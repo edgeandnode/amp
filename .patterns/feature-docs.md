@@ -1,0 +1,441 @@
+# Feature Documentation Patterns
+
+**MANDATORY for ALL feature documentation in `docs/features/`**
+
+## Table of Contents
+
+1. [Core Principles](#1-core-principles)
+2. [Frontmatter Requirements](#2-frontmatter-requirements)
+3. [Naming Schema](#3-naming-schema)
+4. [Document Structure](#4-document-structure)
+5. [Glossary References](#5-glossary-references)
+6. [Content Guidelines](#6-content-guidelines)
+7. [Template](#7-template)
+8. [Checklist](#8-checklist)
+
+---
+
+## 1. Core Principles
+
+### Feature Docs Are Authoritative
+
+**CRITICAL**: Feature documentation is the **ground truth** for what a feature should do.
+
+- If a feature doc exists, the implementation **MUST** align with it
+- If code behaves differently than documented, the code is wrong OR the doc must be updated
+- Engineers **MUST** keep feature docs accurate - outdated docs are unacceptable
+- When implementation changes, update the feature doc in the same PR
+
+### Purpose
+Feature docs provide contextual knowledge for AI agents to understand project features without loading all documentation upfront.
+
+### Dynamic Discovery
+Feature docs use YAML frontmatter for lazy loading - AI agents query frontmatter to determine which docs to load based on user queries.
+
+### Avoid Context Bloat
+Keep feature docs focused and concise. CLAUDE.md should NOT hardcode feature lists - use dynamic discovery instead.
+
+---
+
+## 2. Frontmatter Requirements
+
+**CRITICAL**: Every feature doc MUST begin with valid YAML frontmatter:
+
+```yaml
+---
+name: "feature-name-kebab-case"
+description: "A one line short description of the feature/functionality"
+components: "prefix:name,prefix:name"
+---
+```
+
+### Field Requirements
+
+| Field | Required | Format | Description |
+|-------|----------|--------|-------------|
+| `name` | YES | kebab-case | Unique identifier matching filename (minus .md) |
+| `description` | YES | Single line, succinct | Discovery-optimized description (see guidelines below) |
+| `components` | YES | Prefixed, comma-separated | Related crates/modules with type prefix |
+
+### Component Prefixes (MANDATORY)
+
+Components MUST use one of these prefixes:
+
+| Prefix | Usage | Example |
+|--------|-------|---------|
+| `crate:` | Library crates in `crates/` | `crate:common`, `crate:metadata-db` |
+| `service:` | Service crates in `crates/services/` | `service:server`, `service:worker` |
+| `app:` | Binary crates in `crates/bin/` | `app:ampd` |
+
+**Example:**
+```yaml
+components: "service:server,crate:common,crate:dataset-store"
+```
+
+### Description Guidelines
+
+Write descriptions optimized for dynamic discovery. Unlike skills (which are executed), feature docs are loaded to answer questions and navigate the codebase. Your description must answer two questions:
+
+1. **What does this document explain?** - List specific capabilities or concepts covered
+2. **When should Claude load it?** - Include trigger terms and questions this doc answers
+
+**Requirements:**
+- Written in third person (no "I" or "you")
+- Include keywords users would search for or mention
+- Be specific - avoid vague words like "overview", "various", "handles"
+- No ending period
+
+**Examples:**
+- ✅ `"evm_encode_hex, evm_decode_hex functions for converting addresses and hashes. Load when working with hex encoding or binary conversion"`
+- ✅ `"Batch SQL queries via JSON Lines HTTP endpoint. Load when asking about one-shot queries or the /query/jsonl API"`
+- ❌ `"Overview of user-defined functions"` (vague, no trigger)
+- ❌ `"Handles various data transformations"` (vague, no specifics)
+
+### Discovery Command
+
+The discovery command extracts all feature frontmatter for lazy loading.
+
+**Primary Method**: Use the Grep tool with multiline mode:
+- **Pattern**: `^---\n[\s\S]*?\n---`
+- **Path**: `docs/features/`
+- **multiline**: `true`
+- **output_mode**: `content`
+
+**Fallback**: Bash command for manual use:
+```bash
+grep -Pzo '(?s)^---\n.*?\n---' docs/features/*.md 2>/dev/null | tr '\0' '\n'
+```
+
+**Cross-platform alternative** (macOS compatible):
+```bash
+awk '/^---$/{p=!p; print; next} p' docs/features/*.md
+```
+
+---
+
+## 3. Naming Schema
+
+Feature names follow a hierarchical pattern from broad domain to specific feature:
+
+**Pattern:** `<domain>-<subdomain>-<variant>`
+
+### Examples by Domain
+
+**Query Features:**
+```
+query                           # Meta-doc: Overview of all query capabilities
+├── query-sql                   # SQL execution modes
+│   ├── query-sql-batch         # Batch query execution
+│   └── query-sql-streaming     # Streaming query execution
+│       └── query-sql-streaming-joins  # Incremental joins
+└── query-transport             # Query transports
+    ├── query-transport-jsonl   # JSON Lines HTTP transport
+    └── query-transport-flight  # Arrow Flight RPC transport
+```
+
+**Application Features:**
+```
+app-ampd                        # Meta-doc: ampd application overview
+└── app-ampd-server             # Query server endpoints and configuration
+```
+
+**UDF Features:**
+```
+udf                             # Meta-doc: Overview of all UDFs
+├── udf-builtin                 # Built-in UDFs meta doc
+│   ├── udf-builtin-evm-log     # Event log decoding (includes evm_topic)
+│   └── udf-builtin-evm-hex     # Hex encoding/decoding
+└── udf-custom                  # Custom UDFs meta doc
+    ├── udf-custom-javascript   # JavaScript custom UDFs
+    └── udf-custom-wasm         # WebAssembly custom UDFs
+```
+
+**Extraction Features:**
+```
+extraction                      # Meta-doc: Data extraction overview
+├── extraction-evm-rpc          # EVM RPC extraction
+└── extraction-firehose         # Firehose extraction
+```
+
+**Admin Features:**
+```
+admin                           # Meta-doc: Management and administration
+├── admin-jobs                  # Job management
+│   ├── admin-jobs-list         # List and filter jobs
+│   └── admin-jobs-control      # Start, stop, cancel jobs
+├── admin-datasets              # Dataset management
+│   ├── admin-datasets-list     # List registered datasets
+│   └── admin-datasets-sync     # Trigger dataset sync
+├── admin-workers               # Worker node management
+└── admin-openapi               # OpenAPI spec and documentation
+```
+
+### Naming Rules
+
+1. **Use kebab-case** - All lowercase, words separated by hyphens
+2. **Domain first** - Start with the broad capability area
+3. **Progressively specific** - Add specificity with each segment
+4. **Match filename** - `name` field must match filename (minus .md)
+5. **Alphabetical grouping** - Related features sort together
+
+### Benefits
+
+- **Discoverable** - Searching "query" finds all query features
+- **Hierarchical** - Child docs reference parent meta docs for shared context
+- **Scalable** - Easy to add new features in the hierarchy
+- **Organized** - Natural grouping when listing files
+
+---
+
+## 4. Document Structure
+
+### Required Sections (in order)
+
+1. **H1 Title** - Human-readable feature name
+2. **Summary** - 2-4 sentences expanding on the frontmatter description
+3. **Table of Contents** - Links to all sections
+4. **Key Concepts** - Core terminology and definitions
+5. **Usage** - How to use/interact with the feature (with code examples)
+
+### Optional Sections
+
+Include when relevant:
+
+- **Architecture** - How the feature fits into the system. Include when the feature is complex enough to warrant high-level architecture explanation (data flow, component interaction, request/response cycles). Omit for simple features where usage examples are self-explanatory.
+- **Configuration** - Configuration options and defaults
+- **API Reference** - Key API endpoints or functions
+- **Implementation** - Database schemas (if apply), file locations, internal notes
+- **Limitations** - Known constraints or limitations
+- **References** - Cross-references to other feature docs (at the end)
+
+**CRITICAL**: No empty sections allowed. If you include a section header, it must have content. Omit optional sections entirely rather than leaving them empty.
+
+### References Section Format
+
+Use simple list format with relationship type:
+
+```markdown
+## References
+
+- [arrow-flight-query](arrow-flight-query.md) - Alternative: High-performance streaming
+- [dataset-store](dataset-store.md) - Dependency: Dataset catalog access
+- [common-udfs](common-udfs.md) - Dependency: SQL UDFs
+```
+
+**Relationship types:** `Dependency`, `Alternative`, `Related`, `Extended by`, `Base`
+
+### Reference Direction Rules
+
+**CRITICAL**: References ALWAYS flow UP the hierarchy, not down. This applies to ALL links anywhere in the document—not just the References section.
+
+- ✅ **Concrete → Meta**: Child/specific docs reference parent/meta docs
+- ❌ **Meta → Concrete**: Meta docs MUST NOT link to child/specific docs
+
+**This rule applies to:**
+- The References section
+- Inline links in prose
+- Links in Architecture diagrams or tables
+- Any markdown link `[text](file.md)` pointing to a feature doc
+
+**Rationale**: Meta docs provide stable, high-level context. Linking downward creates:
+- Maintenance burden when child docs are added/removed/renamed
+- Coupling between stable meta docs and volatile implementation details
+- Circular dependency patterns in documentation
+
+**Examples:**
+- ✅ `provider-extractor-evm-rpc.md` → links to `provider.md` (child → parent)
+- ✅ `admin-provider.md` → links to `admin.md` (specific → meta)
+- ❌ `provider.md` → links to `provider-config.md` (FORBIDDEN: parent → child)
+- ❌ `udf-builtin.md` → lists `udf-builtin-evm-hex.md` (FORBIDDEN: meta → specific)
+
+---
+
+## 5. Glossary References
+
+Avoid re-defining common terms. Instead, embed inline links to the [Glossary](../glossary.md).
+
+**Inline term linking:**
+
+```markdown
+The [dataset](../glossary.md#dataset) contains multiple [revisions](../glossary.md#revision) organized by [namespace](../glossary.md#namespace).
+```
+
+This keeps feature docs focused and ensures consistent terminology across all documentation.
+
+---
+
+## 6. Content Guidelines
+
+### DO
+
+- Keep descriptions focused and actionable
+- Reference specific crates and files with paths
+- Include code snippets for clarity
+- Use consistent terminology from Key Concepts
+- Include curl/CLI examples for API features
+
+### DON'T
+
+- Duplicate content from pattern files (link instead)
+- Include implementation details (use `.patterns/` for that)
+- Hardcode paths that may change frequently
+- Include verbose API documentation (use OpenAPI specs)
+- Add speculative or planned features
+- Use vague descriptions ("various", "multiple", "etc.")
+
+---
+
+## 7. Template
+
+Use this template when creating new feature docs:
+
+```markdown
+---
+name: "{{feature-name-kebab-case}}"
+description: "{{What it explains + when to load it, third person, no period}}"
+components: "{{prefix:name,prefix:name - use crate:, service:, or app:}}"
+---
+
+# {{Feature Title - Human Readable}}
+
+## Summary
+
+{{2-4 sentences providing more context than the frontmatter description.
+Explain what this feature does, why it exists, and its primary use case.}}
+
+## Table of Contents
+
+1. [Key Concepts](#key-concepts)
+2. [Architecture](#architecture) {{if feature is complex}}
+3. [Configuration](#configuration) {{if applicable}}
+4. [Usage](#usage)
+5. [API Reference](#api-reference) {{if applicable}}
+6. [Implementation](#implementation) {{if applicable}}
+7. [Limitations](#limitations) {{if applicable}}
+8. [References](#references) {{if other features are referenced}}
+
+## Key Concepts
+
+{{Define 3-5 key terms used throughout this document:}}
+
+- **Term 1**: Definition explaining what this term means in context
+- **Term 2**: Definition explaining what this term means in context
+
+## Architecture {{OPTIONAL - include only if feature is complex}}
+
+{{Explain how this feature fits into the system. Include this section when:
+- Feature has complex data flow or component interactions
+- Request/response cycles need explanation
+- System integration isn't obvious from usage examples
+
+Omit this section for simple features where usage is self-explanatory.}}
+
+### Request Flow {{or Data Flow, Component Interaction, etc.}}
+
+1. Step one of the flow
+2. Step two of the flow
+3. Step three of the flow
+
+## Configuration {{OPTIONAL}}
+
+{{Configuration options, defaults, and environment variables}}
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| option_name | default_value | What this option controls |
+
+## Usage
+
+{{Code examples showing how to use the feature}}
+
+### Basic Usage
+
+```bash
+{{Command or code example}}
+```
+
+### Advanced Usage {{if applicable}}
+
+```bash
+{{More complex example}}
+```
+
+## API Reference {{OPTIONAL}}
+
+{{For features with HTTP/gRPC APIs}}
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/path` | POST | What this endpoint does |
+
+For request/response schemas, see [OpenAPI spec](../openapi-specs/spec.json):
+
+```bash
+jq '.paths["/path"]' docs/openapi-specs/spec.json
+```
+
+## Implementation {{OPTIONAL}}
+
+{{Database schemas, file locations, internal implementation notes}}
+
+### Database Schema {{if applicable}}
+
+| Column | Type | Description |
+|--------|------|-------------|
+| column_name | TYPE | What this column stores |
+
+### Source Files
+
+- `crates/path/to/file.rs` - How this file relates to the feature
+
+## Limitations {{OPTIONAL}}
+
+{{Known constraints or limitations as bullet points}}
+
+- Limitation one
+- Limitation two
+
+## References {{OPTIONAL}}
+
+{{Cross-references to related feature docs}}
+
+- [feature-name](feature-name.md) - Relationship: Brief description
+- [another-feature](another-feature.md) - Relationship: Brief description
+```
+
+---
+
+## 8. Checklist
+
+Before committing feature documentation:
+
+### Frontmatter
+
+- [ ] Valid YAML frontmatter with opening and closing `---`
+- [ ] `name` is kebab-case and matches filename (minus .md)
+- [ ] `description` explains what it covers and when to load it (no ending period)
+- [ ] `components` uses prefixes: `crate:`, `service:`, or `app:`
+
+### Structure
+
+- [ ] H1 title (human readable) after frontmatter
+- [ ] Summary section (2-4 sentences) after H1
+- [ ] Table of Contents after Summary
+- [ ] Key Concepts section with clear definitions
+- [ ] Usage section with working code examples
+- [ ] Architecture section (if feature is complex - optional)
+- [ ] Implementation section (if DB schemas or file locations apply - optional)
+- [ ] References section (if cross-referencing other features - optional)
+- [ ] No empty sections (omit optional sections rather than leaving them empty)
+
+### Quality
+
+- [ ] Discoverable via grep command
+- [ ] No duplicate content from `.patterns/` files
+- [ ] References specific files/crates where relevant
+- [ ] Examples are accurate and tested
+- [ ] No hardcoded values that may change
+
+### Review
+
+Use the `/feature-fmt-check` skill to validate feature docs before committing.

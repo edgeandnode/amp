@@ -88,6 +88,18 @@ Amp currently adopts the FDAP stack for its physical layer, see https://www.infl
 
 The query planner and execution engine used by Amp, see https://datafusion.apache.org.
 
+### UDF (User-Defined Function)
+
+A custom SQL function registered with [DataFusion](#datafusion) that extends query capabilities beyond standard SQL. UDFs enable data transformations within SQL queries without requiring external processing.
+
+### Built-in UDF
+
+A [UDF](#udf-user-defined-function) provided by Project Amp for common blockchain data operations. Built-in UDFs are always available and include functions for hex encoding/decoding, ABI type conversion, event log parsing, and on-chain contract calls.
+
+### Custom UDF
+
+A [UDF](#udf-user-defined-function) written by users in JavaScript and registered at runtime. Custom UDFs extend query capabilities with domain-specific transformation logic when built-in functions don't cover specific use cases.
+
 ### Arrow record batch
 
 Arrow is an in-memory and over-the-wire data format. Query results are returned by DataFusion as a stream of Arrow record batches. See https://arrow.apache.org/docs/index.html.
@@ -129,6 +141,10 @@ A process that executes data extraction jobs scheduled by the [controller](#cont
 ### Engine Administration Interface
 
 The administrative API exposed by the [controller](#controller) for managing datasets, jobs, workers, providers, and storage. Accessed by the `ampctl` and `amp` CLIs. Also referred to as the "Admin API" in some contexts.
+
+### Provider
+
+A named configuration that defines a connection to an external blockchain data source. Providers abstract connection details (endpoints, credentials, rate limits) from [dataset](#dataset) definitions, enabling reusability and centralized management. Each provider specifies a [kind](#dataset-kind) (evm-rpc, firehose, solana) and network (mainnet, base, etc.). [Datasets](#dataset) reference providers by matching their kind and network requirements, with the system automatically resolving and load-balancing across available providers.
 
 ### Metadata Database
 
