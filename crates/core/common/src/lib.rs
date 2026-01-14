@@ -206,7 +206,6 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
         const ERROR_RETRY_DELAY: Duration = Duration::from_millis(300);
 
         let mut current_block = start;
-        let mut blocks_sent = 0;
         let mut num_retries = 0;
 
         async_stream::stream! {
@@ -217,7 +216,7 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
                     match &block {
                         Ok(_) => {
                             num_retries = 0;
-                            blocks_sent += 1;
+                            current_block += 1;
                             yield block;
                         }
                         Err(e) => {
@@ -264,7 +263,6 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
                                     tokio::time::sleep(ERROR_RETRY_DELAY).await;
                                 }
                             }
-                            current_block = start + blocks_sent;
                             continue 'retry;
                         }
                     }
