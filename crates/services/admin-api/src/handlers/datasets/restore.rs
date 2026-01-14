@@ -3,12 +3,13 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::catalog::physical::{PhysicalTable, RestoreLatestRevisionError};
+use common::catalog::physical::{RestoreLatestTableRevisionError, restore_table_latest_revision};
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
     table_name::TableName,
 };
 use futures::{StreamExt as _, stream::FuturesUnordered};
+use metadata_db::LocationId;
 use monitoring::logging;
 use tokio::task::JoinHandle;
 
@@ -91,7 +92,7 @@ pub async fn handler(
     let revision = reference.revision().clone();
 
     // Resolve reference to hash reference
-    let hash_reference = ctx
+    let dataset_ref = ctx
         .dataset_store
         .resolve_revision(&reference)
         .await
@@ -105,7 +106,7 @@ pub async fn handler(
     // Load the full dataset object using the resolved hash reference
     let dataset = ctx
         .dataset_store
-        .get_dataset(&hash_reference)
+        .get_dataset(&dataset_ref)
         .await
         .map_err(Error::GetDataset)?;
 
@@ -113,46 +114,52 @@ pub async fn handler(
         FuturesUnordered::new();
 
     // Restore each table in the dataset concurrently
-    for table in dataset.resolved_tables(reference.clone().into()) {
-        tracing::debug!(dataset_reference=%reference, table_name=%table.name(), "restoring table");
-
+    for table_def in dataset.tables() {
         let data_store = ctx.data_store.clone();
-        let dataset_reference_clone = hash_reference.clone();
+        let dataset_ref = dataset_ref.clone();
+        let table_def = table_def.clone();
+        let table_name = table_def.name().clone();
+        let start_block = dataset.start_block;
+
+        tracing::debug!(%dataset_ref, %table_name, "restoring table");
 
         let task = tokio::spawn(async move {
-            let physical_table = PhysicalTable::restore_latest_revision(
+            let sql_table_ref_schema = dataset_ref.to_reference().to_string();
+            let physical_table = restore_table_latest_revision(
                 data_store,
-                &dataset_reference_clone,
-                &table,
+                &dataset_ref,
+                start_block,
+                &table_def,
+                sql_table_ref_schema,
             )
             .await
             .map_err(|err| {
                 tracing::error!(
                     error = %err,
                     error_source = logging::error_source(&err),
-                    table = %table.name(),
+                    table = %table_name,
                     "failed to restore table from storage"
                 );
                 Error::RestoreTable {
-                    table: table.name().clone(),
+                    table: table_name.clone(),
                     source: err,
                 }
             })?
             .ok_or_else(|| Error::TableNotFound {
-                table: table.name().clone(),
+                table: table_name.clone(),
             })?;
 
             tracing::info!(
-                dataset_reference=%dataset_reference_clone,
-                table_name = %table.name(),
+                %dataset_ref,
+                %table_name,
                 location_id = %physical_table.location_id(),
-                url = %physical_table.url(),
+                path = %physical_table.path(),
                 "table restored successfully"
             );
 
             Ok(RestoredTableInfo {
-                table_name: table.name().to_string(),
-                location_id: *physical_table.location_id(),
+                table_name: table_name.to_string(),
+                location_id: physical_table.location_id(),
                 url: physical_table.url().to_string(),
             })
         });
@@ -173,7 +180,7 @@ pub async fn handler(
     }
 
     tracing::info!(
-        dataset_reference = %hash_reference,
+        %dataset_ref,
         tables_restored = restored_tables.len(),
         "dataset restoration complete"
     );
@@ -202,7 +209,7 @@ pub struct RestoredTableInfo {
     pub table_name: String,
     /// Unique location ID assigned in the metadata database
     #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
-    pub location_id: i64,
+    pub location_id: LocationId,
     /// Full URL to the storage location
     pub url: String,
 }
@@ -259,7 +266,7 @@ pub enum Error {
     RestoreTable {
         table: TableName,
         #[source]
-        source: RestoreLatestRevisionError,
+        source: RestoreLatestTableRevisionError,
     },
 
     /// Table data not found in object storage

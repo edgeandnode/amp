@@ -51,7 +51,7 @@ impl std::hash::Hash for JsUdf {
 impl JsUdf {
     pub fn new(
         isolate_pool: IsolatePool,
-        catalog_schema: impl Into<Option<String>>,
+        sql_table_ref_schema: impl Into<Option<String>>,
         code: Arc<str>,
         script_name: Arc<str>,
         function_name: Arc<str>,
@@ -67,7 +67,7 @@ impl JsUdf {
         // Use quote_identifier to ensure the schema part is properly quoted when it contains
         // special characters (e.g., "namespace/dataset@0.0.0" becomes "\"namespace/dataset@0.0.0\"")
         // This matches how DataFusion's query planner resolves qualified function references
-        let udf_name = match catalog_schema.into() {
+        let udf_name = match sql_table_ref_schema.into() {
             Some(schema) if !schema.is_empty() => {
                 format!("{}.{}", quote_identifier(&schema), function_name)
             }

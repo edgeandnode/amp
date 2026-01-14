@@ -990,10 +990,10 @@ impl DatasetStore {
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
     ///
-    /// The function will be named `<catalog_schema>.<eth_call>`.
+    /// The function will be named `<sql_table_ref_schema>.eth_call`.
     async fn eth_call_for_dataset(
         &self,
-        catalog_schema: &str,
+        sql_table_ref_schema: &str,
         dataset: &Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
         if dataset.kind != EvmRpcDatasetKind {
@@ -1051,8 +1051,8 @@ impl DatasetStore {
             evm::provider::new(provider.url, provider.rate_limit_per_minute)
         };
 
-        let udf =
-            AsyncScalarUDF::new(Arc::new(EthCall::new(catalog_schema, provider))).into_scalar_udf();
+        let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(sql_table_ref_schema, provider)))
+            .into_scalar_udf();
 
         // Cache the EthCall UDF
         self.eth_call_cache
@@ -1081,10 +1081,10 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
 
     async fn eth_call_for_dataset(
         &self,
-        catalog_schema: &str,
+        sql_table_ref_schema: &str,
         dataset: &Dataset,
     ) -> Result<Option<ScalarUDF>, BoxError> {
-        self.eth_call_for_dataset(catalog_schema, dataset)
+        self.eth_call_for_dataset(sql_table_ref_schema, dataset)
             .await
             .map_err(Into::into)
     }

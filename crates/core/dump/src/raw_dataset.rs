@@ -91,7 +91,7 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
-    BlockNum, BlockStreamer, BoxError, LogicalCatalog,
+    BlockNum, BlockStreamer, BoxError, LogicalCatalog, ResolvedTable,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
@@ -132,26 +132,39 @@ pub async fn dump(
 
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
-    for table in dataset.resolved_tables(dataset_reference.to_reference().into()) {
+    for table_def in &dataset.tables {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> = match ctx
             .data_store
-            .get_table_active_revision(dataset_reference, table.name())
+            .get_table_active_revision(dataset.reference(), table_def.name())
             .await
             .map_err(Error::GetActivePhysicalTable)?
         {
             // Reuse existing table (retry scenario)
             Some(revision) => {
-                PhysicalTable::from_active_revision(ctx.data_store.clone(), table.clone(), revision)
+                let sql_table_ref_schema = dataset_reference.to_reference().to_string();
+                PhysicalTable::from_active_revision(
+                    ctx.data_store.clone(),
+                    dataset.reference().clone(),
+                    dataset.start_block,
+                    table_def.clone(),
+                    revision,
+                    sql_table_ref_schema,
+                )
             }
             // Create new table (initial attempt)
-            None => common::catalog::physical::register_new_table_revision(
-                ctx.data_store.clone(),
-                dataset_reference.clone(),
-                table,
-            )
-            .await
-            .map_err(Error::RegisterNewPhysicalTable)?,
+            None => {
+                let sql_table_ref_schema = dataset_reference.to_reference().to_string();
+                common::catalog::physical::register_new_table_revision(
+                    ctx.data_store.clone(),
+                    dataset_reference.clone(),
+                    dataset.start_block,
+                    table_def.clone(),
+                    sql_table_ref_schema,
+                )
+                .await
+                .map_err(Error::RegisterNewPhysicalTable)?
+            }
         }
         .into();
 
@@ -179,7 +192,18 @@ pub async fn dump(
             .map_err(Error::AssignJobWriter)?;
     }
 
-    let logical = LogicalCatalog::from_tables(tables.iter().map(|(t, _)| t.table()));
+    let resolved_tables: Vec<_> = tables
+        .iter()
+        .map(|(t, _)| {
+            ResolvedTable::new(
+                t.table().clone(),
+                t.sql_table_ref_schema().to_string(),
+                dataset_reference.clone(),
+                dataset.start_block,
+            )
+        })
+        .collect();
+    let logical = LogicalCatalog::from_tables(resolved_tables.iter());
     let catalog = Catalog::new(tables.iter().map(|(t, _)| Arc::clone(t)).collect(), logical);
 
     // Ensure consistency before starting the dump procedure.

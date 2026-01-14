@@ -59,7 +59,7 @@ impl PlanningContext {
         let ctx = SessionContext::new_with_state(state);
         for table in &self.catalog.tables {
             // The catalog schema needs to be explicitly created or table creation will fail.
-            crate::query_context::create_catalog_schema(&ctx, table.catalog_schema().to_string());
+            crate::query_context::create_catalog_schema(&ctx, table.sql_table_ref_schema());
             let planning_table = PlanningTable(table.clone());
             ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
                 .map_err(|e| Error::DatasetError(e.into()))?;
@@ -113,7 +113,7 @@ impl TableProvider for PlanningTable {
     }
 
     fn schema(&self) -> SchemaRef {
-        self.0.schema().clone()
+        self.0.table().schema().clone()
     }
 
     fn table_type(&self) -> TableType {

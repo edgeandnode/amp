@@ -331,7 +331,7 @@ impl QueryContext {
         self.catalog
             .table_snapshots()
             .iter()
-            .find(|snapshot| snapshot.physical_table().table().table_ref() == table_ref)
+            .find(|snapshot| snapshot.physical_table().table_ref() == *table_ref)
             .cloned()
             .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
     }
@@ -411,7 +411,7 @@ fn register_table(
     store: &DataStore,
 ) -> Result<(), DataFusionError> {
     // The catalog schema needs to be explicitly created or table creation will fail.
-    create_catalog_schema(ctx, table.physical_table().catalog_schema().to_string());
+    create_catalog_schema(ctx, table.physical_table().sql_table_ref_schema());
 
     let table_ref = table.physical_table().table_ref().clone();
 
@@ -427,12 +427,12 @@ fn register_table(
     Ok(())
 }
 
-pub fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
+pub fn create_catalog_schema(ctx: &SessionContext, schema_name: &str) {
     // We only have use catalog, the default one.
     let catalog = ctx.catalog(&ctx.catalog_names()[0]).unwrap();
-    if catalog.schema(&schema_name).is_none() {
+    if catalog.schema(schema_name).is_none() {
         let schema = Arc::new(MemorySchemaProvider::new());
-        catalog.register_schema(&schema_name, schema).unwrap();
+        catalog.register_schema(schema_name, schema).unwrap();
     }
 }
 
