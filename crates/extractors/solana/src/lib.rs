@@ -80,6 +80,8 @@ pub struct ProviderConfig {
     pub rpc_provider_url: Url,
     pub max_rpc_calls_per_second: Option<NonZeroU32>,
     pub of1_car_directory: PathBuf,
+    #[serde(default)]
+    pub keep_of1_car_files: bool,
 }
 
 /// Convert a Solana manifest into a logical dataset representation.
@@ -111,6 +113,7 @@ pub fn extractor(
             config.network,
             config.name,
             config.of1_car_directory,
+            config.keep_of1_car_files,
             meter,
         ),
         scheme => {
