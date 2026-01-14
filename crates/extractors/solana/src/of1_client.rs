@@ -550,7 +550,7 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
             let tx_df = nodes.reassemble_dataframes(&tx.data)?;
             let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata)?;
 
-            let (tx, _) = bincode::serde::decode_from_slice(&tx_df, bincode::config::standard())?;
+            let tx = bincode::deserialize(&tx_df)?;
             let tx_meta = if tx_meta_df.is_empty() {
                 // Empty dataframe, return default transaction metadata.
                 tables::transactions::TransactionStatusMeta::default()
@@ -572,27 +572,22 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
                             tx_meta_proto,
                         )
                     }
-                    Err(prost_err) => {
-                        match bincode::serde::decode_from_slice(
-                            tx_meta,
-                            bincode::config::standard(),
-                        ) {
-                            Ok((tx_meta_bincode, _)) => {
-                                tables::transactions::TransactionStatusMeta::from_stored_meta(
-                                    block.slot,
-                                    tx_index,
-                                    tx_meta_bincode,
-                                )
-                            }
-                            Err(bincode_err) => {
-                                let err = format!(
-                                    "failed to decode transaction metadata: prost_err={:?}, bincode_err={:?}",
-                                    prost_err, bincode_err
-                                );
-                                return Err(err.into());
-                            }
+                    Err(prost_err) => match bincode::deserialize(tx_meta) {
+                        Ok(tx_meta_bincode) => {
+                            tables::transactions::TransactionStatusMeta::from_stored_meta(
+                                block.slot,
+                                tx_index,
+                                tx_meta_bincode,
+                            )
                         }
-                    }
+                        Err(bincode_err) => {
+                            let err = format!(
+                                "failed to decode transaction metadata: prost_err={:?}, bincode_err={:?}",
+                                prost_err, bincode_err
+                            );
+                            return Err(err.into());
+                        }
+                    },
                 }
             };
 
