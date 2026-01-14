@@ -134,23 +134,26 @@ pub async fn dump(
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
     for table in dataset.resolved_tables(dataset_reference.to_reference().into()) {
         // Try to get existing active physical table (handles retry case)
-        let physical_table: Arc<PhysicalTable> =
-            match PhysicalTable::get_active(ctx.data_store.clone(), table.clone())
-                .await
-                .map_err(Error::GetActivePhysicalTable)?
-            {
-                // Reuse existing table (retry scenario)
-                Some(pt) => pt,
-                // Create new table (initial attempt)
-                None => common::catalog::physical::register_new_table_revision(
-                    ctx.data_store.clone(),
-                    dataset_reference.clone(),
-                    table,
-                )
-                .await
-                .map_err(Error::RegisterNewPhysicalTable)?,
+        let physical_table: Arc<PhysicalTable> = match ctx
+            .data_store
+            .get_table_active_revision(dataset_reference, table.name())
+            .await
+            .map_err(Error::GetActivePhysicalTable)?
+        {
+            // Reuse existing table (retry scenario)
+            Some(revision) => {
+                PhysicalTable::from_active_revision(ctx.data_store.clone(), table.clone(), revision)
             }
-            .into();
+            // Create new table (initial attempt)
+            None => common::catalog::physical::register_new_table_revision(
+                ctx.data_store.clone(),
+                dataset_reference.clone(),
+                table,
+            )
+            .await
+            .map_err(Error::RegisterNewPhysicalTable)?,
+        }
+        .into();
 
         let compactor = AmpCompactor::start(
             ctx.metadata_db.clone(),
@@ -339,13 +342,10 @@ pub enum Error {
 
     /// Failed to get active physical table
     ///
-    /// This error occurs when querying for an active physical table fails.
+    /// This error occurs when querying for an active physical table revision fails.
     /// This typically happens due to database connection issues.
-    ///
-    /// Note: This wraps BoxError because PhysicalTable::get_active currently
-    /// returns BoxError. This should be replaced with a concrete error type.
-    #[error("Failed to get active physical table")]
-    GetActivePhysicalTable(#[source] BoxError),
+    #[error("Failed to get active physical table revision")]
+    GetActivePhysicalTable(#[source] amp_data_store::GetTableActiveRevisionError),
 
     /// Failed to register physical table revision
     ///

@@ -43,11 +43,14 @@ pub enum CatalogForSqlError {
     /// This occurs when querying the metadata database for the active physical
     /// location of a table fails due to database connection issues, query errors,
     /// or other database-related problems.
-    #[error("Failed to retrieve physical table metadata for table '{table}'")]
+    #[error(
+        "Failed to retrieve physical table metadata for table '{table}' in dataset '{dataset}'"
+    )]
     PhysicalTableRetrieval {
-        table: String,
+        dataset: HashReference,
+        table: TableName,
         #[source]
-        source: BoxError,
+        source: amp_data_store::GetTableActiveRevisionError,
     },
 
     /// Table has not been synced and no physical location exists.
@@ -55,8 +58,11 @@ pub enum CatalogForSqlError {
     /// This occurs when attempting to load a physical catalog for a table that
     /// has been defined but has not yet been dumped/synced to storage. The table
     /// exists in the dataset definition but has no physical parquet files.
-    #[error("Table '{table}' has not been synced")]
-    TableNotSynced { table: String },
+    #[error("Table '{table}' in dataset '{dataset}' has not been synced")]
+    TableNotSynced {
+        dataset: HashReference,
+        table: TableName,
+    },
 }
 
 impl CatalogForSqlError {

@@ -722,22 +722,27 @@ async fn resolve_blocks_table(
     let table = Arc::new(dataset)
         .resolved_tables(reference)
         .find(|t| t.name() == "blocks")
-        .ok_or_else(|| {
-            BoxError::from(format!(
-                "dataset '{}' does not have a 'blocks' table",
-                manifest_hash
-            ))
+        .ok_or_else(|| -> BoxError {
+            format!("dataset '{}' does not have a 'blocks' table", manifest_hash).into()
         })?;
 
     let table_name = table.name().clone();
-    PhysicalTable::get_active(data_store, table)
+    let dataset_ref = table.dataset().reference();
+
+    let revision = data_store
+        .get_table_active_revision(dataset_ref, &table_name)
         .await?
-        .ok_or_else(|| {
-            BoxError::from(format!(
+        .ok_or_else(|| -> BoxError {
+            format!(
                 "table '{}.{}' has not been synced",
                 manifest_hash, table_name
-            ))
-        })
+            )
+            .into()
+        })?;
+
+    Ok(PhysicalTable::from_active_revision(
+        data_store, table, revision,
+    ))
 }
 
 // Breadth-first search over dataset dependencies to find a raw dataset matching the target network.
@@ -771,8 +776,8 @@ async fn search_dependencies_for_raw_dataset(
             let hash_ref = dataset_store
                 .resolve_revision(dep.to_reference())
                 .await?
-                .ok_or_else(|| {
-                    BoxError::from(format!("dependency '{}' not found", dep.to_reference()))
+                .ok_or_else(|| -> BoxError {
+                    format!("dependency '{}' not found", dep.to_reference()).into()
                 })?;
             let dataset = dataset_store.get_dataset(&hash_ref).await?;
             queue.push_back(dataset);

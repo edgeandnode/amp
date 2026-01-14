@@ -17,12 +17,12 @@ use datafusion::{
         file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader},
     },
 };
-use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use foyer::Cache;
 // Re-export foyer::Cache for use by downstream crates
 pub use foyer::Cache as FoyerCache;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream::BoxStream};
-use metadata_db::{LocationId, MetadataDb, PhysicalTable, files::FileId};
+use metadata_db::{LocationId, MetadataDb, files::FileId};
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
 use url::Url;
 
@@ -160,16 +160,27 @@ impl DataStore {
 
     /// Gets the active revision of a table from the metadata database.
     ///
-    /// Returns the database row if an active revision exists, or None if no active
-    /// revision is found.
-    pub async fn get_active_table_revision(
+    /// Returns the active revision info if one exists, or None if not found.
+    pub async fn get_table_active_revision(
         &self,
-        manifest_hash: &Hash,
+        dataset_ref: &HashReference,
         table_name: &TableName,
-    ) -> Result<Option<PhysicalTable>, GetActiveTableRevisionError> {
-        metadata_db::physical_table::get_active(&self.metadata_db, manifest_hash, table_name)
-            .await
-            .map_err(GetActiveTableRevisionError)
+    ) -> Result<Option<PhysicalTableActiveRevision>, GetTableActiveRevisionError> {
+        let Some(row) = metadata_db::physical_table::get_active(
+            &self.metadata_db,
+            dataset_ref.hash(),
+            table_name,
+        )
+        .await
+        .map_err(GetTableActiveRevisionError)?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(PhysicalTableActiveRevision {
+            location_id: row.id,
+            path: row.path.into(),
+        }))
     }
 
     /// Finds the latest table revision by lexicographic comparison of revision IDs.
@@ -290,20 +301,6 @@ impl DataStore {
             .map_err(ListRevisionFilesInObjectStoreError)?;
         files.sort_unstable_by(|a, b| a.location.cmp(&b.location));
         Ok(files)
-    }
-
-    /// Streams all files in a physical table revision directory.
-    ///
-    /// Returns a stream of object metadata for each file in the revision directory.
-    pub fn stream_revision_files_in_object_store(
-        &self,
-        path: &PhyTableRevisionPath,
-    ) -> BoxStream<'_, Result<ObjectMeta, StreamRevisionFilesInObjectStoreError>> {
-        let stream = self
-            .object_store
-            .list(Some(path.as_object_store_path()))
-            .map(|result| result.map_err(StreamRevisionFilesInObjectStoreError));
-        Box::pin(stream)
     }
 
     /// Gets object metadata (size, e_tag, version) for a file in a table revision.
@@ -484,6 +481,18 @@ pub enum RegisterTableRevisionError {
     TransactionCommit(#[source] metadata_db::Error),
 }
 
+/// Information about an active table revision from the metadata database.
+///
+/// This struct provides a clean interface for accessing active revision data
+/// without exposing internal database types.
+#[derive(Debug, Clone)]
+pub struct PhysicalTableActiveRevision {
+    /// Location ID in the metadata database.
+    pub location_id: LocationId,
+    /// Relative path to the table revision in object storage.
+    pub path: PhyTableRevisionPath,
+}
+
 /// Failed to retrieve active physical table revision from metadata database
 ///
 /// This error occurs when querying the metadata database for the currently active
@@ -497,7 +506,7 @@ pub enum RegisterTableRevisionError {
 /// - Invalid manifest hash or table name format
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to get active revision from metadata database")]
-pub struct GetActiveTableRevisionError(#[source] pub metadata_db::Error);
+pub struct GetTableActiveRevisionError(#[source] pub metadata_db::Error);
 
 /// Failed to find the latest table revision in object store
 ///
@@ -609,22 +618,6 @@ pub enum DeleteFilesInObjectStoreError {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to list revision files in object store")]
 pub struct ListRevisionFilesInObjectStoreError(#[source] pub object_store::Error);
-
-/// Failed to stream revision files in object store
-///
-/// This error occurs when streaming file listings from the object store fails.
-/// This typically happens during table discovery, garbage collection, or
-/// file enumeration operations.
-///
-/// Common causes:
-/// - Object store unavailable or unreachable
-/// - Network connectivity issues
-/// - Permission denied for listing objects
-/// - Invalid credentials or authentication failure
-/// - Invalid path prefix
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to stream revision files in object store")]
-pub struct StreamRevisionFilesInObjectStoreError(#[source] pub object_store::Error);
 
 /// Failed to get object metadata from object store
 ///

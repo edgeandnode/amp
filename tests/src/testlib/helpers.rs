@@ -191,10 +191,14 @@ pub async fn load_physical_tables(
 
     let mut dumped_tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in dataset.resolved_tables(dataset_ref.clone().into()) {
-        let physical_table = PhysicalTable::get_active(data_store.clone(), table)
+        let revision = data_store
+            .get_table_active_revision(dataset.reference(), table.name())
             .await
-            .expect("Failed to get physical table")
-            .expect("Physical table not found");
+            .expect("Failed to get active revision")
+            .expect("Active revision not found");
+
+        let physical_table =
+            PhysicalTable::from_active_revision(data_store.clone(), table, revision);
         dumped_tables.push(physical_table.into());
     }
 
@@ -250,7 +254,7 @@ pub async fn restore_dataset_snapshot(
     // 3. Load PhysicalTable objects for each restored table
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
-    for table in Arc::new(dataset).resolved_tables(dataset_ref.clone().into()) {
+    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
         // Verify this table was restored
         let table_name = table.name().to_string();
         let restored = restored_info
@@ -270,8 +274,9 @@ pub async fn restore_dataset_snapshot(
             "Loading PhysicalTable from metadata DB"
         );
 
-        // Load the PhysicalTable using get_active (it was just marked active by restore)
-        let physical_table = PhysicalTable::get_active(data_store.clone(), table)
+        // Load the PhysicalTable using the active revision (it was just marked active by restore)
+        let revision = data_store
+            .get_table_active_revision(dataset.reference(), table.name())
             .await?
             .ok_or_else(|| {
                 format!(
@@ -281,6 +286,8 @@ pub async fn restore_dataset_snapshot(
                 )
             })?;
 
+        let physical_table =
+            PhysicalTable::from_active_revision(data_store.clone(), table, revision);
         tables.push(physical_table.into());
     }
 
@@ -422,10 +429,13 @@ pub async fn catalog_for_dataset(
     let dataset = dataset_store.get_dataset(&hash_ref).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in dataset.resolved_tables(dataset_ref.into()) {
-        // Unwrap: we just dumped the dataset, so it must have an active physical table.
-        let physical_table = PhysicalTable::get_active(data_store.clone(), table)
+        let revision = data_store
+            .get_table_active_revision(dataset.reference(), table.name())
             .await?
-            .unwrap();
+            .expect("Active revision must exist after dump");
+
+        let physical_table =
+            PhysicalTable::from_active_revision(data_store.clone(), table, revision);
         tables.push(physical_table.into());
     }
     let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
