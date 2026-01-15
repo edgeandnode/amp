@@ -67,8 +67,8 @@ pub async fn handler(
     path: Result<Path<(Namespace, Name, Revision)>, PathRejection>,
     State(ctx): State<Ctx>,
 ) -> Result<Json<SyncProgressResponse>, ErrorResponse> {
-    let (namespace, name, revision) = match path {
-        Ok(Path((namespace, name, revision))) => (namespace, name, revision),
+    let reference = match path {
+        Ok(Path((namespace, name, revision))) => Reference::new(namespace, name, revision),
         Err(err) => {
             tracing::debug!(
                 error = %err,
@@ -78,7 +78,6 @@ pub async fn handler(
             return Err(Error::InvalidPath { err }.into());
         }
     };
-    let reference = Reference::new(namespace.clone(), name.clone(), revision.clone());
 
     // Resolve dataset revision to manifest hash
     let resolved_ref = ctx
@@ -135,7 +134,11 @@ pub async fn handler(
         .map(|info| (info.table_name.to_string(), info))
         .collect();
 
-    let partial_ref = PartialReference::new(namespace, name, Some(revision.clone()));
+    let partial_ref = PartialReference::new(
+        reference.namespace().clone(),
+        reference.name().clone(),
+        Some(reference.revision().clone()),
+    );
     let mut tables = Vec::new();
 
     // Iterate over all tables defined in the dataset
