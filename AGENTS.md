@@ -4,150 +4,11 @@
 
 Project Amp is a high-performance ETL (Extract, Transform, Load) architecture for blockchain data services on The Graph. It focuses on extracting blockchain data from various sources, transforming it via SQL queries, and serving it through multiple query interfaces.
 
-## Architecture Overview
-
-### Data Flow
-
-1. **Extract**: Pull data from blockchain sources (EVM RPC, Firehose, etc.)
-2. **Transform**: Process data using SQL queries with custom UDFs
-3. **Store**: Save as Parquet files (columnar format optimized for analytics)
-4. **Serve**: Provide query interfaces (Arrow Flight gRPC, JSON Lines HTTP)
-
-### Technology Stack
-
-- **Language**: Rust
-- **Query Engine**: Apache DataFusion
-- **Storage Format**: Apache Parquet
-- **Wire Format**: Apache Arrow
-- **Database**: PostgreSQL (for metadata)
-
-## Key Components
-
-### 1. Main Binary (`ampd`)
-
-- Central command dispatcher
-- Commands:
-  - `solo`: Start amp in local development mode
-  - `server`: Start query servers
-  - `worker`: Run distributed worker node
-  - `controller`: Run controller with Admin API
-
-### 2. Data Extraction (`dump`)
-
-- Parallel extraction with configurable workers
-- Resumable extraction (tracks progress)
-
-### 3. Query Serving (`server`)
-
-- **Arrow Flight Server** (port 1602): High-performance binary protocol
-- **JSON Lines Server** (port 1603): Simple HTTP interface
-- Features:
-  - SQL query execution via DataFusion
-  - Streaming query support
-
-### 4. Data Sources
-
-#### EVM RPC (`evm-rpc-datasets`)
-
-- Connects to Ethereum-compatible JSON-RPC endpoints
-- Tables: blocks, transactions, logs
-- Batched requests for efficiency
-
-#### Firehose (`firehose-datasets`)
-
-- StreamingFast Firehose protocol (gRPC)
-- Real-time blockchain data streaming
-- Tables: blocks, transactions, logs, calls
-- Protocol buffer-based
-
-### 5. Core Libraries
-
-#### `common`
-
-- Shared utilities and abstractions
-- Configuration management
-- EVM-specific UDFs (User-Defined Functions)
-- Catalog management
-- Attestation support
-
-#### `metadata-db`
-
-- PostgreSQL-based metadata storage
-- Tracks:
-  - File metadata
-  - Worker nodes
-  - Job scheduling
-  - Progress tracking
-- Uses LISTEN/NOTIFY for distributed coordination
-
-#### `dataset-store`
-
-- Dataset management
-- SQL dataset support
-- Manifest parsing
-- JavaScript UDF support
-
-## Configuration
-
-### Environment Variables
-
-- `AMP_CONFIG`: Path to main config file
-- `AMP_LOG`: Logging level (error/warn/info/debug/trace)
-- `AMP_CONFIG_*`: Override config values
-
-### Key Directories
-
-1. **manifests_dir**: Dataset manifests (input)
-2. **providers_dir**: External service configs
-3. **data_dir**: Parquet file storage (output)
-
-### Storage Support
-
-- Local filesystem
-- S3-compatible stores
-- Google Cloud Storage
-- Azure Blob Storage
-
-## SQL Capabilities
-
-### Custom UDFs (User-Defined Functions)
-
-- `evm_decode_hex`: Convert EVM address or bytes32 to hex string
-- `evm_encode_hex`: Convert hex string to EVM address or bytes32
-- `evm_decode_log`: Decode EVM event logs
-- `evm_topic`: Get event topic hash
-- `eth_call`: Execute RPC calls during queries
-- `evm_decode_params`: Decode function parameters
-- `evm_encode_params`: Encode function parameters
-
-### Dataset Definition
-
-- Raw datasets: Direct extraction from sources
-- SQL datasets: Views over other datasets
-- Materialized views for performance
-
-## Usage Examples
-
-### Query via HTTP
-
-```bash
-curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
-```
-
-### Python Integration
-
-- Arrow Flight client available
-- Marimo notebook examples provided
-
-## 🤖 AI Agent Development Workflow
-
-**This section provides guidance for AI agents (Claude Code and future versions) on how to work with this codebase.**
-
-### 🚀 Quick Start for AI Agents
+## Quick Start
 
 **If you're an AI agent working on this codebase, here's what you need to know immediately:**
 
-1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`) instead of running commands directly
+1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`, `/feature-discovery`, `/feature-fmt-check`, `/feature-validate`) instead of running commands directly
 2. **Skills wrap justfile tasks** → Skills provide the interface to `just` commands with proper guidance
 3. **Follow the workflow** → Format → Check → Clippy → Test (in that order)
 4. **Fix ALL warnings** → Zero tolerance for clippy warnings
@@ -155,7 +16,43 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 
 **Your first action**: If you need to run a command, invoke the relevant Skill!
 
-### 📚 Documentation Structure: Separation of Concerns
+## Table of Contents
+
+1. [Feature Discovery](#1-feature-discovery) - Understanding project features via `/feature-discovery` skill
+2. [Development Workflow](#2-development-workflow) - How to develop with this codebase
+3. [Additional Resources](#3-additional-resources) - Links to documentation
+
+## 1. Feature Discovery
+
+Feature documentation lives in `docs/features/` with YAML frontmatter for dynamic discovery.
+
+**Feature docs are authoritative**: If a feature doc exists, it is the ground truth. Implementation MUST align with documentation. If there's a mismatch, either fix the code or update the doc to reflect the correct state.
+
+| When User Asks | Invoke This Skill |
+|----------------|-------------------|
+| "What is X?", "How does X work?", "Explain the Y feature" | `/feature-discovery` |
+| "What features does Amp have?", "What can this project do?" | `/feature-discovery` |
+| Questions about project functionality or capabilities | `/feature-discovery` |
+| Need context before implementing a feature | `/feature-discovery` |
+| Creating or editing files in `docs/features/` | `/feature-fmt-check` |
+| Reviewing PRs that modify feature docs (format check) | `/feature-fmt-check` |
+| "What's the status of feature X implementation?" | `/feature-validate` |
+| Verify feature doc matches implementation | `/feature-validate` |
+| Check if documented functionality exists in code | `/feature-validate` |
+| Audit feature docs for accuracy and test coverage | `/feature-validate` |
+
+**Navigation:**
+
+- Need to understand a feature? → `/feature-discovery`
+- Writing feature docs? → `/feature-fmt-check` + [.patterns/feature-docs.md](.patterns/feature-docs.md)
+- Validate implementation aligns with feature claims? → `/feature-validate`
+
+
+## 2. Development Workflow
+
+**This section provides guidance for AI agents on how to develop with this codebase.**
+
+### Documentation Structure: Separation of Concerns
 
 This project uses three complementary documentation systems. Understanding their roles helps AI agents navigate efficiently:
 
@@ -171,7 +68,7 @@ This project uses three complementary documentation systems. Understanding their
 - Need to run a command? → Invoke the appropriate Skill (`/code-format`, `/code-check`, `/code-test`, `/code-gen`)
 - Need to write code? → Consult Patterns ([`.patterns/README.md`](.patterns/README.md))
 
-### 🎯 Core Operating Principle
+### Core Operating Principle
 
 **🚨 MANDATORY: USE Skills for all common operations. Skills wrap justfile tasks with proper guidance.**
 
@@ -232,7 +129,7 @@ When determining which command to run, follow this strict hierarchy:
 - Need to check a crate? → Use `/code-check` skill
 - Need to run tests? → Use `/code-test` skill
 
-### ⚙️ Command-Line Operations Reference
+### Command-Line Operations Reference
 
 **🚨 CRITICAL: Use skills for all operations - invoke them before running commands.**
 
@@ -253,7 +150,7 @@ Each Skill provides:
 
 **Remember: If you don't know which operation to perform, invoke the appropriate Skill.**
 
-### 📋 Pre-Implementation Checklist
+### Pre-Implementation Checklist
 
 **BEFORE writing ANY code, you MUST:**
 
@@ -262,7 +159,7 @@ Each Skill provides:
 3. **Check crate-specific guidelines** - If modifying a specific crate, read `.patterns/<crate>/crate.md`
 4. **Review security requirements** - If the crate has security guidelines, read `.patterns/<crate>/security.md`
 
-### 🔄 Typical Development Workflow
+### Typical Development Workflow
 
 **Follow this workflow when implementing features or fixing bugs:**
 
@@ -346,7 +243,7 @@ Edit File → /code-format skill
 - Review changes against patterns and security guidelines
 - Document any warnings you couldn't fix and why
 
-### 📐 Code Implementation Patterns Reference
+### Code Implementation Patterns Reference
 
 **AI agents should consult patterns when writing code:**
 
@@ -364,7 +261,7 @@ Edit File → /code-format skill
   - Security checklists and threat mitigation
   - Input validation and injection prevention
 
-### 🎯 Core Development Principles
+### Core Development Principles
 
 **ALL AI agents MUST follow these principles:**
 
@@ -383,7 +280,7 @@ Edit File → /code-format skill
 - **Always format code**: Use `/code-format` skill
 - **Fix all warnings**: Use `/code-check` skill for clippy
 
-### 📦 Summary: Key Takeaways for AI Agents
+### Summary: Key Takeaways for AI Agents
 
 **You've learned the complete workflow. Here's what to remember:**
 
@@ -406,10 +303,11 @@ Edit File → /code-format skill
 
 **Remember**: When in doubt, invoke the appropriate Skill!
 
-## 📝 Additional Resources
+## 3. Additional Resources
 
 For more detailed information about the project:
 
+- **Architecture overview**: See [docs/architecture.md](docs/architecture.md)
 - **Technical documentation**: See `docs/` directory
 - **OpenAPI specifications**: Review `docs/openapi-specs/`
 - **OpenCLI specifications**: Review `docs/opencli-specs/`
