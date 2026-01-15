@@ -1,6 +1,6 @@
 ---
 name: "app-ampd-worker-events"
-description: "Worker event streaming via Kafka or GCP Pub/Sub for real-time sync progress updates. Load when asking about push-based sync notifications, event emission, or message broker integration"
+description: "Worker event streaming via Kafka or GCP Pub/Sub for real-time progress updates. Load when asking about push-based sync notifications, event emission, or message broker integration"
 components: "service:worker,crate:common"
 ---
 
@@ -8,7 +8,7 @@ components: "service:worker,crate:common"
 
 ## Summary
 
-Worker Event Streaming enables a **Push Model** where workers emit events to a message broker (Kafka or GCP Pub/Sub) when significant state changes occur. This complements the pull-based [Dataset Sync Progress API](../glossary.md#sync-progress) by enabling real-time dashboards, event-driven Platform backend updates, alerting on sync failures, and audit logging of sync activity.
+Worker Event Streaming enables a **Push Model** where workers emit events to a message broker (Kafka or GCP Pub/Sub) when significant state changes occur. This complements the pull-based [Dataset Progress API](../glossary.md#sync-progress) by enabling real-time dashboards, event-driven Platform backend updates, alerting on sync failures, and audit logging of sync activity.
 
 ## Table of Contents
 
@@ -45,21 +45,21 @@ Worker Event Streaming enables a **Push Model** where workers emit events to a m
 
 ### Event Types
 
-| Event Type | Trigger | Purpose |
-|------------|---------|---------|
-| `sync.progress` | Segment committed | Report block range updates |
-| `sync.started` | Job begins extraction | Track job lifecycle |
-| `sync.completed` | Job finishes successfully | Mark dataset as synced |
-| `sync.failed` | Job encounters fatal error | Trigger alerts |
-| `sync.stalled` | No progress for threshold | Detect stuck jobs |
-| `worker.heartbeat` | Periodic (configurable) | Worker liveness |
+| Event Type         | Trigger                    | Purpose                    |
+| ------------------ | -------------------------- | -------------------------- |
+| `sync.progress`    | Segment committed          | Report block range updates |
+| `sync.started`     | Job begins extraction      | Track job lifecycle        |
+| `sync.completed`   | Job finishes successfully  | Mark dataset as synced     |
+| `sync.failed`      | Job encounters fatal error | Trigger alerts             |
+| `sync.stalled`     | No progress for threshold  | Detect stuck jobs          |
+| `worker.heartbeat` | Periodic (configurable)    | Worker liveness            |
 
 ### Broker Selection
 
-| Broker | Use Case | Pros | Cons |
-|--------|----------|------|------|
-| **Kafka** | Self-hosted deployments | Full control, replay capability, high throughput | Operational overhead |
-| **GCP Pub/Sub** | Cloud deployments | Managed, serverless, native GCP integration | Vendor lock-in, no replay |
+| Broker          | Use Case                | Pros                                             | Cons                      |
+| --------------- | ----------------------- | ------------------------------------------------ | ------------------------- |
+| **Kafka**       | Self-hosted deployments | Full control, replay capability, high throughput | Operational overhead      |
+| **GCP Pub/Sub** | Cloud deployments       | Managed, serverless, native GCP integration      | Vendor lock-in, no replay |
 
 The implementation abstracts the broker behind a trait, allowing runtime configuration.
 
@@ -87,15 +87,15 @@ project_id = "my-gcp-project"
 topic = "amp-worker-events"
 ```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `enabled` | `false` | Enable/disable event emission |
-| `broker` | `"kafka"` | Broker type: `kafka` or `pubsub` |
-| `kafka.bootstrap_servers` | - | Kafka broker addresses |
-| `kafka.topic` | `"amp.worker.events"` | Kafka topic name |
-| `kafka.acks` | `"all"` | Acknowledgment level |
-| `pubsub.project_id` | - | GCP project ID |
-| `pubsub.topic` | - | Pub/Sub topic name |
+| Setting                   | Default               | Description                      |
+| ------------------------- | --------------------- | -------------------------------- |
+| `enabled`                 | `false`               | Enable/disable event emission    |
+| `broker`                  | `"kafka"`             | Broker type: `kafka` or `pubsub` |
+| `kafka.bootstrap_servers` | -                     | Kafka broker addresses           |
+| `kafka.topic`             | `"amp.worker.events"` | Kafka topic name                 |
+| `kafka.acks`              | `"all"`               | Acknowledgment level             |
+| `pubsub.project_id`       | -                     | GCP project ID                   |
+| `pubsub.topic`            | -                     | Pub/Sub topic name               |
 
 ## Usage
 
@@ -226,6 +226,7 @@ Emitted when a new segment is committed to a table.
 ### Topic Structure
 
 **Single Topic (Recommended):**
+
 ```
 amp.worker.events
 ```
@@ -233,6 +234,7 @@ amp.worker.events
 All events go to one topic, partitioned by `manifest_hash` to ensure ordering per-dataset. Consumers filter by `event_type`.
 
 **Multi-Topic (Alternative):**
+
 ```
 amp.worker.sync.progress
 amp.worker.sync.lifecycle

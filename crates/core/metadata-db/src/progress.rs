@@ -1,6 +1,6 @@
-//! Sync progress tracking for datasets
+//! Progress tracking for datasets
 //!
-//! This module provides functionality for querying the sync progress of dataset tables,
+//! This module provides functionality for querying the progress of dataset tables,
 //! including current block numbers, job status, and file statistics.
 
 use crate::{JobStatus, ManifestHash, jobs::JobId, physical_table::TableNameOwned};

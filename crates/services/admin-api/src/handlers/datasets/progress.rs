@@ -1,4 +1,4 @@
-//! Dataset sync progress handler
+//! Dataset progress handler
 
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ use crate::{
 
 /// Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/sync-progress` endpoint
 ///
-/// Retrieves sync progress information for a specific dataset revision, including
+/// Retrieves progress information for a specific dataset revision, including
 /// per-table current block numbers, job status, and file statistics.
 ///
 /// ## Path Parameters
@@ -30,7 +30,7 @@ use crate::{
 /// - `revision`: Dataset revision (version, hash, "latest", or "dev")
 ///
 /// ## Response
-/// - **200 OK**: Returns sync progress for all tables in the dataset
+/// - **200 OK**: Returns progress for all tables in the dataset
 /// - **400 Bad Request**: Invalid path parameters
 /// - **404 Not Found**: Dataset or revision not found
 /// - **500 Internal Server Error**: Database connection or query error
@@ -40,7 +40,7 @@ use crate::{
 /// - `DATASET_NOT_FOUND`: Dataset revision does not exist
 /// - `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)
 /// - `GET_DATASET_ERROR`: Failed to retrieve dataset definition
-/// - `GET_SYNC_PROGRESS_ERROR`: Failed to get sync progress from metadata database
+/// - `GET_progress_ERROR`: Failed to get progress from metadata database
 /// - `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
@@ -49,14 +49,14 @@ use crate::{
         get,
         path = "/datasets/{namespace}/{name}/versions/{revision}/sync-progress",
         tag = "datasets",
-        operation_id = "get_dataset_sync_progress",
+        operation_id = "get_dataset_progress",
         params(
             ("namespace" = String, Path, description = "Dataset namespace"),
             ("name" = String, Path, description = "Dataset name"),
             ("revision" = String, Path, description = "Revision (version, hash, latest, or dev)")
         ),
         responses(
-            (status = 200, description = "Successfully retrieved sync progress", body = SyncProgressResponse),
+            (status = 200, description = "Successfully retrieved progress", body = SyncProgressResponse),
             (status = 400, description = "Invalid path parameters", body = crate::handlers::error::ErrorResponse),
             (status = 404, description = "Dataset or revision not found", body = crate::handlers::error::ErrorResponse),
             (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
@@ -113,7 +113,7 @@ pub async fn handler(
         })?;
 
     // Query active tables info from metadata database (job_id, status)
-    let writer_infos = metadata_db::sync_progress::get_active_tables_with_writer_info(
+    let writer_infos = metadata_db::progress::get_active_tables_with_writer_info(
         &ctx.metadata_db,
         resolved_ref.hash(),
     )
@@ -123,7 +123,7 @@ pub async fn handler(
             dataset_reference = %resolved_ref,
             error = %err,
             error_source = logging::error_source(&err),
-            "failed to get sync progress for dataset"
+            "failed to get progress for dataset"
         );
         Error::GetSyncProgress(err)
     })?;
@@ -229,7 +229,7 @@ pub async fn handler(
     }))
 }
 
-/// API response containing sync progress information for a dataset
+/// API response containing progress information for a dataset
 #[derive(Debug, serde::Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SyncProgressResponse {
@@ -241,11 +241,11 @@ pub struct SyncProgressResponse {
     pub revision: String,
     /// Resolved manifest hash
     pub manifest_hash: String,
-    /// Sync progress for each table in the dataset
+    /// Progress for each table in the dataset
     pub tables: Vec<TableSyncProgress>,
 }
 
-/// Sync progress information for a single table
+/// Progress information for a single table
 #[derive(Debug, serde::Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TableSyncProgress {
@@ -265,7 +265,7 @@ pub struct TableSyncProgress {
     pub total_size_bytes: i64,
 }
 
-/// Errors that can occur during sync progress retrieval
+/// Errors that can occur during progress retrieval
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The path parameters are invalid or malformed
@@ -290,8 +290,8 @@ pub enum Error {
     #[error("failed to get dataset definition")]
     GetDataset(#[source] amp_dataset_store::GetDatasetError),
 
-    /// Failed to get sync progress from metadata database
-    #[error("failed to get sync progress for dataset")]
+    /// Failed to get progress from metadata database
+    #[error("failed to get progress for dataset")]
     GetSyncProgress(#[source] metadata_db::Error),
 
     /// Failed to access physical table metadata
@@ -306,7 +306,7 @@ impl IntoErrorResponse for Error {
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::DatasetNotFound { .. } => "DATASET_NOT_FOUND",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
-            Error::GetSyncProgress(_) => "GET_SYNC_PROGRESS_ERROR",
+            Error::GetSyncProgress(_) => "GET_progress_ERROR",
             Error::PhysicalTable(_) => "PHYSICAL_TABLE_ERROR",
         }
     }

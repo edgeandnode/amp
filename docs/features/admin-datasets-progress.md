@@ -1,14 +1,14 @@
 ---
 name: "admin-datasets-progress"
-description: "Dataset sync progress API for monitoring sync state, block ranges, and job health. Load when asking about dataset freshness, sync status, or progress endpoints"
+description: "Dataset progress API for monitoring sync state, block ranges, and job health. Load when asking about dataset freshness, sync status, or progress endpoints"
 components: "crate:amp-data-store,crate:admin-api,crate:metadata-db"
 ---
 
-# Dataset Sync Progress API
+# Dataset Progress API
 
 ## Summary
 
-The Dataset Sync Progress API provides visibility into the operational state of datasets, reporting sync metrics like `start_block`, `current_block`, job health status, and file statistics. This API serves as the "ground truth" for the engine's state, which Platform services can use to calculate higher-level metrics like freshness or block lag.
+The Dataset Progress API provides visibility into the operational state of datasets, reporting sync metrics like `start_block`, `current_block`, job health status, and file statistics. This API serves as the "ground truth" for the engine's state, which Platform services can use to calculate higher-level metrics like freshness or block lag.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ The Dataset Sync Progress API provides visibility into the operational state of 
 
 ## Key Concepts
 
-- **Sync Progress**: The current state of data synchronization for a dataset, including the range of blocks that have been synced and the number of files produced
+- **Progress**: The current state of data synchronization for a dataset, including the range of blocks that have been synced and the number of files produced
 - **Current Block**: The highest block number that has been synced (end of the synced range)
 - **Start Block**: The lowest block number that has been synced (beginning of the synced range)
 - **Job Status**: The health state of the writer job (e.g., `RUNNING`, `FAILED`, `COMPLETED`)
@@ -133,7 +133,7 @@ curl -X GET "http://localhost:8080/datasets/ethereum/mainnet/versions/0.0.0/tabl
 
 #### `get_table_progress()`
 
-Computes sync progress for a single physical table.
+Computes progress for a single physical table.
 
 ```rust
 pub async fn get_table_progress(
@@ -166,7 +166,7 @@ pub async fn get_tables_writer_info(
 ### Return Types
 
 ```rust
-/// Sync progress statistics for a single table.
+/// Progress statistics for a single table.
 pub struct TableProgress {
     /// Highest block number synced (end of synced range)
     pub current_block: u64,
@@ -190,7 +190,7 @@ pub struct TableWriterInfo {
 
 - `crates/amp-data-store/src/lib.rs` - DataStore methods for progress calculation
 - `crates/admin-api/src/handlers/datasets.rs` - HTTP handler orchestration
-- `crates/metadata-db/src/sync_progress.rs` - Database queries for writer info
+- `crates/metadata-db/src/progress.rs` - Database queries for writer info
 
 ## Limitations
 

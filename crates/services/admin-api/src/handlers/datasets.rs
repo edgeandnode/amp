@@ -11,4 +11,4 @@ pub mod list_jobs;
 pub mod list_versions;
 pub mod register;
 pub mod restore;
-pub mod sync_progress;
+pub mod progress;
