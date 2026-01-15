@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::ResolveRevisionError;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -245,7 +246,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] ResolveRevisionError),
 
     /// Dataset store operation error when loading dataset
     ///

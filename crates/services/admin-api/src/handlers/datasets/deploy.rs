@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
-use amp_dataset_store::DatasetKind;
+use amp_dataset_store::{DatasetKind, GetDatasetError};
+use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
 use axum::{
     Json,
     extract::{
@@ -282,7 +283,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list version tags: {0}")]
-    ListVersionTags(#[source] amp_dataset_store::ListVersionTagsError),
+    ListVersionTags(#[source] ListVersionTagsError),
     /// Dataset store operation error when resolving revision
     ///
     /// This occurs when:
@@ -290,7 +291,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] ResolveRevisionError),
     /// Dataset store operation error when loading dataset
     ///
     /// This occurs when:
@@ -298,7 +299,7 @@ pub enum Error {
     /// - Manifest parsing errors
     /// - Invalid dataset structure
     #[error("Failed to load dataset: {0}")]
-    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+    GetDataset(#[source] GetDatasetError),
     /// Scheduler error
     ///
     /// This occurs when:

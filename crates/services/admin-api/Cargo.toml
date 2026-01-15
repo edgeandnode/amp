@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../../core/data-store" }
+amp-datasets-registry = { path = "../../core/datasets-registry" }
 async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }

@@ -1,6 +1,5 @@
-use amp_dataset_store::{
-    DatasetKind, LinkManifestError, RegisterManifestError, SetVersionTagError,
-};
+use amp_dataset_store::DatasetKind;
+use amp_datasets_registry::error::{LinkManifestError, RegisterManifestError, SetVersionTagError};
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},

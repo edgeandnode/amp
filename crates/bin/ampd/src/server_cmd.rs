@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use amp_config::{Addrs, Config as CommonConfig};
 use amp_data_store::DataStore;
-use amp_dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use common::BoxError;
 use monitoring::telemetry::metrics::Meter;
@@ -44,11 +43,8 @@ pub async fn run(
             )
             .map_err(Error::ManifestsStoreCreation)?,
         );
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
+        let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
+        DatasetStore::new(datasets_registry, provider_configs_store)
     };
 
     let server_config = config_from_common(&config);

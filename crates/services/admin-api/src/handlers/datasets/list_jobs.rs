@@ -1,5 +1,6 @@
 //! Dataset jobs listing handler
 
+use amp_datasets_registry::error::ResolveRevisionError;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -152,7 +153,7 @@ pub enum Error {
     /// - Query execution encounters an internal database error
     /// - Metadata database query for revision fails
     #[error("failed to resolve dataset revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] ResolveRevisionError),
 
     /// Dataset revision does not exist
     ///

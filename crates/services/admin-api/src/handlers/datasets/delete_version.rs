@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::{DeleteVersionTagError, ResolveRevisionError};
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -137,7 +138,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during resolution
     #[error("Failed to resolve latest revision: {0}")]
-    ResolveLatestRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveLatestRevision(#[source] ResolveRevisionError),
     /// Failed to resolve the version revision
     ///
     /// This occurs when:
@@ -145,7 +146,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during resolution
     #[error("Failed to resolve version revision: {0}")]
-    ResolveVersionRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveVersionRevision(#[source] ResolveRevisionError),
     /// Cannot delete the version currently tagged as "latest"
     ///
     /// This occurs when:
@@ -160,7 +161,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during deletion
     #[error("Failed to delete version tag: {0}")]
-    DeleteVersionTag(#[source] amp_dataset_store::DeleteVersionTagError),
+    DeleteVersionTag(#[source] DeleteVersionTagError),
 }
 
 impl IntoErrorResponse for Error {

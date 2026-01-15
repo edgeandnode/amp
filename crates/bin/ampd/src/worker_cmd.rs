@@ -1,8 +1,7 @@
 use amp_config::Config;
 use amp_data_store::DataStore;
-use amp_dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use monitoring::telemetry::metrics::Meter;
 use worker::node_id::NodeId;
@@ -35,11 +34,8 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
             )
             .map_err(Error::ManifestsStoreCreation)?,
         );
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
+        let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
+        DatasetStore::new(datasets_registry, provider_configs_store)
     };
 
     // Convert common config to worker-specific config

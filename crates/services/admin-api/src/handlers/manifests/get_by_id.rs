@@ -1,6 +1,6 @@
 //! Manifests get by ID handler
 
-use amp_dataset_store::{GetManifestError, manifests::ManifestContent};
+use amp_datasets_registry::{error::GetManifestError, manifests::ManifestContent};
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -173,7 +173,7 @@ pub enum Error {
     /// - Network errors prevent reading from remote storage
     /// - File corruption or invalid data in the object store
     #[error("failed to read manifest from object store: {0}")]
-    ObjectStoreReadError(#[source] amp_dataset_store::manifests::GetError),
+    ObjectStoreReadError(#[source] amp_datasets_registry::manifests::GetError),
 }
 
 impl IntoErrorResponse for Error {

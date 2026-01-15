@@ -1,6 +1,6 @@
 //! Manifests delete by ID handler
 
-use amp_dataset_store::DeleteManifestError;
+use amp_datasets_registry::error::DeleteManifestError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -199,7 +199,7 @@ pub enum Error {
     /// - Network errors prevent deletion from remote storage
     /// - File does not exist in object store (non-critical if DB delete succeeded)
     #[error("failed to delete manifest from object store: {0}")]
-    ObjectStoreDeleteError(#[source] amp_dataset_store::manifests::DeleteError),
+    ObjectStoreDeleteError(#[source] amp_datasets_registry::manifests::DeleteError),
 
     /// Failed to commit transaction
     ///

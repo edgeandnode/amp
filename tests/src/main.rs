@@ -49,10 +49,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use amp_config::Config;
 use amp_data_store::DataStore;
-use amp_dataset_store::{
-    DatasetStore, dataset_and_dependencies, manifests::DatasetManifestsStore,
-    providers::ProviderConfigsStore,
-};
+use amp_dataset_store::{DatasetStore, dataset_and_dependencies, providers::ProviderConfigsStore};
+use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use clap::Parser;
 use common::BoxError;
 use datasets_common::reference::Reference;
@@ -179,11 +177,9 @@ async fn main() {
                     )
                     .expect("Failed to create manifests store"),
                 );
-                DatasetStore::new(
-                    sysdb.conn_pool().clone(),
-                    provider_configs_store,
-                    dataset_manifests_store,
-                )
+                let datasets_registry =
+                    DatasetsRegistry::new(sysdb.conn_pool().clone(), dataset_manifests_store);
+                DatasetStore::new(datasets_registry, provider_configs_store)
             };
 
             // Start controller for Admin API access during dependency restoration

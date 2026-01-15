@@ -31,6 +31,7 @@ dependencies = [
  "amp-config",
  "amp-data-store",
  "amp-dataset-store",
+ "amp-datasets-registry",
  "async-trait",
  "axum 0.8.8",
  "common",
@@ -991,6 +992,7 @@ dependencies = [
 name = "amp-dataset-store"
 version = "0.1.0"
 dependencies = [
+ "amp-datasets-registry",
  "async-stream",
  "common",
  "datafusion",
@@ -1014,6 +1016,19 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "amp-datasets-registry"
+version = "0.1.0"
+dependencies = [
+ "datasets-common",
+ "metadata-db",
+ "object_store",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -1087,6 +1102,7 @@ dependencies = [
  "amp-config",
  "amp-data-store",
  "amp-dataset-store",
+ "amp-datasets-registry",
  "amp-object-store",
  "clap",
  "common",
@@ -12185,6 +12201,7 @@ dependencies = [
  "amp-config",
  "amp-data-store",
  "amp-dataset-store",
+ "amp-datasets-registry",
  "amp-object-store",
  "ampctl",
  "arrow-flight",

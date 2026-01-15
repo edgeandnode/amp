@@ -1,6 +1,6 @@
 //! Manifests prune handler
 
-use amp_dataset_store::DeleteManifestError;
+use amp_datasets_registry::error::{DeleteManifestError, ListOrphanedManifestsError};
 use axum::{Json, extract::State, http::StatusCode};
 use futures::stream::{FuturesUnordered, StreamExt};
 use monitoring::logging;
@@ -163,7 +163,7 @@ pub struct PruneResponse {
 /// - Database errors during query
 #[derive(Debug, thiserror::Error)]
 #[error("failed to list orphaned manifests")]
-pub struct Error(#[source] pub amp_dataset_store::ListOrphanedManifestsError);
+pub struct Error(#[source] pub ListOrphanedManifestsError);
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {

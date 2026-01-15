@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -184,7 +185,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list version tags: {0}")]
-    ListVersionTags(#[source] amp_dataset_store::ListVersionTagsError),
+    ListVersionTags(#[source] ListVersionTagsError),
 
     /// Dataset store operation error when resolving revision
     ///
@@ -193,7 +194,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] ResolveRevisionError),
 }
 
 impl IntoErrorResponse for Error {
