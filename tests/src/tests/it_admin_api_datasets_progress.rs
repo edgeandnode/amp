@@ -55,9 +55,7 @@ async fn get_progress_with_non_existent_dataset_returns_not_found() {
     let ctx = TestCtx::setup("get_progress_non_existent", Vec::<&str>::new()).await;
 
     //* When
-    let resp = ctx
-        .get_progress("non_existent", "dataset", "latest")
-        .await;
+    let resp = ctx.get_progress("non_existent", "dataset", "latest").await;
 
     //* Then
     assert_eq!(
@@ -361,12 +359,7 @@ impl TestCtx {
             .expect("failed to build test context")
     }
 
-    async fn get_progress(
-        &self,
-        namespace: &str,
-        name: &str,
-        revision: &str,
-    ) -> reqwest::Response {
+    async fn get_progress(&self, namespace: &str, name: &str, revision: &str) -> reqwest::Response {
         let url = format!(
             "{}/datasets/{}/{}/versions/{}/sync-progress",
             self.daemon_controller().admin_api_url(),
