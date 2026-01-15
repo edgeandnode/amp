@@ -18,3 +18,12 @@
     [
       {"count": 348}
     ]
+
+- name: query_subquery_alias_table
+  query: |
+    SELECT _block_num, value
+    FROM joins.subquery_alias
+  results: |
+    [
+      {"_block_num": 15000000, "value": "99227573441855374"}
+    ]
