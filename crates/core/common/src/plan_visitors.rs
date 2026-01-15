@@ -8,8 +8,8 @@ use datafusion::{
     error::DataFusionError,
     functions::core::expr_fn::greatest,
     logical_expr::{
-        Join as JoinStruct, LogicalPlan, LogicalPlanBuilder, Sort, Union as UnionStruct,
-        expr::physical_name,
+        Join as JoinStruct, LogicalPlan, LogicalPlanBuilder, Sort,
+        SubqueryAlias as SubqueryAliasStruct, Union as UnionStruct, expr::physical_name,
     },
     physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
@@ -228,9 +228,18 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 Ok(Transformed::no(node))
             }
 
-            // These nodes do not change the schema and are not leaves, so we can leave them as-is
-            Filter(_) | Repartition(_) | Subquery(_) | SubqueryAlias(_) | Explain(_)
-            | Analyze(_) | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
+            // SubqueryAlias caches its schema - we need to rebuild it to reflect schema changes in its input.
+            // When the child projection gets _block_num prepended, the SubqueryAlias must be rebuilt
+            // so its cached schema includes _block_num. Otherwise, JOINs will fail to find _block_num.
+            SubqueryAlias(subquery_alias) => {
+                let rebuilt =
+                    SubqueryAliasStruct::try_new(subquery_alias.input, subquery_alias.alias)?;
+                Ok(Transformed::yes(LogicalPlan::SubqueryAlias(rebuilt)))
+            }
+
+            // These nodes do not cache schema and are not leaves, so we can leave them as-is
+            Filter(_) | Repartition(_) | Subquery(_) | Explain(_) | Analyze(_)
+            | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
 
             // These variants would have already errored in `incremental_op_kind` above
             Limit(_) | Aggregate(_) | Distinct(_) | Sort(_) | Window(_) | RecursiveQuery(_)
@@ -690,6 +699,77 @@ mod tests {
         assert!(
             err_msg.contains("Duplicate field names detected in plan schema"),
             "Error message should indicate duplicate field names"
+        );
+    }
+
+    #[test]
+    fn test_propagate_block_num_through_subquery_alias_in_join() {
+        // This test verifies that _block_num is properly propagated through SubqueryAlias nodes
+        // when used in JOINs. This simulates the CTE case where a user writes:
+        //   WITH test AS (SELECT block_num FROM transactions WHERE value > 0)
+        //   SELECT tx.tx_hash, t.block_num FROM test t, transactions tx
+        // Without explicit _block_num in the CTE.
+
+        // Create a table with _block_num
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new("value", DataType::Utf8, false),
+        ]));
+        let batch = array::RecordBatch::new_empty(schema.clone());
+        let table = Arc::new(MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap());
+
+        // Create a scan and project WITHOUT _block_num (simulating a CTE that doesn't select it)
+        let scan = LogicalPlanBuilder::scan("txs", provider_as_source(table.clone()), None)
+            .unwrap()
+            .project(vec![col("id"), col("value")]) // Note: no _block_num!
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // Wrap in SubqueryAlias to simulate a CTE
+        let cte_alias = SubqueryAliasStruct::try_new(Arc::new(scan), "cte").unwrap();
+        let cte_plan = LogicalPlan::SubqueryAlias(cte_alias);
+
+        // Create another scan for the right side of join
+        let right_scan = LogicalPlanBuilder::scan("txs2", provider_as_source(table), None)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // Create a cross join between CTE and the table
+        let join_plan = LogicalPlanBuilder::from(cte_plan)
+            .join(
+                right_scan,
+                JoinType::Inner,
+                (
+                    vec![Column::from_qualified_name("cte.id")],
+                    vec![Column::from_qualified_name("txs2.id")],
+                ),
+                None,
+            )
+            .unwrap()
+            .project(vec![col("cte.value"), col("txs2.value")])
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // This should succeed now that SubqueryAlias properly propagates _block_num
+        let result = propagate_block_num(join_plan);
+        assert!(
+            result.is_ok(),
+            "propagate_block_num should succeed for SubqueryAlias in JOIN: {:?}",
+            result.err()
+        );
+
+        // Verify that the resulting plan has _block_num in the schema
+        let plan = result.unwrap();
+        assert!(
+            plan.schema()
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+            "Resulting plan should have _block_num in schema"
         );
     }
 }

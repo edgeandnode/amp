@@ -23,6 +23,16 @@ export default defineDataset(() => ({
       `,
       network: "mainnet",
     },
+    // Test that _block_num is propagated through SubqueryAlias (CTE) in JOINs
+    subquery_alias: {
+      sql: `
+        WITH tx_value AS (
+          SELECT value FROM eth_rpc.transactions WHERE value = '99227573441855374'
+        )
+        SELECT block_num, tv.value FROM tx_value tv, eth_rpc.blocks
+      `,
+      network: "mainnet",
+    },
   },
   functions: {},
 }))
