@@ -612,8 +612,8 @@
           "datasets"
         ],
         "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/sync-progress` endpoint",
-        "description": "Retrieves sync progress information for a specific dataset revision, including\nper-table current block numbers, job status, and file statistics.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns sync progress for all tables in the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `GET_DATASET_ERROR`: Failed to retrieve dataset definition\n- `GET_SYNC_PROGRESS_ERROR`: Failed to get sync progress from metadata database\n- `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata",
-        "operationId": "get_dataset_sync_progress",
+        "description": "Retrieves progress information for a specific dataset revision, including\nper-table current block numbers, job status, and file statistics.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns progress for all tables in the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `GET_DATASET_ERROR`: Failed to retrieve dataset definition\n- `GET_progress_ERROR`: Failed to get progress from metadata database\n- `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata",
+        "operationId": "get_dataset_progress",
         "parameters": [
           {
             "name": "namespace",
@@ -645,7 +645,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successfully retrieved sync progress",
+            "description": "Successfully retrieved progress",
             "content": {
               "application/json": {
                 "schema": {
@@ -2317,7 +2317,7 @@
       },
       "SyncProgressResponse": {
         "type": "object",
-        "description": "API response containing sync progress information for a dataset",
+        "description": "API response containing progress information for a dataset",
         "required": [
           "dataset_namespace",
           "dataset_name",
@@ -2347,7 +2347,7 @@
             "items": {
               "$ref": "#/components/schemas/TableSyncProgress"
             },
-            "description": "Sync progress for each table in the dataset"
+            "description": "Progress for each table in the dataset"
           }
         }
       },
@@ -2373,7 +2373,7 @@
       },
       "TableSyncProgress": {
         "type": "object",
-        "description": "Sync progress information for a single table",
+        "description": "Progress information for a single table",
         "required": [
           "table_name",
           "files_count",

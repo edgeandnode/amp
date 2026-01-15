@@ -51,7 +51,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         )
         .route(
             "/datasets/{namespace}/{name}/versions/{revision}/sync-progress",
-            get(datasets::sync_progress::handler),
+            get(datasets::progress::handler),
         )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
@@ -104,7 +104,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::list_all::handler,
         handlers::datasets::list_versions::handler,
         handlers::datasets::list_jobs::handler,
-        handlers::datasets::sync_progress::handler,
+        handlers::datasets::progress::handler,
         handlers::datasets::get::handler,
         handlers::datasets::get_manifest::handler,
         handlers::datasets::register::handler,
@@ -159,8 +159,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::deploy::DeployResponse,
         handlers::datasets::restore::RestoreResponse,
         handlers::datasets::restore::RestoredTableInfo,
-        handlers::datasets::sync_progress::SyncProgressResponse,
-        handlers::datasets::sync_progress::TableSyncProgress,
+        handlers::datasets::progress::SyncProgressResponse,
+        handlers::datasets::progress::TableSyncProgress,
         // Job schemas
         handlers::jobs::job_info::JobInfo,
         handlers::jobs::get_all::JobsResponse,

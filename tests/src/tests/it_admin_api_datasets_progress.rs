@@ -1,4 +1,4 @@
-//! Integration tests for the Admin API dataset sync progress endpoint.
+//! Integration tests for the Admin API dataset progress endpoint.
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -6,32 +6,32 @@ use serde::{Deserialize, Serialize};
 use crate::testlib::ctx::TestCtxBuilder;
 
 #[tokio::test]
-async fn get_sync_progress_with_valid_dataset_succeeds() {
+async fn get_progress_with_valid_dataset_succeeds() {
     //* Given
     let ctx = TestCtx::setup(
-        "get_sync_progress_with_valid_dataset",
+        "get_progress_with_valid_dataset",
         [("eth_rpc", "_/eth_rpc@0.0.0")],
     )
     .await;
 
     //* When
     // Using default namespace '_' and version '0.0.0'
-    let resp = ctx.get_sync_progress("_", "eth_rpc", "0.0.0").await;
+    let resp = ctx.get_progress("_", "eth_rpc", "0.0.0").await;
 
     //* Then
     assert_eq!(
         resp.status(),
         StatusCode::OK,
-        "sync progress retrieval should succeed for valid dataset"
+        "progress retrieval should succeed for valid dataset"
     );
 
     let progress: SyncProgressResponse = resp
         .json()
         .await
-        .expect("failed to parse sync progress response JSON");
+        .expect("failed to parse progress response JSON");
 
     println!(
-        "Sync Progress Response:\n{}",
+        "Progress Response:\n{}",
         serde_json::to_string_pretty(&progress).expect("serialization failed")
     );
 
@@ -50,20 +50,20 @@ async fn get_sync_progress_with_valid_dataset_succeeds() {
 }
 
 #[tokio::test]
-async fn get_sync_progress_with_non_existent_dataset_returns_not_found() {
+async fn get_progress_with_non_existent_dataset_returns_not_found() {
     //* Given
-    let ctx = TestCtx::setup("get_sync_progress_non_existent", Vec::<&str>::new()).await;
+    let ctx = TestCtx::setup("get_progress_non_existent", Vec::<&str>::new()).await;
 
     //* When
     let resp = ctx
-        .get_sync_progress("non_existent", "dataset", "latest")
+        .get_progress("non_existent", "dataset", "latest")
         .await;
 
     //* Then
     assert_eq!(
         resp.status(),
         StatusCode::NOT_FOUND,
-        "sync progress retrieval should fail for non-existent dataset"
+        "progress retrieval should fail for non-existent dataset"
     );
 
     let error: ErrorResponse = resp.json().await.expect("failed to parse error response");
@@ -71,12 +71,12 @@ async fn get_sync_progress_with_non_existent_dataset_returns_not_found() {
     assert_eq!(error.error_code, "DATASET_NOT_FOUND");
 }
 
-/// Test that sync progress shows RUNNING status while a job is actively syncing.
+/// Test that progress shows RUNNING status while a job is actively syncing.
 #[tokio::test]
-async fn get_sync_progress_shows_running_status() {
+async fn get_progress_shows_running_status() {
     //* Given
     // Use anvil_rpc dataset which connects to the local Anvil instance
-    let ctx = TestCtx::setup_with_anvil("get_sync_progress_running_status").await;
+    let ctx = TestCtx::setup_with_anvil("get_progress_running_status").await;
 
     // Mine many blocks so syncing takes time
     ctx.anvil().mine(100).await.expect("failed to mine blocks");
@@ -98,12 +98,12 @@ async fn get_sync_progress_shows_running_status() {
             panic!("Timeout waiting for RUNNING status");
         }
 
-        let resp = ctx.get_sync_progress("_", "anvil_rpc", "0.0.0").await;
+        let resp = ctx.get_progress("_", "anvil_rpc", "0.0.0").await;
         if resp.status() == StatusCode::OK {
             let progress: SyncProgressResponse = resp.json().await.expect("failed to parse JSON");
 
             println!(
-                "Sync Progress: {}",
+                "Progress: {}",
                 serde_json::to_string_pretty(&progress).unwrap()
             );
 
@@ -148,7 +148,7 @@ async fn get_sync_progress_shows_running_status() {
 
     assert_eq!(
         actual_tables, expected_tables,
-        "all expected tables should be present in sync progress"
+        "all expected tables should be present in progress"
     );
 
     // Verify the job is RUNNING
@@ -193,12 +193,12 @@ async fn get_sync_progress_shows_running_status() {
     );
 }
 
-/// Test that sync progress shows COMPLETED status when the end block is reached.
+/// Test that progress shows COMPLETED status when the end block is reached.
 #[tokio::test]
-async fn get_sync_progress_shows_completed_status_when_end_block_reached() {
+async fn get_progress_shows_completed_status_when_end_block_reached() {
     //* Given
     // Use anvil_rpc dataset which connects to the local Anvil instance
-    let ctx = TestCtx::setup_with_anvil("get_sync_progress_completed_status").await;
+    let ctx = TestCtx::setup_with_anvil("get_progress_completed_status").await;
 
     // Mine 10 blocks (1 to 10)
     ctx.anvil().mine(10).await.expect("failed to mine blocks");
@@ -221,12 +221,12 @@ async fn get_sync_progress_shows_completed_status_when_end_block_reached() {
             panic!("Timeout waiting for COMPLETED status");
         }
 
-        let resp = ctx.get_sync_progress("_", "anvil_rpc", "0.0.0").await;
+        let resp = ctx.get_progress("_", "anvil_rpc", "0.0.0").await;
         if resp.status() == StatusCode::OK {
             let progress: SyncProgressResponse = resp.json().await.expect("failed to parse JSON");
 
             println!(
-                "Sync Progress: {}",
+                "Progress: {}",
                 serde_json::to_string_pretty(&progress).unwrap()
             );
 
@@ -275,7 +275,7 @@ async fn get_sync_progress_shows_completed_status_when_end_block_reached() {
 
     assert_eq!(
         actual_tables, expected_tables,
-        "all expected tables should be present in sync progress"
+        "all expected tables should be present in progress"
     );
 
     // Verify the job is COMPLETED
@@ -361,7 +361,7 @@ impl TestCtx {
             .expect("failed to build test context")
     }
 
-    async fn get_sync_progress(
+    async fn get_progress(
         &self,
         namespace: &str,
         name: &str,
