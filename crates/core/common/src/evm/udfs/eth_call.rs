@@ -93,10 +93,13 @@ impl std::hash::Hash for EthCall {
 }
 
 impl EthCall {
-    pub fn new(catalog_schema: &str, client: alloy::providers::RootProvider<AnyNetwork>) -> Self {
+    pub fn new(
+        sql_table_ref_schema: &str,
+        client: alloy::providers::RootProvider<AnyNetwork>,
+    ) -> Self {
         // Create UDF name with quoted schema to match how DataFusion's query planner
         // resolves qualified function references (e.g., "_/anvil_rpc@0.0.0".eth_call)
-        let name = format!("{}.eth_call", quote_identifier(catalog_schema));
+        let name = format!("{}.eth_call", quote_identifier(sql_table_ref_schema));
 
         EthCall {
             name,

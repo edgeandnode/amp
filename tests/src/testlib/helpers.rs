@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BoxError, LogicalCatalog,
+    BoxError, LogicalCatalog, ResolvedTable,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
@@ -178,27 +178,34 @@ pub async fn load_physical_tables(
     data_store: &DataStore,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    let hash_ref = dataset_store
+    let dataset_ref = dataset_store
         .resolve_revision(&dataset_ref)
         .await
         .expect("Failed to resolve dataset")
         .expect("Dataset not found");
 
     let dataset = dataset_store
-        .get_dataset(&hash_ref)
+        .get_dataset(&dataset_ref)
         .await
         .expect("Failed to get dataset");
 
     let mut dumped_tables: Vec<Arc<PhysicalTable>> = Vec::new();
-    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+    for table_def in &dataset.tables {
         let revision = data_store
-            .get_table_active_revision(dataset.reference(), table.name())
+            .get_table_active_revision(dataset.reference(), table_def.name())
             .await
             .expect("Failed to get active revision")
             .expect("Active revision not found");
 
-        let physical_table =
-            PhysicalTable::from_active_revision(data_store.clone(), table, revision);
+        let sql_table_ref_schema = dataset_ref.to_reference().to_string();
+        let physical_table = PhysicalTable::from_active_revision(
+            data_store.clone(),
+            dataset_ref.clone(),
+            dataset.start_block,
+            table_def.clone(),
+            revision,
+            sql_table_ref_schema,
+        );
         dumped_tables.push(physical_table.into());
     }
 
@@ -245,18 +252,18 @@ pub async fn restore_dataset_snapshot(
     );
 
     // 2. Load the dataset to get ResolvedTables
-    let hash_ref = dataset_store
+    let dataset_ref = dataset_store
         .resolve_revision(dataset_ref)
         .await?
         .ok_or_else(|| format!("dataset '{}' not found", dataset_ref))?;
-    let dataset = dataset_store.get_dataset(&hash_ref).await?;
+    let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
     // 3. Load PhysicalTable objects for each restored table
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
-    for table in dataset.resolved_tables(dataset_ref.clone().into()) {
+    for table_def in &dataset.tables {
         // Verify this table was restored
-        let table_name = table.name().to_string();
+        let table_name = table_def.name().to_string();
         let restored = restored_info
             .iter()
             .find(|info| info.table_name == table_name)
@@ -276,7 +283,7 @@ pub async fn restore_dataset_snapshot(
 
         // Load the PhysicalTable using the active revision (it was just marked active by restore)
         let revision = data_store
-            .get_table_active_revision(dataset.reference(), table.name())
+            .get_table_active_revision(dataset.reference(), table_def.name())
             .await?
             .ok_or_else(|| {
                 format!(
@@ -286,8 +293,15 @@ pub async fn restore_dataset_snapshot(
                 )
             })?;
 
-        let physical_table =
-            PhysicalTable::from_active_revision(data_store.clone(), table, revision);
+        let sql_table_ref_schema = dataset_ref.to_reference().to_string();
+        let physical_table = PhysicalTable::from_active_revision(
+            data_store.clone(),
+            dataset_ref.clone(),
+            dataset.start_block,
+            table_def.clone(),
+            revision,
+            sql_table_ref_schema,
+        );
         tables.push(physical_table.into());
     }
 
@@ -419,26 +433,48 @@ pub async fn catalog_for_dataset(
     dataset_store: &DatasetStore,
     data_store: &DataStore,
 ) -> Result<Catalog, BoxError> {
-    let dataset_ref: Reference = format!("_/{dataset_name}@latest")
-        .parse()
-        .expect("should be valid reference");
-    let hash_ref = dataset_store
-        .resolve_revision(&dataset_ref)
-        .await?
-        .ok_or_else(|| format!("dataset '{}' not found", dataset_ref))?;
-    let dataset = dataset_store.get_dataset(&hash_ref).await?;
+    let dataset_ref = {
+        let reference: Reference = format!("_/{dataset_name}@latest")
+            .parse()
+            .expect("should be valid reference");
+        dataset_store
+            .resolve_revision(&reference)
+            .await?
+            .ok_or_else(|| format!("dataset '{}' not found", reference))?
+    };
+
+    let dataset = dataset_store.get_dataset(&dataset_ref).await?;
+
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
-    for table in dataset.resolved_tables(dataset_ref.into()) {
+    for table_def in &dataset.tables {
         let revision = data_store
-            .get_table_active_revision(dataset.reference(), table.name())
+            .get_table_active_revision(dataset.reference(), table_def.name())
             .await?
             .expect("Active revision must exist after dump");
 
-        let physical_table =
-            PhysicalTable::from_active_revision(data_store.clone(), table, revision);
+        let sql_table_ref_schema = dataset_ref.to_reference().to_string();
+        let physical_table = PhysicalTable::from_active_revision(
+            data_store.clone(),
+            dataset_ref.clone(),
+            dataset.start_block,
+            table_def.clone(),
+            revision,
+            sql_table_ref_schema,
+        );
         tables.push(physical_table.into());
     }
-    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+    let resolved_tables: Vec<_> = tables
+        .iter()
+        .map(|t| {
+            ResolvedTable::new(
+                t.table().clone(),
+                t.sql_table_ref_schema().to_string(),
+                dataset_ref.clone(),
+                dataset.start_block,
+            )
+        })
+        .collect();
+    let logical = LogicalCatalog::from_tables(resolved_tables.iter());
     Ok(Catalog::new(tables, logical))
 }
 

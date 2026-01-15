@@ -11,7 +11,7 @@ use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
     BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
-    QueryContext, SPECIAL_BLOCK_NUM,
+    QueryContext, ResolvedTable, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
@@ -21,9 +21,7 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use datasets_common::{
-    hash::Hash, name::Name, partial_reference::PartialReference, revision::Revision,
-};
+use datasets_common::hash_reference::HashReference;
 use datasets_derived::DerivedDatasetKind;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
@@ -241,12 +239,17 @@ impl StreamingQuery {
 
         let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
         let network = tables.iter().map(|t| t.network()).next().unwrap();
-        let src_datasets = tables
-            .iter()
-            .map(|t| (t.dataset().reference().hash().clone(), t.dataset().clone()))
-            .collect();
-        let blocks_table =
-            resolve_blocks_table(dataset_store, data_store.clone(), src_datasets, network).await?;
+        let unique_refs: BTreeSet<&HashReference> =
+            tables.iter().map(|t| t.dataset_reference()).collect();
+
+        let blocks_table = resolve_blocks_table(
+            dataset_store,
+            data_store.clone(),
+            unique_refs.into_iter(),
+            network,
+        )
+        .await?;
+
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
@@ -379,8 +382,14 @@ impl StreamingQuery {
         let blocks_ctx = {
             // Construct a catalog for the single `blocks_table`.
             let catalog = {
-                let logical =
-                    LogicalCatalog::from_tables(std::iter::once(self.blocks_table.table()));
+                let table = &self.blocks_table;
+                let resolved_table = ResolvedTable::new(
+                    table.table().clone(),
+                    table.sql_table_ref_schema().to_string(),
+                    table.dataset_reference().clone(),
+                    table.dataset_start_block(),
+                );
+                let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
                 Catalog::new(vec![self.blocks_table.clone()], logical)
             };
             QueryContext::for_catalog(
@@ -613,7 +622,7 @@ impl StreamingQuery {
             .unwrap_or_default();
         let sql = format!(
             "SELECT hash, parent_hash FROM {} WHERE block_num = {} {} LIMIT 1",
-            self.blocks_table.table_ref(),
+            self.blocks_table.table_ref().to_quoted_string(),
             number,
             hash_constraint,
         );
@@ -701,64 +710,68 @@ pub fn keep_alive_stream<'a>(
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
-#[tracing::instrument(skip(dataset_store, data_store), err)]
 async fn resolve_blocks_table(
     dataset_store: &DatasetStore,
     data_store: DataStore,
-    root_datasets: BTreeMap<Hash, Arc<Dataset>>,
+    root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &str,
 ) -> Result<PhysicalTable, BoxError> {
     let dataset =
-        search_dependencies_for_raw_dataset(dataset_store, root_datasets, network).await?;
+        search_dependencies_for_raw_dataset(dataset_store, root_dataset_refs, network).await?;
 
-    // TODO: Have a dataset name here that is not made up.
-    let dataset_name = Name::try_from("blocks_table".to_string())?;
-    let manifest_hash = dataset.reference().hash().clone();
-    let reference = PartialReference::new(
-        None,
-        dataset_name,
-        Some(Revision::Hash(manifest_hash.clone())),
-    );
-    let table = Arc::new(dataset)
-        .resolved_tables(reference)
+    let table = dataset
+        .tables
+        .iter()
         .find(|t| t.name() == "blocks")
         .ok_or_else(|| -> BoxError {
-            format!("dataset '{}' does not have a 'blocks' table", manifest_hash).into()
-        })?;
-
-    let table_name = table.name().clone();
-    let dataset_ref = table.dataset().reference();
-
-    let revision = data_store
-        .get_table_active_revision(dataset_ref, &table_name)
-        .await?
-        .ok_or_else(|| -> BoxError {
             format!(
-                "table '{}.{}' has not been synced",
-                manifest_hash, table_name
+                "dataset '{}' does not have a 'blocks' table",
+                dataset.reference()
             )
             .into()
         })?;
 
+    let revision = data_store
+        .get_table_active_revision(dataset.reference(), table.name())
+        .await?
+        .ok_or_else(|| -> BoxError {
+            format!(
+                "table '{}.{}' has not been synced",
+                dataset.reference(),
+                table.name()
+            )
+            .into()
+        })?;
+
+    let sql_table_ref_schema = dataset.reference().to_reference().to_string();
     Ok(PhysicalTable::from_active_revision(
-        data_store, table, revision,
+        data_store,
+        dataset.reference().clone(),
+        dataset.start_block,
+        table.clone(),
+        revision,
+        sql_table_ref_schema,
     ))
 }
 
 // Breadth-first search over dataset dependencies to find a raw dataset matching the target network.
 async fn search_dependencies_for_raw_dataset(
     dataset_store: &DatasetStore,
-    root_datasets: BTreeMap<Hash, Arc<Dataset>>,
+    root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &str,
 ) -> Result<Arc<Dataset>, BoxError> {
-    let mut queue: VecDeque<Arc<Dataset>> = root_datasets.values().cloned().collect();
-    let mut visited = BTreeSet::new();
+    let mut queue: VecDeque<Arc<Dataset>> = VecDeque::new();
+    for hash_ref in root_dataset_refs {
+        let dataset = dataset_store.get_dataset(hash_ref).await?;
+        queue.push_back(dataset);
+    }
 
+    let mut visited = BTreeSet::new();
     while let Some(dataset) = queue.pop_front() {
-        let hash = dataset.reference().hash().clone();
+        let dataset_ref = dataset.reference().clone();
 
         // Skip duplicates
-        if !visited.insert(hash) {
+        if !visited.insert(dataset_ref) {
             continue;
         }
 
@@ -780,6 +793,7 @@ async fn search_dependencies_for_raw_dataset(
                     format!("dependency '{}' not found", dep.to_reference()).into()
                 })?;
             let dataset = dataset_store.get_dataset(&hash_ref).await?;
+
             queue.push_back(dataset);
         }
     }

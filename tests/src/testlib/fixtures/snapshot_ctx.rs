@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use common::{
-    BoxError, LogicalCatalog, QueryContext,
+    BoxError, LogicalCatalog, QueryContext, ResolvedTable,
     catalog::physical::{Catalog, PhysicalTable},
 };
 use server::config::Config;
@@ -37,7 +37,18 @@ impl SnapshotContext {
         store: DataStore,
         tables: Vec<Arc<PhysicalTable>>,
     ) -> Result<Self, BoxError> {
-        let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+        let resolved_tables: Vec<_> = tables
+            .iter()
+            .map(|t| {
+                ResolvedTable::new(
+                    t.table().clone(),
+                    t.sql_table_ref_schema().to_string(),
+                    t.dataset_reference().clone(),
+                    t.dataset_start_block(),
+                )
+            })
+            .collect();
+        let logical = LogicalCatalog::from_tables(resolved_tables.iter());
         let catalog = Catalog::new(tables, logical);
         let query_ctx =
             QueryContext::for_catalog(catalog, config.make_query_env()?, store, false).await?;

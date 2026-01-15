@@ -130,7 +130,7 @@ pub async fn catalog_for_sql(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let dataset_ref = table.dataset().reference();
+        let dataset_ref = table.dataset_reference();
 
         let revision = data_store
             .get_table_active_revision(dataset_ref, table.name())
@@ -145,8 +145,14 @@ pub async fn catalog_for_sql(
                 table: table.name().clone(),
             })?;
 
-        let physical_table =
-            PhysicalTable::from_active_revision(data_store.clone(), table.clone(), revision);
+        let physical_table = PhysicalTable::from_active_revision(
+            data_store.clone(),
+            table.dataset_reference().clone(),
+            table.dataset_start_block(),
+            table.table().clone(),
+            revision,
+            table.sql_table_ref_schema().to_string(),
+        );
         tables.push(Arc::new(physical_table));
     }
 
@@ -282,14 +288,15 @@ pub async fn planning_ctx_for_sql(
                     .find(|t| t.name() == table)
                     .ok_or_else(|| PlanningCtxForSqlError::TableNotFoundInDataset {
                         table_name: table.as_ref().clone(),
-                        reference: hash_ref,
+                        reference: hash_ref.clone(),
                     })?;
 
-                // Create ResolvedTable with the converted string-based table reference
+                // Create ResolvedTable
                 let resolved_table = ResolvedTable::new(
-                    table_ref_string.clone(),
                     dataset_table.clone(),
-                    dataset.clone(),
+                    schema.to_string(),
+                    hash_ref.clone(),
+                    dataset.start_block,
                 );
 
                 // Insert into vacant entry
@@ -456,14 +463,15 @@ async fn get_logical_catalog(
                     .find(|t| t.name() == table)
                     .ok_or_else(|| GetLogicalCatalogError::TableNotFoundInDataset {
                         table_name: table.as_ref().clone(),
-                        reference: hash_ref,
+                        reference: hash_ref.clone(),
                     })?;
 
-                // Create ResolvedTable with the converted string-based table reference
+                // Create ResolvedTable
                 let resolved_table = ResolvedTable::new(
-                    table_ref_string.clone(),
                     dataset_table.clone(),
-                    dataset.clone(),
+                    schema.to_string(),
+                    hash_ref.clone(),
+                    dataset.start_block,
                 );
 
                 // Insert into vacant entry

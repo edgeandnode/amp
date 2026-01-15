@@ -93,7 +93,7 @@ async fn get_physical_catalog_with_deps(
 
     let mut tables = Vec::new();
     for table in &logical_catalog.tables {
-        let dataset_ref = table.dataset().reference();
+        let dataset_ref = table.dataset_reference();
         let table_name = table.name();
 
         let revision = data_store
@@ -111,8 +111,14 @@ async fn get_physical_catalog_with_deps(
                 table: table_name.clone(),
             })?;
 
-        let physical_table =
-            PhysicalTable::from_active_revision(data_store.clone(), table.clone(), revision);
+        let physical_table = PhysicalTable::from_active_revision(
+            data_store.clone(),
+            table.dataset_reference().clone(),
+            table.dataset_start_block(),
+            table.table().clone(),
+            revision,
+            table.sql_table_ref_schema().to_string(),
+        );
         tables.push(physical_table.into());
     }
     Ok(Catalog::new(tables, logical_catalog))
@@ -198,11 +204,12 @@ async fn get_logical_catalog_with_deps_and_funcs(
                         }
                     })?;
 
-                // Create ResolvedTable with the converted string-based table reference
+                // Create ResolvedTable
                 let resolved_table = ResolvedTable::new(
-                    table_ref_string.clone(),
                     dataset_table.clone(),
-                    dataset.clone(),
+                    schema.to_string(),
+                    hash_ref.clone(),
+                    dataset.start_block,
                 );
 
                 // Insert into vacant entry
@@ -449,11 +456,12 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
                             }
                         })?;
 
-                    // Create ResolvedTable with the converted string-based table reference
+                    // Create ResolvedTable
                     let resolved_table = ResolvedTable::new(
-                        table_ref.into_string_reference(),
                         dataset_table.clone(),
-                        dataset.clone(),
+                        schema.to_string(),
+                        hash_ref.clone(),
+                        dataset.start_block,
                     );
 
                     // Insert into vacant entry

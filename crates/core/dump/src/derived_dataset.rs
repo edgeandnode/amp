@@ -150,26 +150,39 @@ pub async fn dump(
 
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
-    for table in dataset.resolved_tables(dataset_ref.to_reference().into()) {
+    for table_def in &dataset.tables {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> = match ctx
             .data_store
-            .get_table_active_revision(dataset_ref, table.name())
+            .get_table_active_revision(dataset.reference(), table_def.name())
             .await
             .map_err(Error::GetActivePhysicalTable)?
         {
             // Reuse existing table (retry scenario)
             Some(revision) => {
-                PhysicalTable::from_active_revision(ctx.data_store.clone(), table.clone(), revision)
+                let sql_table_ref_schema = dataset.reference().to_reference().to_string();
+                PhysicalTable::from_active_revision(
+                    ctx.data_store.clone(),
+                    dataset.reference().clone(),
+                    dataset.start_block,
+                    table_def.clone(),
+                    revision,
+                    sql_table_ref_schema,
+                )
             }
             // Create new table (initial attempt)
-            None => common::catalog::physical::register_new_table_revision(
-                ctx.data_store.clone(),
-                dataset_ref.clone(),
-                table,
-            )
-            .await
-            .map_err(Error::RegisterNewPhysicalTable)?,
+            None => {
+                let sql_table_ref_schema = dataset.reference().to_reference().to_string();
+                common::catalog::physical::register_new_table_revision(
+                    ctx.data_store.clone(),
+                    dataset.reference().clone(),
+                    dataset.start_block,
+                    table_def.clone(),
+                    sql_table_ref_schema,
+                )
+                .await
+                .map_err(Error::RegisterNewPhysicalTable)?
+            }
         }
         .into();
 

@@ -11,7 +11,6 @@ use datafusion::{
 use datasets_common::{
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
-    partial_reference::PartialReference,
     table_name::TableName,
 };
 use js_runtime::isolate_pool::IsolatePool;
@@ -35,22 +34,6 @@ pub struct Dataset {
 impl Dataset {
     pub fn tables(&self) -> &[Table] {
         &self.tables
-    }
-
-    /// Resolved tables serve two purposes:
-    /// 1. Associate a table with its dataset.
-    /// 2. Associate the table with a `TableReference`
-    ///    - If no reference is provided, the table reference will be a bare table name.
-    ///
-    /// TODO: Separate a mandatory full `Reference` from a `TableReference` alias.
-    pub fn resolved_tables(
-        self: &Arc<Self>,
-        dataset_ref: PartialReference,
-    ) -> impl Iterator<Item = ResolvedTable> + '_ {
-        self.tables.iter().map(move |table| {
-            let table_ref = TableReference::partial(dataset_ref.to_string(), table.name().clone());
-            ResolvedTable::new(table_ref, table.clone(), self.clone())
-        })
     }
 
     /// Returns a specific JS function by name from this dataset.
@@ -130,22 +113,34 @@ impl Table {
 #[derive(Debug, Clone)]
 pub struct ResolvedTable {
     table: Table,
-    dataset: Arc<Dataset>,
-    table_ref: TableReference,
+    /// The dataset reference portion of SQL table references.
+    ///
+    /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
+    /// This field stores the string form of the `<dataset_ref>` portion - the schema under
+    /// which this table is registered in the catalog and referenced in SQL queries.
+    sql_table_ref_schema: String,
+    dataset_reference: HashReference,
+    dataset_start_block: Option<BlockNum>,
 }
 
 impl fmt::Display for ResolvedTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.table_ref)
+        write!(f, "{}", self.table_ref())
     }
 }
 
 impl ResolvedTable {
-    pub fn new(table_ref: TableReference, table: Table, dataset: Arc<Dataset>) -> Self {
+    pub fn new(
+        table: Table,
+        sql_table_ref_schema: String,
+        dataset_reference: HashReference,
+        dataset_start_block: Option<BlockNum>,
+    ) -> Self {
         Self {
             table,
-            dataset,
-            table_ref,
+            sql_table_ref_schema,
+            dataset_reference,
+            dataset_start_block,
         }
     }
 
@@ -153,12 +148,16 @@ impl ResolvedTable {
         &self.table
     }
 
-    pub fn dataset(&self) -> &Arc<Dataset> {
-        &self.dataset
+    pub fn table_ref(&self) -> TableReference {
+        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name.clone())
     }
 
-    pub fn table_ref(&self) -> &TableReference {
-        &self.table_ref
+    pub fn dataset_reference(&self) -> &HashReference {
+        &self.dataset_reference
+    }
+
+    pub fn dataset_start_block(&self) -> Option<BlockNum> {
+        self.dataset_start_block
     }
 
     /// Bare table name
@@ -166,17 +165,13 @@ impl ResolvedTable {
         &self.table.name
     }
 
-    pub fn catalog_schema(&self) -> &str {
-        // Unwrap: This is always constructed with a schema.
-        self.table_ref.schema().unwrap()
-    }
-
-    pub fn network(&self) -> &str {
-        &self.table.network
-    }
-
-    pub fn schema(&self) -> &SchemaRef {
-        &self.table.schema
+    /// Returns the dataset reference portion of SQL table references.
+    ///
+    /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
+    /// This returns the string form of the `<dataset_ref>` portion - the schema under which
+    /// this table is registered in the catalog and referenced in SQL queries.
+    pub fn sql_table_ref_schema(&self) -> &str {
+        &self.sql_table_ref_schema
     }
 }
 

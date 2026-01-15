@@ -36,7 +36,7 @@ pub trait DatasetAccess {
     /// Returns `None` if the dataset kind doesn't support eth_call (i.e., not EVM RPC).
     fn eth_call_for_dataset(
         &self,
-        catalog_schema: &str,
+        sql_table_ref_schema: &str,
         dataset: &Dataset,
     ) -> impl Future<Output = Result<Option<ScalarUDF>, BoxError>> + Send;
 }
