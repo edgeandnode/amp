@@ -17,13 +17,8 @@ serde.workspace = true
 
 # Solana dependencies, version should be compatible with solana-datasets
 solana-account-decoder = "3.0.10"
-solana-hash = "3.0.0"
-solana-instruction = "3.0.0"
 solana-message = "3.0.0"
-solana-pubkey = "3.0.0"
 solana-serde = "3.0.0"
-solana-signature = { version = "3.0.0", features = ["std"] }
-solana-transaction = "3.0.0"
 solana-transaction-context = { version = "3.0.0", features = ["serde"] }
 solana-transaction-error = "3.0.0"
 solana-transaction-status = { version = "3.0.0", features = [
@@ -36,7 +31,6 @@ enum-iterator = "2.0"
 # Protobuf code generation dependencies
 # Run with: RUSTFLAGS="--cfg gen_proto" cargo check -p solana-storage-proto
 [target.'cfg(gen_proto)'.build-dependencies]
-prost-build = { workspace = true }
 tonic-build = { workspace = true }
 
 [lints.rust]

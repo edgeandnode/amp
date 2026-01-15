@@ -8,7 +8,6 @@ license-file.workspace = true
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 
 [dependencies]
-anyhow.workspace = true
 async-stream.workspace = true
 backon.workspace = true
 bs58 = "0.5.1"
@@ -26,7 +25,6 @@ serde_json = { workspace = true, optional = true }
 serde_with = "3.9.0"
 solana-clock = "3.0.0"
 solana-client = "3.0.10"
-solana-rpc-client-types = "3.0.10"
 solana-rpc-client-api = "3.0.10"
 solana-sdk = "3.0.0"
 solana-storage-proto = { path = "../solana-storage-proto" }

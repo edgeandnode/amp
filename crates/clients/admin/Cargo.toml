@@ -5,7 +5,6 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 monitoring = { path = "../../core/monitoring" }

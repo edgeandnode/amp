@@ -22,7 +22,6 @@ tokio-stream.workspace = true
 url.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-rand.workspace = true
 tokio-util.workspace = true
 alloy.workspace = true
 monitoring = { path = "../monitoring" }
