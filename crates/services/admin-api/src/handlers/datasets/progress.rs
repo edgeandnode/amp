@@ -10,7 +10,7 @@ use axum::{
 use common::catalog::physical::PhysicalTable;
 use datasets_common::{
     name::Name, namespace::Namespace, partial_reference::PartialReference, reference::Reference,
-    revision::Revision,
+    revision::Revision, table_name::TableName,
 };
 use monitoring::logging;
 
@@ -19,7 +19,7 @@ use crate::{
     handlers::error::{ErrorResponse, IntoErrorResponse},
 };
 
-/// Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/sync-progress` endpoint
+/// Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/progress` endpoint
 ///
 /// Retrieves progress information for a specific dataset revision, including
 /// per-table current block numbers, job status, and file statistics.
@@ -47,7 +47,7 @@ use crate::{
     feature = "utoipa",
     utoipa::path(
         get,
-        path = "/datasets/{namespace}/{name}/versions/{revision}/sync-progress",
+        path = "/datasets/{namespace}/{name}/versions/{revision}/progress",
         tag = "datasets",
         operation_id = "get_dataset_progress",
         params(
@@ -229,6 +229,205 @@ pub async fn handler(
     }))
 }
 
+/// Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress` endpoint
+///
+/// Retrieves progress information for a specific table within a dataset revision.
+///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+/// - `revision`: Dataset revision (version, hash, "latest", or "dev")
+/// - `table`: Table name within the dataset
+///
+/// ## Response
+/// - **200 OK**: Returns progress for the specified table
+/// - **400 Bad Request**: Invalid path parameters
+/// - **404 Not Found**: Dataset, revision, or table not found
+/// - **500 Internal Server Error**: Database connection or query error
+#[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress",
+        tag = "datasets",
+        operation_id = "get_table_progress",
+        params(
+            ("namespace" = String, Path, description = "Dataset namespace"),
+            ("name" = String, Path, description = "Dataset name"),
+            ("revision" = String, Path, description = "Revision (version, hash, latest, or dev)"),
+            ("table" = String, Path, description = "Table name")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved table progress", body = TableSyncProgress),
+            (status = 400, description = "Invalid path parameters", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Dataset, revision, or table not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
+        )
+    )
+)]
+pub async fn table_handler(
+    path: Result<Path<(Namespace, Name, Revision, TableName)>, PathRejection>,
+    State(ctx): State<Ctx>,
+) -> Result<Json<TableSyncProgress>, ErrorResponse> {
+    let (reference, table_name) = match path {
+        Ok(Path((namespace, name, revision, table))) => {
+            (Reference::new(namespace, name, revision), table)
+        }
+        Err(err) => {
+            tracing::debug!(
+                error = %err,
+                error_source = logging::error_source(&err),
+                "invalid path parameters"
+            );
+            return Err(Error::InvalidPath { err }.into());
+        }
+    };
+
+    // Resolve dataset revision to manifest hash
+    let resolved_ref = ctx
+        .dataset_store
+        .resolve_revision(&reference)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                dataset_reference = %reference,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to resolve dataset revision"
+            );
+            Error::ResolveRevision(err)
+        })?
+        .ok_or_else(|| Error::DatasetNotFound {
+            reference: reference.clone(),
+        })?;
+
+    // Get the full dataset definition to verify table exists
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(&resolved_ref)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                dataset_reference = %resolved_ref,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to get dataset definition"
+            );
+            Error::GetDataset(err)
+        })?;
+
+    // Check if the table exists in the dataset
+    let partial_ref = PartialReference::new(
+        reference.namespace().clone(),
+        reference.name().clone(),
+        Some(reference.revision().clone()),
+    );
+
+    let resolved_table = dataset
+        .resolved_tables(partial_ref)
+        .find(|t| t.name() == &table_name)
+        .ok_or_else(|| Error::TableNotFound {
+            reference: reference.clone(),
+            table_name: table_name.clone(),
+        })?;
+
+    // Query writer info for this table
+    let writer_infos = metadata_db::progress::get_active_tables_with_writer_info(
+        &ctx.metadata_db,
+        resolved_ref.hash(),
+    )
+    .await
+    .map_err(|err| {
+        tracing::error!(
+            dataset_reference = %resolved_ref,
+            error = %err,
+            error_source = logging::error_source(&err),
+            "failed to get progress for dataset"
+        );
+        Error::GetSyncProgress(err)
+    })?;
+
+    let writer_info = writer_infos
+        .into_iter()
+        .find(|info| info.table_name.as_str() == table_name.as_str());
+
+    // Get the active physical table revision if it exists
+    let physical_table = ctx
+        .data_store
+        .get_table_active_revision(&resolved_ref, &table_name)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                table = %table_name,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to get active physical table"
+            );
+            Error::PhysicalTable(err.into())
+        })?
+        .map(|revision| {
+            PhysicalTable::from_active_revision(
+                ctx.data_store.clone(),
+                resolved_table.clone(),
+                revision,
+            )
+        });
+
+    let (current_block, start_block, files_count, total_size_bytes) =
+        if let Some(pt) = physical_table {
+            let snapshot = pt
+                .snapshot(false, ctx.data_store.clone())
+                .await
+                .map_err(|err| {
+                    tracing::error!(
+                        table = %table_name,
+                        error = %err,
+                        error_source = logging::error_source(&*err),
+                        "failed to snapshot physical table"
+                    );
+                    Error::PhysicalTable(err)
+                })?;
+
+            let synced_range = snapshot.synced_range();
+            let canonical_segments = snapshot.canonical_segments();
+
+            let files_count = canonical_segments.len() as i64;
+            let total_size_bytes = canonical_segments
+                .iter()
+                .map(|s| s.object.size as i64)
+                .sum();
+
+            let (start, end) = match synced_range {
+                Some(range) => (
+                    Some(range.start().try_into().unwrap_or(0)),
+                    Some(range.end().try_into().unwrap_or(0)),
+                ),
+                None => (None, None),
+            };
+
+            (end, start, files_count, total_size_bytes)
+        } else {
+            (None, None, 0, 0)
+        };
+
+    Ok(Json(TableSyncProgress {
+        table_name: table_name.to_string(),
+        current_block,
+        start_block,
+        job_id: writer_info
+            .as_ref()
+            .and_then(|i| i.job_id)
+            .map(|id| id.into_i64()),
+        job_status: writer_info
+            .as_ref()
+            .and_then(|i| i.job_status)
+            .map(|s| s.to_string()),
+        files_count,
+        total_size_bytes,
+    }))
+}
+
 /// API response containing progress information for a dataset
 #[derive(Debug, serde::Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -286,6 +485,15 @@ pub enum Error {
         reference: Reference,
     },
 
+    /// Table does not exist in the dataset
+    #[error("table '{table_name}' not found in dataset '{reference}'")]
+    TableNotFound {
+        /// The dataset reference
+        reference: Reference,
+        /// The table name that was not found
+        table_name: TableName,
+    },
+
     /// Failed to get dataset definition
     #[error("failed to get dataset definition")]
     GetDataset(#[source] amp_dataset_store::GetDatasetError),
@@ -305,6 +513,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPath { .. } => "INVALID_PATH",
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::DatasetNotFound { .. } => "DATASET_NOT_FOUND",
+            Error::TableNotFound { .. } => "TABLE_NOT_FOUND",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::GetSyncProgress(_) => "GET_progress_ERROR",
             Error::PhysicalTable(_) => "PHYSICAL_TABLE_ERROR",
@@ -316,6 +525,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPath { .. } => StatusCode::BAD_REQUEST,
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetNotFound { .. } => StatusCode::NOT_FOUND,
+            Error::TableNotFound { .. } => StatusCode::NOT_FOUND,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetSyncProgress(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PhysicalTable(_) => StatusCode::INTERNAL_SERVER_ERROR,

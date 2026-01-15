@@ -525,6 +525,87 @@
         }
       }
     },
+    "/datasets/{namespace}/{name}/versions/{revision}/progress": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/progress` endpoint",
+        "description": "Retrieves progress information for a specific dataset revision, including\nper-table current block numbers, job status, and file statistics.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns progress for all tables in the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `GET_DATASET_ERROR`: Failed to retrieve dataset definition\n- `GET_progress_ERROR`: Failed to get progress from metadata database\n- `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata",
+        "operationId": "get_dataset_progress",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProgressResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{namespace}/{name}/versions/{revision}/restore": {
       "post": {
         "tags": [
@@ -606,14 +687,14 @@
         }
       }
     },
-    "/datasets/{namespace}/{name}/versions/{revision}/sync-progress": {
+    "/datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress": {
       "get": {
         "tags": [
           "datasets"
         ],
-        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/sync-progress` endpoint",
-        "description": "Retrieves progress information for a specific dataset revision, including\nper-table current block numbers, job status, and file statistics.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns progress for all tables in the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `GET_DATASET_ERROR`: Failed to retrieve dataset definition\n- `GET_progress_ERROR`: Failed to get progress from metadata database\n- `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata",
-        "operationId": "get_dataset_progress",
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress` endpoint",
+        "description": "Retrieves progress information for a specific table within a dataset revision.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n- `table`: Table name within the dataset\n\n## Response\n- **200 OK**: Returns progress for the specified table\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset, revision, or table not found\n- **500 Internal Server Error**: Database connection or query error",
+        "operationId": "get_table_progress",
         "parameters": [
           {
             "name": "namespace",
@@ -641,15 +722,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "description": "Table name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Successfully retrieved progress",
+            "description": "Successfully retrieved table progress",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SyncProgressResponse"
+                  "$ref": "#/components/schemas/TableSyncProgress"
                 }
               }
             }
@@ -665,7 +755,7 @@
             }
           },
           "404": {
-            "description": "Dataset or revision not found",
+            "description": "Dataset, revision, or table not found",
             "content": {
               "application/json": {
                 "schema": {
