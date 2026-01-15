@@ -143,19 +143,27 @@ pub async fn handler(
         let table_name = resolved_table.name().clone();
         let writer_info = writer_info_map.get(table_name.as_str());
 
-        // Get the active physical table if it exists
-        let physical_table =
-            PhysicalTable::get_active(ctx.data_store.clone(), resolved_table.clone())
-                .await
-                .map_err(|err| {
-                    tracing::error!(
-                        table = %table_name,
-                        error = %err,
-                        error_source = logging::error_source(&*err),
-                        "failed to get active physical table"
-                    );
-                    Error::PhysicalTable(err)
-                })?;
+        // Get the active physical table revision if it exists
+        let physical_table = ctx
+            .data_store
+            .get_table_active_revision(&resolved_ref, &table_name)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    table = %table_name,
+                    error = %err,
+                    error_source = logging::error_source(&err),
+                    "failed to get active physical table"
+                );
+                Error::PhysicalTable(err.into())
+            })?
+            .map(|revision| {
+                PhysicalTable::from_active_revision(
+                    ctx.data_store.clone(),
+                    resolved_table.clone(),
+                    revision,
+                )
+            });
 
         let (current_block, start_block, files_count, total_size_bytes) =
             if let Some(pt) = physical_table {
