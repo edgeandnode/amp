@@ -50,8 +50,12 @@ pub fn router(ctx: Ctx) -> Router<()> {
             get(datasets::list_jobs::handler),
         )
         .route(
-            "/datasets/{namespace}/{name}/versions/{revision}/sync-progress",
+            "/datasets/{namespace}/{name}/versions/{revision}/progress",
             get(datasets::progress::handler),
+        )
+        .route(
+            "/datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress",
+            get(datasets::progress::table_handler),
         )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
@@ -105,6 +109,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::list_versions::handler,
         handlers::datasets::list_jobs::handler,
         handlers::datasets::progress::handler,
+        handlers::datasets::progress::table_handler,
         handlers::datasets::get::handler,
         handlers::datasets::get_manifest::handler,
         handlers::datasets::register::handler,

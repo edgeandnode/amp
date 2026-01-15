@@ -334,6 +334,171 @@ async fn get_progress_shows_completed_status_when_end_block_reached() {
     );
 }
 
+// --- Table-level progress endpoint tests ---
+
+#[tokio::test]
+async fn get_table_progress_with_valid_table_succeeds() {
+    //* Given
+    let ctx = TestCtx::setup("get_table_progress_valid", [("eth_rpc", "_/eth_rpc@0.0.0")]).await;
+
+    //* When
+    // Request progress for the "blocks" table specifically
+    let resp = ctx
+        .get_table_progress("_", "eth_rpc", "0.0.0", "blocks")
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "table progress retrieval should succeed for valid table"
+    );
+
+    let progress: TableSyncProgress = resp
+        .json()
+        .await
+        .expect("failed to parse table progress response JSON");
+
+    println!(
+        "Table Progress Response:\n{}",
+        serde_json::to_string_pretty(&progress).expect("serialization failed")
+    );
+
+    // Verify response structure
+    assert_eq!(progress.table_name, "blocks");
+    // Initial state will have zero files (no job deployed yet)
+    assert!(progress.files_count >= 0);
+}
+
+#[tokio::test]
+async fn get_table_progress_with_non_existent_table_returns_not_found() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "get_table_progress_non_existent_table",
+        [("eth_rpc", "_/eth_rpc@0.0.0")],
+    )
+    .await;
+
+    //* When
+    // Request progress for a table that doesn't exist in the dataset
+    let resp = ctx
+        .get_table_progress("_", "eth_rpc", "0.0.0", "non_existent_table")
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "table progress retrieval should fail for non-existent table"
+    );
+
+    let error: ErrorResponse = resp.json().await.expect("failed to parse error response");
+
+    assert_eq!(error.error_code, "TABLE_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn get_table_progress_with_non_existent_dataset_returns_not_found() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "get_table_progress_non_existent_dataset",
+        Vec::<&str>::new(),
+    )
+    .await;
+
+    //* When
+    let resp = ctx
+        .get_table_progress("non_existent", "dataset", "latest", "blocks")
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "table progress retrieval should fail for non-existent dataset"
+    );
+
+    let error: ErrorResponse = resp.json().await.expect("failed to parse error response");
+
+    assert_eq!(error.error_code, "DATASET_NOT_FOUND");
+}
+
+/// Test that table progress shows correct data after deployment
+#[tokio::test]
+async fn get_table_progress_shows_running_status_for_specific_table() {
+    //* Given
+    let ctx = TestCtx::setup_with_anvil("get_table_progress_running").await;
+
+    // Mine blocks so syncing takes time
+    ctx.anvil().mine(50).await.expect("failed to mine blocks");
+
+    // Deploy without an end_block so the job keeps running
+    ctx.deploy_dataset("_", "anvil_rpc", "0.0.0", None).await;
+
+    //* When
+    // Poll until we see RUNNING status with some progress for the blocks table
+    let start = tokio::time::Instant::now();
+    let timeout = tokio::time::Duration::from_secs(30);
+
+    let table_progress: TableSyncProgress = loop {
+        if start.elapsed() > timeout {
+            panic!("Timeout waiting for RUNNING status on blocks table");
+        }
+
+        let resp = ctx
+            .get_table_progress("_", "anvil_rpc", "0.0.0", "blocks")
+            .await;
+        if resp.status() == StatusCode::OK {
+            let progress: TableSyncProgress = resp.json().await.expect("failed to parse JSON");
+
+            println!(
+                "Table Progress: {}",
+                serde_json::to_string_pretty(&progress).unwrap()
+            );
+
+            // Check if job has failed
+            if progress.job_status.as_deref() == Some("FAILED") {
+                panic!("Job failed for blocks table: {:?}", progress);
+            }
+
+            // Check if we have a RUNNING job with some data synced
+            if progress.job_status.as_deref() == Some("RUNNING")
+                && progress.files_count > 0
+                && progress.current_block.is_some()
+            {
+                break progress;
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    };
+
+    //* Then
+    assert_eq!(table_progress.table_name, "blocks");
+    assert!(
+        table_progress.job_id.is_some(),
+        "blocks table should have a job_id"
+    );
+    assert_eq!(
+        table_progress.job_status.as_deref(),
+        Some("RUNNING"),
+        "blocks table should be RUNNING"
+    );
+    assert!(
+        table_progress.current_block.is_some(),
+        "blocks table should have current_block"
+    );
+    assert!(
+        table_progress.files_count > 0,
+        "blocks table should have at least one file"
+    );
+
+    println!(
+        "Verified table RUNNING status: current_block={:?}, files_count={}",
+        table_progress.current_block, table_progress.files_count
+    );
+}
+
 // --- Helper types and impls ---
 
 use crate::testlib::ctx::TestCtx;
@@ -361,11 +526,34 @@ impl TestCtx {
 
     async fn get_progress(&self, namespace: &str, name: &str, revision: &str) -> reqwest::Response {
         let url = format!(
-            "{}/datasets/{}/{}/versions/{}/sync-progress",
+            "{}/datasets/{}/{}/versions/{}/progress",
             self.daemon_controller().admin_api_url(),
             namespace,
             name,
             revision
+        );
+
+        reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .expect("failed to send request")
+    }
+
+    async fn get_table_progress(
+        &self,
+        namespace: &str,
+        name: &str,
+        revision: &str,
+        table: &str,
+    ) -> reqwest::Response {
+        let url = format!(
+            "{}/datasets/{}/{}/versions/{}/tables/{}/progress",
+            self.daemon_controller().admin_api_url(),
+            namespace,
+            name,
+            revision,
+            table
         );
 
         reqwest::Client::new()
