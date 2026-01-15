@@ -8,6 +8,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
+use amp_datasets_registry::DatasetsRegistry;
 use common::{BoxError, BoxResult};
 use controller::config::Config;
 use metadata_db::MetadataDb;
@@ -36,6 +37,7 @@ impl DaemonController {
     pub async fn new(
         config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
+        datasets_registry: DatasetsRegistry,
         data_store: DataStore,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
@@ -47,6 +49,7 @@ impl DaemonController {
         let (admin_api_addr, controller_server) = controller::service::new(
             config.clone(),
             metadata_db.clone(),
+            datasets_registry,
             data_store,
             dataset_store.clone(),
             meter,

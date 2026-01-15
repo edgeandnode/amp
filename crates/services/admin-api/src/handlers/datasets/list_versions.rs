@@ -76,7 +76,7 @@ pub async fn handler(
 
     // Query version tags with full details
     let version_tags = ctx
-        .dataset_store
+        .datasets_registry
         .list_dataset_version_tags(&namespace, &name)
         .await
         .map_err(Error::ListVersionTags)?;
@@ -106,7 +106,7 @@ pub async fn handler(
 
     // Get dev tag hash
     let dev_hash = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_dev_version_hash(&namespace, &name)
         .await
         .map_err(Error::ResolveRevision)?

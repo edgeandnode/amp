@@ -69,7 +69,7 @@ pub async fn handler(
     };
 
     let Some(tags) = ctx
-        .dataset_store
+        .datasets_registry
         .list_manifest_linked_datasets(&hash)
         .await
         .map_err(Error::ListDatasetTags)?

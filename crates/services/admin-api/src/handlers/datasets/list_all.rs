@@ -45,7 +45,7 @@ use crate::{
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, ErrorResponse> {
     // Query all tags from dataset store
     let tags = ctx
-        .dataset_store
+        .datasets_registry
         .list_all_datasets()
         .await
         .map_err(Error::ListAllDatasets)?;

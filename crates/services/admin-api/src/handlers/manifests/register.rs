@@ -140,7 +140,7 @@ pub async fn handler(
     // Store manifest in object store and register in metadata database
     // This does NOT link to any dataset or create version tags
     if let Err(err) = ctx
-        .dataset_store
+        .datasets_registry
         .register_manifest(&hash, canonical_manifest_str)
         .await
     {

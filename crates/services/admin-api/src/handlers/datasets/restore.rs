@@ -94,7 +94,7 @@ pub async fn handler(
 
     // Resolve reference to hash reference
     let dataset_ref = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_revision(&reference)
         .await
         .map_err(Error::ResolveRevision)?

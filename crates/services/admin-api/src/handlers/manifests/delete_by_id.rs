@@ -80,8 +80,8 @@ pub async fn handler(
         }
     };
 
-    // Delete manifest using dataset store
-    match ctx.dataset_store.delete_manifest(&hash).await {
+    // Delete manifest using datasets registry
+    match ctx.datasets_registry.delete_manifest(&hash).await {
         Ok(()) => {
             tracing::info!(
                 manifest_hash = %hash,

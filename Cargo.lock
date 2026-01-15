@@ -2955,6 +2955,7 @@ dependencies = [
  "amp-config",
  "amp-data-store",
  "amp-dataset-store",
+ "amp-datasets-registry",
  "async-trait",
  "axum 0.8.8",
  "common",

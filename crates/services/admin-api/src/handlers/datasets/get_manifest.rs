@@ -85,7 +85,7 @@ pub async fn handler(
 
     // Resolve the revision to a manifest hash
     let reference = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_revision(&reference)
         .await
         .map_err(Error::ResolveRevision)?
@@ -97,7 +97,7 @@ pub async fn handler(
 
     // Load manifest content
     let manifest_content = ctx
-        .dataset_store
+        .datasets_registry
         .get_manifest(reference.hash())
         .await
         .map_err(|err| match err {

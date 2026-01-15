@@ -83,7 +83,7 @@ pub async fn handler(
 
     // Resolve dataset revision to manifest hash
     let reference = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_revision(&reference)
         .await
         .map_err(|err| {

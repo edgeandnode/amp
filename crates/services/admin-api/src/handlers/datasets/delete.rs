@@ -74,7 +74,7 @@ pub async fn handler(
     // Step 1: Unlink all manifests from the dataset (idempotent)
     // This will delete all dataset_manifests links (which cascades to delete tags)
     let unlinked_hashes = ctx
-        .dataset_store
+        .datasets_registry
         .unlink_dataset_manifests(&namespace, &name)
         .await
         .map_err(Error::UnlinkDatasetManifests)?;
@@ -99,10 +99,10 @@ pub async fn handler(
 
     let deletion_futures = FuturesUnordered::new();
     for hash in unlinked_hashes {
-        let store = ctx.dataset_store.clone();
+        let registry = ctx.datasets_registry.clone();
 
         deletion_futures.push(async move {
-            if let Err(err) = store.delete_manifest(&hash).await {
+            if let Err(err) = registry.delete_manifest(&hash).await {
                 match err {
                     DeleteManifestError::ManifestLinked => {
                         // No-op

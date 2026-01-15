@@ -31,24 +31,22 @@ pub async fn run(
     )
     .map_err(Error::DataStoreCreation)?;
 
-    let dataset_store = {
-        let provider_configs_store = ProviderConfigsStore::new(
-            amp_object_store::new_with_prefix(
-                &config.providers_store_url,
-                config.providers_store_url.path(),
-            )
-            .map_err(Error::ProvidersStoreCreation)?,
-        );
-        let dataset_manifests_store = DatasetManifestsStore::new(
-            amp_object_store::new_with_prefix(
-                &config.manifests_store_url,
-                config.manifests_store_url.path(),
-            )
-            .map_err(Error::ManifestsStoreCreation)?,
-        );
-        let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
-        DatasetStore::new(datasets_registry, provider_configs_store)
-    };
+    let provider_configs_store = ProviderConfigsStore::new(
+        amp_object_store::new_with_prefix(
+            &config.providers_store_url,
+            config.providers_store_url.path(),
+        )
+        .map_err(Error::ProvidersStoreCreation)?,
+    );
+    let dataset_manifests_store = DatasetManifestsStore::new(
+        amp_object_store::new_with_prefix(
+            &config.manifests_store_url,
+            config.manifests_store_url.path(),
+        )
+        .map_err(Error::ManifestsStoreCreation)?,
+    );
+    let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
+    let dataset_store = DatasetStore::new(datasets_registry.clone(), provider_configs_store);
 
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
@@ -56,6 +54,7 @@ pub async fn run(
         let (addr, fut) = controller::service::new(
             Arc::new(controller_config),
             metadata_db.clone(),
+            datasets_registry,
             data_store.clone(),
             dataset_store.clone(),
             meter.clone(),

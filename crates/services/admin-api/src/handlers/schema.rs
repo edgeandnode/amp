@@ -162,7 +162,7 @@ pub async fn handler(
                 HashOrVersion::Hash(hash) => {
                     // Verify the hash is linked to the dataset (namespace/name)
                     let is_linked = ctx
-                        .dataset_store
+                        .datasets_registry
                         .is_manifest_linked(fqn.namespace(), fqn.name(), &hash)
                         .await
                         .map_err(|err| Error::DependencyResolution {
@@ -183,7 +183,7 @@ pub async fn handler(
                 }
                 HashOrVersion::Version(version) => {
                     // Resolve version tag to hash for this specific dataset
-                    ctx.dataset_store
+                    ctx.datasets_registry
                         .resolve_version_hash(fqn.namespace(), fqn.name(), &version)
                         .await
                         .map_err(|err| Error::DependencyResolution {

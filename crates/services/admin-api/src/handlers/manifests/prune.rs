@@ -51,7 +51,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<PruneResponse>, Erro
 
     // List all orphaned manifests
     let orphaned_hashes = ctx
-        .dataset_store
+        .datasets_registry
         .list_orphaned_manifests()
         .await
         .map_err(|err| {
@@ -75,11 +75,11 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<PruneResponse>, Erro
     // Delete each orphaned manifest concurrently
     let deletion_futures = FuturesUnordered::new();
     for hash in &orphaned_hashes {
-        let store = ctx.dataset_store.clone();
+        let registry = ctx.datasets_registry.clone();
         let hash = hash.clone();
 
         deletion_futures.push(async move {
-            if let Err(err) = store.delete_manifest(&hash).await {
+            if let Err(err) = registry.delete_manifest(&hash).await {
                 match err {
                     DeleteManifestError::ManifestLinked => {
                         // Manifest was linked after we listed orphans (race condition)

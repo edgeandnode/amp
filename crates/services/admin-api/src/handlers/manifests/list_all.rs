@@ -41,7 +41,7 @@ use crate::{
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<ManifestsResponse>, ErrorResponse> {
     // Query all manifests from dataset store
     let manifests_data = ctx
-        .dataset_store
+        .datasets_registry
         .list_all_manifests()
         .await
         .map_err(Error::ListAllManifests)?;

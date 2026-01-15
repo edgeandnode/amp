@@ -162,30 +162,30 @@ async fn main() {
             )
             .expect("Failed to create data store");
 
-            let dataset_store = {
-                let provider_configs_store = ProviderConfigsStore::new(
-                    amp_object_store::new_with_prefix(
-                        &config.providers_store_url,
-                        config.providers_store_url.path(),
-                    )
-                    .expect("Failed to create provider configs store"),
-                );
-                let dataset_manifests_store = DatasetManifestsStore::new(
-                    amp_object_store::new_with_prefix(
-                        &config.manifests_store_url,
-                        config.manifests_store_url.path(),
-                    )
-                    .expect("Failed to create manifests store"),
-                );
-                let datasets_registry =
-                    DatasetsRegistry::new(sysdb.conn_pool().clone(), dataset_manifests_store);
-                DatasetStore::new(datasets_registry, provider_configs_store)
-            };
+            let provider_configs_store = ProviderConfigsStore::new(
+                amp_object_store::new_with_prefix(
+                    &config.providers_store_url,
+                    config.providers_store_url.path(),
+                )
+                .expect("Failed to create provider configs store"),
+            );
+            let dataset_manifests_store = DatasetManifestsStore::new(
+                amp_object_store::new_with_prefix(
+                    &config.manifests_store_url,
+                    config.manifests_store_url.path(),
+                )
+                .expect("Failed to create manifests store"),
+            );
+            let datasets_registry =
+                DatasetsRegistry::new(sysdb.conn_pool().clone(), dataset_manifests_store);
+            let dataset_store =
+                DatasetStore::new(datasets_registry.clone(), provider_configs_store);
 
             // Start controller for Admin API access during dependency restoration
             let controller = DaemonController::new(
                 config.clone(),
                 sysdb.conn_pool().clone(),
+                datasets_registry,
                 data_store.clone(),
                 dataset_store.clone(),
                 None,

@@ -3,6 +3,7 @@ use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use admin_api::ctx::Ctx;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
+use amp_datasets_registry::DatasetsRegistry;
 use axum::{
     Router,
     http::StatusCode,
@@ -33,6 +34,7 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
+    datasets_registry: DatasetsRegistry,
     data_store: DataStore,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
@@ -42,6 +44,7 @@ pub async fn new(
 
     let ctx = Ctx {
         metadata_db,
+        datasets_registry,
         dataset_store,
         scheduler: scheduler.clone(),
         data_store,

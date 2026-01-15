@@ -83,7 +83,7 @@ pub async fn handler(
 
     // First check if this version exists
     let version_hash = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_version_hash(&namespace, &name, &version)
         .await
         .map_err(Error::ResolveVersionRevision)?;
@@ -101,7 +101,7 @@ pub async fn handler(
 
     // Check if this version is the current "latest" version
     let latest_hash = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_latest_version_hash(&namespace, &name)
         .await
         .map_err(Error::ResolveLatestRevision)?;
@@ -113,7 +113,7 @@ pub async fn handler(
         return Err(Error::CannotDeleteLatestVersion.into());
     }
 
-    ctx.dataset_store
+    ctx.datasets_registry
         .delete_dataset_version_tag(&namespace, &name, &version)
         .await
         .map_err(Error::DeleteVersionTag)?;

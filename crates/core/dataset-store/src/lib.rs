@@ -5,17 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use amp_datasets_registry::{
-    DatasetTag, DatasetsRegistry,
-    error::{
-        DeleteManifestError, DeleteVersionTagError, GetManifestError, IsManifestLinkedError,
-        LinkManifestError, ListAllDatasetsError, ListAllManifestsError,
-        ListDatasetsUsingManifestError, ListOrphanedManifestsError, ListVersionTagsError,
-        RegisterManifestError, ResolveRevisionError, SetVersionTagError,
-        UnlinkDatasetManifestsError,
-    },
-    manifests::ManifestContent,
-};
+use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset,
     evm::{self, udfs::EthCall},
@@ -25,8 +15,8 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::{
-    hash::Hash, hash_reference::HashReference, manifest::Manifest as CommonManifest, name::Name,
-    namespace::Namespace, reference::Reference, version::Version,
+    hash::Hash, hash_reference::HashReference, manifest::Manifest as CommonManifest,
+    reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use eth_beacon_datasets::{
@@ -145,156 +135,8 @@ impl DatasetStore {
     }
 }
 
-// Manifest management APIs
-impl DatasetStore {
-    /// Store a manifest in object store and metadata database.
-    ///
-    /// See [`DatasetsRegistry::register_manifest`] for full details.
-    pub async fn register_manifest(
-        &self,
-        hash: &Hash,
-        content: String,
-    ) -> Result<(), RegisterManifestError> {
-        self.datasets_registry
-            .register_manifest(hash, content)
-            .await?;
-        Ok(())
-    }
-
-    /// Retrieve a manifest by its content hash.
-    ///
-    /// See [`DatasetsRegistry::get_manifest`] for full details.
-    pub async fn get_manifest(
-        &self,
-        hash: &Hash,
-    ) -> Result<Option<ManifestContent>, GetManifestError> {
-        self.datasets_registry.get_manifest(hash).await
-    }
-
-    /// Delete a manifest from metadata database and object store.
-    ///
-    /// See [`DatasetsRegistry::delete_manifest`] for full details.
-    pub async fn delete_manifest(&self, hash: &Hash) -> Result<(), DeleteManifestError> {
-        self.datasets_registry.delete_manifest(hash).await?;
-        Ok(())
-    }
-
-    /// List all datasets that use a specific manifest.
-    ///
-    /// See [`DatasetsRegistry::list_manifest_linked_datasets`] for full details.
-    pub async fn list_manifest_linked_datasets(
-        &self,
-        manifest_hash: &Hash,
-    ) -> Result<Option<Vec<DatasetTag>>, ListDatasetsUsingManifestError> {
-        self.datasets_registry
-            .list_manifest_linked_datasets(manifest_hash)
-            .await
-    }
-
-    /// List all orphaned manifests (manifests with no dataset links).
-    ///
-    /// See [`DatasetsRegistry::list_orphaned_manifests`] for full details.
-    pub async fn list_orphaned_manifests(&self) -> Result<Vec<Hash>, ListOrphanedManifestsError> {
-        self.datasets_registry.list_orphaned_manifests().await
-    }
-
-    /// List all registered manifests with metadata.
-    ///
-    /// See [`DatasetsRegistry::list_all_manifests`] for full details.
-    pub async fn list_all_manifests(
-        &self,
-    ) -> Result<Vec<metadata_db::manifests::ManifestSummary>, ListAllManifestsError> {
-        self.datasets_registry.list_all_manifests().await
-    }
-}
-
 // Dataset versioning API
 impl DatasetStore {
-    /// Link an existing manifest to a dataset.
-    ///
-    /// See [`DatasetsRegistry::link_manifest`] for full details.
-    pub async fn link_manifest(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-        manifest_hash: &Hash,
-    ) -> Result<(), LinkManifestError> {
-        self.datasets_registry
-            .link_manifest(namespace, name, manifest_hash)
-            .await?;
-        Ok(())
-    }
-
-    /// Check if a manifest is linked to a specific dataset.
-    ///
-    /// See [`DatasetsRegistry::is_manifest_linked`] for full details.
-    pub async fn is_manifest_linked(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-        manifest_hash: &Hash,
-    ) -> Result<bool, IsManifestLinkedError> {
-        self.datasets_registry
-            .is_manifest_linked(namespace, name, manifest_hash)
-            .await
-    }
-
-    /// Set a semantic version tag for a dataset manifest.
-    ///
-    /// See [`DatasetsRegistry::set_dataset_version_tag`] for full details.
-    pub async fn set_dataset_version_tag(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-        version: &Version,
-        manifest_hash: &Hash,
-    ) -> Result<(), SetVersionTagError> {
-        self.datasets_registry
-            .set_dataset_version_tag(namespace, name, version, manifest_hash)
-            .await?;
-        Ok(())
-    }
-
-    /// Resolve the "latest" tag to its manifest hash.
-    ///
-    /// See [`DatasetsRegistry::resolve_latest_version_hash`] for full details.
-    pub async fn resolve_latest_version_hash(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-    ) -> Result<Option<Hash>, ResolveRevisionError> {
-        self.datasets_registry
-            .resolve_latest_version_hash(namespace, name)
-            .await
-    }
-
-    /// Resolve the "dev" tag to its manifest hash.
-    ///
-    /// See [`DatasetsRegistry::resolve_dev_version_hash`] for full details.
-    pub async fn resolve_dev_version_hash(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-    ) -> Result<Option<Hash>, ResolveRevisionError> {
-        self.datasets_registry
-            .resolve_dev_version_hash(namespace, name)
-            .await
-    }
-
-    /// Resolve a semantic version tag to its manifest hash.
-    ///
-    /// See [`DatasetsRegistry::resolve_version_hash`] for full details.
-    pub async fn resolve_version_hash(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-        version: &Version,
-    ) -> Result<Option<Hash>, ResolveRevisionError> {
-        self.datasets_registry
-            .resolve_version_hash(namespace, name, version)
-            .await
-    }
-
     /// Resolve a reference to a hash reference.
     ///
     /// See [`DatasetsRegistry::resolve_revision`] for full details.
@@ -303,56 +145,6 @@ impl DatasetStore {
         reference: impl AsRef<Reference>,
     ) -> Result<Option<HashReference>, ResolveRevisionError> {
         self.datasets_registry.resolve_revision(reference).await
-    }
-
-    /// List all version tags for a dataset.
-    ///
-    /// See [`DatasetsRegistry::list_dataset_version_tags`] for full details.
-    pub async fn list_dataset_version_tags(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-    ) -> Result<Vec<metadata_db::DatasetTag>, ListVersionTagsError> {
-        self.datasets_registry
-            .list_dataset_version_tags(namespace, name)
-            .await
-    }
-
-    /// List all datasets across all namespaces.
-    ///
-    /// See [`DatasetsRegistry::list_all_datasets`] for full details.
-    pub async fn list_all_datasets(
-        &self,
-    ) -> Result<Vec<metadata_db::DatasetTag>, ListAllDatasetsError> {
-        self.datasets_registry.list_all_datasets().await
-    }
-
-    /// Unlink all manifests from a dataset.
-    ///
-    /// See [`DatasetsRegistry::unlink_dataset_manifests`] for full details.
-    pub async fn unlink_dataset_manifests(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-    ) -> Result<BTreeSet<Hash>, UnlinkDatasetManifestsError> {
-        self.datasets_registry
-            .unlink_dataset_manifests(namespace, name)
-            .await
-    }
-
-    /// Delete a version tag for a dataset.
-    ///
-    /// See [`DatasetsRegistry::delete_dataset_version_tag`] for full details.
-    pub async fn delete_dataset_version_tag(
-        &self,
-        namespace: &Namespace,
-        name: &Name,
-        version: &Version,
-    ) -> Result<(), DeleteVersionTagError> {
-        self.datasets_registry
-            .delete_dataset_version_tag(namespace, name, version)
-            .await?;
-        Ok(())
     }
 }
 

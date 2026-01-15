@@ -78,8 +78,8 @@ pub async fn handler(
         "retrieving manifest from store"
     );
 
-    // Get the raw manifest JSON using the dataset store
-    let manifest_content = match ctx.dataset_store.get_manifest(&hash).await {
+    // Get the raw manifest JSON using the datasets registry
+    let manifest_content = match ctx.datasets_registry.get_manifest(&hash).await {
         Ok(Some(content)) => content,
         Ok(None) => {
             tracing::debug!(
