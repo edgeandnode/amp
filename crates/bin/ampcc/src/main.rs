@@ -86,7 +86,10 @@ async fn main() -> Result<()> {
 async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
-) -> Result<()> {
+) -> Result<()>
+where
+    B::Error: Send + Sync + 'static,
+{
     let (tx, mut rx) = mpsc::channel::<AppEvent>(10);
     let tick_rate = std::time::Duration::from_millis(100);
 

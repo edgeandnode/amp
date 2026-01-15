@@ -7,7 +7,7 @@ license-file.workspace = true
 [dependencies]
 anyhow.workspace = true
 crossterm = "0.29.0"
-ratatui = "0.29.0"
+ratatui = "0.30"
 tokio.workspace = true
 admin-client = { path = "../../clients/admin" }
 worker = { path = "../../services/worker" }
