@@ -525,6 +525,87 @@
         }
       }
     },
+    "/datasets/{namespace}/{name}/versions/{revision}/progress": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/progress` endpoint",
+        "description": "Retrieves progress information for a specific dataset revision, including\nper-table current block numbers, job status, and file statistics.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Returns progress for all tables in the dataset\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision malformed)\n- `DATASET_NOT_FOUND`: Dataset revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)\n- `GET_DATASET_ERROR`: Failed to retrieve dataset definition\n- `GET_progress_ERROR`: Failed to get progress from metadata database\n- `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata",
+        "operationId": "get_dataset_progress",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProgressResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{namespace}/{name}/versions/{revision}/restore": {
       "post": {
         "tags": [
@@ -585,6 +666,96 @@
           },
           "404": {
             "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress` endpoint",
+        "description": "Retrieves progress information for a specific table within a dataset revision.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Dataset revision (version, hash, \"latest\", or \"dev\")\n- `table`: Table name within the dataset\n\n## Response\n- **200 OK**: Returns progress for the specified table\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset, revision, or table not found\n- **500 Internal Server Error**: Database connection or query error",
+        "operationId": "get_table_progress",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "description": "Table name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved table progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableSyncProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset, revision, or table not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2234,6 +2405,45 @@
           "Error"
         ]
       },
+      "SyncProgressResponse": {
+        "type": "object",
+        "description": "API response containing progress information for a dataset",
+        "required": [
+          "dataset_namespace",
+          "dataset_name",
+          "revision",
+          "manifest_hash",
+          "tables"
+        ],
+        "properties": {
+          "dataset_name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "dataset_namespace": {
+            "type": "string",
+            "description": "Dataset namespace"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Resolved manifest hash"
+          },
+          "revision": {
+            "type": "string",
+            "description": "Requested revision"
+          },
+          "tables": {
+            "type": "object",
+            "description": "Progress for each table in the dataset, keyed by table name",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TableSyncProgress"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "TableSchemaWithNetworks": {
         "type": "object",
         "description": "Table schema with associated networks\n\nContains the output schema for a table and the list of networks referenced by its query.",
@@ -2251,6 +2461,57 @@
           },
           "schema": {
             "description": "The output schema for the table\n\nDescribes the structure and types of columns that will be returned\nwhen executing the SQL query for this table."
+          }
+        }
+      },
+      "TableSyncProgress": {
+        "type": "object",
+        "description": "Progress information for a single table",
+        "required": [
+          "files_count",
+          "total_size_bytes"
+        ],
+        "properties": {
+          "current_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Highest block number that has been synced (null if no data yet)"
+          },
+          "files_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of Parquet files written for this table"
+          },
+          "job_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "ID of the writer job (null if no active job)"
+          },
+          "job_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Status of the writer job (null if no active job)"
+          },
+          "start_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Lowest block number that has been synced (null if no data yet)"
+          },
+          "total_size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total size of all Parquet files in bytes"
           }
         }
       },
