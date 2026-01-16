@@ -8,6 +8,7 @@ license-file.workspace = true
 [dependencies]
 async-stream.workspace = true
 amp-datasets-registry = { path = "../datasets-registry" }
+amp-providers-registry = { path = "../providers-registry" }
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }

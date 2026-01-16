@@ -2,9 +2,10 @@ use std::{net::SocketAddr, sync::Arc};
 
 use amp_config::Config as CommonConfig;
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
+use amp_providers_registry::ProvidersRegistry;
 use common::BoxError;
 use controller::config::Config;
 use monitoring::telemetry::metrics::Meter;
@@ -23,8 +24,8 @@ pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> 
     )
     .map_err(Error::DataStoreCreation)?;
 
-    let (dataset_store, datasets_registry) = {
-        let provider_configs_store = ProviderConfigsStore::new(
+    let (dataset_store, datasets_registry, providers_registry) = {
+        let providers_registry = ProvidersRegistry::new(
             amp_object_store::new_with_prefix(
                 &config.providers_store_url,
                 config.providers_store_url.path(),
@@ -39,8 +40,9 @@ pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> 
             .map_err(Error::ManifestsStoreCreation)?,
         );
         let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
-        let dataset_store = DatasetStore::new(datasets_registry.clone(), provider_configs_store);
-        (dataset_store, datasets_registry)
+        let dataset_store =
+            DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+        (dataset_store, datasets_registry, providers_registry)
     };
 
     // Convert to controller-specific config
@@ -50,6 +52,7 @@ pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> 
         Arc::new(controller_config),
         metadata_db,
         datasets_registry,
+        providers_registry,
         data_store,
         dataset_store,
         meter,

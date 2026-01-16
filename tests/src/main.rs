@@ -49,8 +49,9 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use amp_config::Config;
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, dataset_and_dependencies, providers::ProviderConfigsStore};
+use amp_dataset_store::{DatasetStore, dataset_and_dependencies};
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
+use amp_providers_registry::ProvidersRegistry;
 use clap::Parser;
 use common::BoxError;
 use datasets_common::reference::Reference;
@@ -162,8 +163,8 @@ async fn main() {
             )
             .expect("Failed to create data store");
 
-            let (dataset_store, datasets_registry) = {
-                let provider_configs_store = ProviderConfigsStore::new(
+            let (dataset_store, datasets_registry, providers_registry) = {
+                let providers_registry = ProvidersRegistry::new(
                     amp_object_store::new_with_prefix(
                         &config.providers_store_url,
                         config.providers_store_url.path(),
@@ -180,8 +181,8 @@ async fn main() {
                 let datasets_registry =
                     DatasetsRegistry::new(sysdb.conn_pool().clone(), dataset_manifests_store);
                 let dataset_store =
-                    DatasetStore::new(datasets_registry.clone(), provider_configs_store);
-                (dataset_store, datasets_registry)
+                    DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+                (dataset_store, datasets_registry, providers_registry)
             };
 
             // Start controller for Admin API access during dependency restoration
@@ -189,6 +190,7 @@ async fn main() {
                 config.clone(),
                 sysdb.conn_pool().clone(),
                 datasets_registry,
+                providers_registry,
                 data_store.clone(),
                 dataset_store.clone(),
                 None,

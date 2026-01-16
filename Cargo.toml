@@ -13,6 +13,7 @@ members = [
     "crates/core/data-store",
     "crates/core/dataset-store",
     "crates/core/datasets-registry",
+    "crates/core/providers-registry",
     "crates/core/datasets-common",
     "crates/core/datasets-derived",
     "crates/core/datasets-derived/gen",

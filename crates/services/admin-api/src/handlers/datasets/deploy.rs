@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 
-use amp_dataset_store::{DatasetKind, GetDatasetError};
+use amp_dataset_store::GetDatasetError;
 use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
+use amp_providers_registry::dataset_kind::DatasetKind;
 use axum::{
     Json,
     extract::{
