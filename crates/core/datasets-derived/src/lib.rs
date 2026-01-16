@@ -12,7 +12,6 @@
 //!
 //! See [`manifest::Manifest`] for the complete derived dataset specification.
 
-pub mod catalog;
 mod dataset_kind;
 pub mod logical;
 pub mod manifest;
