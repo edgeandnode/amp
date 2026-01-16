@@ -8,7 +8,7 @@ components: "crate:amp-data-store,crate:admin-api,crate:metadata-db"
 
 ## Summary
 
-The Dataset Progress API provides visibility into the operational state of datasets, reporting sync metrics like `start_block`, `current_block`, job health status, and file statistics. This API serves as the "ground truth" for the engine's state, which Platform services can use to calculate higher-level metrics like freshness or block lag.
+The Dataset Progress API provides visibility into the sync state of datasets, reporting metrics like `start_block`, `current_block`, job health status, and file statistics. This allows anyone to track the progress of a dataset sync at a point in time, either programmatically over the RESTful API or via the administration CLI (ampctl).
 
 ## Table of Contents
 
@@ -17,14 +17,13 @@ The Dataset Progress API provides visibility into the operational state of datas
 3. [API Reference](#api-reference)
 4. [Usage](#usage)
 5. [Implementation](#implementation)
-6. [Limitations](#limitations)
 
 ## Key Concepts
 
 - **Progress**: The current state of data synchronization for a dataset, including the range of blocks that have been synced and the number of files produced
 - **Current Block**: The highest block number that has been synced (end of the synced range)
 - **Start Block**: The lowest block number that has been synced (beginning of the synced range)
-- **Job Status**: The health state of the writer job (e.g., `RUNNING`, `FAILED`, `COMPLETED`)
+- **Job Status**: The status of the table's currently assigned writer job (from `physical_tables.writer`). Possible values: `RUNNING`, `FAILED`, `COMPLETED`
 - **Pull Model**: The current data strategy where progress is calculated on-demand from table snapshots rather than persisted separately
 
 ## Architecture
@@ -33,11 +32,11 @@ The Dataset Progress API provides visibility into the operational state of datas
 
 The API uses a **Pull Model** where progress is calculated on-demand:
 
-1. **No new infrastructure** - Avoids introducing Kafka or message broker dependencies
-2. **Leverages existing caches** - Postgres metadata and Foyer caches already exist
-3. **Simpler operational model** - No event consumers to deploy and monitor
+1. **On-demand computation** - Progress is computed from table snapshots when requested
+2. **Leverages existing infrastructure** - Uses Postgres metadata and Foyer caches
+3. **Point-in-time accuracy** - Each request returns the current state at query time
 
-A **Push Model** (event-driven via Kafka) may be considered in the future for real-time dashboards or webhook notifications.
+A **Push Model** (event-driven) will be implemented in a future PR for real-time progress updates to support dashboards and streaming consumers.
 
 ### Logic Location & Ownership
 
@@ -66,140 +65,105 @@ A **Push Model** (event-driven via Kafka) may be considered in the future for re
 
 ## API Reference
 
-### Endpoints
+| Endpoint                                                       | Method | Description                         |
+| -------------------------------------------------------------- | ------ | ----------------------------------- |
+| `/datasets/{ns}/{name}/versions/{rev}/progress`                | GET    | Dataset-level progress (all tables) |
+| `/datasets/{ns}/{name}/versions/{rev}/tables/{table}/progress` | GET    | Single table progress               |
 
-| Endpoint                                                           | Description                         |
-| ------------------------------------------------------------------ | ----------------------------------- |
-| `GET /datasets/{ns}/{name}/versions/{rev}/progress`                | Dataset-level progress (all tables) |
-| `GET /datasets/{ns}/{name}/versions/{rev}/tables/{table}/progress` | Single table progress               |
+For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
 
-### Response Format
+```bash
+# Dataset progress endpoint
+jq '.paths["/datasets/{namespace}/{name}/versions/{revision}/progress"]' docs/openapi-specs/admin.spec.json
 
-#### Dataset-Level Response
-
-```json
-{
-  "dataset_namespace": "ethereum",
-  "dataset_name": "mainnet",
-  "revision": "0.0.0",
-  "manifest_hash": "2dbf16e8...",
-  "tables": [
-    {
-      "table_name": "blocks",
-      "current_block": 11111,
-      "start_block": 10000,
-      "job_id": 1,
-      "job_status": "RUNNING",
-      "files_count": 47,
-      "total_size_bytes": 2147483648
-    }
-  ]
-}
-```
-
-#### Table-Level Response
-
-```json
-{
-  "table_name": "blocks",
-  "current_block": 11111,
-  "start_block": 10000,
-  "job_id": 1,
-  "job_status": "RUNNING",
-  "files_count": 47,
-  "total_size_bytes": 2147483648
-}
+# Table progress endpoint
+jq '.paths["/datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress"]' docs/openapi-specs/admin.spec.json
 ```
 
 ## Usage
 
-### Get Dataset Progress
+**Get dataset progress:**
+
+View sync progress for all tables in a dataset, including current block, job status, and file statistics.
 
 ```bash
-curl -X GET "http://localhost:8080/datasets/ethereum/mainnet/versions/0.0.0/progress" \
-  -H "Authorization: Bearer $TOKEN"
+# Get progress for a dataset version
+ampctl dataset progress ethereum/mainnet@0.0.0
+
+# Example output:
+# Dataset: ethereum/mainnet@0.0.0
+# Manifest: 2dbf16e8...
+#
+# Table          Current Block   Start Block   Status    Files   Size
+# blocks         21,500,000      0             RUNNING   1,247   128.5 GB
+# transactions   21,499,850      0             RUNNING   3,891   512.2 GB
+# logs           21,499,900      0             RUNNING   2,156   256.8 GB
 ```
 
-### Get Table Progress
+**Get single table progress:**
+
+View detailed progress for a specific table within a dataset.
 
 ```bash
-curl -X GET "http://localhost:8080/datasets/ethereum/mainnet/versions/0.0.0/tables/blocks/progress" \
-  -H "Authorization: Bearer $TOKEN"
+# Get progress for a single table
+ampctl dataset progress ethereum/mainnet@0.0.0 --table blocks
+
+# Example output:
+# Table: blocks
+# Current Block: 21,500,000
+# Start Block: 0
+# Job ID: 42
+# Status: RUNNING
+# Files: 1,247
+# Total Size: 128.5 GB
+```
+
+**JSON output for scripting:**
+
+Use JSON format to pipe output to jq or other tools for automated processing and monitoring.
+
+```bash
+# Dataset progress as JSON
+ampctl dataset progress ethereum/mainnet@0.0.0 --json
+
+# Extract current block for a table with jq
+ampctl dataset progress ethereum/mainnet@0.0.0 --json | jq '.tables.blocks.current_block'
+```
+
+**Direct API access:**
+
+Query the Admin API directly using curl for integrations or when ampctl is not available.
+
+```bash
+# Get dataset progress
+curl http://localhost:1610/datasets/ethereum/mainnet/versions/0.0.0/progress
+
+# Get single table progress
+curl http://localhost:1610/datasets/ethereum/mainnet/versions/0.0.0/tables/blocks/progress
 ```
 
 ## Implementation
 
-### DataStore Methods
+### How "Current Block" is Defined
 
-#### `get_table_progress()`
+The `current_block` field represents the highest block number in the **contiguous synced range** for a table. This is computed from the table's canonical chain of parquet files:
 
-Computes progress for a single physical table.
+1. **Canonical segments**: Only files that form a valid, non-overlapping chain are considered. Orphaned segments (from reorgs) are excluded.
 
-```rust
-pub async fn get_table_progress(
-    &self,
-    manifest_hash: &Hash,
-    table_name: &TableName,
-) -> Result<Option<TableProgress>, GetTableProgressError>
-```
+2. **Synced range**: The range spans from the lowest block in the first canonical segment (`start_block`) to the highest block in the last canonical segment (`current_block`).
 
-**Internal Dependencies:**
+3. **Gap handling**: If there are gaps in the canonical chain, the synced range reflects only the contiguous portion. This ensures `current_block` accurately represents verified, queryable data.
 
-| Dependency                            | Purpose                                                  |
-| ------------------------------------- | -------------------------------------------------------- |
-| `PhysicalTable::get_active()`         | Retrieve the active table revision from metadata         |
-| `PhysicalTable::snapshot()`           | Create a point-in-time snapshot of the table             |
-| `TableSnapshot::synced_range()`       | Compute the contiguous block range (handles gaps/reorgs) |
-| `TableSnapshot::canonical_segments()` | Get the list of canonical parquet files                  |
-
-#### `get_tables_writer_info()`
-
-Retrieves writer job information for all active tables in a dataset.
-
-```rust
-pub async fn get_tables_writer_info(
-    &self,
-    manifest_hash: &Hash,
-) -> Result<Vec<TableWriterInfo>, GetWriterInfoError>
-```
-
-### Return Types
-
-```rust
-/// Progress statistics for a single table.
-pub struct TableProgress {
-    /// Highest block number synced (end of synced range)
-    pub current_block: u64,
-    /// Lowest block number synced (start of synced range)
-    pub start_block: u64,
-    /// Number of canonical parquet files
-    pub files_count: u64,
-    /// Total size of canonical files in bytes
-    pub total_size_bytes: u64,
-}
-
-/// Writer job information for a table.
-pub struct TableWriterInfo {
-    pub table_name: TableName,
-    pub job_id: Option<JobId>,
-    pub job_status: Option<JobStatus>,
-}
-```
+This approach provides a reliable "ground truth" for sync progress, unaffected by reorgs or incomplete writes.
 
 ### Source Files
 
-- `crates/amp-data-store/src/lib.rs` - DataStore methods for progress calculation
-- `crates/admin-api/src/handlers/datasets.rs` - HTTP handler orchestration
-- `crates/metadata-db/src/progress.rs` - Database queries for writer info
-
-## Limitations
-
-- **Polling required**: Platform services must poll each dataset individually; no push/subscription model currently exists
-- **Single-network datasets**: Multi-chain derived datasets may need `Vec<BlockRange>` per network in the future
-- **No chainhead**: Response does not include chainhead for lag calculation (requires provider RPC access)
-- **No off-chain progress**: Datasets without block numbers (e.g., IPFS sources) have no defined progress metric
-- **Bulk endpoint not available**: No endpoint to retrieve progress for multiple datasets in a single request
+- `crates/services/admin-api/src/handlers/datasets/progress.rs` - API endpoint handlers
+- `crates/clients/admin/src/datasets.rs` - Client library
+- `crates/core/metadata-db/src/progress.rs` - Database operations for writer info
 
 ## References
 
-- [admin](admin.md) - Base: Admin API overview
+- [admin](admin.md) - Base: Administration overview
+- [app-ampctl](app-ampctl.md) - Related: CLI tool
+- [admin-datasets](admin-datasets.md) - Related: Dataset management
