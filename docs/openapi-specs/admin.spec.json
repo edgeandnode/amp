@@ -2433,11 +2433,14 @@
             "description": "Requested revision"
           },
           "tables": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "description": "Progress for each table in the dataset, keyed by table name",
+            "additionalProperties": {
               "$ref": "#/components/schemas/TableSyncProgress"
             },
-            "description": "Progress for each table in the dataset"
+            "propertyNames": {
+              "type": "string"
+            }
           }
         }
       },
@@ -2465,7 +2468,6 @@
         "type": "object",
         "description": "Progress information for a single table",
         "required": [
-          "table_name",
           "files_count",
           "total_size_bytes"
         ],
@@ -2505,10 +2507,6 @@
             ],
             "format": "int64",
             "description": "Lowest block number that has been synced (null if no data yet)"
-          },
-          "table_name": {
-            "type": "string",
-            "description": "Name of the table within the dataset"
           },
           "total_size_bytes": {
             "type": "integer",

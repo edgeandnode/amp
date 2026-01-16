@@ -42,8 +42,8 @@ async fn get_progress_with_valid_dataset_succeeds() {
     assert!(!progress.manifest_hash.is_empty());
 
     // Check tables if present
-    for table in progress.tables {
-        assert!(!table.table_name.is_empty());
+    for (table_name, table) in &progress.tables {
+        assert!(!table_name.is_empty());
         // Initial state will have zero files (no job deployed yet)
         assert!(table.files_count >= 0);
     }
@@ -106,24 +106,21 @@ async fn get_progress_shows_running_status() {
             );
 
             // Check if any job has failed
-            for table in &progress.tables {
+            for (table_name, table) in &progress.tables {
                 if table.job_status.as_deref() == Some("FAILED") {
-                    panic!(
-                        "Job failed for table '{}': {:?}",
-                        table.table_name, progress
-                    );
+                    panic!("Job failed for table '{}': {:?}", table_name, progress);
                 }
             }
 
             // Check if we have a RUNNING job with some data synced
             let has_running_job = progress
                 .tables
-                .iter()
+                .values()
                 .any(|t| t.job_status.as_deref() == Some("RUNNING"));
 
             let has_synced_data = progress
                 .tables
-                .iter()
+                .values()
                 .any(|t| t.files_count > 0 && t.current_block.is_some());
 
             if has_running_job && has_synced_data {
@@ -138,11 +135,8 @@ async fn get_progress_shows_running_status() {
 
     //* Then
     // Verify all expected tables are present
-    let actual_tables: std::collections::HashSet<&str> = running_progress
-        .tables
-        .iter()
-        .map(|t| t.table_name.as_str())
-        .collect();
+    let actual_tables: std::collections::HashSet<&str> =
+        running_progress.tables.keys().map(|s| s.as_str()).collect();
 
     assert_eq!(
         actual_tables, expected_tables,
@@ -150,30 +144,29 @@ async fn get_progress_shows_running_status() {
     );
 
     // Verify the job is RUNNING
-    for table in &running_progress.tables {
+    for (table_name, table) in &running_progress.tables {
         assert!(
             table.job_id.is_some(),
             "table '{}' should have a job_id",
-            table.table_name
+            table_name
         );
 
         let status = table
             .job_status
             .as_ref()
-            .unwrap_or_else(|| panic!("table '{}' should have a job_status", table.table_name));
+            .unwrap_or_else(|| panic!("table '{}' should have a job_status", table_name));
 
         assert_eq!(
             status, "RUNNING",
             "table '{}' job_status should be RUNNING, got '{}'",
-            table.table_name, status
+            table_name, status
         );
     }
 
     // Verify we have some progress
     let blocks_table = running_progress
         .tables
-        .iter()
-        .find(|t| t.table_name == "blocks")
+        .get("blocks")
         .expect("blocks table should exist");
 
     assert!(
@@ -229,27 +222,23 @@ async fn get_progress_shows_completed_status_when_end_block_reached() {
             );
 
             // Check if any job has failed
-            for table in &progress.tables {
+            for (table_name, table) in &progress.tables {
                 if table.job_status.as_deref() == Some("FAILED") {
-                    panic!(
-                        "Job failed for table '{}': {:?}",
-                        table.table_name, progress
-                    );
+                    panic!("Job failed for table '{}': {:?}", table_name, progress);
                 }
             }
 
             // Check if all tables have completed jobs
             let all_completed = progress
                 .tables
-                .iter()
+                .values()
                 .all(|t| t.job_status.as_deref() == Some("COMPLETED"));
 
             if all_completed {
                 // Verify blocks table has data
                 if progress
                     .tables
-                    .iter()
-                    .find(|t| t.table_name == "blocks")
+                    .get("blocks")
                     .filter(|t| t.files_count > 0 && t.current_block.is_some())
                     .is_some()
                 {
@@ -265,11 +254,8 @@ async fn get_progress_shows_completed_status_when_end_block_reached() {
 
     //* Then
     // Verify all expected tables are present
-    let actual_tables: std::collections::HashSet<&str> = final_progress
-        .tables
-        .iter()
-        .map(|t| t.table_name.as_str())
-        .collect();
+    let actual_tables: std::collections::HashSet<&str> =
+        final_progress.tables.keys().map(|s| s.as_str()).collect();
 
     assert_eq!(
         actual_tables, expected_tables,
@@ -277,30 +263,29 @@ async fn get_progress_shows_completed_status_when_end_block_reached() {
     );
 
     // Verify the job is COMPLETED
-    for table in &final_progress.tables {
+    for (table_name, table) in &final_progress.tables {
         assert!(
             table.job_id.is_some(),
             "table '{}' should have a job_id",
-            table.table_name
+            table_name
         );
 
         let status = table
             .job_status
             .as_ref()
-            .unwrap_or_else(|| panic!("table '{}' should have a job_status", table.table_name));
+            .unwrap_or_else(|| panic!("table '{}' should have a job_status", table_name));
 
         assert_eq!(
             status, "COMPLETED",
             "table '{}' job_status should be COMPLETED, got '{}'",
-            table.table_name, status
+            table_name, status
         );
     }
 
     // Verify the blocks table has complete progress tracking
     let blocks_table = final_progress
         .tables
-        .iter()
-        .find(|t| t.table_name == "blocks")
+        .get("blocks")
         .expect("blocks table should exist");
 
     let current_block = blocks_table
@@ -364,8 +349,8 @@ async fn get_table_progress_with_valid_table_succeeds() {
         serde_json::to_string_pretty(&progress).expect("serialization failed")
     );
 
-    // Verify response structure
-    assert_eq!(progress.table_name, "blocks");
+    // Verify response structure - table_name is no longer in the response
+    // (it was the path parameter, so it's implicit)
     // Initial state will have zero files (no job deployed yet)
     assert!(progress.files_count >= 0);
 }
@@ -474,7 +459,7 @@ async fn get_table_progress_shows_running_status_for_specific_table() {
     };
 
     //* Then
-    assert_eq!(table_progress.table_name, "blocks");
+    // table_name is no longer in the response (it was the path parameter)
     assert!(
         table_progress.job_id.is_some(),
         "blocks table should have a job_id"
@@ -586,12 +571,12 @@ struct SyncProgressResponse {
     dataset_name: String,
     revision: String,
     manifest_hash: String,
-    tables: Vec<TableSyncProgress>,
+    tables: std::collections::HashMap<String, TableSyncProgress>,
 }
 
+/// Progress for a single table (used in both dataset-level and table-level responses)
 #[derive(Debug, Deserialize, Serialize)]
 struct TableSyncProgress {
-    table_name: String,
     current_block: Option<i64>,
     start_block: Option<i64>,
     job_id: Option<i64>,

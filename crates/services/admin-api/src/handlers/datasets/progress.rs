@@ -9,8 +9,8 @@ use axum::{
 };
 use common::catalog::physical::PhysicalTable;
 use datasets_common::{
-    name::Name, namespace::Namespace, partial_reference::PartialReference, reference::Reference,
-    revision::Revision, table_name::TableName,
+    name::Name, namespace::Namespace, reference::Reference, revision::Revision,
+    table_name::TableName,
 };
 use monitoring::logging;
 
@@ -134,16 +134,12 @@ pub async fn handler(
         .map(|info| (info.table_name.to_string(), info))
         .collect();
 
-    let partial_ref = PartialReference::new(
-        reference.namespace().clone(),
-        reference.name().clone(),
-        Some(reference.revision().clone()),
-    );
-    let mut tables = Vec::new();
+    let sql_table_ref_schema = resolved_ref.to_reference().to_string();
+    let mut tables = HashMap::new();
 
     // Iterate over all tables defined in the dataset
-    for resolved_table in dataset.resolved_tables(partial_ref) {
-        let table_name = resolved_table.name().clone();
+    for table in dataset.tables() {
+        let table_name = table.name().clone();
         let writer_info = writer_info_map.get(table_name.as_str());
 
         // Get the active physical table revision if it exists
@@ -163,8 +159,11 @@ pub async fn handler(
             .map(|revision| {
                 PhysicalTable::from_active_revision(
                     ctx.data_store.clone(),
-                    resolved_table.clone(),
+                    resolved_ref.clone(),
+                    dataset.start_block,
+                    table.clone(),
                     revision,
+                    sql_table_ref_schema.clone(),
                 )
             });
 
@@ -207,17 +206,19 @@ pub async fn handler(
                 (None, None, 0, 0)
             };
 
-        tables.push(TableSyncProgress {
-            table_name: table_name.to_string(),
-            current_block,
-            start_block,
-            job_id: writer_info.and_then(|i| i.job_id).map(|id| id.into_i64()),
-            job_status: writer_info
-                .and_then(|i| i.job_status)
-                .map(|s| s.to_string()),
-            files_count,
-            total_size_bytes,
-        });
+        tables.insert(
+            table_name.to_string(),
+            TableSyncProgress {
+                current_block,
+                start_block,
+                job_id: writer_info.and_then(|i| i.job_id).map(|id| id.into_i64()),
+                job_status: writer_info
+                    .and_then(|i| i.job_status)
+                    .map(|s| s.to_string()),
+                files_count,
+                total_size_bytes,
+            },
+        );
     }
 
     Ok(Json(SyncProgressResponse {
@@ -318,14 +319,9 @@ pub async fn table_handler(
         })?;
 
     // Check if the table exists in the dataset
-    let partial_ref = PartialReference::new(
-        reference.namespace().clone(),
-        reference.name().clone(),
-        Some(reference.revision().clone()),
-    );
-
-    let resolved_table = dataset
-        .resolved_tables(partial_ref)
+    let table = dataset
+        .tables()
+        .iter()
         .find(|t| t.name() == &table_name)
         .ok_or_else(|| Error::TableNotFound {
             reference: reference.clone(),
@@ -352,6 +348,8 @@ pub async fn table_handler(
         .into_iter()
         .find(|info| info.table_name.as_str() == table_name.as_str());
 
+    let sql_table_ref_schema = resolved_ref.to_reference().to_string();
+
     // Get the active physical table revision if it exists
     let physical_table = ctx
         .data_store
@@ -369,8 +367,11 @@ pub async fn table_handler(
         .map(|revision| {
             PhysicalTable::from_active_revision(
                 ctx.data_store.clone(),
-                resolved_table.clone(),
+                resolved_ref.clone(),
+                dataset.start_block,
+                table.clone(),
                 revision,
+                sql_table_ref_schema.clone(),
             )
         });
 
@@ -412,7 +413,6 @@ pub async fn table_handler(
         };
 
     Ok(Json(TableSyncProgress {
-        table_name: table_name.to_string(),
         current_block,
         start_block,
         job_id: writer_info
@@ -440,16 +440,14 @@ pub struct SyncProgressResponse {
     pub revision: String,
     /// Resolved manifest hash
     pub manifest_hash: String,
-    /// Progress for each table in the dataset
-    pub tables: Vec<TableSyncProgress>,
+    /// Progress for each table in the dataset, keyed by table name
+    pub tables: HashMap<String, TableSyncProgress>,
 }
 
 /// Progress information for a single table
 #[derive(Debug, serde::Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TableSyncProgress {
-    /// Name of the table within the dataset
-    pub table_name: String,
     /// Highest block number that has been synced (null if no data yet)
     pub current_block: Option<i64>,
     /// Lowest block number that has been synced (null if no data yet)
@@ -476,7 +474,7 @@ pub enum Error {
 
     /// Failed to resolve dataset revision to manifest hash
     #[error("failed to resolve dataset revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] amp_datasets_registry::error::ResolveRevisionError),
 
     /// Dataset revision does not exist
     #[error("dataset '{reference}' not found")]
