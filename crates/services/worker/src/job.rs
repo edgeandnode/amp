@@ -1,4 +1,4 @@
-use amp_dataset_store::DatasetKind;
+use amp_providers_registry::dataset_kind::DatasetKind;
 use chrono::{DateTime, Utc};
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 pub use dump::Ctx;

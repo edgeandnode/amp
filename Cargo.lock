@@ -32,6 +32,7 @@ dependencies = [
  "amp-data-store",
  "amp-dataset-store",
  "amp-datasets-registry",
+ "amp-providers-registry",
  "async-trait",
  "axum 0.8.8",
  "common",
@@ -993,6 +994,7 @@ name = "amp-dataset-store"
 version = "0.1.0"
 dependencies = [
  "amp-datasets-registry",
+ "amp-providers-registry",
  "async-stream",
  "common",
  "datafusion",
@@ -1044,6 +1046,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-providers-registry"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "datasets-common",
+ "datasets-derived",
+ "eth-beacon-datasets",
+ "evm-rpc-datasets",
+ "firehose-datasets",
+ "futures",
+ "indoc",
+ "monitoring",
+ "object_store",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "solana-datasets",
+ "thiserror 2.0.17",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
 name = "ampcc"
 version = "0.1.0"
 dependencies = [
@@ -1071,6 +1097,7 @@ dependencies = [
  "admin-client",
  "amp-dataset-store",
  "amp-object-store",
+ "amp-providers-registry",
  "anyhow",
  "clap",
  "common",
@@ -1104,6 +1131,7 @@ dependencies = [
  "amp-dataset-store",
  "amp-datasets-registry",
  "amp-object-store",
+ "amp-providers-registry",
  "clap",
  "common",
  "console-subscriber",
@@ -2939,6 +2967,7 @@ dependencies = [
  "amp-data-store",
  "amp-dataset-store",
  "amp-datasets-registry",
+ "amp-providers-registry",
  "async-trait",
  "axum 0.8.8",
  "common",
@@ -4450,6 +4479,7 @@ dependencies = [
  "alloy",
  "amp-data-store",
  "amp-dataset-store",
+ "amp-providers-registry",
  "async-stream",
  "common",
  "datafusion",
@@ -12059,6 +12089,7 @@ dependencies = [
  "amp-dataset-store",
  "amp-datasets-registry",
  "amp-object-store",
+ "amp-providers-registry",
  "ampctl",
  "arrow-flight",
  "backon",
@@ -13820,6 +13851,7 @@ dependencies = [
  "amp-config",
  "amp-data-store",
  "amp-dataset-store",
+ "amp-providers-registry",
  "backon",
  "chrono",
  "common",

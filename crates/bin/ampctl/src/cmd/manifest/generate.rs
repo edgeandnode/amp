@@ -24,7 +24,7 @@
 
 use std::path::PathBuf;
 
-use amp_dataset_store::DatasetKind;
+use amp_providers_registry::dataset_kind::DatasetKind;
 use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use monitoring::logging;
 

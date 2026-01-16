@@ -31,7 +31,7 @@ use admin_api::scheduler::{
     ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError, SchedulerJobs,
     SchedulerWorkers, StopJobError,
 };
-use amp_dataset_store::DatasetKind;
+use amp_providers_registry::dataset_kind::DatasetKind;
 use async_trait::async_trait;
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,

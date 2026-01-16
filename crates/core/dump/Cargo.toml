@@ -6,6 +6,7 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
+amp-providers-registry = { path = "../providers-registry" }
 async-stream.workspace = true
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }

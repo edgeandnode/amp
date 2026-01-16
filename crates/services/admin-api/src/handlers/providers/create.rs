@@ -1,6 +1,6 @@
 //! Provider create handler
 
-use amp_dataset_store::providers::{ProviderConfig, RegisterError};
+use amp_providers_registry::{ProviderConfig, RegisterError};
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -81,8 +81,8 @@ pub async fn handler(
         rest: provider_rest_table,
     };
 
-    ctx.dataset_store
-        .register_provider(provider_config)
+    ctx.providers_registry
+        .register(provider_config)
         .await
         .map_err(|err| match err {
             RegisterError::Conflict { name } => {

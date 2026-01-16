@@ -1,6 +1,6 @@
 //! Providers delete handler
 
-use amp_dataset_store::providers::DeleteError;
+use amp_providers_registry::DeleteError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -69,7 +69,7 @@ pub async fn handler(
         }
     };
 
-    match ctx.dataset_store.delete_provider(&name).await {
+    match ctx.providers_registry.delete(&name).await {
         Ok(()) => {
             tracing::info!(
                 provider_name = %name,
