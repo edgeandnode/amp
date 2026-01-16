@@ -23,7 +23,7 @@ semver.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
-indicatif = "0.17"
+indicatif = "0.18"
 console = "0.15"
 dialoguer = "0.11"
 
