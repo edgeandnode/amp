@@ -109,7 +109,7 @@ pub async fn handler(
         })?;
 
     // Parse manifest JSON and return it
-    let manifest_json: JsonValue = manifest_content
+    let manifest_json = manifest_content
         .try_into_manifest::<JsonValue>()
         .map_err(Error::ParseManifest)?;
 
