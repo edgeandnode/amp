@@ -18,6 +18,11 @@ use serde::Deserialize;
 
 use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
 
+pub mod for_admin_api;
+pub mod for_dump;
+pub mod for_manifest_validation;
+pub mod for_query;
+
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {

@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::{
     BlockNum, BoxError, LogicalCatalog,
-    catalog::{logical::Table, reader::AmpReaderFactory},
+    catalog::logical::Table,
     metadata::{
         FileMetadata, amp_metadata_from_parquet_file,
         parquet::ParquetMeta,
@@ -38,6 +38,10 @@ use crate::{
     },
     sql::TableReference,
 };
+
+pub mod for_dump;
+pub mod for_query;
+pub mod reader;
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
@@ -639,7 +643,7 @@ impl PhysicalTable {
         };
 
         // Create a reader factory with the cached store
-        let reader_factory_with_cache = AmpReaderFactory {
+        let reader_factory_with_cache = reader::AmpReaderFactory {
             location_id: self.location_id,
             store,
             schema: self.schema(),
@@ -697,7 +701,7 @@ impl PhysicalTable {
 #[derive(Debug, Clone)]
 pub struct TableSnapshot {
     physical_table: Arc<PhysicalTable>,
-    reader_factory: Arc<AmpReaderFactory>,
+    reader_factory: Arc<reader::AmpReaderFactory>,
     canonical_segments: Vec<Segment>,
 }
 
@@ -724,7 +728,7 @@ impl TableSnapshot {
         &self.canonical_segments
     }
 
-    pub fn reader_factory(&self) -> &Arc<AmpReaderFactory> {
+    pub fn reader_factory(&self) -> &Arc<reader::AmpReaderFactory> {
         &self.reader_factory
     }
 

@@ -8,10 +8,7 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
-    catalog::{
-        physical::{PhysicalTable, TableSnapshot},
-        reader::AmpReaderFactory,
-    },
+    catalog::physical::{PhysicalTable, TableSnapshot, reader::AmpReaderFactory},
     metadata::{
         SegmentSize,
         segments::{BlockRange, Segment},

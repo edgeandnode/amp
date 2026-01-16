@@ -3,9 +3,13 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
 use common::{
-    BlockNum, catalog::sql::catalog_for_sql, metadata::segments::BlockRange, sql, sql_str::SqlStr,
+    BlockNum,
+    catalog::{logical::for_query as logical_catalog, physical::for_query as physical_catalog},
+    metadata::segments::BlockRange,
+    sql::{self, resolve_function_references, resolve_table_references},
+    sql_str::SqlStr,
 };
-use datasets_common::reference::Reference;
+use datasets_common::{partial_reference::PartialReference, reference::Reference};
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
@@ -468,14 +472,22 @@ impl ReorgTestCtx {
             .config()
             .make_query_env()
             .expect("Failed to create query environment");
-        let catalog = catalog_for_sql(
-            test_env.daemon_server().dataset_store(),
-            test_env.daemon_server().data_store(),
-            &sql,
-            env,
-        )
-        .await
-        .expect("Failed to create catalog for SQL query");
+        let catalog = {
+            let table_refs = resolve_table_references::<PartialReference>(&sql)
+                .expect("Failed to resolve table references");
+            let func_refs = resolve_function_references::<PartialReference>(&sql)
+                .expect("Failed to resolve function references");
+            let logical = logical_catalog::create(
+                test_env.daemon_server().dataset_store(),
+                &env.isolate_pool,
+                (table_refs, func_refs),
+            )
+            .await
+            .expect("Failed to create logical catalog");
+            physical_catalog::create(test_env.daemon_server().data_store(), logical)
+                .await
+                .expect("Failed to create physical catalog for SQL query")
+        };
         let table = catalog
             .tables()
             .iter()

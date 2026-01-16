@@ -99,14 +99,19 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use amp_data_store::file_name::FileName;
 use common::{
     BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::{
+        logical::for_dump as logical_catalog,
+        physical::{Catalog, PhysicalTable, for_dump as physical_catalog},
+    },
     metadata::{Generation, segments::ResumeWatermark},
     query_context::QueryEnv,
+    sql::{resolve_function_references, resolve_table_references},
 };
-use datasets_common::{deps::alias::DepAlias, hash_reference::HashReference};
-use datasets_derived::{
-    Manifest as DerivedManifest, catalog::catalog_for_sql_with_deps, manifest::TableInput,
+use datasets_common::{
+    deps::alias::{DepAlias, DepAliasOrSelfRef},
+    hash_reference::HashReference,
 };
+use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::{Instrument, instrument};
@@ -464,15 +469,19 @@ async fn dump_table(
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), BoxError>>::new();
 
-    let catalog = catalog_for_sql_with_deps(
-        &ctx.dataset_store,
-        &ctx.data_store,
-        &query,
-        &env,
-        &dependencies,
-        &manifest.functions,
-    )
-    .await?;
+    let catalog = {
+        let table_refs = resolve_table_references::<DepAlias>(&query)?;
+        let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&query)?;
+        let logical = logical_catalog::create(
+            &ctx.dataset_store,
+            &env.isolate_pool,
+            &dependencies,
+            &manifest.functions,
+            (table_refs, func_refs),
+        )
+        .await?;
+        physical_catalog::create(&ctx.data_store, logical).await?
+    };
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
     let manifest_start_block = manifest.start_block;
 
