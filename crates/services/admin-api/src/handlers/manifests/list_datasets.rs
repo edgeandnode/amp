@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::ListDatasetsUsingManifestError;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -68,7 +69,7 @@ pub async fn handler(
     };
 
     let Some(tags) = ctx
-        .dataset_store
+        .datasets_registry
         .list_manifest_linked_datasets(&hash)
         .await
         .map_err(Error::ListDatasetTags)?
@@ -110,8 +111,8 @@ pub struct Dataset {
     pub version: Version,
 }
 
-impl From<amp_dataset_store::DatasetTag> for Dataset {
-    fn from(tag: amp_dataset_store::DatasetTag) -> Self {
+impl From<amp_datasets_registry::DatasetTag> for Dataset {
+    fn from(tag: amp_datasets_registry::DatasetTag) -> Self {
         Self {
             namespace: tag.namespace,
             name: tag.name,
@@ -151,7 +152,7 @@ pub enum Error {
     /// - SQL query to retrieve dataset tags fails
     /// - Database schema inconsistencies prevent tag retrieval
     #[error("failed to list dataset tags: {0}")]
-    ListDatasetTags(#[source] amp_dataset_store::ListDatasetsUsingManifestError),
+    ListDatasetTags(#[source] ListDatasetsUsingManifestError),
 }
 
 impl IntoErrorResponse for Error {
@@ -160,12 +161,10 @@ impl IntoErrorResponse for Error {
             Error::InvalidHash(_) => "INVALID_HASH",
             Error::ManifestNotFound { .. } => "MANIFEST_NOT_FOUND",
             Error::ListDatasetTags(err) => match err {
-                amp_dataset_store::ListDatasetsUsingManifestError::MetadataDbQueryPath(_) => {
+                ListDatasetsUsingManifestError::MetadataDbQueryPath(_) => {
                     "QUERY_MANIFEST_PATH_ERROR"
                 }
-                amp_dataset_store::ListDatasetsUsingManifestError::MetadataDbListTags(_) => {
-                    "LIST_DATASET_TAGS_ERROR"
-                }
+                ListDatasetsUsingManifestError::MetadataDbListTags(_) => "LIST_DATASET_TAGS_ERROR",
             },
         }
     }

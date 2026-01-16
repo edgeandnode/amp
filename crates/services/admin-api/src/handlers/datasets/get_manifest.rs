@@ -1,3 +1,7 @@
+use amp_datasets_registry::{
+    error::{GetManifestError, ResolveRevisionError},
+    manifests::ManifestParseError,
+};
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -81,7 +85,7 @@ pub async fn handler(
 
     // Resolve the revision to a manifest hash
     let reference = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_revision(&reference)
         .await
         .map_err(Error::ResolveRevision)?
@@ -93,22 +97,20 @@ pub async fn handler(
 
     // Load manifest content
     let manifest_content = ctx
-        .dataset_store
+        .datasets_registry
         .get_manifest(reference.hash())
         .await
         .map_err(|err| match err {
-            amp_dataset_store::GetManifestError::MetadataDbQueryPath(_) => {
-                Error::GetManifestPath(err)
-            }
-            amp_dataset_store::GetManifestError::ObjectStoreError(_) => Error::ReadManifest(err),
+            GetManifestError::MetadataDbQueryPath(_) => Error::GetManifestPath(err),
+            GetManifestError::ObjectStoreError(_) => Error::ReadManifest(err),
         })?
         .ok_or_else(|| Error::ManifestNotFound {
             hash: reference.hash().to_string(),
         })?;
 
     // Parse manifest JSON and return it
-    let manifest_json: JsonValue = manifest_content
-        .try_into_manifest()
+    let manifest_json = manifest_content
+        .try_into_manifest::<JsonValue>()
         .map_err(Error::ParseManifest)?;
 
     Ok(Json(manifest_json))
@@ -151,7 +153,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during revision resolution
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] ResolveRevisionError),
     /// Failed to query manifest path from metadata database
     ///
     /// This occurs when:
@@ -159,7 +161,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to query manifest path: {0}")]
-    GetManifestPath(#[source] amp_dataset_store::GetManifestError),
+    GetManifestPath(#[source] GetManifestError),
     /// Failed to read manifest from object store
     ///
     /// This occurs when:
@@ -168,7 +170,7 @@ pub enum Error {
     /// - Permissions issues accessing object store
     /// - Network errors
     #[error("Failed to read manifest from object store: {0}")]
-    ReadManifest(#[source] amp_dataset_store::GetManifestError),
+    ReadManifest(#[source] GetManifestError),
     /// Failed to parse manifest JSON
     ///
     /// This occurs when:
@@ -176,7 +178,7 @@ pub enum Error {
     /// - Manifest structure doesn't match expected schema
     /// - Required fields are missing
     #[error("Failed to parse manifest: {0}")]
-    ParseManifest(#[source] amp_dataset_store::ManifestParseError),
+    ParseManifest(#[source] ManifestParseError),
 }
 
 impl IntoErrorResponse for Error {

@@ -1,4 +1,4 @@
-use amp_dataset_store::DeleteManifestError;
+use amp_datasets_registry::error::{DeleteManifestError, UnlinkDatasetManifestsError};
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -74,7 +74,7 @@ pub async fn handler(
     // Step 1: Unlink all manifests from the dataset (idempotent)
     // This will delete all dataset_manifests links (which cascades to delete tags)
     let unlinked_hashes = ctx
-        .dataset_store
+        .datasets_registry
         .unlink_dataset_manifests(&namespace, &name)
         .await
         .map_err(Error::UnlinkDatasetManifests)?;
@@ -99,10 +99,10 @@ pub async fn handler(
 
     let deletion_futures = FuturesUnordered::new();
     for hash in unlinked_hashes {
-        let store = ctx.dataset_store.clone();
+        let registry = ctx.datasets_registry.clone();
 
         deletion_futures.push(async move {
-            if let Err(err) = store.delete_manifest(&hash).await {
+            if let Err(err) = registry.delete_manifest(&hash).await {
                 match err {
                     DeleteManifestError::ManifestLinked => {
                         // No-op
@@ -178,7 +178,7 @@ pub enum Error {
     /// - Failed to delete dataset manifest links from database
     /// - Database connection or transaction issues
     #[error("Failed to unlink dataset manifests: {0}")]
-    UnlinkDatasetManifests(#[source] amp_dataset_store::UnlinkDatasetManifestsError),
+    UnlinkDatasetManifests(#[source] UnlinkDatasetManifestsError),
 }
 
 impl IntoErrorResponse for Error {

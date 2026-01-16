@@ -1,0 +1,14 @@
+[package]
+name = "amp-datasets-registry"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+datasets-common = { path = "../datasets-common" }
+metadata-db = { path = "../metadata-db" }
+object_store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

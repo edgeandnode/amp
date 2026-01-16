@@ -2,9 +2,8 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use amp_config::Config as CommonConfig;
 use amp_data_store::DataStore;
-use amp_dataset_store::{
-    DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-};
+use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use common::BoxError;
 use monitoring::telemetry::metrics::Meter;
@@ -32,7 +31,7 @@ pub async fn run(
     )
     .map_err(Error::DataStoreCreation)?;
 
-    let dataset_store = {
+    let (dataset_store, datasets_registry) = {
         let provider_configs_store = ProviderConfigsStore::new(
             amp_object_store::new_with_prefix(
                 &config.providers_store_url,
@@ -47,11 +46,9 @@ pub async fn run(
             )
             .map_err(Error::ManifestsStoreCreation)?,
         );
-        DatasetStore::new(
-            metadata_db.clone(),
-            provider_configs_store,
-            dataset_manifests_store,
-        )
+        let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
+        let dataset_store = DatasetStore::new(datasets_registry.clone(), provider_configs_store);
+        (dataset_store, datasets_registry)
     };
 
     // Spawn controller (Admin API) if enabled
@@ -60,6 +57,7 @@ pub async fn run(
         let (addr, fut) = controller::service::new(
             Arc::new(controller_config),
             metadata_db.clone(),
+            datasets_registry,
             data_store.clone(),
             dataset_store.clone(),
             meter.clone(),

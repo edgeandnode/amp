@@ -1,6 +1,5 @@
-use amp_dataset_store::{
-    DatasetKind, LinkManifestError, RegisterManifestError, SetVersionTagError,
-};
+use amp_dataset_store::DatasetKind;
+use amp_datasets_registry::error::{LinkManifestError, RegisterManifestError, SetVersionTagError};
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -213,7 +212,7 @@ pub async fn handler(
             let manifest_hash = hash(&manifest_canonical);
 
             // Register manifest (store in object store + metadata DB)
-            ctx.dataset_store
+            ctx.datasets_registry
                 .register_manifest(&manifest_hash, manifest_canonical)
                 .await
                 .map_err(|err| {
@@ -241,7 +240,7 @@ pub async fn handler(
     };
 
     // Step 2: Link manifest to dataset
-    ctx.dataset_store
+    ctx.datasets_registry
         .link_manifest(&namespace, &name, &manifest_hash)
         .await
         .map_err(|err| match err {
@@ -275,7 +274,7 @@ pub async fn handler(
 
     // Step 3: Tag the manifest with version, if provided
     if let Some(version) = version {
-        ctx.dataset_store
+        ctx.datasets_registry
             .set_dataset_version_tag(&namespace, &name, &version, &manifest_hash)
             .await
             .map_err(|err| {

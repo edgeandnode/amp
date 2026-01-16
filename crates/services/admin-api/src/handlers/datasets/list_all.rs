@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::ListAllDatasetsError;
 use axum::{Json, extract::State, http::StatusCode};
 use datasets_common::{name::Name, namespace::Namespace, version::Version};
 
@@ -44,7 +45,7 @@ use crate::{
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, ErrorResponse> {
     // Query all tags from dataset store
     let tags = ctx
-        .dataset_store
+        .datasets_registry
         .list_all_datasets()
         .await
         .map_err(Error::ListAllDatasets)?;
@@ -136,7 +137,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list all datasets: {0}")]
-    ListAllDatasets(#[source] amp_dataset_store::ListAllDatasetsError),
+    ListAllDatasets(#[source] ListAllDatasetsError),
 }
 
 impl IntoErrorResponse for Error {

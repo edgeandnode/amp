@@ -350,10 +350,9 @@ impl TestCtxBuilder {
         )?;
 
         // Create shared DatasetStore instance (used by both server and worker)
-        let dataset_store = {
-            use amp_dataset_store::{
-                DatasetStore, manifests::DatasetManifestsStore, providers::ProviderConfigsStore,
-            };
+        let (datasets_registry, dataset_store) = {
+            use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+            use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
             let provider_configs_store =
                 ProviderConfigsStore::new(amp_object_store::new_with_prefix(
                     &config.providers_store_url,
@@ -364,11 +363,11 @@ impl TestCtxBuilder {
                     &config.manifests_store_url,
                     config.manifests_store_url.path(),
                 )?);
-            DatasetStore::new(
-                metadata_db.conn_pool().clone(),
-                provider_configs_store,
-                dataset_manifests_store,
-            )
+            let datasets_registry =
+                DatasetsRegistry::new(metadata_db.conn_pool().clone(), dataset_manifests_store);
+            let dataset_store =
+                DatasetStore::new(datasets_registry.clone(), provider_configs_store);
+            (datasets_registry, dataset_store)
         };
 
         // Create Anvil fixture (if enabled) and capture provider config for later registration
@@ -418,6 +417,7 @@ impl TestCtxBuilder {
         let controller = DaemonController::new(
             config.clone(),
             metadata_db.conn_pool().clone(),
+            datasets_registry,
             data_store.clone(),
             dataset_store.clone(),
             controller_meter,

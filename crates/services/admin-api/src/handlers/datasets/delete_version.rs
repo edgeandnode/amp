@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::{DeleteVersionTagError, ResolveRevisionError};
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -82,7 +83,7 @@ pub async fn handler(
 
     // First check if this version exists
     let version_hash = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_version_hash(&namespace, &name, &version)
         .await
         .map_err(Error::ResolveVersionRevision)?;
@@ -100,7 +101,7 @@ pub async fn handler(
 
     // Check if this version is the current "latest" version
     let latest_hash = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_latest_version_hash(&namespace, &name)
         .await
         .map_err(Error::ResolveLatestRevision)?;
@@ -112,7 +113,7 @@ pub async fn handler(
         return Err(Error::CannotDeleteLatestVersion.into());
     }
 
-    ctx.dataset_store
+    ctx.datasets_registry
         .delete_dataset_version_tag(&namespace, &name, &version)
         .await
         .map_err(Error::DeleteVersionTag)?;
@@ -137,7 +138,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during resolution
     #[error("Failed to resolve latest revision: {0}")]
-    ResolveLatestRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveLatestRevision(#[source] ResolveRevisionError),
     /// Failed to resolve the version revision
     ///
     /// This occurs when:
@@ -145,7 +146,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during resolution
     #[error("Failed to resolve version revision: {0}")]
-    ResolveVersionRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveVersionRevision(#[source] ResolveRevisionError),
     /// Cannot delete the version currently tagged as "latest"
     ///
     /// This occurs when:
@@ -160,7 +161,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors during deletion
     #[error("Failed to delete version tag: {0}")]
-    DeleteVersionTag(#[source] amp_dataset_store::DeleteVersionTagError),
+    DeleteVersionTag(#[source] DeleteVersionTagError),
 }
 
 impl IntoErrorResponse for Error {

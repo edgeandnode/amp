@@ -1,3 +1,4 @@
+use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -75,7 +76,7 @@ pub async fn handler(
 
     // Query version tags with full details
     let version_tags = ctx
-        .dataset_store
+        .datasets_registry
         .list_dataset_version_tags(&namespace, &name)
         .await
         .map_err(Error::ListVersionTags)?;
@@ -105,7 +106,7 @@ pub async fn handler(
 
     // Get dev tag hash
     let dev_hash = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_dev_version_hash(&namespace, &name)
         .await
         .map_err(Error::ResolveRevision)?
@@ -184,7 +185,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to list version tags: {0}")]
-    ListVersionTags(#[source] amp_dataset_store::ListVersionTagsError),
+    ListVersionTags(#[source] ListVersionTagsError),
 
     /// Dataset store operation error when resolving revision
     ///
@@ -193,7 +194,7 @@ pub enum Error {
     /// - Database connection issues
     /// - Internal database errors
     #[error("Failed to resolve revision: {0}")]
-    ResolveRevision(#[source] amp_dataset_store::ResolveRevisionError),
+    ResolveRevision(#[source] ResolveRevisionError),
 }
 
 impl IntoErrorResponse for Error {
