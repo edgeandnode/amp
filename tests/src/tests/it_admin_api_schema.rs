@@ -1424,7 +1424,7 @@ async fn function_not_in_dataset_fails_at_catalog_construction() {
         "should return FUNCTION_NOT_FOUND_IN_DATASET error"
     );
     assert!(
-        response.error_message.contains("eth.nonexistent_function")
+        response.error_message.contains("nonexistent_function")
             && response.error_message.contains("_/eth_firehose"),
         "error message should indicate function and dataset, got: {}",
         response.error_message
@@ -1726,7 +1726,7 @@ async fn multiple_functions_mixed_validity_fails() {
         "should return FUNCTION_NOT_FOUND_IN_DATASET error"
     );
     assert!(
-        response.error_message.contains("eth.nonexistent_fn"),
+        response.error_message.contains("nonexistent_fn"),
         "error message should indicate the invalid function, got: {}",
         response.error_message
     );

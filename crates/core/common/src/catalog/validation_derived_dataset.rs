@@ -1,0 +1,399 @@
+//! Validation-specific catalog construction for derived dataset manifests
+//!
+//! This module provides catalog creation for validating derived dataset manifests
+//! during the manifest compilation phase.
+//!
+//! ## Key Functions
+//!
+//! - [`create`] - Creates a LogicalCatalog for SQL validation
+//! - [`resolve_tables`] - Resolves table references using pre-resolved dependencies
+//! - [`resolve_udfs`] - Resolves function references to ScalarUDF instances
+
+use std::{
+    collections::{BTreeMap, btree_map::Entry},
+    sync::Arc,
+};
+
+use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
+use datasets_common::{
+    deps::alias::{DepAlias, DepAliasOrSelfRef, SELF_REF_KEYWORD},
+    func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
+    hash::Hash,
+    hash_reference::HashReference,
+    manifest::Function,
+    table_name::TableName,
+};
+use js_runtime::isolate_pool::IsolatePool;
+
+use crate::{
+    BoxError,
+    catalog::{
+        dataset_access::DatasetAccess,
+        logical::{LogicalCatalog, ResolvedTable},
+    },
+    js_udf::JsUdf,
+    sql::{FunctionReference, TableReference},
+};
+
+/// Map of table names to their SQL references (table refs and function refs) using dependency aliases or self-references.
+pub type TableReferencesMap = BTreeMap<
+    TableName,
+    (
+        Vec<TableReference<DepAlias>>,
+        Vec<FunctionReference<DepAliasOrSelfRef>>,
+    ),
+>;
+
+/// Creates a logical catalog for SQL validation using pre-resolved dependencies and functions.
+///
+/// Builds a unified logical catalog from table and function references across multiple tables,
+/// resolving dependency aliases to datasets for schema-only validation (no physical data access).
+///
+/// Delegates to specialized helpers:
+/// - [`resolve_tables`] - Resolves table references to `ResolvedTable` instances
+/// - [`resolve_udfs`] - Resolves function references to UDFs
+pub async fn create(
+    dataset_store: &impl DatasetAccess,
+    isolate_pool: IsolatePool,
+    manifest_deps: BTreeMap<DepAlias, HashReference>,
+    manifest_udfs: BTreeMap<FuncName, Function>,
+    refs: TableReferencesMap,
+) -> Result<LogicalCatalog, CreateLogicalCatalogError> {
+    let table_refs: Vec<_> = refs
+        .iter()
+        .flat_map(|(name, (table_refs, _))| {
+            table_refs.iter().map(move |table_ref| (name, table_ref))
+        })
+        .collect();
+
+    let tables = resolve_tables(dataset_store, &manifest_deps, table_refs)
+        .await
+        .map_err(CreateLogicalCatalogError::ResolveTables)?;
+
+    let func_refs: Vec<_> = refs
+        .iter()
+        .flat_map(|(name, (_, func_refs))| func_refs.iter().map(move |func_ref| (name, func_ref)))
+        .collect();
+
+    let udfs = resolve_udfs(
+        dataset_store,
+        isolate_pool,
+        &manifest_deps,
+        &manifest_udfs,
+        func_refs,
+    )
+    .await
+    .map_err(CreateLogicalCatalogError::ResolveUdfs)?;
+
+    Ok(LogicalCatalog { tables, udfs })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CreateLogicalCatalogError {
+    /// Failed to resolve table references to ResolvedTable instances
+    #[error(transparent)]
+    ResolveTables(ResolveTablesError),
+
+    /// Failed to resolve function references to UDF instances
+    #[error(transparent)]
+    ResolveUdfs(ResolveUdfsError),
+}
+
+/// Resolves table references to ResolvedTable instances using pre-resolved dependencies.
+async fn resolve_tables<'a>(
+    dataset_store: &impl DatasetAccess,
+    manifest_deps: &BTreeMap<DepAlias, HashReference>,
+    refs: impl IntoIterator<Item = (&'a TableName, &'a TableReference<DepAlias>)> + 'a,
+) -> Result<Vec<ResolvedTable>, ResolveTablesError> {
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, ResolvedTable>> =
+        BTreeMap::new();
+
+    for (table_name, table_ref) in refs {
+        match table_ref {
+            TableReference::Bare { .. } => {
+                return Err(ResolveTablesError::UnqualifiedTable {
+                    table_name: table_name.clone(),
+                    table_ref: table_ref.to_string(),
+                });
+            }
+            TableReference::Partial { schema, table } => {
+                let dataset_ref = manifest_deps.get(schema.as_ref()).ok_or_else(|| {
+                    ResolveTablesError::DependencyAliasNotFound {
+                        table_name: table_name.clone(),
+                        alias: schema.as_ref().clone(),
+                    }
+                })?;
+
+                let Entry::Vacant(entry) = tables
+                    .entry(dataset_ref.hash().clone())
+                    .or_default()
+                    .entry(table_ref.clone())
+                else {
+                    continue;
+                };
+
+                let dataset = dataset_store
+                    .get_dataset(dataset_ref)
+                    .await
+                    .map_err(|err| ResolveTablesError::GetDataset {
+                        table_name: table_name.clone(),
+                        reference: dataset_ref.clone(),
+                        source: err,
+                    })?;
+
+                let dataset_table = dataset
+                    .tables
+                    .iter()
+                    .find(|t| t.name() == table)
+                    .ok_or_else(|| ResolveTablesError::TableNotFoundInDataset {
+                        table_name: table_name.clone(),
+                        referenced_table_name: table.as_ref().clone(),
+                        reference: dataset_ref.clone(),
+                    })?;
+
+                let resolved_table = ResolvedTable::new(
+                    dataset_table.clone(),
+                    schema.to_string(),
+                    dataset_ref.clone(),
+                    dataset.start_block,
+                );
+
+                entry.insert(resolved_table);
+            }
+        }
+    }
+
+    Ok(tables
+        .into_values()
+        .flat_map(|map| map.into_values())
+        .collect())
+}
+
+/// Resolves function references to ScalarUDF instances using pre-resolved dependencies.
+async fn resolve_udfs<'a>(
+    dataset_store: &impl DatasetAccess,
+    isolate_pool: IsolatePool,
+    manifest_deps: &BTreeMap<DepAlias, HashReference>,
+    manifest_udfs: &BTreeMap<FuncName, Function>,
+    refs: impl IntoIterator<Item = (&'a TableName, &'a FunctionReference<DepAliasOrSelfRef>)> + 'a,
+) -> Result<Vec<ScalarUDF>, ResolveUdfsError> {
+    let mut udfs: BTreeMap<Hash, BTreeMap<FunctionReference<DepAliasOrSelfRef>, ScalarUDF>> =
+        BTreeMap::new();
+    let mut self_udfs: BTreeMap<FunctionReference<DepAliasOrSelfRef>, ScalarUDF> = BTreeMap::new();
+
+    for (table_name, func_ref) in refs {
+        match func_ref {
+            FunctionReference::Bare { function: _ } => {
+                continue;
+            }
+            FunctionReference::Qualified { schema, function } => match schema.as_ref() {
+                DepAliasOrSelfRef::DepAlias(dep_alias) => {
+                    let dataset_ref = manifest_deps.get(dep_alias).ok_or_else(|| {
+                        ResolveUdfsError::DependencyAliasNotFound {
+                            table_name: table_name.clone(),
+                            alias: dep_alias.clone(),
+                        }
+                    })?;
+
+                    // Check vacancy BEFORE loading dataset
+                    let Entry::Vacant(entry) = udfs
+                        .entry(dataset_ref.hash().clone())
+                        .or_default()
+                        .entry(func_ref.clone())
+                    else {
+                        continue;
+                    };
+
+                    // Only load dataset if UDF not already resolved
+                    let dataset = dataset_store
+                        .get_dataset(dataset_ref)
+                        .await
+                        .map_err(|err| ResolveUdfsError::GetDataset {
+                            table_name: table_name.clone(),
+                            reference: dataset_ref.clone(),
+                            source: err,
+                        })?;
+
+                    let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
+                        dataset_store
+                            .eth_call_for_dataset(&schema.to_string(), &dataset)
+                            .await
+                            .map_err(|err| ResolveUdfsError::EthCallUdfCreation {
+                                table_name: table_name.clone(),
+                                reference: dataset_ref.clone(),
+                                source: err,
+                            })?
+                            .ok_or_else(|| ResolveUdfsError::EthCallNotAvailable {
+                                table_name: table_name.clone(),
+                                reference: dataset_ref.clone(),
+                            })?
+                    } else {
+                        dataset
+                            .function_by_name(schema.to_string(), function, IsolatePool::dummy())
+                            .ok_or_else(|| ResolveUdfsError::FunctionNotFoundInDataset {
+                                table_name: table_name.clone(),
+                                function_name: (**function).clone(),
+                                reference: dataset_ref.clone(),
+                            })?
+                    };
+
+                    entry.insert(udf);
+                }
+                DepAliasOrSelfRef::SelfRef => {
+                    let func_def = manifest_udfs.get(function).ok_or_else(|| {
+                        ResolveUdfsError::SelfReferencedFunctionNotFound {
+                            table_name: table_name.clone(),
+                            function_name: (**function).clone(),
+                        }
+                    })?;
+
+                    let Entry::Vacant(entry) = self_udfs.entry(func_ref.clone()) else {
+                        continue;
+                    };
+
+                    let udf = AsyncScalarUDF::new(Arc::new(JsUdf::new(
+                        isolate_pool.clone(),
+                        Some(SELF_REF_KEYWORD.to_string()),
+                        func_def.source.source.clone(),
+                        func_def.source.filename.clone().into(),
+                        Arc::from(function.as_ref().as_str()),
+                        func_def
+                            .input_types
+                            .iter()
+                            .map(|dt| dt.clone().into_arrow())
+                            .collect(),
+                        func_def.output_type.clone().into_arrow(),
+                    )))
+                    .into_scalar_udf();
+
+                    entry.insert(udf);
+                }
+            },
+        }
+    }
+
+    Ok(self_udfs
+        .into_values()
+        .chain(udfs.into_values().flat_map(|map| map.into_values()))
+        .collect())
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveTablesError {
+    /// Table is not qualified with a schema/dataset name
+    #[error(
+        "In table '{table_name}': Unqualified table '{table_ref}', all tables must be qualified with a dataset"
+    )]
+    UnqualifiedTable {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The unqualified table reference string
+        table_ref: String,
+    },
+
+    /// Dependency alias not found when processing table reference
+    #[error(
+        "In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
+    )]
+    DependencyAliasNotFound {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The dependency alias that was not found in the dependencies map
+        alias: DepAlias,
+    },
+
+    /// Failed to retrieve dataset from store when loading dataset for table reference
+    #[error("In table '{table_name}': Failed to retrieve dataset '{reference}'")]
+    GetDataset {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The hash reference of the dataset that failed to load
+        reference: HashReference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Table not found in dataset
+    #[error(
+        "In table '{table_name}': Table '{referenced_table_name}' not found in dataset '{reference}'"
+    )]
+    TableNotFoundInDataset {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The name of the table that was not found in the dataset
+        referenced_table_name: TableName,
+        /// The hash reference of the dataset where the table was not found
+        reference: HashReference,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveUdfsError {
+    /// Dependency alias not found when processing function reference
+    #[error(
+        "In table '{table_name}': Dependency alias '{alias}' referenced in function but not provided in dependencies"
+    )]
+    DependencyAliasNotFound {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The dependency alias that was not found in the dependencies map
+        alias: DepAlias,
+    },
+
+    /// Failed to retrieve dataset from store when loading dataset for function
+    #[error("In table '{table_name}': Failed to retrieve dataset '{reference}' for function")]
+    GetDataset {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The hash reference of the dataset that failed to load
+        reference: HashReference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// Failed to create ETH call UDF for dataset referenced in function name
+    #[error(
+        "In table '{table_name}': Failed to create ETH call UDF for dataset '{reference}' for function"
+    )]
+    EthCallUdfCreation {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The hash reference of the dataset for which the eth_call UDF creation failed
+        reference: HashReference,
+        #[source]
+        source: BoxError,
+    },
+
+    /// eth_call function not available for dataset
+    #[error("In table '{table_name}': Function 'eth_call' not available for dataset '{reference}'")]
+    EthCallNotAvailable {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The hash reference of the dataset that does not support eth_call
+        reference: HashReference,
+    },
+
+    /// Function not found in dataset
+    #[error(
+        "In table '{table_name}': Function '{function_name}' not found in dataset '{reference}'"
+    )]
+    FunctionNotFoundInDataset {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The name of the function that was not found
+        function_name: FuncName,
+        /// The hash reference of the dataset where the function was not found
+        reference: HashReference,
+    },
+
+    /// Self-referenced function not found in manifest's functions map.
+    #[error(
+        "In table '{table_name}': Self-referenced function '{function_name}' not found in manifest functions"
+    )]
+    SelfReferencedFunctionNotFound {
+        /// The table containing the SQL query with the invalid reference
+        table_name: TableName,
+        /// The function name that was referenced but not defined
+        function_name: FuncName,
+    },
+}

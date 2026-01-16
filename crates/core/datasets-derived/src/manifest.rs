@@ -4,15 +4,14 @@
 //! Derived datasets replace the legacy SQL dataset format, providing versioned, dependency-aware dataset
 //! definitions with explicit schemas and functions.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use common::{BlockNum, sql_str::SqlStr};
 // Re-export schema types from datasets-common
-pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
+pub use datasets_common::manifest::{ArrowSchema, Field, Function, FunctionSource, TableSchema};
 use datasets_common::{
     deps::{alias::DepAlias, reference::DepReference},
     func_name::FuncName,
-    manifest::DataType,
     table_name::TableName,
 };
 
@@ -57,32 +56,6 @@ pub struct Table {
     pub schema: TableSchema,
     /// Network this table belongs to
     pub network: String,
-}
-
-/// User-defined function specification.
-///
-/// Defines a custom function with input/output types and implementation source.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct Function {
-    // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
-    /// Arrow data types for function input parameters
-    pub input_types: Vec<DataType>,
-    /// Arrow data type for function return value
-    pub output_type: DataType,
-    /// Function implementation source code and metadata
-    pub source: FunctionSource,
-}
-
-/// Source code and metadata for a user-defined function.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct FunctionSource {
-    /// Function implementation source code
-    pub source: Arc<str>,
-    /// Filename where the function is defined
-    pub filename: String,
 }
 
 /// Input source for a table definition.
