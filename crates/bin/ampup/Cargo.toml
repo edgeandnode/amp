@@ -28,4 +28,4 @@ console = "0.15"
 dialoguer = "0.11"
 
 [build-dependencies]
-vergen-gitcl = { version = "1.0.8", features = ["build"] }
+vergen-gitcl = { version = "9.0.0", features = ["build"] }
