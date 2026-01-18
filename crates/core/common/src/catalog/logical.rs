@@ -1,22 +1,19 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use datafusion::{
-    arrow::datatypes::{DataType, SchemaRef},
+    arrow::datatypes::DataType,
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::{
+    dataset::{RawDatasetKind, Table},
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
     table_name::TableName,
+    udf::{IsolatePool, JsUdf},
 };
-use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
+use crate::{BlockNum, sql::TableReference};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -65,47 +62,42 @@ impl Dataset {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
-pub struct Table {
-    /// Bare table name.
-    name: TableName,
-    schema: SchemaRef,
-    network: String,
-    sorted_by: BTreeSet<String>,
-}
-
-impl Table {
-    pub fn new(
-        name: TableName,
-        schema: SchemaRef,
-        network: String,
-        sorted_by: Vec<String>,
-    ) -> Self {
-        let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
-        sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
-        Self {
-            name,
-            schema,
-            network,
-            sorted_by,
-        }
+impl datasets_common::dataset::Dataset for Dataset {
+    fn tables(&self) -> &[Table] {
+        &self.tables
     }
 
-    pub fn name(&self) -> &TableName {
-        &self.name
+    fn start_block(&self) -> Option<BlockNum> {
+        self.start_block
     }
 
-    pub fn schema(&self) -> &SchemaRef {
-        &self.schema
+    fn kind(&self) -> RawDatasetKind {
+        RawDatasetKind::new(self.kind.to_string())
     }
 
-    pub fn network(&self) -> &str {
-        &self.network
+    fn dependencies(&self) -> &BTreeMap<DepAlias, DepReference> {
+        &self.dependencies
     }
 
-    /// Column names by which this table is naturally sorted.
-    pub fn sorted_by(&self) -> &BTreeSet<String> {
-        &self.sorted_by
+    fn reference(&self) -> &HashReference {
+        &self.reference
+    }
+
+    fn network(&self) -> Option<&String> {
+        self.network.as_ref()
+    }
+
+    fn finalized_blocks_only(&self) -> bool {
+        self.finalized_blocks_only
+    }
+
+    fn function_by_name(
+        &self,
+        schema: String,
+        name: &str,
+        isolate_pool: IsolatePool,
+    ) -> Option<ScalarUDF> {
+        self.function_by_name(schema, name, isolate_pool)
     }
 }
 
@@ -149,7 +141,7 @@ impl ResolvedTable {
     }
 
     pub fn table_ref(&self) -> TableReference {
-        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name.clone())
+        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name().clone())
     }
 
     pub fn dataset_reference(&self) -> &HashReference {
@@ -162,7 +154,7 @@ impl ResolvedTable {
 
     /// Bare table name
     pub fn name(&self) -> &TableName {
-        &self.table.name
+        self.table.name()
     }
 
     /// Returns the dataset reference portion of SQL table references.

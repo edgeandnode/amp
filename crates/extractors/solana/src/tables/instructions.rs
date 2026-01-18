@@ -1,13 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM, Table,
+    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{ArrayRef, ListBuilder, UInt8Builder, UInt32Builder, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
     metadata::segments::BlockRange,
 };
+use datasets_common::dataset::Table;
 use serde::Deserialize;
 use solana_clock::Slot;
 

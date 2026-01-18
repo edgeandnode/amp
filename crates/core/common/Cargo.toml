@@ -22,7 +22,6 @@ futures.workspace = true
 governor.workspace = true
 indoc.workspace = true
 itertools.workspace = true
-js-runtime = { path = "../js-runtime" }
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }
 object_store.workspace = true

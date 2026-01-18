@@ -2,7 +2,6 @@ pub mod arrow_helpers;
 pub mod catalog;
 pub mod evm;
 pub mod incrementalizer;
-pub mod js_udf;
 pub mod memory_pool;
 pub mod metadata;
 pub mod plan_visitors;
@@ -28,6 +27,7 @@ use datafusion::arrow::{
     error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};
+use datasets_common::dataset::Table;
 use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
 pub use planning_context::{DetachedLogicalPlan, PlanningContext};

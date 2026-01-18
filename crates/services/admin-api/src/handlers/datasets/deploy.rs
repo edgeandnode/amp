@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 
-use amp_dataset_store::GetDatasetError;
+use amp_dataset_store::{GetDatasetError, dataset_kind::DatasetKind};
 use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
-use amp_providers_registry::dataset_kind::DatasetKind;
 use axum::{
     Json,
     extract::{
@@ -136,8 +135,8 @@ pub async fn handler(
 
     // Parse dataset kind (must always succeed - panic if DB is in bad state)
     let dataset_kind: DatasetKind = dataset
-        .kind
-        .parse()
+        .kind()
+        .try_into()
         .expect("dataset kind in database must be valid");
 
     // Schedule the extraction job using the scheduler

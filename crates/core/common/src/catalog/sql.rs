@@ -73,9 +73,8 @@ use amp_data_store::DataStore;
 use datafusion::{logical_expr::ScalarUDF, sql::parser::Statement};
 use datasets_common::{
     func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, partial_reference::PartialReference,
-    reference::Reference,
+    reference::Reference, udf::IsolatePool,
 };
-use js_runtime::isolate_pool::IsolatePool;
 
 use super::{
     dataset_access::DatasetAccess,
@@ -283,7 +282,7 @@ pub async fn planning_ctx_for_sql(
 
                 // Find table in dataset
                 let dataset_table = dataset
-                    .tables
+                    .tables()
                     .iter()
                     .find(|t| t.name() == table)
                     .ok_or_else(|| PlanningCtxForSqlError::TableNotFoundInDataset {
@@ -296,7 +295,7 @@ pub async fn planning_ctx_for_sql(
                     dataset_table.clone(),
                     schema.to_string(),
                     hash_ref.clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                 );
 
                 // Insert into vacant entry
@@ -350,7 +349,7 @@ pub async fn planning_ctx_for_sql(
                 // Get the UDF for this function reference
                 let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
-                        .eth_call_for_dataset(&schema.to_string(), &dataset)
+                        .eth_call_for_dataset(&schema.to_string(), dataset.as_ref())
                         .await
                         .map_err(|err| PlanningCtxForSqlError::EthCallUdfCreation {
                             reference: hash_ref.clone(),
@@ -458,7 +457,7 @@ async fn get_logical_catalog(
 
                 // Find table in dataset
                 let dataset_table = dataset
-                    .tables
+                    .tables()
                     .iter()
                     .find(|t| t.name() == table)
                     .ok_or_else(|| GetLogicalCatalogError::TableNotFoundInDataset {
@@ -471,7 +470,7 @@ async fn get_logical_catalog(
                     dataset_table.clone(),
                     schema.to_string(),
                     hash_ref.clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                 );
 
                 // Insert into vacant entry
@@ -525,7 +524,7 @@ async fn get_logical_catalog(
                 // Get the UDF for this function reference
                 let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     store
-                        .eth_call_for_dataset(&schema.to_string(), &dataset)
+                        .eth_call_for_dataset(&schema.to_string(), dataset.as_ref())
                         .await
                         .map_err(|err| GetLogicalCatalogError::EthCallUdfCreation {
                             reference: hash_ref.clone(),

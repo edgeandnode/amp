@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc};
 use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{hash_reference::HashReference, reference::Reference};
 
-use crate::{BoxError, Dataset};
+use crate::BoxError;
 
 /// Minimal trait for accessing datasets and provider configuration.
 ///
@@ -29,7 +29,7 @@ pub trait DatasetAccess {
     fn get_dataset(
         &self,
         reference: &HashReference,
-    ) -> impl Future<Output = Result<Arc<Dataset>, BoxError>> + Send;
+    ) -> impl Future<Output = Result<Arc<dyn datasets_common::dataset::Dataset>, BoxError>> + Send;
 
     /// Create an eth_call UDF for the given dataset if applicable.
     ///
@@ -37,6 +37,6 @@ pub trait DatasetAccess {
     fn eth_call_for_dataset(
         &self,
         sql_table_ref_schema: &str,
-        dataset: &Dataset,
+        dataset: &dyn datasets_common::dataset::Dataset,
     ) -> impl Future<Output = Result<Option<ScalarUDF>, BoxError>> + Send;
 }
