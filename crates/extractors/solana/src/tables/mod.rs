@@ -1,4 +1,5 @@
 use common::{BoxResult, RawDatasetRows, metadata::segments::BlockRange};
+use datasets_common::dataset::Table;
 use solana_clock::Slot;
 
 use crate::rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage};
@@ -8,7 +9,7 @@ pub mod instructions;
 pub mod messages;
 pub mod transactions;
 
-pub fn all(network: &str) -> Vec<common::Table> {
+pub fn all(network: &str) -> Vec<Table> {
     vec![
         block_headers::table(network.to_string()),
         transactions::table(network.to_string()),

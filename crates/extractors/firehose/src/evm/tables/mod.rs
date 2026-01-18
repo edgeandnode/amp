@@ -1,7 +1,7 @@
 pub mod calls;
 pub mod transactions;
 
-use common::Table;
+use datasets_common::dataset::Table;
 
 pub fn all(network: &str) -> Vec<Table> {
     vec![

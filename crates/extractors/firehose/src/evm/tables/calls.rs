@@ -3,8 +3,7 @@ use std::sync::{Arc, LazyLock};
 use common::{
     BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
     EVM_CURRENCY_TYPE, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
-    EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Table, Timestamp,
-    TimestampArrayBuilder,
+    EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Timestamp, TimestampArrayBuilder,
     arrow::{
         array::{
             ArrayRef, BinaryBuilder, BooleanBuilder, Int32Builder, UInt32Builder, UInt64Builder,
@@ -13,6 +12,7 @@ use common::{
     },
     metadata::segments::BlockRange,
 };
+use datasets_common::dataset::Table;
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 

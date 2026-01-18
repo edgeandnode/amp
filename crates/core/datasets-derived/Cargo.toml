@@ -12,7 +12,6 @@ amp-data-store = { path = "../data-store" }
 common = { version = "0.1.0", path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
-js-runtime = { version = "0.1.0", path = "../js-runtime" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = {workspace = true, optional = true}

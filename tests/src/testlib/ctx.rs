@@ -350,14 +350,14 @@ impl TestCtxBuilder {
         )?;
 
         // Create shared DatasetStore instance (used by both server and worker)
-        let (datasets_registry, dataset_store) = {
-            use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+        let (dataset_store, datasets_registry, providers_registry) = {
+            use amp_dataset_store::DatasetStore;
             use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
-            let provider_configs_store =
-                ProviderConfigsStore::new(amp_object_store::new_with_prefix(
-                    &config.providers_store_url,
-                    config.providers_store_url.path(),
-                )?);
+            use amp_providers_registry::ProvidersRegistry;
+            let providers_registry = ProvidersRegistry::new(amp_object_store::new_with_prefix(
+                &config.providers_store_url,
+                config.providers_store_url.path(),
+            )?);
             let dataset_manifests_store =
                 DatasetManifestsStore::new(amp_object_store::new_with_prefix(
                     &config.manifests_store_url,
@@ -366,8 +366,8 @@ impl TestCtxBuilder {
             let datasets_registry =
                 DatasetsRegistry::new(metadata_db.conn_pool().clone(), dataset_manifests_store);
             let dataset_store =
-                DatasetStore::new(datasets_registry.clone(), provider_configs_store);
-            (datasets_registry, dataset_store)
+                DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+            (dataset_store, datasets_registry, providers_registry)
         };
 
         // Create Anvil fixture (if enabled) and capture provider config for later registration
@@ -418,6 +418,7 @@ impl TestCtxBuilder {
             config.clone(),
             metadata_db.conn_pool().clone(),
             datasets_registry,
+            providers_registry,
             data_store.clone(),
             dataset_store.clone(),
             controller_meter,

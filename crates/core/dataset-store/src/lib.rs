@@ -6,8 +6,9 @@ use std::{
 };
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
+use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
 use common::{
-    BlockStreamer, BlockStreamerExt, BoxError, Dataset,
+    BlockStreamer, BlockStreamerExt, BoxError,
     evm::{self, udfs::EthCall},
 };
 use datafusion::{
@@ -36,102 +37,37 @@ use tracing::instrument;
 use url::Url;
 
 mod block_stream_client;
-mod dataset_kind;
+pub mod dataset_kind;
 mod env_substitute;
 mod error;
-pub mod providers;
 
-use self::{
-    block_stream_client::BlockStreamClient,
-    providers::{ProviderConfig, ProviderConfigsStore},
+use self::block_stream_client::BlockStreamClient;
+pub use self::error::{
+    EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
+    GetDerivedManifestError,
 };
-pub use self::{
-    dataset_kind::{DatasetKind, UnsupportedKindError},
-    error::{
-        EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
-        GetDerivedManifestError,
-    },
-};
+use crate::dataset_kind::{DatasetKind, UnsupportedKindError};
 
 #[derive(Clone)]
 pub struct DatasetStore {
     // Datasets registry for managing dataset revisions and tags.
     datasets_registry: DatasetsRegistry,
-    // Provider store for managing provider configurations and caching.
-    provider_configs_store: ProviderConfigsStore,
+    // Provider registry for managing provider configurations and caching.
+    providers_registry: ProvidersRegistry,
     // Cache maps HashReference to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<HashReference, ScalarUDF>>>,
     // This cache maps HashReference to the dataset definition.
-    dataset_cache: Arc<RwLock<HashMap<HashReference, Arc<Dataset>>>>,
+    dataset_cache: Arc<RwLock<HashMap<HashReference, Arc<dyn datasets_common::dataset::Dataset>>>>,
 }
 
 impl DatasetStore {
-    pub fn new(
-        datasets_registry: DatasetsRegistry,
-        provider_configs_store: ProviderConfigsStore,
-    ) -> Self {
+    pub fn new(datasets_registry: DatasetsRegistry, providers_registry: ProvidersRegistry) -> Self {
         Self {
             datasets_registry,
-            provider_configs_store,
+            providers_registry,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
         }
-    }
-}
-
-// Provider configuration  management APIs
-impl DatasetStore {
-    /// Load provider configurations from disk and initialize the cache.
-    ///
-    /// Overwrites existing cache contents. Invalid configuration files are logged and skipped.
-    pub async fn load_providers_into_cache(&self) {
-        self.provider_configs_store.load_into_cache().await
-    }
-
-    /// Get all provider configurations, using cache if available
-    ///
-    /// Returns a read guard that dereferences to the cached `BTreeMap<String, ProviderConfig>`.
-    /// This provides efficient access to all provider configurations without cloning.
-    ///
-    /// # Deadlock Warning
-    ///
-    /// The returned guard holds a read lock on the internal cache. Holding this guard
-    /// for extended periods can cause deadlocks with operations that require write access
-    /// (such as `register_provider` and `delete_provider`). Extract the needed data
-    /// immediately and drop the guard as soon as possible.
-    #[must_use]
-    pub async fn get_all_providers(
-        &self,
-    ) -> impl std::ops::Deref<Target = BTreeMap<String, ProviderConfig>> + '_ {
-        self.provider_configs_store.get_all().await
-    }
-
-    /// Get a provider configuration by name, using cache if available
-    pub async fn get_provider_by_name(&self, name: &str) -> Option<ProviderConfig> {
-        self.provider_configs_store.get_by_name(name).await
-    }
-
-    /// Register a new provider configuration in both cache and store
-    ///
-    /// If a provider configuration with the same name already exists, returns a conflict error.
-    pub async fn register_provider(
-        &self,
-        provider: ProviderConfig,
-    ) -> Result<(), providers::RegisterError> {
-        self.provider_configs_store.register(provider).await
-    }
-
-    /// Delete a provider configuration by name from both the store and cache
-    ///
-    /// This operation fails if the provider configuration file does not exist in the store,
-    /// ensuring consistent delete behavior across different object store implementations.
-    ///
-    /// # Cache Management
-    /// - If file not found: removes stale cache entry and returns `DeleteError::NotFound`
-    /// - If other store errors: preserves cache (file may still exist) and propagates error
-    /// - If deletion succeeds: removes from both store and cache
-    pub async fn delete_provider(&self, name: &str) -> Result<(), providers::DeleteError> {
-        self.provider_configs_store.delete(name).await
     }
 }
 
@@ -170,7 +106,7 @@ impl DatasetStore {
     pub async fn get_dataset(
         &self,
         reference: &HashReference,
-    ) -> Result<Arc<Dataset>, GetDatasetError> {
+    ) -> Result<Arc<dyn datasets_common::dataset::Dataset>, GetDatasetError> {
         let hash = reference.hash();
 
         // Check cache using HashReference as the key
@@ -205,14 +141,14 @@ impl DatasetStore {
                 source,
             })?;
 
-        let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
+        let kind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
             GetDatasetError::UnsupportedKind {
                 reference: reference.clone(),
                 kind: err.kind,
             }
         })?;
 
-        let dataset = match kind {
+        let dataset: Arc<dyn datasets_common::dataset::Dataset> = match kind {
             DatasetKind::EvmRpc => {
                 let manifest = manifest_content
                     .try_into_manifest::<EvmRpcManifest>()
@@ -221,7 +157,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                evm_rpc_datasets::dataset(reference.clone(), manifest)
+                Arc::new(evm_rpc_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::Solana => {
                 let manifest = manifest_content
@@ -231,7 +167,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                solana_datasets::dataset(reference.clone(), manifest)
+                Arc::new(solana_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content
@@ -241,7 +177,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                eth_beacon_datasets::dataset(reference.clone(), manifest)
+                Arc::new(eth_beacon_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content
@@ -251,7 +187,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                firehose_datasets::evm::dataset(reference.clone(), manifest)
+                Arc::new(firehose_datasets::evm::dataset(reference.clone(), manifest))
             }
             DatasetKind::Derived => {
                 let manifest = manifest_content
@@ -261,16 +197,16 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
-                    GetDatasetError::CreateDerivedDataset {
-                        reference: reference.clone(),
-                        source,
-                    }
-                })?
+                Arc::new(
+                    datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
+                        GetDatasetError::CreateDerivedDataset {
+                            reference: reference.clone(),
+                            source,
+                        }
+                    })?,
+                )
             }
         };
-
-        let dataset = Arc::new(dataset);
 
         // Cache the dataset
         self.dataset_cache
@@ -437,11 +373,17 @@ impl DatasetStore {
     async fn find_provider(&self, kind: DatasetKind, network: String) -> Option<ProviderConfig> {
         // Collect matching provider configurations into a vector for shuffling
         let mut matching_providers = self
-            .provider_configs_store
+            .providers_registry
             .get_all()
             .await
             .values()
-            .filter(|prov| prov.kind == kind && prov.network == network)
+            .filter_map(|prov| {
+                let prov_kind: DatasetKind = (&prov.kind).try_into().ok()?;
+                if prov_kind != kind || prov.network != network {
+                    return None;
+                }
+                Some(prov)
+            })
             .cloned()
             .collect::<Vec<_>>();
 
@@ -486,9 +428,9 @@ impl DatasetStore {
     async fn eth_call_for_dataset(
         &self,
         sql_table_ref_schema: &str,
-        dataset: &Dataset,
+        dataset: &dyn datasets_common::dataset::Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        if dataset.kind != EvmRpcDatasetKind {
+        if dataset.kind().as_str() != EvmRpcDatasetKind {
             return Ok(None);
         }
 
@@ -498,7 +440,7 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        let Some(network) = &dataset.network else {
+        let Some(network) = dataset.network() else {
             tracing::warn!(
                 dataset = %dataset.reference().short_display(),
                 "dataset is missing required 'network' field for evm-rpc kind"
@@ -567,14 +509,17 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
             .map_err(Into::into)
     }
 
-    async fn get_dataset(&self, reference: &HashReference) -> Result<Arc<Dataset>, BoxError> {
+    async fn get_dataset(
+        &self,
+        reference: &HashReference,
+    ) -> Result<Arc<dyn datasets_common::dataset::Dataset>, BoxError> {
         self.get_dataset(reference).await.map_err(Into::into)
     }
 
     async fn eth_call_for_dataset(
         &self,
         sql_table_ref_schema: &str,
-        dataset: &Dataset,
+        dataset: &dyn datasets_common::dataset::Dataset,
     ) -> Result<Option<ScalarUDF>, BoxError> {
         self.eth_call_for_dataset(sql_table_ref_schema, dataset)
             .await
@@ -598,13 +543,13 @@ pub async fn dataset_and_dependencies(
             .ok_or_else(|| BoxError::from(format!("dataset '{}' not found", dataset_ref)))?;
         let dataset = store.get_dataset(&hash_ref).await?;
 
-        if dataset.kind != DerivedDatasetKind {
+        if dataset.kind().as_str() != DerivedDatasetKind {
             deps.insert(dataset_ref, vec![]);
             continue;
         }
 
         let refs: Vec<Reference> = dataset
-            .dependencies
+            .dependencies()
             .values()
             .map(|dep| dep.to_reference())
             .collect();

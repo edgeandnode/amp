@@ -16,12 +16,11 @@
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use common::BoxError;
+use datasets_common::dataset::RawDatasetKind;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
 use object_store::ObjectStore;
 use parking_lot::RwLock;
-
-use crate::dataset_kind::DatasetKind;
 
 /// Manages provider configurations and caching
 ///
@@ -47,16 +46,16 @@ use crate::dataset_kind::DatasetKind;
 /// **Note**: External changes to the underlying store will not be reflected in the cache
 /// until the process is restarted, as there is no automatic cache invalidation mechanism.
 #[derive(Debug, Clone)]
-pub struct ProviderConfigsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
+pub struct ProvidersRegistry<S: ObjectStore = Arc<dyn ObjectStore>> {
     store: S,
     cache: Arc<RwLock<BTreeMap<String, ProviderConfig>>>,
 }
 
-impl<S> ProviderConfigsStore<S>
+impl<S> ProvidersRegistry<S>
 where
     S: ObjectStore + Clone,
 {
-    /// Create a new [`ProviderConfigsStore`] instance with the given underlying store.
+    /// Create a new [`ProvidersRegistry`] instance with the given underlying store.
     pub fn new(store: S) -> Self {
         Self {
             store,
@@ -276,8 +275,8 @@ pub struct ProviderConfig {
     /// Unique name of the provider configuration
     #[serde(default)]
     pub name: String,
-    /// The type of provider (e.g., "evm-rpc", "firehose")
-    pub kind: DatasetKind,
+    /// The type of provider as raw string (e.g., "evm-rpc", "firehose")
+    pub kind: RawDatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     pub network: String,
     /// All other provider-specific configuration fields

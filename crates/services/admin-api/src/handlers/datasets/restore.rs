@@ -120,7 +120,7 @@ pub async fn handler(
         let dataset_ref = dataset_ref.clone();
         let table_def = table_def.clone();
         let table_name = table_def.name().clone();
-        let start_block = dataset.start_block;
+        let start_block = dataset.start_block();
 
         tracing::debug!(%dataset_ref, %table_name, "restoring table");
 

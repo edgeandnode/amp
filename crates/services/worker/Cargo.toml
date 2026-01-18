@@ -11,6 +11,7 @@ chrono.workspace = true
 common = { path = "../../core/common" }
 amp-config = { path = "../../config" }
 amp-dataset-store = { path = "../../core/dataset-store" }
+amp-providers-registry = { path = "../../core/providers-registry" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 futures.workspace = true

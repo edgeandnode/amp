@@ -1,8 +1,9 @@
 use amp_datasets_registry::manifests::ManifestParseError;
+use amp_providers_registry::ParseConfigError;
 use common::BoxError;
 use datasets_common::{hash::Hash, hash_reference::HashReference};
 
-use crate::{DatasetKind, providers::ParseConfigError};
+use crate::dataset_kind::DatasetKind;
 
 /// Errors specific to getting dataset operations
 #[derive(Debug, thiserror::Error)]

@@ -13,6 +13,8 @@ num-traits = "0.2.19"
 deadpool = "0.12.2"
 num_cpus = "1.16.0"
 tokio.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+indoc.workspace = true

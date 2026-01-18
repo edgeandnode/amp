@@ -24,7 +24,7 @@
 
 use std::path::PathBuf;
 
-use amp_dataset_store::DatasetKind;
+use amp_dataset_store::dataset_kind::DatasetKind;
 use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 use monitoring::logging;
 
@@ -56,7 +56,7 @@ pub struct Args {
 }
 
 /// Create a TableSchema from a logical table
-fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
+fn table_schema_from_logical_table(table: &datasets_common::dataset::Table) -> TableSchema {
     let fields: Vec<Field> = table
         .schema()
         .fields()

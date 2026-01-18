@@ -23,7 +23,6 @@ use common::{
         logical::LogicalCatalog,
         physical::{Catalog, PhysicalTable},
     },
-    js_udf::JsUdf,
     query_context::QueryEnv,
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
@@ -40,8 +39,8 @@ use datasets_common::{
     hash::Hash,
     hash_reference::HashReference,
     table_name::TableName,
+    udf::{IsolatePool, JsUdf},
 };
-use js_runtime::isolate_pool::IsolatePool;
 
 use crate::manifest::Function;
 
@@ -194,7 +193,7 @@ async fn get_logical_catalog_with_deps_and_funcs(
 
                 // Find table in dataset
                 let dataset_table = dataset
-                    .tables
+                    .tables()
                     .iter()
                     .find(|t| t.name() == table)
                     .ok_or_else(|| {
@@ -209,7 +208,7 @@ async fn get_logical_catalog_with_deps_and_funcs(
                     dataset_table.clone(),
                     schema.to_string(),
                     hash_ref.clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                 );
 
                 // Insert into vacant entry
@@ -260,7 +259,7 @@ async fn get_logical_catalog_with_deps_and_funcs(
                         // Get the UDF for this function reference
                         let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                             store
-                                .eth_call_for_dataset(&schema.to_string(), &dataset)
+                                .eth_call_for_dataset(&schema.to_string(), dataset.as_ref())
                                 .await
                                 .map_err(|err| {
                                     GetLogicalCatalogWithDepsAndFuncsError::EthCallUdfCreationForFunction {
@@ -445,7 +444,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
 
                     // Find table in dataset
                     let dataset_table = dataset
-                        .tables
+                        .tables()
                         .iter()
                         .find(|t| t.name() == table)
                         .ok_or_else(|| {
@@ -461,7 +460,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
                         dataset_table.clone(),
                         schema.to_string(),
                         hash_ref.clone(),
-                        dataset.start_block,
+                        dataset.start_block(),
                     );
 
                     // Insert into vacant entry
@@ -510,7 +509,7 @@ pub async fn planning_ctx_for_sql_tables_with_deps_and_funcs(
                             // Get the UDF for this function reference
                             let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                                 store
-                                    .eth_call_for_dataset(&schema.to_string(), &dataset)
+                                    .eth_call_for_dataset(&schema.to_string(), dataset.as_ref())
                                     .await
                                     .map_err(|err| {
                                         PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction {

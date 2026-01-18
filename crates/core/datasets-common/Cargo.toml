@@ -17,6 +17,7 @@ serde = { workspace = true }
 semver = { workspace = true }
 sha2 = "0.10"
 thiserror = { workspace = true }
+js-runtime = { path = "../js-runtime" }
 
 [dev-dependencies]
 serde_json.workspace = true

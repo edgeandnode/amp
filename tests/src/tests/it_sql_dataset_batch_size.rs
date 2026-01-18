@@ -38,7 +38,7 @@ async fn sql_dataset_input_batch_size() {
         .get_dataset(&hash_ref)
         .await
         .unwrap()
-        .start_block
+        .start_block()
         .unwrap();
     let end = start + 3;
 

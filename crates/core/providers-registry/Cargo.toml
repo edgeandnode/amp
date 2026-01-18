@@ -1,0 +1,27 @@
+[package]
+name = "amp-providers-registry"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+datasets-common = { path = "../datasets-common" }
+futures.workspace = true
+monitoring = { path = "../monitoring" }
+object_store.workspace = true
+parking_lot = "0.12.4"
+tracing.workspace = true
+toml = { workspace = true, features = ["preserve_order"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+datasets-derived = { path = "../datasets-derived" }
+eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
+firehose-datasets = { path = "../../extractors/firehose" }
+solana-datasets = { path = "../../extractors/solana" }
+tokio.workspace = true
+
+[dev-dependencies]
+indoc.workspace = true
