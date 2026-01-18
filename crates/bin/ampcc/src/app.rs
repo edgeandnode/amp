@@ -981,9 +981,43 @@ impl App {
     async fn fetch_versions(&self, namespace: &str, name: &str) -> Result<Vec<VersionEntry>> {
         match self.current_source {
             DataSource::Local => {
-                // Local doesn't have version listing in admin-client currently
-                // Return just the latest version if available
-                Ok(Vec::new())
+                use datasets_common::fqn::FullyQualifiedName;
+
+                // Construct FQN for the dataset
+                let fqn_str = format!("{}/{}", namespace, name);
+                let fqn: FullyQualifiedName = fqn_str
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("invalid FQN: {}", e))?;
+
+                // Call admin API to list versions
+                match self.local_client.datasets().list_versions(&fqn).await {
+                    Ok(versions_response) => {
+                        // Determine which version is the latest
+                        let latest_version = versions_response.special_tags.latest.as_ref();
+
+                        // Map API response to VersionEntry structs
+                        let versions = versions_response
+                            .versions
+                            .into_iter()
+                            .map(|v| {
+                                let is_latest =
+                                    latest_version.map(|lv| lv == &v.version).unwrap_or(false);
+                                VersionEntry {
+                                    version_tag: v.version.to_string(),
+                                    status: "registered".to_string(),
+                                    created_at: v.created_at,
+                                    is_latest,
+                                }
+                            })
+                            .collect();
+                        Ok(versions)
+                    }
+                    Err(e) => {
+                        // Log error but don't crash - graceful degradation
+                        eprintln!("Failed to fetch versions for {}: {}", fqn_str, e);
+                        Ok(Vec::new())
+                    }
+                }
             }
             DataSource::Registry => {
                 let versions = self.registry_client.get_versions(namespace, name).await?;
