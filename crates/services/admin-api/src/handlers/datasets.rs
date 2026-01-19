@@ -12,3 +12,4 @@ pub mod list_versions;
 pub mod progress;
 pub mod register;
 pub mod restore;
+pub mod table_progress;
