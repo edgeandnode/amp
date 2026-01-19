@@ -81,7 +81,7 @@ pub async fn handler(
 
     // Resolve dataset revision to manifest hash
     let resolved_ref = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_revision(&reference)
         .await
         .map_err(|err| {
@@ -287,7 +287,7 @@ pub async fn table_handler(
 
     // Resolve dataset revision to manifest hash
     let resolved_ref = ctx
-        .dataset_store
+        .datasets_registry
         .resolve_revision(&reference)
         .await
         .map_err(|err| {
