@@ -428,6 +428,11 @@ pub struct App {
     pub query_scroll: u16,
     pub query_scroll_state: ScrollbarState,
     pub query_content_length: usize,
+
+    // Query history (session-only)
+    pub query_history: Vec<String>,
+    pub query_history_index: Option<usize>, // None = current input, Some(i) = history[i]
+    pub query_draft: String,                // Preserved current input when navigating history
 }
 
 impl App {
@@ -485,6 +490,9 @@ impl App {
             query_scroll: 0,
             query_scroll_state: ScrollbarState::default(),
             query_content_length: 0,
+            query_history: Vec::new(),
+            query_history_index: None,
+            query_draft: String::new(),
         })
     }
 

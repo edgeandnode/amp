@@ -458,6 +458,20 @@ where
                                 // Execute query with Ctrl+Enter
                                 let sql = app.query_input.clone();
                                 if !sql.trim().is_empty() {
+                                    // Add to history (avoid consecutive duplicates)
+                                    let trimmed = sql.trim().to_string();
+                                    if app.query_history.last() != Some(&trimmed) {
+                                        app.query_history.push(trimmed);
+                                        // Cap history size at 100 entries
+                                        const MAX_HISTORY: usize = 100;
+                                        if app.query_history.len() > MAX_HISTORY {
+                                            app.query_history.remove(0);
+                                        }
+                                    }
+                                    // Reset history navigation state
+                                    app.query_history_index = None;
+                                    app.query_draft.clear();
+
                                     app.start_loading("Executing query...");
                                     spawn_execute_query(app, sql, tx.clone());
                                 }
@@ -471,18 +485,66 @@ where
                                     app.content_view = ContentView::Dataset;
                                 }
                             }
+                            KeyCode::Up => {
+                                // Navigate to older history entry
+                                if !app.query_history.is_empty() {
+                                    match app.query_history_index {
+                                        None => {
+                                            // Save current input as draft, load most recent history
+                                            app.query_draft = app.query_input.clone();
+                                            let last_idx = app.query_history.len() - 1;
+                                            app.query_history_index = Some(last_idx);
+                                            app.query_input = app.query_history[last_idx].clone();
+                                            app.query_cursor = app.query_input.len();
+                                        }
+                                        Some(idx) if idx > 0 => {
+                                            // Move to older entry
+                                            let new_idx = idx - 1;
+                                            app.query_history_index = Some(new_idx);
+                                            app.query_input = app.query_history[new_idx].clone();
+                                            app.query_cursor = app.query_input.len();
+                                        }
+                                        Some(_) => {
+                                            // Already at oldest entry, do nothing
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                // Navigate to newer history entry
+                                if let Some(idx) = app.query_history_index {
+                                    if idx < app.query_history.len() - 1 {
+                                        // Move to newer entry
+                                        let new_idx = idx + 1;
+                                        app.query_history_index = Some(new_idx);
+                                        app.query_input = app.query_history[new_idx].clone();
+                                        app.query_cursor = app.query_input.len();
+                                    } else {
+                                        // At newest entry, restore draft
+                                        app.query_history_index = None;
+                                        app.query_input = app.query_draft.clone();
+                                        app.query_cursor = app.query_input.len();
+                                    }
+                                }
+                            }
                             KeyCode::Char(c) => {
+                                // Reset history navigation on edit
+                                app.query_history_index = None;
                                 app.query_input.insert(app.query_cursor, c);
                                 app.query_cursor += 1;
                             }
                             KeyCode::Backspace => {
                                 if app.query_cursor > 0 {
+                                    // Reset history navigation on edit
+                                    app.query_history_index = None;
                                     app.query_cursor -= 1;
                                     app.query_input.remove(app.query_cursor);
                                 }
                             }
                             KeyCode::Delete => {
                                 if app.query_cursor < app.query_input.len() {
+                                    // Reset history navigation on edit
+                                    app.query_history_index = None;
                                     app.query_input.remove(app.query_cursor);
                                 }
                             }

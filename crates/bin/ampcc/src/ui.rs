@@ -703,9 +703,22 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = if app.input_mode == InputMode::Query {
-        "SQL Query (Ctrl+Enter to execute, Esc to cancel)"
+        if let Some(idx) = app.query_history_index {
+            format!(
+                "SQL Query (history {}/{}) [Ctrl+Enter execute, Esc cancel]",
+                idx + 1,
+                app.query_history.len()
+            )
+        } else if !app.query_history.is_empty() {
+            format!(
+                "SQL Query [↑ history ({} entries), Ctrl+Enter execute]",
+                app.query_history.len()
+            )
+        } else {
+            "SQL Query (Ctrl+Enter to execute, Esc to cancel)".to_string()
+        }
     } else {
-        "SQL Query (press Q to edit)"
+        "SQL Query (press Q to edit)".to_string()
     };
 
     let block = Block::default()
@@ -1392,7 +1405,13 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             }
             ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => "[Ctrl+u/d] Scroll",
             ActivePane::Header => "[Tab] Navigate",
-            ActivePane::Query => "[Ctrl+Enter] Execute [Esc] Cancel",
+            ActivePane::Query => {
+                if app.query_history.is_empty() {
+                    "[Ctrl+Enter] Execute [Esc] Cancel"
+                } else {
+                    "[↑↓] History [Ctrl+Enter] Execute [Esc] Cancel"
+                }
+            }
             ActivePane::QueryResult => "[j/k] Scroll [Q] Edit query [Esc] Back",
         };
 
