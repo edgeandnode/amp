@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use object_store::{ObjectStore, memory::InMemory};
 
-use crate::{
-    DatasetKind,
-    providers::{ProviderConfig, ProviderConfigsStore, RegisterError},
-};
+use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry, RegisterError};
 
 #[tokio::test]
 async fn get_all_with_empty_store_returns_empty_list() {
@@ -93,9 +90,9 @@ async fn register_with_multiple_providers_all_retrievable() {
     let evm = evm_retrieved.expect("should have EVM provider");
     let firehose = firehose_retrieved.expect("should have Firehose provider");
 
-    assert_eq!(evm.kind, DatasetKind::EvmRpc);
+    assert_eq!(evm.kind, "evm-rpc");
     assert_eq!(evm.network, "mainnet");
-    assert_eq!(firehose.kind, DatasetKind::Firehose);
+    assert_eq!(firehose.kind, "firehose");
     assert_eq!(firehose.network, "polygon");
 
     // Note: With in-memory storage, we don't verify disk files since they don't exist
@@ -231,10 +228,10 @@ async fn delete_with_subdirectory_path_removes_correct_file() {
 
 /// Create a test ProvidersStore backed by in-memory storage
 /// Returns (ProvidersStore, underlying Arc<InMemory>) for testing caching logic
-fn create_test_providers_store() -> (ProviderConfigsStore, Arc<dyn ObjectStore>) {
+fn create_test_providers_store() -> (ProvidersRegistry, Arc<dyn ObjectStore>) {
     let in_memory_store = Arc::new(InMemory::new());
     let store: Arc<dyn ObjectStore> = in_memory_store.clone();
-    let providers_store = ProviderConfigsStore::new(store);
+    let providers_store = ProvidersRegistry::new(ProviderConfigsStore::new(store.clone()));
     (providers_store, in_memory_store)
 }
 

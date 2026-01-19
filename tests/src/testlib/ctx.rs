@@ -31,6 +31,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_config::Config;
 use amp_data_store::DataStore;
+use amp_dataset_store::DatasetStore;
 use common::BoxError;
 use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
@@ -350,14 +351,17 @@ impl TestCtxBuilder {
         )?;
 
         // Create shared DatasetStore instance (used by both server and worker)
-        let (datasets_registry, dataset_store) = {
-            use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+        let (datasets_registry, providers_registry) = {
             use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
+            use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
+
             let provider_configs_store =
                 ProviderConfigsStore::new(amp_object_store::new_with_prefix(
                     &config.providers_store_url,
                     config.providers_store_url.path(),
                 )?);
+            let providers_registry = ProvidersRegistry::new(provider_configs_store);
+
             let dataset_manifests_store =
                 DatasetManifestsStore::new(amp_object_store::new_with_prefix(
                     &config.manifests_store_url,
@@ -365,10 +369,10 @@ impl TestCtxBuilder {
                 )?);
             let datasets_registry =
                 DatasetsRegistry::new(metadata_db.conn_pool().clone(), dataset_manifests_store);
-            let dataset_store =
-                DatasetStore::new(datasets_registry.clone(), provider_configs_store);
-            (datasets_registry, dataset_store)
+            (datasets_registry, providers_registry)
         };
+        let dataset_store =
+            DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
 
         // Create Anvil fixture (if enabled) and capture provider config for later registration
         let (anvil, anvil_provider_config) = match self.anvil_fixture {
@@ -418,6 +422,7 @@ impl TestCtxBuilder {
             config.clone(),
             metadata_db.conn_pool().clone(),
             datasets_registry,
+            providers_registry,
             data_store.clone(),
             dataset_store.clone(),
             controller_meter,

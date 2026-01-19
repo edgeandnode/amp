@@ -8,6 +8,7 @@ license-file.workspace = true
 [dependencies]
 async-stream.workspace = true
 amp-datasets-registry = { path = "../datasets-registry" }
+amp-providers-registry = { path = "../providers-registry" }
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
@@ -18,18 +19,11 @@ firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }
-object_store.workspace = true
 parking_lot = "0.12.4"
 rand.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 solana-datasets = { path = "../../extractors/solana" }
 thiserror.workspace = true
-tokio.workspace = true
 toml = { workspace = true, features = ["preserve_order"] }
 tracing.workspace = true
 url.workspace = true
-
-[dev-dependencies]
-indoc.workspace = true
-tokio = { workspace = true, features = ["macros"] }

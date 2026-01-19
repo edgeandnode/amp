@@ -3,6 +3,8 @@
 //! This module defines the type-safe representation of the Firehose dataset kind
 //! and provides parsing functionality with proper error handling.
 
+use datasets_common::raw_dataset_kind::RawDatasetKind;
+
 /// The canonical string identifier for Firehose datasets.
 ///
 /// This constant defines the string representation used in dataset manifests
@@ -28,6 +30,12 @@ impl FirehoseDatasetKind {
     #[inline]
     pub const fn as_str(self) -> &'static str {
         DATASET_KIND
+    }
+}
+
+impl From<FirehoseDatasetKind> for RawDatasetKind {
+    fn from(value: FirehoseDatasetKind) -> Self {
+        RawDatasetKind::new(value.to_string())
     }
 }
 

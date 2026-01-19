@@ -1,6 +1,6 @@
 //! Provider create handler
 
-use amp_dataset_store::providers::{ProviderConfig, RegisterError};
+use amp_providers_registry::{ProviderConfig, RegisterError};
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -76,13 +76,13 @@ pub async fn handler(
         convert::json_map_to_toml_table(provider_info.rest).map_err(Error::ConversionError)?;
     let provider_config = ProviderConfig {
         name: provider_info.name.to_string(),
-        kind: provider_info.kind,
+        kind: provider_info.kind.into(),
         network: provider_info.network.to_string(),
         rest: provider_rest_table,
     };
 
-    ctx.dataset_store
-        .register_provider(provider_config)
+    ctx.providers_registry
+        .register(provider_config)
         .await
         .map_err(|err| match err {
             RegisterError::Conflict { name } => {

@@ -75,7 +75,7 @@ pub async fn handler(
         }
     };
 
-    let Some(config) = ctx.dataset_store.get_provider_by_name(&name).await else {
+    let Some(config) = ctx.providers_registry.get_by_name(&name).await else {
         tracing::debug!(provider_name = %name, "provider not found");
         return Err(Error::NotFound { name }.into());
     };

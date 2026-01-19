@@ -10,6 +10,7 @@
 //! - **Firehose**: StreamingFast Firehose protocol for real-time blockchain data
 //! - **Derived**: Modern manifest-based dataset definitions
 
+use datasets_common::raw_dataset_kind::RawDatasetKind;
 use datasets_derived::DerivedDatasetKind;
 use eth_beacon_datasets::EthBeaconDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
@@ -163,4 +164,30 @@ impl serde::Serialize for DatasetKind {
 pub struct UnsupportedKindError {
     /// The unsupported dataset kind string that caused this error.
     pub kind: String,
+}
+
+impl TryFrom<RawDatasetKind> for DatasetKind {
+    type Error = UnsupportedKindError;
+
+    fn try_from(value: RawDatasetKind) -> Result<Self, Self::Error> {
+        value.as_str().parse().map_err(|_| UnsupportedKindError {
+            kind: value.to_string(),
+        })
+    }
+}
+
+impl TryFrom<&RawDatasetKind> for DatasetKind {
+    type Error = UnsupportedKindError;
+
+    fn try_from(value: &RawDatasetKind) -> Result<Self, Self::Error> {
+        value.as_str().parse().map_err(|_| UnsupportedKindError {
+            kind: value.to_string(),
+        })
+    }
+}
+
+impl From<DatasetKind> for RawDatasetKind {
+    fn from(value: DatasetKind) -> Self {
+        RawDatasetKind::new(value.to_string())
+    }
 }

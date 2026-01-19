@@ -16,12 +16,133 @@
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use common::BoxError;
+use datasets_common::raw_dataset_kind::RawDatasetKind;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
 use object_store::ObjectStore;
 use parking_lot::RwLock;
 
-use crate::dataset_kind::DatasetKind;
+/// Store for provider configuration files.
+///
+/// Wraps an ObjectStore to provide provider-specific storage semantics.
+/// This follows the same pattern as `DatasetManifestsStore` for consistency.
+#[derive(Debug, Clone)]
+pub struct ProviderConfigsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
+    store: S,
+}
+
+impl<S> ProviderConfigsStore<S>
+where
+    S: ObjectStore + Clone,
+{
+    /// Create a new store with the given underlying object store.
+    pub fn new(store: S) -> Self {
+        Self { store }
+    }
+
+    /// Store a provider configuration file.
+    ///
+    /// Writes the content to `{name}.toml` in the underlying store.
+    pub async fn store(&self, name: &str, content: Vec<u8>) -> Result<(), object_store::Error> {
+        let path: object_store::path::Path = format!("{}.toml", name).into();
+        self.store.put(&path, content.into()).await?;
+        Ok(())
+    }
+
+    /// Get a provider configuration file by name.
+    ///
+    /// Returns `None` if the file doesn't exist.
+    pub async fn get(&self, name: &str) -> Result<Option<ProviderConfigContent>, GetError> {
+        let path: object_store::path::Path = format!("{}.toml", name).into();
+
+        let get_result = match self.store.get(&path).await {
+            Ok(res) => res,
+            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Err(err) => return Err(GetError::ObjectStoreGet(err)),
+        };
+
+        let bytes = get_result
+            .bytes()
+            .await
+            .map_err(GetError::ObjectStoreReadBytes)?;
+
+        let content = String::from_utf8(bytes.to_vec()).map_err(GetError::Utf8Error)?;
+
+        Ok(Some(ProviderConfigContent(content)))
+    }
+
+    /// Check if a provider configuration file exists.
+    pub async fn exists(&self, name: &str) -> Result<bool, object_store::Error> {
+        let path: object_store::path::Path = format!("{}.toml", name).into();
+        match self.store.head(&path).await {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Delete a provider configuration file.
+    ///
+    /// Returns `NotFound` error if the file doesn't exist.
+    pub async fn delete(&self, name: &str) -> Result<(), object_store::Error> {
+        let path: object_store::path::Path = format!("{}.toml", name).into();
+        // Check existence first to provide consistent not-found behavior
+        self.store.head(&path).await?;
+        self.store.delete(&path).await
+    }
+
+    /// List all provider configuration files.
+    ///
+    /// Returns a stream of (name, metadata) for all `.toml` files.
+    pub fn list(
+        &self,
+    ) -> futures::stream::BoxStream<'_, object_store::Result<object_store::ObjectMeta>> {
+        self.store.list(None)
+    }
+}
+
+impl<S: ObjectStore> std::ops::Deref for ProviderConfigsStore<S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.store
+    }
+}
+
+/// Errors when getting provider configuration.
+#[derive(Debug, thiserror::Error)]
+pub enum GetError {
+    /// Failed to get object from store.
+    #[error("Failed to get provider config from object store: {0}")]
+    ObjectStoreGet(#[source] object_store::Error),
+
+    /// Failed to read bytes from object.
+    #[error("Failed to read provider config bytes: {0}")]
+    ObjectStoreReadBytes(#[source] object_store::Error),
+
+    /// Content is not valid UTF-8.
+    #[error("Provider config is not valid UTF-8: {0}")]
+    Utf8Error(#[source] std::string::FromUtf8Error),
+}
+
+/// Provider configuration file content.
+pub struct ProviderConfigContent(String);
+
+impl ProviderConfigContent {
+    /// Get the raw TOML string content.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    /// Parse into a ProviderConfig.
+    pub fn try_into_config(self, name: &str) -> Result<ProviderConfig, toml::de::Error> {
+        let mut config: ProviderConfig = toml::from_str(&self.0)?;
+        if config.name.is_empty() {
+            config.name = name.to_string();
+        }
+        Ok(config)
+    }
+}
 
 /// Manages provider configurations and caching
 ///
@@ -47,17 +168,17 @@ use crate::dataset_kind::DatasetKind;
 /// **Note**: External changes to the underlying store will not be reflected in the cache
 /// until the process is restarted, as there is no automatic cache invalidation mechanism.
 #[derive(Debug, Clone)]
-pub struct ProviderConfigsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
-    store: S,
+pub struct ProvidersRegistry<S: ObjectStore = Arc<dyn ObjectStore>> {
+    store: ProviderConfigsStore<S>,
     cache: Arc<RwLock<BTreeMap<String, ProviderConfig>>>,
 }
 
-impl<S> ProviderConfigsStore<S>
+impl<S> ProvidersRegistry<S>
 where
     S: ObjectStore + Clone,
 {
-    /// Create a new [`ProviderConfigsStore`] instance with the given underlying store.
-    pub fn new(store: S) -> Self {
+    /// Create a new [`ProvidersRegistry`] instance with the given provider configs store.
+    pub fn new(store: ProviderConfigsStore<S>) -> Self {
         Self {
             store,
             cache: Default::default(),
@@ -172,8 +293,7 @@ where
 
         // Serialize and write to store
         let content = toml::to_string(&provider)?.into_bytes();
-        let path = format!("{}.toml", name).into();
-        self.store.put(&path, content.into()).await?;
+        self.store.store(name, content).await?;
 
         // Add to cache
         self.cache.write().insert(name.to_string(), provider);
@@ -191,25 +311,19 @@ where
     /// - If other store errors: preserves cache (file may still exist) and propagates error
     /// - If deletion succeeds: removes from both store and cache
     pub async fn delete(&self, name: &str) -> Result<(), DeleteError> {
-        let path = format!("{}.toml", name).into();
-
-        // Fail fast if file doesn't exist
-        if let Err(err) = self.store.head(&path).await.map_err(Into::into) {
-            match err {
-                DeleteError::NotFound { .. } => {
+        // Delete from store (will check existence first)
+        if let Err(err) = self.store.delete(name).await {
+            match &err {
+                object_store::Error::NotFound { .. } => {
                     // Remove from cache if present (safe even if not in cache)
                     self.cache.write().remove(name);
-
-                    // Propagate the not found error
-                    return Err(err);
+                    return Err(DeleteError::NotFound {
+                        name: name.to_string(),
+                    });
                 }
-                // Propagate other store errors (without modifying cache)
-                _ => return Err(err),
+                _ => return Err(DeleteError::StoreError(err)),
             }
         }
-
-        // File exists, proceed with deletion
-        self.store.delete(&path).await?;
 
         // Remove from cache if present (safe even if not in cache)
         self.cache.write().remove(name);
@@ -228,7 +342,7 @@ where
     {
         let providers: Vec<_> = self
             .store
-            .list(None)
+            .list()
             .try_filter_map(|meta| async move {
                 // Select valid provider configuration files and extract their names for processing
                 let is_empty = meta.size == 0;
@@ -251,14 +365,12 @@ where
             .await
             .map_err(|source| LoadError { source })?;
 
+        let store = (*self.store).clone();
         let stream = stream::iter(providers).then(move |(name, path)| {
-            let store = self.store.clone();
+            let store = store.clone();
             async move {
-                // Load and parse provider configuration file
-                match load_and_parse_file(&store, &path).await {
-                    Ok(provider) => Ok((name, provider)),
-                    Err(err) => Err(err),
-                }
+                let provider = load_and_parse_file(&store, &path).await?;
+                Ok((name, provider))
             }
         });
 
@@ -276,8 +388,8 @@ pub struct ProviderConfig {
     /// Unique name of the provider configuration
     #[serde(default)]
     pub name: String,
-    /// The type of provider (e.g., "evm-rpc", "firehose")
-    pub kind: DatasetKind,
+    /// The type of provider as string (e.g., "evm-rpc", "firehose")
+    pub kind: RawDatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     pub network: String,
     /// All other provider-specific configuration fields

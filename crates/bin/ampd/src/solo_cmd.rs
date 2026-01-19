@@ -2,9 +2,10 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use amp_config::Config as CommonConfig;
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, providers::ProviderConfigsStore};
+use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
+use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use common::BoxError;
 use monitoring::telemetry::metrics::Meter;
 
@@ -31,7 +32,7 @@ pub async fn run(
     )
     .map_err(Error::DataStoreCreation)?;
 
-    let (dataset_store, datasets_registry) = {
+    let (datasets_registry, providers_registry) = {
         let provider_configs_store = ProviderConfigsStore::new(
             amp_object_store::new_with_prefix(
                 &config.providers_store_url,
@@ -39,6 +40,8 @@ pub async fn run(
             )
             .map_err(Error::ProvidersStoreCreation)?,
         );
+        let providers_registry = ProvidersRegistry::new(provider_configs_store);
+
         let dataset_manifests_store = DatasetManifestsStore::new(
             amp_object_store::new_with_prefix(
                 &config.manifests_store_url,
@@ -47,9 +50,10 @@ pub async fn run(
             .map_err(Error::ManifestsStoreCreation)?,
         );
         let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
-        let dataset_store = DatasetStore::new(datasets_registry.clone(), provider_configs_store);
-        (dataset_store, datasets_registry)
+        (datasets_registry, providers_registry)
     };
+
+    let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
 
     // Spawn controller (Admin API) if enabled
     let controller_fut: Pin<Box<dyn Future<Output = _> + Send>> = if admin_server {
@@ -58,6 +62,7 @@ pub async fn run(
             Arc::new(controller_config),
             metadata_db.clone(),
             datasets_registry,
+            providers_registry,
             data_store.clone(),
             dataset_store.clone(),
             meter.clone(),

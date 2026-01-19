@@ -3,6 +3,8 @@
 //! This module defines the type-safe representation of the EVM-RPC dataset kind
 //! and provides parsing functionality with proper error handling.
 
+use datasets_common::raw_dataset_kind::RawDatasetKind;
+
 /// The canonical string identifier for EVM-RPC datasets.
 ///
 /// This constant defines the string representation used in dataset manifests
@@ -28,6 +30,12 @@ impl EvmRpcDatasetKind {
     #[inline]
     pub const fn as_str(self) -> &'static str {
         DATASET_KIND
+    }
+}
+
+impl From<EvmRpcDatasetKind> for RawDatasetKind {
+    fn from(value: EvmRpcDatasetKind) -> Self {
+        RawDatasetKind::new(value.to_string())
     }
 }
 

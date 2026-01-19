@@ -4,6 +4,7 @@ use admin_api::ctx::Ctx;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
+use amp_providers_registry::ProvidersRegistry;
 use axum::{
     Router,
     http::StatusCode,
@@ -31,10 +32,12 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 /// Spawns a background task for failed job reconciliation with exponential backoff retry.
 ///
 /// Returns the bound socket address and a future that runs the server with graceful shutdown.
+#[allow(clippy::too_many_arguments)]
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     datasets_registry: DatasetsRegistry,
+    providers_registry: ProvidersRegistry,
     data_store: DataStore,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
@@ -45,6 +48,7 @@ pub async fn new(
     let ctx = Ctx {
         metadata_db,
         datasets_registry,
+        providers_registry,
         dataset_store,
         scheduler: scheduler.clone(),
         data_store,
