@@ -1,6 +1,6 @@
 //! Manifests register handler
 
-use amp_dataset_store::dataset_kind::DatasetKind;
+use amp_dataset_store::DatasetKind;
 use amp_datasets_registry::{error::RegisterManifestError, manifests::StoreError};
 use axum::{
     Json,

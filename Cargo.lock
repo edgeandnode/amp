@@ -1093,7 +1093,6 @@ dependencies = [
  "admin-client",
  "amp-dataset-store",
  "amp-object-store",
- "amp-providers-registry",
  "anyhow",
  "clap",
  "common",

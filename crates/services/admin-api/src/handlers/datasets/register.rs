@@ -1,4 +1,4 @@
-use amp_dataset_store::dataset_kind::DatasetKind;
+use amp_dataset_store::DatasetKind;
 use amp_datasets_registry::error::{LinkManifestError, RegisterManifestError, SetVersionTagError};
 use axum::{
     Json,

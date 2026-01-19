@@ -16,6 +16,7 @@ impl RawDatasetKind {
         Self(kind)
     }
 
+    /// Returns the dataset kind as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -24,5 +25,17 @@ impl RawDatasetKind {
 impl std::fmt::Display for RawDatasetKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl PartialEq<&str> for RawDatasetKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<RawDatasetKind> for &str {
+    fn eq(&self, other: &RawDatasetKind) -> bool {
+        *self == other.0
     }
 }

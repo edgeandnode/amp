@@ -1,6 +1,6 @@
 //! Provider information types for API requests and responses
 
-use amp_dataset_store::dataset_kind::DatasetKind;
+use amp_dataset_store::DatasetKind;
 
 use super::convert;
 use crate::handlers::common::NonEmptyString;

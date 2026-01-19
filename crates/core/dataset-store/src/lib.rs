@@ -37,16 +37,19 @@ use tracing::instrument;
 use url::Url;
 
 mod block_stream_client;
-pub mod dataset_kind;
+mod dataset_kind;
 mod env_substitute;
 mod error;
 
 use self::block_stream_client::BlockStreamClient;
-pub use self::error::{
-    EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
-    GetDerivedManifestError,
+pub use self::{
+    dataset_kind::DatasetKind,
+    error::{
+        EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
+        GetDerivedManifestError,
+    },
 };
-use crate::dataset_kind::{DatasetKind, UnsupportedKindError};
+use crate::dataset_kind::UnsupportedKindError;
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -197,14 +200,12 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                Arc::new(
-                    datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
-                        GetDatasetError::CreateDerivedDataset {
-                            reference: reference.clone(),
-                            source,
-                        }
-                    })?,
-                )
+                datasets_derived::dataset(reference.clone(), manifest)
+                    .map(Arc::new)
+                    .map_err(|source| GetDatasetError::CreateDerivedDataset {
+                        reference: reference.clone(),
+                        source,
+                    })?
             }
         };
 
@@ -378,6 +379,7 @@ impl DatasetStore {
             .await
             .values()
             .filter_map(|prov| {
+                // Filter out providers with unknown dataset kinds (try_into fails)
                 let prov_kind: DatasetKind = (&prov.kind).try_into().ok()?;
                 if prov_kind != kind || prov.network != network {
                     return None;
@@ -430,7 +432,7 @@ impl DatasetStore {
         sql_table_ref_schema: &str,
         dataset: &Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        if dataset.kind.as_str() != EvmRpcDatasetKind {
+        if dataset.kind != EvmRpcDatasetKind {
             return Ok(None);
         }
 
@@ -540,7 +542,7 @@ pub async fn dataset_and_dependencies(
             .ok_or_else(|| BoxError::from(format!("dataset '{}' not found", dataset_ref)))?;
         let dataset = store.get_dataset(&hash_ref).await?;
 
-        if dataset.kind.as_str() != DerivedDatasetKind {
+        if dataset.kind != DerivedDatasetKind {
             deps.insert(dataset_ref, vec![]);
             continue;
         }

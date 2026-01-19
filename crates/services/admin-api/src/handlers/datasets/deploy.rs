@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use amp_dataset_store::{GetDatasetError, dataset_kind::DatasetKind};
+use amp_dataset_store::{DatasetKind, GetDatasetError};
 use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
 use axum::{
     Json,

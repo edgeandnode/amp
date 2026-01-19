@@ -51,7 +51,7 @@ use amp_config::Config;
 use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetStore, dataset_and_dependencies};
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
-use amp_providers_registry::ProvidersRegistry;
+use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use clap::Parser;
 use common::BoxError;
 use datasets_common::reference::Reference;
@@ -164,13 +164,14 @@ async fn main() {
             .expect("Failed to create data store");
 
             let (dataset_store, datasets_registry, providers_registry) = {
-                let providers_registry = ProvidersRegistry::new(
+                let provider_configs_store = ProviderConfigsStore::new(
                     amp_object_store::new_with_prefix(
                         &config.providers_store_url,
                         config.providers_store_url.path(),
                     )
                     .expect("Failed to create provider configs store"),
                 );
+                let providers_registry = ProvidersRegistry::new(provider_configs_store);
                 let dataset_manifests_store = DatasetManifestsStore::new(
                     amp_object_store::new_with_prefix(
                         &config.manifests_store_url,

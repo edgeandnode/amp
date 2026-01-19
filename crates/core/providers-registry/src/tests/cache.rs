@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use object_store::{ObjectStore, memory::InMemory, path::Path};
 
-use crate::{ProviderConfig, ProvidersRegistry, RegisterError};
+use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry, RegisterError};
 
 #[tokio::test]
 async fn register_with_valid_provider_makes_immediately_available() {
@@ -230,7 +230,7 @@ async fn get_all_with_store_providers_loads_on_first_access() {
     let evm_provider = providers_store.get_by_name("evm-mainnet").await;
     assert!(evm_provider.is_some(), "Expected EVM provider to be loaded");
     let evm = evm_provider.expect("should have EVM provider");
-    assert_eq!(evm.kind.as_str(), "evm-rpc");
+    assert_eq!(evm.kind, "evm-rpc");
     assert_eq!(evm.network, "mainnet");
 
     // Verify Firehose provider was loaded correctly
@@ -240,7 +240,7 @@ async fn get_all_with_store_providers_loads_on_first_access() {
         "Expected Firehose provider to be loaded"
     );
     let firehose = firehose_provider.expect("should have Firehose provider");
-    assert_eq!(firehose.kind.as_str(), "firehose");
+    assert_eq!(firehose.kind, "firehose");
     assert_eq!(firehose.network, "polygon");
 }
 
@@ -298,7 +298,7 @@ async fn get_all_with_invalid_toml_handles_gracefully() {
         .values()
         .next()
         .expect("should have at least one provider");
-    assert_eq!(provider.kind.as_str(), "evm-rpc");
+    assert_eq!(provider.kind, "evm-rpc");
     assert_eq!(provider.network, "mainnet");
 }
 
@@ -486,7 +486,7 @@ async fn register_with_externally_removed_file_returns_conflict_error() {
 fn create_test_providers_store() -> (ProvidersRegistry, Arc<dyn ObjectStore>) {
     let in_memory_store = Arc::new(InMemory::new());
     let store: Arc<dyn ObjectStore> = in_memory_store.clone();
-    let providers_store = ProvidersRegistry::new(store.clone());
+    let providers_store = ProvidersRegistry::new(ProviderConfigsStore::new(store.clone()));
     (providers_store, store)
 }
 

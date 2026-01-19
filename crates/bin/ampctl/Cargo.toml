@@ -21,7 +21,6 @@ clap.workspace = true
 common = { path = "../../core/common" }
 console = "0.16.1"
 amp-dataset-store = { path = "../../core/dataset-store" }
-amp-providers-registry = { path = "../../core/providers-registry" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
