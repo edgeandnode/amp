@@ -511,6 +511,11 @@ pub struct App {
     // Template picker state
     pub template_picker_open: bool,
     pub template_picker_index: usize,
+
+    // Result sorting state
+    pub result_sort_column: Option<usize>,
+    pub result_sort_ascending: bool,
+    pub result_sort_pending: bool, // true when waiting for column number input
 }
 
 impl App {
@@ -580,6 +585,9 @@ impl App {
             history_search_index: 0,
             template_picker_open: false,
             template_picker_index: 0,
+            result_sort_column: None,
+            result_sort_ascending: true,
+            result_sort_pending: false,
         })
     }
 
@@ -1587,5 +1595,56 @@ impl App {
         template
             .replace("{table}", table)
             .replace("{column}", column)
+    }
+
+    /// Get sorted indices for query results based on current sort state.
+    /// Returns None if no sort is active, otherwise returns sorted row indices.
+    pub fn get_sorted_indices(&self) -> Option<Vec<usize>> {
+        let col = self.result_sort_column?;
+        let results = self.query_results.as_ref()?;
+
+        if col >= results.columns.len() {
+            return None;
+        }
+
+        let mut indices: Vec<usize> = (0..results.rows.len()).collect();
+        let ascending = self.result_sort_ascending;
+
+        indices.sort_by(|&a, &b| {
+            let val_a = results.rows[a].get(col).map(|s| s.as_str()).unwrap_or("");
+            let val_b = results.rows[b].get(col).map(|s| s.as_str()).unwrap_or("");
+
+            // Try numeric comparison first
+            let cmp = match (val_a.parse::<f64>(), val_b.parse::<f64>()) {
+                (Ok(num_a), Ok(num_b)) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                _ => val_a.cmp(val_b),
+            };
+
+            if ascending { cmp } else { cmp.reverse() }
+        });
+
+        Some(indices)
+    }
+
+    /// Toggle sort on the specified column.
+    /// If already sorted by this column, reverses direction.
+    /// If sorted by different column, starts ascending sort on new column.
+    pub fn toggle_sort(&mut self, col: usize) {
+        if self.result_sort_column == Some(col) {
+            // Toggle direction
+            self.result_sort_ascending = !self.result_sort_ascending;
+        } else {
+            // New column, start ascending
+            self.result_sort_column = Some(col);
+            self.result_sort_ascending = true;
+        }
+        self.result_sort_pending = false;
+    }
+
+    /// Clear all sorting.
+    pub fn clear_sort(&mut self) {
+        self.result_sort_column = None;
+        self.result_sort_ascending = true;
+        self.result_sort_pending = false;
     }
 }

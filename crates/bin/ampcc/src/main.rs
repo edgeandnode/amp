@@ -340,10 +340,9 @@ where
                                     }
                                 }
 
-                                // Stop job (s key)
-                                KeyCode::Char('s') => {
-                                    if app.active_pane == ActivePane::Jobs
-                                        && let Some(job) = app.get_selected_job()
+                                // Stop job (s key in Jobs pane)
+                                KeyCode::Char('s') if app.active_pane == ActivePane::Jobs => {
+                                    if let Some(job) = app.get_selected_job()
                                         && App::can_stop_job(&job.status)
                                     {
                                         let job_id = job.id;
@@ -497,6 +496,41 @@ where
                                         app.error_message =
                                             Some("No results to export".to_string());
                                     }
+                                }
+
+                                // Sort query results (s key in QueryResult pane)
+                                KeyCode::Char('s')
+                                    if app.active_pane == ActivePane::QueryResult
+                                        && app.query_results.is_some() =>
+                                {
+                                    app.result_sort_pending = true;
+                                }
+
+                                // Clear sort (S key in QueryResult pane)
+                                KeyCode::Char('S')
+                                    if app.active_pane == ActivePane::QueryResult =>
+                                {
+                                    app.clear_sort();
+                                }
+
+                                // Column selection for sorting (1-9 keys when sort pending)
+                                KeyCode::Char(c @ '1'..='9')
+                                    if app.result_sort_pending
+                                        && app.active_pane == ActivePane::QueryResult =>
+                                {
+                                    let col = c.to_digit(10).unwrap() as usize - 1; // 0-indexed
+                                    if let Some(results) = &app.query_results {
+                                        if col < results.columns.len() {
+                                            app.toggle_sort(col);
+                                        } else {
+                                            app.result_sort_pending = false;
+                                        }
+                                    }
+                                }
+
+                                // Cancel sort mode with Escape
+                                KeyCode::Esc if app.result_sort_pending => {
+                                    app.result_sort_pending = false;
                                 }
 
                                 _ => {}

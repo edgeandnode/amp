@@ -1120,9 +1120,20 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    // Build title with sort info
+    let sort_info = if app.result_sort_pending {
+        " - Press 1-9 for column".to_string()
+    } else if let Some(col) = app.result_sort_column {
+        let dir = if app.result_sort_ascending { "▲" } else { "▼" };
+        let col_name = results.columns.get(col).map(|s| s.as_str()).unwrap_or("?");
+        format!(" - sorted by {} {}", col_name, dir)
+    } else {
+        String::new()
+    };
+
     let title = format!(
-        "Query Results ({} rows) - Press E to export",
-        results.row_count
+        "Query Results ({} rows){} [E]xport [s]ort [S]clear",
+        results.row_count, sort_info
     );
     let block = Block::default()
         .title(title)
@@ -1143,24 +1154,34 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
     let available_width = area.width.saturating_sub(2);
     let col_widths = calculate_column_widths(results, available_width);
 
-    // Build table header with column numbers
+    // Build table header with column numbers and sort indicators
     let header_cells: Vec<Cell> = results
         .columns
         .iter()
         .enumerate()
         .map(|(idx, c)| {
             let col_num = idx + 1; // 1-indexed for user display
-            let header_text = format!("[{}] {}", col_num, c);
+            let sort_indicator = if app.result_sort_column == Some(idx) {
+                if app.result_sort_ascending { " ▲" } else { " ▼" }
+            } else {
+                ""
+            };
+            let header_text = format!("[{}] {}{}", col_num, c, sort_indicator);
             Cell::from(header_text).style(Theme::text_primary().add_modifier(Modifier::BOLD))
         })
         .collect();
     let header = Row::new(header_cells).height(1);
 
     // Build table rows with truncation based on calculated column widths
-    let rows: Vec<Row> = results
-        .rows
+    // Use sorted indices if sorting is active, otherwise use original order
+    let sorted_indices = app.get_sorted_indices();
+    let row_indices: Vec<usize> =
+        sorted_indices.unwrap_or_else(|| (0..results.rows.len()).collect());
+
+    let rows: Vec<Row> = row_indices
         .iter()
-        .map(|row| {
+        .map(|&row_idx| {
+            let row = &results.rows[row_idx];
             let cells: Vec<Cell> = row
                 .iter()
                 .enumerate()
@@ -1764,7 +1785,13 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                     "[↑↓] History [Ctrl+Enter] Execute [Esc] Cancel"
                 }
             }
-            ActivePane::QueryResult => "[E] Export [j/k] Scroll [Q] Edit query",
+            ActivePane::QueryResult => {
+                if app.result_sort_pending {
+                    "Sort: Press 1-9 for column, Esc to cancel"
+                } else {
+                    "[s] Sort [S] Clear sort [E] Export [j/k] Scroll [Q] Edit"
+                }
+            }
         };
 
         format!(
