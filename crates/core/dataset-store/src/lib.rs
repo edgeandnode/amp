@@ -6,10 +6,7 @@ use std::{
 };
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
-use amp_providers_registry::{
-    ProviderConfig, ProvidersRegistry,
-    dataset_kind::{DatasetKind, UnsupportedKindError},
-};
+use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
 use common::{
     BlockStreamer, BlockStreamerExt, BoxError, Dataset,
     evm::{self, udfs::EthCall},
@@ -40,6 +37,7 @@ use tracing::instrument;
 use url::Url;
 
 mod block_stream_client;
+pub mod dataset_kind;
 mod env_substitute;
 mod error;
 
@@ -48,6 +46,7 @@ pub use self::error::{
     EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
     GetDerivedManifestError,
 };
+use crate::dataset_kind::{DatasetKind, UnsupportedKindError};
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -142,14 +141,14 @@ impl DatasetStore {
                 source,
             })?;
 
-        let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
+        let kind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
             GetDatasetError::UnsupportedKind {
                 reference: reference.clone(),
                 kind: err.kind,
             }
         })?;
 
-        let dataset = match kind {
+        let dataset: Arc<Dataset> = match kind {
             DatasetKind::EvmRpc => {
                 let manifest = manifest_content
                     .try_into_manifest::<EvmRpcManifest>()
@@ -158,7 +157,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                evm_rpc_datasets::dataset(reference.clone(), manifest)
+                Arc::new(evm_rpc_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::Solana => {
                 let manifest = manifest_content
@@ -168,7 +167,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                solana_datasets::dataset(reference.clone(), manifest)
+                Arc::new(solana_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::EthBeacon => {
                 let manifest = manifest_content
@@ -178,7 +177,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                eth_beacon_datasets::dataset(reference.clone(), manifest)
+                Arc::new(eth_beacon_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content
@@ -188,7 +187,7 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                firehose_datasets::evm::dataset(reference.clone(), manifest)
+                Arc::new(firehose_datasets::evm::dataset(reference.clone(), manifest))
             }
             DatasetKind::Derived => {
                 let manifest = manifest_content
@@ -198,16 +197,16 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
-                    GetDatasetError::CreateDerivedDataset {
-                        reference: reference.clone(),
-                        source,
-                    }
-                })?
+                Arc::new(
+                    datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
+                        GetDatasetError::CreateDerivedDataset {
+                            reference: reference.clone(),
+                            source,
+                        }
+                    })?,
+                )
             }
         };
-
-        let dataset = Arc::new(dataset);
 
         // Cache the dataset
         self.dataset_cache
@@ -378,7 +377,13 @@ impl DatasetStore {
             .get_all()
             .await
             .values()
-            .filter(|prov| prov.kind == kind && prov.network == network)
+            .filter_map(|prov| {
+                let prov_kind: DatasetKind = (&prov.kind).try_into().ok()?;
+                if prov_kind != kind || prov.network != network {
+                    return None;
+                }
+                Some(prov)
+            })
             .cloned()
             .collect::<Vec<_>>();
 
@@ -425,7 +430,7 @@ impl DatasetStore {
         sql_table_ref_schema: &str,
         dataset: &Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        if dataset.kind != EvmRpcDatasetKind {
+        if dataset.kind.as_str() != EvmRpcDatasetKind {
             return Ok(None);
         }
 
@@ -535,7 +540,7 @@ pub async fn dataset_and_dependencies(
             .ok_or_else(|| BoxError::from(format!("dataset '{}' not found", dataset_ref)))?;
         let dataset = store.get_dataset(&hash_ref).await?;
 
-        if dataset.kind != DerivedDatasetKind {
+        if dataset.kind.as_str() != DerivedDatasetKind {
             deps.insert(dataset_ref, vec![]);
             continue;
         }

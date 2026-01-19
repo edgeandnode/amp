@@ -1011,7 +1011,7 @@ dependencies = [
  "serde",
  "solana-datasets",
  "thiserror 2.0.17",
- "toml 0.8.23",
+ "toml",
  "tracing",
  "url",
 ]
@@ -1061,7 +1061,7 @@ dependencies = [
  "solana-datasets",
  "thiserror 2.0.17",
  "tokio",
- "toml 0.8.23",
+ "toml",
  "tracing",
 ]
 

@@ -1,6 +1,6 @@
 //! Provider information types for API requests and responses
 
-use amp_providers_registry::dataset_kind::DatasetKind;
+use amp_dataset_store::dataset_kind::DatasetKind;
 
 use super::convert;
 use crate::handlers::common::NonEmptyString;
@@ -52,7 +52,7 @@ impl TryFrom<(String, amp_providers_registry::ProviderConfig)> for ProviderInfo 
 
         Ok(Self {
             name,
-            kind: config.kind,
+            kind: config.kind.try_into().map_err(serde::de::Error::custom)?,
             network,
             rest,
         })

@@ -16,14 +16,11 @@
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use common::BoxError;
+use datasets_common::dataset::RawDatasetKind;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
 use object_store::ObjectStore;
 use parking_lot::RwLock;
-
-use crate::dataset_kind::DatasetKind;
-
-pub mod dataset_kind;
 
 /// Manages provider configurations and caching
 ///
@@ -278,8 +275,8 @@ pub struct ProviderConfig {
     /// Unique name of the provider configuration
     #[serde(default)]
     pub name: String,
-    /// The type of provider (e.g., "evm-rpc", "firehose")
-    pub kind: DatasetKind,
+    /// The type of provider as raw string (e.g., "evm-rpc", "firehose")
+    pub kind: RawDatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     pub network: String,
     /// All other provider-specific configuration fields
