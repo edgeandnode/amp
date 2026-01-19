@@ -121,6 +121,13 @@ where
             app.needs_redraw = true;
         }
 
+        // Tick message expiration (for success messages)
+        let had_message = app.success_message.is_some();
+        app.tick_messages();
+        if had_message && app.success_message.is_none() {
+            app.needs_redraw = true;
+        }
+
         // Auto-refresh jobs/workers in Local mode
         if app.is_local() && app.last_refresh.elapsed() >= REFRESH_INTERVAL {
             spawn_fetch_jobs(app, tx.clone());
@@ -254,9 +261,10 @@ where
                                             && let Some((ns, name, _)) =
                                                 app.get_selected_manifest_params()
                                         {
-                                            app.query_input =
-                                                format!("SELECT * FROM {}.{} LIMIT 10", ns, name);
-                                            app.query_cursor = app.query_input.len();
+                                            app.set_query_input(format!(
+                                                "SELECT * FROM {}.{} LIMIT 10",
+                                                ns, name
+                                            ));
                                         }
                                     }
                                 }
@@ -437,6 +445,29 @@ where
                                     app.active_pane = app.active_pane.prev(is_local);
                                 }
 
+                                // Export query results to CSV (E key in QueryResult pane)
+                                KeyCode::Char('E') | KeyCode::Char('e')
+                                    if app.active_pane == ActivePane::QueryResult =>
+                                {
+                                    if let Some(results) = &app.query_results {
+                                        match export_results_csv(results) {
+                                            Ok(filename) => {
+                                                app.set_success_message(format!(
+                                                    "Exported {} rows to {}",
+                                                    results.row_count, filename
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                app.error_message =
+                                                    Some(format!("Export failed: {}", e));
+                                            }
+                                        }
+                                    } else {
+                                        app.error_message =
+                                            Some("No results to export".to_string());
+                                    }
+                                }
+
                                 _ => {}
                             }
                         }
@@ -482,6 +513,11 @@ where
                                     spawn_execute_query(app, sql, tx.clone());
                                 }
                             }
+                            KeyCode::Enter => {
+                                // Insert newline (plain Enter without Ctrl)
+                                app.query_history_index = None;
+                                app.insert_char('\n');
+                            }
                             KeyCode::Esc => {
                                 // Cancel query input, return to normal mode
                                 app.input_mode = InputMode::Normal;
@@ -492,80 +528,81 @@ where
                                 }
                             }
                             KeyCode::Up => {
-                                // Navigate to older history entry
-                                if !app.query_history.is_empty() {
-                                    match app.query_history_index {
-                                        None => {
-                                            // Save current input as draft, load most recent history
-                                            app.query_draft = app.query_input.clone();
-                                            let last_idx = app.query_history.len() - 1;
-                                            app.query_history_index = Some(last_idx);
-                                            app.query_input = app.query_history[last_idx].clone();
-                                            app.query_cursor = app.query_input.len();
-                                        }
-                                        Some(idx) if idx > 0 => {
-                                            // Move to older entry
-                                            let new_idx = idx - 1;
-                                            app.query_history_index = Some(new_idx);
-                                            app.query_input = app.query_history[new_idx].clone();
-                                            app.query_cursor = app.query_input.len();
-                                        }
-                                        Some(_) => {
-                                            // Already at oldest entry, do nothing
+                                // First try to move cursor up in multiline input
+                                if !app.cursor_up() {
+                                    // At first line, navigate history
+                                    if !app.query_history.is_empty() {
+                                        match app.query_history_index {
+                                            None => {
+                                                // Save current input as draft, load most recent history
+                                                app.query_draft = app.query_input.clone();
+                                                let last_idx = app.query_history.len() - 1;
+                                                app.query_history_index = Some(last_idx);
+                                                app.set_query_input(
+                                                    app.query_history[last_idx].clone(),
+                                                );
+                                            }
+                                            Some(idx) if idx > 0 => {
+                                                // Move to older entry
+                                                let new_idx = idx - 1;
+                                                app.query_history_index = Some(new_idx);
+                                                app.set_query_input(
+                                                    app.query_history[new_idx].clone(),
+                                                );
+                                            }
+                                            Some(_) => {
+                                                // Already at oldest entry, do nothing
+                                            }
                                         }
                                     }
                                 }
                             }
                             KeyCode::Down => {
-                                // Navigate to newer history entry
-                                if let Some(idx) = app.query_history_index {
-                                    if idx < app.query_history.len() - 1 {
-                                        // Move to newer entry
-                                        let new_idx = idx + 1;
-                                        app.query_history_index = Some(new_idx);
-                                        app.query_input = app.query_history[new_idx].clone();
-                                        app.query_cursor = app.query_input.len();
-                                    } else {
-                                        // At newest entry, restore draft
-                                        app.query_history_index = None;
-                                        app.query_input = app.query_draft.clone();
-                                        app.query_cursor = app.query_input.len();
+                                // First try to move cursor down in multiline input
+                                if !app.cursor_down() {
+                                    // At last line, navigate history
+                                    if let Some(idx) = app.query_history_index {
+                                        if idx < app.query_history.len() - 1 {
+                                            // Move to newer entry
+                                            let new_idx = idx + 1;
+                                            app.query_history_index = Some(new_idx);
+                                            app.set_query_input(
+                                                app.query_history[new_idx].clone(),
+                                            );
+                                        } else {
+                                            // At newest entry, restore draft
+                                            app.query_history_index = None;
+                                            app.set_query_input(app.query_draft.clone());
+                                        }
                                     }
                                 }
                             }
                             KeyCode::Char(c) => {
                                 // Reset history navigation on edit
                                 app.query_history_index = None;
-                                app.query_input.insert(app.query_cursor, c);
-                                app.query_cursor += 1;
+                                app.insert_char(c);
                             }
                             KeyCode::Backspace => {
-                                if app.query_cursor > 0 {
-                                    // Reset history navigation on edit
-                                    app.query_history_index = None;
-                                    app.query_cursor -= 1;
-                                    app.query_input.remove(app.query_cursor);
-                                }
+                                // Reset history navigation on edit
+                                app.query_history_index = None;
+                                app.backspace();
                             }
                             KeyCode::Delete => {
-                                if app.query_cursor < app.query_input.len() {
-                                    // Reset history navigation on edit
-                                    app.query_history_index = None;
-                                    app.query_input.remove(app.query_cursor);
-                                }
+                                // Reset history navigation on edit
+                                app.query_history_index = None;
+                                app.delete_char();
                             }
                             KeyCode::Left => {
-                                app.query_cursor = app.query_cursor.saturating_sub(1);
+                                app.cursor_left();
                             }
                             KeyCode::Right => {
-                                app.query_cursor =
-                                    (app.query_cursor + 1).min(app.query_input.len());
+                                app.cursor_right();
                             }
                             KeyCode::Home => {
-                                app.query_cursor = 0;
+                                app.cursor_home();
                             }
                             KeyCode::End => {
-                                app.query_cursor = app.query_input.len();
+                                app.cursor_end();
                             }
                             _ => {}
                         },
@@ -687,12 +724,14 @@ where
                                         }
                                     }
                                     ContentView::QueryResults => {
-                                        // Split: Query input (5 lines) | Results (rest)
+                                        // Dynamic height for query input
+                                        let query_height =
+                                            (app.query_line_count() as u16 + 2).clamp(3, 10);
                                         let query_chunks = Layout::default()
                                             .direction(Direction::Vertical)
                                             .constraints([
-                                                Constraint::Length(5), // Query input
-                                                Constraint::Min(0),    // Results
+                                                Constraint::Length(query_height), // Query input
+                                                Constraint::Min(0),               // Results
                                             ])
                                             .split(content_area);
 
@@ -1011,4 +1050,29 @@ fn format_array_value(array: &dyn Array, idx: usize) -> String {
 
     // Fallback: use array_value_to_string from Arrow
     arrow::util::display::array_value_to_string(array, idx).unwrap_or_else(|_| "?".to_string())
+}
+
+/// Export query results to a CSV file.
+///
+/// Returns the filename on success, or an error message on failure.
+fn export_results_csv(results: &QueryResults) -> Result<String, String> {
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("query_results_{}.csv", timestamp);
+
+    let mut wtr =
+        csv::Writer::from_path(&filename).map_err(|e| format!("Failed to create file: {}", e))?;
+
+    // Write header
+    wtr.write_record(&results.columns)
+        .map_err(|e| format!("Failed to write header: {}", e))?;
+
+    // Write rows
+    for row in &results.rows {
+        wtr.write_record(row)
+            .map_err(|e| format!("Failed to write row: {}", e))?;
+    }
+
+    wtr.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+
+    Ok(filename)
 }

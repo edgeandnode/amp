@@ -661,12 +661,13 @@ fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
             draw_worker_detail(f, app, worker.clone(), area);
         }
         ContentView::QueryResults => {
-            // Split content vertically: Query input (5 lines) | Results (rest)
+            // Dynamic height for query input: line count + 2 (borders), clamped to 3-10 lines
+            let query_height = (app.query_line_count() as u16 + 2).clamp(3, 10);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(5), // Query input
-                    Constraint::Min(0),    // Results
+                    Constraint::Length(query_height), // Query input
+                    Constraint::Min(0),               // Results
                 ])
                 .split(area);
 
@@ -702,6 +703,7 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
         Theme::border_unfocused()
     };
 
+    let line_count = app.query_line_count();
     let title = if app.input_mode == InputMode::Query {
         if let Some(idx) = app.query_history_index {
             format!(
@@ -711,11 +713,14 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
             )
         } else if !app.query_history.is_empty() {
             format!(
-                "SQL Query [↑ history ({} entries), Ctrl+Enter execute]",
-                app.query_history.len()
+                "SQL Query ({} lines) [↑↓ nav, Enter newline, Ctrl+Enter execute]",
+                line_count
             )
         } else {
-            "SQL Query (Ctrl+Enter to execute, Esc to cancel)".to_string()
+            format!(
+                "SQL Query ({} lines) [Enter newline, Ctrl+Enter execute]",
+                line_count
+            )
         }
     } else {
         "SQL Query (press Q to edit)".to_string()
@@ -726,19 +731,38 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    // Show cursor in query input when in query mode
-    let text = if app.input_mode == InputMode::Query {
-        let (before, after) = app.query_input.split_at(app.query_cursor);
-        Line::from(vec![
-            Span::styled(before.to_string(), Theme::text_primary()),
-            Span::styled("_", Theme::status_warning()),
-            Span::styled(after.to_string(), Theme::text_primary()),
-        ])
+    // Build lines with cursor rendering for multi-line input
+    let lines: Vec<Line> = if app.input_mode == InputMode::Query {
+        let query_lines = app.query_lines();
+        query_lines
+            .iter()
+            .enumerate()
+            .map(|(line_idx, line_text)| {
+                if line_idx == app.query_cursor.line {
+                    // This is the line with the cursor
+                    let col = app.query_cursor.column.min(line_text.len());
+                    let (before, after) = line_text.split_at(col);
+                    Line::from(vec![
+                        Span::styled(before.to_string(), Theme::text_primary()),
+                        Span::styled("_", Theme::status_warning()),
+                        Span::styled(after.to_string(), Theme::text_primary()),
+                    ])
+                } else {
+                    Line::from(Span::styled(line_text.to_string(), Theme::text_primary()))
+                }
+            })
+            .collect()
     } else {
-        Line::from(Span::styled(&app.query_input, Theme::text_primary()))
+        // Not in query mode, just show the text without cursor
+        app.query_lines()
+            .iter()
+            .map(|line| Line::from(Span::styled(line.to_string(), Theme::text_primary())))
+            .collect()
     };
 
-    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.query_input_scroll, 0));
     f.render_widget(paragraph, area);
 }
 
@@ -776,7 +800,10 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let title = format!("Query Results ({} rows)", results.row_count);
+    let title = format!(
+        "Query Results ({} rows) - Press E to export",
+        results.row_count
+    );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -1412,7 +1439,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                     "[↑↓] History [Ctrl+Enter] Execute [Esc] Cancel"
                 }
             }
-            ActivePane::QueryResult => "[j/k] Scroll [Q] Edit query [Esc] Back",
+            ActivePane::QueryResult => "[E] Export [j/k] Scroll [Q] Edit query",
         };
 
         format!(
@@ -1421,7 +1448,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         )
     };
 
-    // Build the right side (loading indicator or error message)
+    // Build the right side (loading indicator, success message, or error message)
     let (right_spans, right_width): (Vec<Span>, u16) = if app.loading {
         // Show loading spinner
         let mut spans = Vec::new();
@@ -1438,6 +1465,19 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             .map(|m| m.len() + 1)
             .unwrap_or(0);
         (spans, (msg_len + 2) as u16)
+    } else if let Some(success) = &app.success_message {
+        // Show success message (green)
+        let display_success = if success.len() > 60 {
+            format!("{}...", &success[..57])
+        } else {
+            success.clone()
+        };
+        let spans = vec![Span::styled(
+            format!("✓ {}", display_success),
+            Theme::status_success(),
+        )];
+        let width = (display_success.len() + 3) as u16; // icon + space + message
+        (spans, width)
     } else if let Some(error) = &app.error_message {
         // Show error message
         let display_error = if error.len() > 50 {

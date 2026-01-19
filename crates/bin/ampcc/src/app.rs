@@ -1,6 +1,11 @@
 //! Application state and business logic.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use admin_client::{
     Client,
@@ -12,6 +17,13 @@ use ratatui::widgets::ScrollbarState;
 use url::Url;
 
 use crate::{config::Config, registry::RegistryClient};
+
+/// Cursor position in multi-line text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextPosition {
+    pub line: usize,
+    pub column: usize,
+}
 
 /// A history entry for a single query.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -415,6 +427,10 @@ pub struct App {
     pub loading: bool,
     pub error_message: Option<String>,
 
+    // Success message (auto-expires after 3 seconds)
+    pub success_message: Option<String>,
+    pub message_expires: Option<Instant>,
+
     // Spinner animation state
     pub spinner_frame: usize,
     pub loading_message: Option<String>,
@@ -437,7 +453,8 @@ pub struct App {
 
     // SQL Query state (Local mode only)
     pub query_input: String,
-    pub query_cursor: usize,
+    pub query_cursor: TextPosition,
+    pub query_input_scroll: u16, // Scroll offset for tall query input
     pub query_results: Option<QueryResults>,
     pub query_scroll: u16,
     pub query_scroll_state: ScrollbarState,
@@ -447,6 +464,12 @@ pub struct App {
     pub query_history: Vec<String>,
     pub query_history_index: Option<usize>, // None = current input, Some(i) = history[i]
     pub query_draft: String,                // Preserved current input when navigating history
+
+    // History search state (Ctrl+R)
+    pub history_search_active: bool,
+    pub history_search_query: String,
+    pub history_search_matches: Vec<usize>, // indices into query_history
+    pub history_search_index: usize,        // index into matches
 }
 
 impl App {
@@ -486,6 +509,8 @@ impl App {
             current_inspect: None,
             loading: false,
             error_message: None,
+            success_message: None,
+            message_expires: None,
             spinner_frame: 0,
             loading_message: None,
             manifest_scroll: 0,
@@ -499,7 +524,8 @@ impl App {
             detail_content_length: 0,
             needs_redraw: true,
             query_input: String::new(),
-            query_cursor: 0,
+            query_cursor: TextPosition::default(),
+            query_input_scroll: 0,
             query_results: None,
             query_scroll: 0,
             query_scroll_state: ScrollbarState::default(),
@@ -507,6 +533,10 @@ impl App {
             query_history: Vec::new(),
             query_history_index: None,
             query_draft: String::new(),
+            history_search_active: false,
+            history_search_query: String::new(),
+            history_search_matches: Vec::new(),
+            history_search_index: 0,
         })
     }
 
@@ -541,6 +571,24 @@ impl App {
     pub fn stop_loading(&mut self) {
         self.loading = false;
         self.loading_message = None;
+    }
+
+    /// Set a success message that auto-expires after 3 seconds.
+    pub fn set_success_message(&mut self, msg: String) {
+        self.success_message = Some(msg);
+        self.message_expires = Some(Instant::now() + Duration::from_secs(3));
+        // Clear any error message when showing success
+        self.error_message = None;
+    }
+
+    /// Tick message expiration - call in main loop.
+    pub fn tick_messages(&mut self) {
+        if let Some(expires) = self.message_expires
+            && Instant::now() > expires
+        {
+            self.success_message = None;
+            self.message_expires = None;
+        }
     }
 
     /// Scroll up in the focused pane.
@@ -1227,5 +1275,252 @@ impl App {
         std::fs::write(&path, content)?;
 
         Ok(())
+    }
+
+    // ========================================================================
+    // Multi-line Query Input Helpers
+    // ========================================================================
+
+    /// Get the lines of query input.
+    pub fn query_lines(&self) -> Vec<&str> {
+        if self.query_input.is_empty() {
+            vec![""]
+        } else {
+            self.query_input.split('\n').collect()
+        }
+    }
+
+    /// Get the number of lines in query input.
+    pub fn query_line_count(&self) -> usize {
+        if self.query_input.is_empty() {
+            1
+        } else {
+            self.query_input.split('\n').count()
+        }
+    }
+
+    /// Get the length of a specific line.
+    pub fn get_line_length(&self, line: usize) -> usize {
+        self.query_lines().get(line).map(|l| l.len()).unwrap_or(0)
+    }
+
+    /// Convert TextPosition to byte offset in query_input.
+    pub fn cursor_to_offset(&self) -> usize {
+        let mut offset = 0;
+        for (i, line) in self.query_input.split('\n').enumerate() {
+            if i == self.query_cursor.line {
+                return offset + self.query_cursor.column.min(line.len());
+            }
+            offset += line.len() + 1; // +1 for newline
+        }
+        self.query_input.len()
+    }
+
+    /// Convert byte offset to TextPosition.
+    pub fn offset_to_cursor(input: &str, offset: usize) -> TextPosition {
+        let mut line = 0;
+        let mut column = 0;
+        let mut current = 0;
+
+        for ch in input.chars() {
+            if current >= offset {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 0;
+            } else {
+                column += 1;
+            }
+            current += ch.len_utf8();
+        }
+
+        TextPosition { line, column }
+    }
+
+    /// Move cursor up one line (returns true if moved).
+    pub fn cursor_up(&mut self) -> bool {
+        if self.query_cursor.line > 0 {
+            self.query_cursor.line -= 1;
+            let line_len = self.get_line_length(self.query_cursor.line);
+            self.query_cursor.column = self.query_cursor.column.min(line_len);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move cursor down one line (returns true if moved).
+    pub fn cursor_down(&mut self) -> bool {
+        let line_count = self.query_line_count();
+        if self.query_cursor.line < line_count.saturating_sub(1) {
+            self.query_cursor.line += 1;
+            let line_len = self.get_line_length(self.query_cursor.line);
+            self.query_cursor.column = self.query_cursor.column.min(line_len);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move cursor left, wrapping to previous line if at start.
+    pub fn cursor_left(&mut self) {
+        if self.query_cursor.column > 0 {
+            self.query_cursor.column -= 1;
+        } else if self.query_cursor.line > 0 {
+            // Move to end of previous line
+            self.query_cursor.line -= 1;
+            self.query_cursor.column = self.get_line_length(self.query_cursor.line);
+        }
+    }
+
+    /// Move cursor right, wrapping to next line if at end.
+    pub fn cursor_right(&mut self) {
+        let line_len = self.get_line_length(self.query_cursor.line);
+        if self.query_cursor.column < line_len {
+            self.query_cursor.column += 1;
+        } else if self.query_cursor.line < self.query_line_count().saturating_sub(1) {
+            // Move to start of next line
+            self.query_cursor.line += 1;
+            self.query_cursor.column = 0;
+        }
+    }
+
+    /// Move cursor to start of current line.
+    pub fn cursor_home(&mut self) {
+        self.query_cursor.column = 0;
+    }
+
+    /// Move cursor to end of current line.
+    pub fn cursor_end(&mut self) {
+        self.query_cursor.column = self.get_line_length(self.query_cursor.line);
+    }
+
+    /// Insert a character at cursor position.
+    pub fn insert_char(&mut self, c: char) {
+        let offset = self.cursor_to_offset();
+        self.query_input.insert(offset, c);
+        if c == '\n' {
+            self.query_cursor.line += 1;
+            self.query_cursor.column = 0;
+        } else {
+            self.query_cursor.column += 1;
+        }
+    }
+
+    /// Delete character before cursor (backspace).
+    /// Returns true if something was deleted.
+    pub fn backspace(&mut self) -> bool {
+        if self.query_cursor.column > 0 {
+            // Delete character in current line
+            let offset = self.cursor_to_offset();
+            self.query_input.remove(offset - 1);
+            self.query_cursor.column -= 1;
+            true
+        } else if self.query_cursor.line > 0 {
+            // Join with previous line
+            let offset = self.cursor_to_offset();
+            let prev_line_len = self.get_line_length(self.query_cursor.line - 1);
+            self.query_input.remove(offset - 1); // Remove the newline
+            self.query_cursor.line -= 1;
+            self.query_cursor.column = prev_line_len;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Delete character at cursor position (delete key).
+    /// Returns true if something was deleted.
+    pub fn delete_char(&mut self) -> bool {
+        let offset = self.cursor_to_offset();
+        if offset < self.query_input.len() {
+            self.query_input.remove(offset);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set query input and reset cursor to end.
+    pub fn set_query_input(&mut self, input: String) {
+        self.query_input = input;
+        // Move cursor to end of input
+        let line_count = self.query_line_count();
+        if line_count > 0 {
+            self.query_cursor.line = line_count - 1;
+            self.query_cursor.column = self.get_line_length(self.query_cursor.line);
+        } else {
+            self.query_cursor = TextPosition::default();
+        }
+    }
+
+    // ========================================================================
+    // History Search (Ctrl+R)
+    // ========================================================================
+
+    /// Update history search matches based on current search query.
+    pub fn update_history_search(&mut self) {
+        if self.history_search_query.is_empty() {
+            // Empty search query matches all history
+            self.history_search_matches = (0..self.query_history.len()).rev().collect();
+        } else {
+            let query_lower = self.history_search_query.to_lowercase();
+            self.history_search_matches = self
+                .query_history
+                .iter()
+                .enumerate()
+                .filter(|(_, h)| h.to_lowercase().contains(&query_lower))
+                .map(|(i, _)| i)
+                .rev() // Most recent first
+                .collect();
+        }
+
+        // Reset to first match
+        self.history_search_index = 0;
+
+        // Update query input to show current match
+        if let Some(&idx) = self.history_search_matches.first() {
+            self.set_query_input(self.query_history[idx].clone());
+        }
+    }
+
+    /// Cycle to the next history search match.
+    pub fn cycle_history_search(&mut self) {
+        if self.history_search_matches.is_empty() {
+            return;
+        }
+
+        self.history_search_index =
+            (self.history_search_index + 1) % self.history_search_matches.len();
+
+        let idx = self.history_search_matches[self.history_search_index];
+        self.set_query_input(self.query_history[idx].clone());
+    }
+
+    /// Enter history search mode.
+    pub fn enter_history_search(&mut self) {
+        // Save current input as draft before starting search
+        if !self.history_search_active {
+            self.query_draft = self.query_input.clone();
+        }
+        self.history_search_active = true;
+        self.history_search_query.clear();
+        self.history_search_matches.clear();
+        self.history_search_index = 0;
+    }
+
+    /// Exit history search mode, accepting current match.
+    pub fn accept_history_search(&mut self) {
+        self.history_search_active = false;
+        self.history_search_query.clear();
+        // query_input already has the selected match
+    }
+
+    /// Cancel history search mode, restoring original input.
+    pub fn cancel_history_search(&mut self) {
+        self.history_search_active = false;
+        self.history_search_query.clear();
+        self.set_query_input(self.query_draft.clone());
     }
 }

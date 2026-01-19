@@ -1075,6 +1075,7 @@ dependencies = [
  "arrow",
  "chrono",
  "crossterm 0.29.0",
+ "csv",
  "datasets-common",
  "directories",
  "figment",
