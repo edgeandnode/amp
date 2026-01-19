@@ -1,11 +1,12 @@
 use std::{collections::BTreeMap, num::NonZeroU32};
 
-use common::{BlockNum, Dataset};
-use datasets_common::hash_reference::HashReference;
+use common::BlockNum;
+use datasets_common::{dataset::Table as DatasetTable, hash_reference::HashReference};
 use reqwest::Url;
 
 mod block;
 mod client;
+mod dataset;
 mod dataset_kind;
 
 // Reuse types from datasets-common for consistency
@@ -68,21 +69,20 @@ pub struct ProviderConfig {
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
     let network = manifest.network;
-    Dataset {
+    crate::dataset::Dataset {
         reference,
         dependencies: BTreeMap::new(),
-        kind: manifest.kind.to_string(),
+        kind: manifest.kind,
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
         tables: all_tables(network.clone()),
         network: Some(network),
-        functions: vec![],
     }
 }
 
-pub fn all_tables(network: String) -> Vec<common::Table> {
+pub fn all_tables(network: String) -> Vec<DatasetTable> {
     vec![block::table(network)]
 }
 

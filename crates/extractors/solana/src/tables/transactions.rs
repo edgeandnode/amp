@@ -2,7 +2,7 @@ use std::sync::{Arc, LazyLock};
 
 use base64::Engine;
 use common::{
-    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM, Table,
+    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{
             ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, ListBuilder, StringBuilder,
@@ -12,6 +12,7 @@ use common::{
     },
     metadata::segments::BlockRange,
 };
+use datasets_common::dataset::Table;
 use serde::Deserialize;
 use solana_clock::Slot;
 

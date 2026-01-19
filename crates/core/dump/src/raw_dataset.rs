@@ -132,7 +132,7 @@ pub async fn dump(
 
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
-    for table_def in &dataset.tables {
+    for table_def in dataset.tables() {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> = match ctx
             .data_store
@@ -146,7 +146,7 @@ pub async fn dump(
                 PhysicalTable::from_active_revision(
                     ctx.data_store.clone(),
                     dataset.reference().clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                     table_def.clone(),
                     revision,
                     sql_table_ref_schema,
@@ -158,7 +158,7 @@ pub async fn dump(
                 common::catalog::physical::register_new_table_revision(
                     ctx.data_store.clone(),
                     dataset_reference.clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                     table_def.clone(),
                     sql_table_ref_schema,
                 )
@@ -216,7 +216,7 @@ pub async fn dump(
     }
 
     let metrics = ctx.metrics.clone();
-    let finalized_blocks_only = dataset.finalized_blocks_only;
+    let finalized_blocks_only = dataset.finalized_blocks_only();
 
     let mut client = ctx
         .dataset_store
@@ -230,7 +230,7 @@ pub async fn dump(
     let provider_name = client.provider_name().to_string();
     tracing::info!("connected to provider: {provider_name}");
 
-    let start = dataset.start_block.unwrap_or(0);
+    let start = dataset.start_block().unwrap_or(0);
     let resolved = end
         .resolve(start, client.latest_block(finalized_blocks_only))
         .await

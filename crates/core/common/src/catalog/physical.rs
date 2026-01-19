@@ -21,7 +21,7 @@ use datafusion::{
     prelude::Expr,
 };
 use datafusion_datasource::compute_all_files_statistics;
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use datasets_common::{dataset::Table, hash_reference::HashReference, table_name::TableName};
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::LocationId;
 use object_store::{ObjectMeta, ObjectStore, path::Path};
@@ -30,7 +30,6 @@ use uuid::Uuid;
 
 use crate::{
     BlockNum, BoxError, LogicalCatalog,
-    catalog::logical::Table,
     metadata::{
         FileMetadata, amp_metadata_from_parquet_file,
         parquet::ParquetMeta,

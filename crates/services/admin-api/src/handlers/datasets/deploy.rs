@@ -135,8 +135,8 @@ pub async fn handler(
 
     // Parse dataset kind (must always succeed - panic if DB is in bad state)
     let dataset_kind: DatasetKind = dataset
-        .kind
-        .parse()
+        .kind()
+        .try_into()
         .expect("dataset kind in database must be valid");
 
     // Schedule the extraction job using the scheduler

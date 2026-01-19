@@ -56,7 +56,7 @@ pub struct Args {
 }
 
 /// Create a TableSchema from a logical table
-fn table_schema_from_logical_table(table: &common::Table) -> TableSchema {
+fn table_schema_from_logical_table(table: &datasets_common::dataset::Table) -> TableSchema {
     let fields: Vec<Field> = table
         .schema()
         .fields()

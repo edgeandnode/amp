@@ -190,7 +190,7 @@ pub async fn load_physical_tables(
         .expect("Failed to get dataset");
 
     let mut dumped_tables: Vec<Arc<PhysicalTable>> = Vec::new();
-    for table_def in &dataset.tables {
+    for table_def in dataset.tables() {
         let revision = data_store
             .get_table_active_revision(dataset.reference(), table_def.name())
             .await
@@ -201,7 +201,7 @@ pub async fn load_physical_tables(
         let physical_table = PhysicalTable::from_active_revision(
             data_store.clone(),
             dataset_ref.clone(),
-            dataset.start_block,
+            dataset.start_block(),
             table_def.clone(),
             revision,
             sql_table_ref_schema,
@@ -261,7 +261,7 @@ pub async fn restore_dataset_snapshot(
     // 3. Load PhysicalTable objects for each restored table
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
-    for table_def in &dataset.tables {
+    for table_def in dataset.tables() {
         // Verify this table was restored
         let table_name = table_def.name().to_string();
         let restored = restored_info
@@ -297,7 +297,7 @@ pub async fn restore_dataset_snapshot(
         let physical_table = PhysicalTable::from_active_revision(
             data_store.clone(),
             dataset_ref.clone(),
-            dataset.start_block,
+            dataset.start_block(),
             table_def.clone(),
             revision,
             sql_table_ref_schema,
@@ -446,7 +446,7 @@ pub async fn catalog_for_dataset(
     let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
-    for table_def in &dataset.tables {
+    for table_def in dataset.tables() {
         let revision = data_store
             .get_table_active_revision(dataset.reference(), table_def.name())
             .await?
@@ -456,7 +456,7 @@ pub async fn catalog_for_dataset(
         let physical_table = PhysicalTable::from_active_revision(
             data_store.clone(),
             dataset_ref.clone(),
-            dataset.start_block,
+            dataset.start_block(),
             table_def.clone(),
             revision,
             sql_table_ref_schema,

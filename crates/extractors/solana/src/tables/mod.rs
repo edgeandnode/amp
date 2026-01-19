@@ -11,7 +11,7 @@ pub mod transactions;
 /// Maximum number of ASCII characters in a base58-encoded 32-byte hash.
 pub(crate) const BASE58_ENCODED_HASH_LEN: usize = 44;
 
-pub fn all(network: &str) -> Vec<common::Table> {
+pub fn all(network: &str) -> Vec<datasets_common::dataset::Table> {
     vec![
         block_headers::table(network.to_string()),
         transactions::table(network.to_string()),

@@ -11,7 +11,7 @@ use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
     BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, LogicalTable,
-    PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
+    PlanningContext, QueryContext, ResolvedTable, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
@@ -719,7 +719,7 @@ async fn resolve_blocks_table(
         search_dependencies_for_raw_dataset(dataset_store, root_dataset_refs, network).await?;
 
     let table = dataset
-        .tables
+        .tables()
         .iter()
         .find(|t| t.name() == "blocks")
         .ok_or_else(|| -> BoxError {
@@ -746,7 +746,7 @@ async fn resolve_blocks_table(
     Ok(PhysicalTable::from_active_revision(
         data_store,
         dataset.reference().clone(),
-        dataset.start_block,
+        dataset.start_block(),
         table.clone(),
         revision,
         sql_table_ref_schema,
@@ -758,8 +758,8 @@ async fn search_dependencies_for_raw_dataset(
     dataset_store: &DatasetStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &str,
-) -> Result<Arc<Dataset>, BoxError> {
-    let mut queue: VecDeque<Arc<Dataset>> = VecDeque::new();
+) -> Result<Arc<dyn datasets_common::dataset::Dataset>, BoxError> {
+    let mut queue: VecDeque<Arc<dyn datasets_common::dataset::Dataset>> = VecDeque::new();
     for hash_ref in root_dataset_refs {
         let dataset = dataset_store.get_dataset(hash_ref).await?;
         queue.push_back(dataset);
@@ -774,8 +774,8 @@ async fn search_dependencies_for_raw_dataset(
             continue;
         }
 
-        if dataset.kind != DerivedDatasetKind
-            && let Some(dataset_network) = dataset.network.as_ref()
+        if dataset.kind().as_str() != DerivedDatasetKind
+            && let Some(dataset_network) = dataset.network()
             && dataset_network == network
         {
             // Found matching dataset
@@ -783,7 +783,7 @@ async fn search_dependencies_for_raw_dataset(
         }
 
         // Enqueue dependencies for exploration
-        for dep in dataset.dependencies.values() {
+        for dep in dataset.dependencies().values() {
             // Resolve the reference to a hash reference first
             let hash_ref = dataset_store
                 .resolve_revision(dep.to_reference())

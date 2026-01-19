@@ -6,13 +6,12 @@
 
 use std::sync::Arc;
 
-// Re-export Table type from common for convenience
-pub use common::Table;
 use datafusion::arrow::{
     array::{ArrayRef, RecordBatch, StringArray},
     datatypes::{DataType, Field, Schema},
     util::pretty::pretty_format_batches,
 };
+use datasets_common::dataset::Table;
 
 /// Convert a collection of tables into a markdown-formatted schema document.
 ///

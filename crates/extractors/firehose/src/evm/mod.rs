@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use common::Dataset;
 use datasets_common::hash_reference::HashReference;
 
 use crate::dataset::Manifest;
@@ -12,16 +11,15 @@ pub mod tables;
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
     let network = manifest.network;
-    Dataset {
+    crate::dataset::Dataset {
         reference,
         dependencies: BTreeMap::new(),
-        kind: manifest.kind.to_string(),
+        kind: manifest.kind,
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
         tables: tables::all(&network),
         network: Some(network),
-        functions: vec![],
     }
 }

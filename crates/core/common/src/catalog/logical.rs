@@ -1,21 +1,8 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::sync::Arc;
 
-use datafusion::{
-    arrow::datatypes::{DataType, SchemaRef},
-    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
-};
-use datasets_common::{
-    deps::{alias::DepAlias, reference::DepReference},
-    hash_reference::HashReference,
-    table_name::TableName,
-};
-use js_runtime::isolate_pool::IsolatePool;
+use datafusion::{arrow::datatypes::DataType, logical_expr::ScalarUDF};
+use datasets_common::dataset::Table;
 use serde::Deserialize;
-
-use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 
 pub mod for_admin_api;
 pub mod for_dump;
@@ -24,97 +11,6 @@ pub mod for_query;
 pub mod table;
 
 pub use table::LogicalTable;
-
-/// Identifies a dataset and its data schema.
-#[derive(Clone, Debug)]
-pub struct Dataset {
-    pub reference: HashReference,
-    pub dependencies: BTreeMap<DepAlias, DepReference>,
-    pub kind: String,
-    pub network: Option<String>,
-    pub start_block: Option<BlockNum>,
-    pub finalized_blocks_only: bool,
-    pub tables: Vec<Table>,
-    pub functions: Vec<Function>,
-}
-
-impl Dataset {
-    pub fn tables(&self) -> &[Table] {
-        &self.tables
-    }
-
-    /// Returns a specific JS function by name from this dataset.
-    ///
-    /// This implements lazy loading by only instantiating the requested function,
-    /// rather than creating all functions in the dataset.
-    pub fn function_by_name(
-        &self,
-        schema: String,
-        name: &str,
-        isolate_pool: IsolatePool,
-    ) -> Option<ScalarUDF> {
-        self.functions.iter().find(|f| f.name == name).map(|f| {
-            AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                isolate_pool,
-                schema,
-                f.source.source.clone(),
-                f.source.filename.clone().into(),
-                f.name.clone().into(),
-                f.input_types.clone(),
-                f.output_type.clone(),
-            )))
-            .into_scalar_udf()
-        })
-    }
-
-    pub fn reference(&self) -> &HashReference {
-        &self.reference
-    }
-}
-
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
-pub struct Table {
-    /// Bare table name.
-    name: TableName,
-    schema: SchemaRef,
-    network: String,
-    sorted_by: BTreeSet<String>,
-}
-
-impl Table {
-    pub fn new(
-        name: TableName,
-        schema: SchemaRef,
-        network: String,
-        sorted_by: Vec<String>,
-    ) -> Self {
-        let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
-        sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
-        Self {
-            name,
-            schema,
-            network,
-            sorted_by,
-        }
-    }
-
-    pub fn name(&self) -> &TableName {
-        &self.name
-    }
-
-    pub fn schema(&self) -> &SchemaRef {
-        &self.schema
-    }
-
-    pub fn network(&self) -> &str {
-        &self.network
-    }
-
-    /// Column names by which this table is naturally sorted.
-    pub fn sorted_by(&self) -> &BTreeSet<String> {
-        &self.sorted_by
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Function {

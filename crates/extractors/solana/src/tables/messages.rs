@@ -1,7 +1,8 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM, Table,
+    BYTES32_TYPE, BoxResult, BoxResult, Bytes32ArrayBuilder, RawTableRows, RawTableRows,
+    SPECIAL_BLOCK_NUM,
     arrow::{
         array::{
             ArrayRef, ListBuilder, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
@@ -11,6 +12,7 @@ use common::{
     },
     metadata::segments::BlockRange,
 };
+use datasets_common::dataset::Table;
 use solana_clock::Slot;
 
 use crate::{rpc_client::UiRawMessage, tables::BASE58_ENCODED_HASH_LEN};

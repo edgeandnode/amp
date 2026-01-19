@@ -11,7 +11,8 @@ use datafusion::{
     },
     scalar::ScalarValue,
 };
-use js_runtime::{convert::ToV8, isolate_pool::IsolatePool};
+
+use crate::{convert::ToV8, isolate_pool::IsolatePool};
 
 #[derive(Debug)]
 pub struct JsUdf {
