@@ -78,16 +78,44 @@ pub trait DatasetWithFunctions: Dataset {
     ) -> Option<ScalarUDF>;
 }
 
+/// Represents a table definition within a dataset.
+///
+/// A table consists of a name, an Arrow schema defining its columns, the network
+/// it belongs to, and metadata about its natural sort order. Tables are the primary
+/// data containers within datasets and are used by the query engine for planning
+/// and execution.
+///
+/// # Sort Order
+///
+/// Every table is naturally sorted by at least the `_block_num` column, which is
+/// automatically added to the `sorted_by` set during construction. This ensures
+/// consistent block-ordered data access across all tables.
 #[derive(Clone, Hash, PartialEq, Eq, Debug, serde::Deserialize)]
 pub struct Table {
-    /// Bare table name.
+    /// Bare table name (e.g., "blocks", "transactions").
     name: TableName,
+    /// Arrow schema defining the table's columns and their data types.
     schema: SchemaRef,
+    /// Network identifier (e.g., "mainnet", "sepolia").
     network: String,
+    /// Column names by which this table is naturally sorted.
     sorted_by: BTreeSet<String>,
 }
 
 impl Table {
+    /// Creates a new table definition.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The bare table name (e.g., "blocks", "transactions")
+    /// * `schema` - The Arrow schema defining the table's columns and types
+    /// * `network` - The network identifier (e.g., "mainnet", "sepolia")
+    /// * `sorted_by` - Column names by which the table data is naturally sorted
+    ///
+    /// # Note
+    ///
+    /// The special `_block_num` column is automatically added to `sorted_by`
+    /// to ensure all tables maintain block-level ordering.
     pub fn new(
         name: TableName,
         schema: SchemaRef,
@@ -104,19 +132,33 @@ impl Table {
         }
     }
 
+    /// Returns the bare table name.
+    ///
+    /// This is the unqualified name without any schema or dataset prefix.
     pub fn name(&self) -> &TableName {
         &self.name
     }
 
+    /// Returns the Arrow schema defining this table's structure.
+    ///
+    /// The schema includes all column definitions with their data types
+    /// and nullability constraints.
     pub fn schema(&self) -> &SchemaRef {
         &self.schema
     }
 
+    /// Returns the network this table is associated with.
+    ///
+    /// Examples: `"mainnet"`, `"sepolia"`, `"solana-mainnet"`.
     pub fn network(&self) -> &str {
         &self.network
     }
 
-    /// Column names by which this table is naturally sorted.
+    /// Returns the column names by which this table is naturally sorted.
+    ///
+    /// This information is used by the query optimizer to avoid unnecessary
+    /// sort operations when the requested order matches the natural order.
+    /// Always includes `_block_num`.
     pub fn sorted_by(&self) -> &BTreeSet<String> {
         &self.sorted_by
     }
