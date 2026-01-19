@@ -16,7 +16,7 @@
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use common::BoxError;
-use datasets_common::dataset::RawDatasetKind;
+use datasets_common::raw_dataset_kind::RawDatasetKind;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
 use object_store::ObjectStore;

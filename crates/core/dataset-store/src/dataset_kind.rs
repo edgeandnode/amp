@@ -10,7 +10,7 @@
 //! - **Firehose**: StreamingFast Firehose protocol for real-time blockchain data
 //! - **Derived**: Modern manifest-based dataset definitions
 
-use datasets_common::dataset::RawDatasetKind;
+use datasets_common::raw_dataset_kind::RawDatasetKind;
 use datasets_derived::DerivedDatasetKind;
 use eth_beacon_datasets::EthBeaconDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;

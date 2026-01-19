@@ -3,7 +3,7 @@
 //! This module defines the type-safe representation of the Eth-Beacon dataset kind
 //! and provides parsing functionality with proper error handling.
 
-use datasets_common::dataset::RawDatasetKind;
+use datasets_common::raw_dataset_kind::RawDatasetKind;
 
 /// The canonical string identifier for Eth-Beacon datasets.
 ///

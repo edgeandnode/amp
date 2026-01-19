@@ -20,7 +20,7 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
     )
     .map_err(Error::DataStoreCreation)?;
 
-    let providers_registry = {
+    let (datasets_registry, providers_registry) = {
         let provider_configs_store = ProviderConfigsStore::new(
             amp_object_store::new_with_prefix(
                 &config.providers_store_url,
@@ -28,10 +28,8 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
             )
             .map_err(Error::ProvidersStoreCreation)?,
         );
-        ProvidersRegistry::new(provider_configs_store)
-    };
+        let providers_registry = ProvidersRegistry::new(provider_configs_store);
 
-    let datasets_registry = {
         let dataset_manifests_store = DatasetManifestsStore::new(
             amp_object_store::new_with_prefix(
                 &config.manifests_store_url,
@@ -39,7 +37,8 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
             )
             .map_err(Error::ManifestsStoreCreation)?,
         );
-        DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store)
+        let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
+        (datasets_registry, providers_registry)
     };
 
     let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());

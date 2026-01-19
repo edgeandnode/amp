@@ -3,7 +3,6 @@
 //! This module provides shared structures used across different dataset definition formats,
 //! including serializable schema representations and common dataset metadata.
 
-pub mod dataset;
 pub mod deps;
 pub mod fqn;
 pub mod func_name;
@@ -13,6 +12,7 @@ pub mod manifest;
 pub mod name;
 pub mod namespace;
 pub mod partial_reference;
+pub mod raw_dataset_kind;
 pub mod reference;
 pub mod revision;
 pub mod table_name;
