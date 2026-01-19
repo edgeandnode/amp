@@ -14,7 +14,9 @@ use ratatui::{
     },
 };
 
-use crate::app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
+use crate::app::{
+    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults,
+};
 
 // ============================================================================
 // The Graph Color Palette
@@ -1030,6 +1032,54 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
+/// Calculate column widths based on content, with min/max constraints.
+///
+/// Returns a vector of pixel widths for each column, auto-sized based on content
+/// and scaled proportionally if total exceeds available width.
+fn calculate_column_widths(results: &QueryResults, available_width: u16) -> Vec<u16> {
+    let col_count = results.columns.len();
+    if col_count == 0 {
+        return vec![];
+    }
+
+    // Calculate max width needed for each column (considering headers)
+    let mut max_widths: Vec<usize> = results.columns.iter().map(|c| c.len()).collect();
+
+    // Check data rows for wider content
+    for row in &results.rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < max_widths.len() {
+                max_widths[i] = max_widths[i].max(cell.len());
+            }
+        }
+    }
+
+    // Apply min (5 chars) and max (50 chars) constraints
+    const MIN_WIDTH: u16 = 5;
+    const MAX_WIDTH: u16 = 50;
+
+    let mut widths: Vec<u16> = max_widths
+        .iter()
+        .map(|&w| (w as u16).clamp(MIN_WIDTH, MAX_WIDTH))
+        .collect();
+
+    // Account for borders and spacing between columns (3 chars per column for " | ")
+    let total_padding = (col_count as u16).saturating_mul(3);
+    let usable = available_width.saturating_sub(total_padding);
+
+    // Scale proportionally if total exceeds available width
+    let total: u16 = widths.iter().sum();
+    if total > usable && total > 0 {
+        let scale = usable as f32 / total as f32;
+        widths = widths
+            .iter()
+            .map(|&w| ((w as f32 * scale) as u16).max(MIN_WIDTH))
+            .collect();
+    }
+
+    widths
+}
+
 /// Draw the SQL query results table.
 fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
     let border_style = if app.active_pane == ActivePane::QueryResult {
@@ -1082,24 +1132,37 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Build table header
+    // Calculate auto-sized column widths based on content
+    // Account for 2 chars of border on each side of the table
+    let available_width = area.width.saturating_sub(2);
+    let col_widths = calculate_column_widths(results, available_width);
+
+    // Build table header with column numbers
     let header_cells: Vec<Cell> = results
         .columns
         .iter()
-        .map(|c| Cell::from(c.as_str()).style(Theme::text_primary().add_modifier(Modifier::BOLD)))
+        .enumerate()
+        .map(|(idx, c)| {
+            let col_num = idx + 1; // 1-indexed for user display
+            let header_text = format!("[{}] {}", col_num, c);
+            Cell::from(header_text).style(Theme::text_primary().add_modifier(Modifier::BOLD))
+        })
         .collect();
     let header = Row::new(header_cells).height(1);
 
-    // Build table rows
+    // Build table rows with truncation based on calculated column widths
     let rows: Vec<Row> = results
         .rows
         .iter()
         .map(|row| {
             let cells: Vec<Cell> = row
                 .iter()
-                .map(|val| {
-                    let display = if val.len() > 40 {
-                        format!("{}...", &val[..37])
+                .enumerate()
+                .map(|(col_idx, val)| {
+                    // Get the calculated width for this column (default to 50 if out of bounds)
+                    let max_width = col_widths.get(col_idx).copied().unwrap_or(50) as usize;
+                    let display = if val.len() > max_width && max_width > 3 {
+                        format!("{}...", &val[..max_width.saturating_sub(3)])
                     } else {
                         val.clone()
                     };
@@ -1110,16 +1173,8 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    // Calculate column widths - divide evenly with a reasonable minimum
-    let col_count = results.columns.len();
-    let widths: Vec<Constraint> = if col_count <= 4 {
-        (0..col_count)
-            .map(|_| Constraint::Percentage((100 / col_count.max(1)) as u16))
-            .collect()
-    } else {
-        // For many columns, use a fixed width with horizontal scroll potential
-        (0..col_count).map(|_| Constraint::Min(15)).collect()
-    };
+    // Convert widths to constraints for the table
+    let widths: Vec<Constraint> = col_widths.iter().map(|&w| Constraint::Length(w)).collect();
 
     let table = Table::new(rows, widths)
         .header(header)
