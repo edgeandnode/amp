@@ -1070,11 +1070,15 @@ name = "ampcc"
 version = "0.1.0"
 dependencies = [
  "admin-client",
+ "amp-client",
  "anyhow",
+ "arrow",
  "crossterm 0.29.0",
  "datasets-common",
  "directories",
  "figment",
+ "futures",
+ "hex",
  "ratatui",
  "reqwest",
  "serde",

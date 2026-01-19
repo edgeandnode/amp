@@ -9,7 +9,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+        ScrollbarOrientation, Table, Wrap,
     },
 };
 
@@ -659,6 +660,19 @@ fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
         ContentView::Worker(worker) => {
             draw_worker_detail(f, app, worker.clone(), area);
         }
+        ContentView::QueryResults => {
+            // Split content vertically: Query input (5 lines) | Results (rest)
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(5), // Query input
+                    Constraint::Min(0),    // Results
+                ])
+                .split(area);
+
+            draw_query_input(f, app, chunks[0]);
+            draw_query_results(f, app, chunks[1]);
+        }
         ContentView::None => {
             draw_empty_content(f, area);
         }
@@ -678,6 +692,163 @@ fn draw_empty_content(f: &mut Frame, area: Rect) {
         .alignment(Alignment::Center);
 
     f.render_widget(text, area);
+}
+
+/// Draw the SQL query input panel.
+fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::Query {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let title = if app.input_mode == InputMode::Query {
+        "SQL Query (Ctrl+Enter to execute, Esc to cancel)"
+    } else {
+        "SQL Query (press Q to edit)"
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Show cursor in query input when in query mode
+    let text = if app.input_mode == InputMode::Query {
+        let (before, after) = app.query_input.split_at(app.query_cursor);
+        Line::from(vec![
+            Span::styled(before.to_string(), Theme::text_primary()),
+            Span::styled("_", Theme::status_warning()),
+            Span::styled(after.to_string(), Theme::text_primary()),
+        ])
+    } else {
+        Line::from(Span::styled(&app.query_input, Theme::text_primary()))
+    };
+
+    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
+    f.render_widget(paragraph, area);
+}
+
+/// Draw the SQL query results table.
+fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::QueryResult {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let Some(results) = &app.query_results else {
+        let block = Block::default()
+            .title("Query Results")
+            .borders(Borders::ALL)
+            .border_style(border_style);
+        let text = Paragraph::new("No query executed yet. Press Q to enter a SQL query.")
+            .block(block)
+            .style(Theme::text_secondary());
+        f.render_widget(text, area);
+        return;
+    };
+
+    // Show error if present
+    if let Some(error) = &results.error {
+        let block = Block::default()
+            .title("Query Error")
+            .borders(Borders::ALL)
+            .border_style(Theme::status_error());
+        let text = Paragraph::new(error.as_str())
+            .block(block)
+            .style(Theme::status_error())
+            .wrap(Wrap { trim: false });
+        f.render_widget(text, area);
+        return;
+    }
+
+    let title = format!("Query Results ({} rows)", results.row_count);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Handle empty results
+    if results.columns.is_empty() {
+        let text = Paragraph::new("Query returned no columns.")
+            .block(block)
+            .style(Theme::text_secondary());
+        f.render_widget(text, area);
+        return;
+    }
+
+    // Build table header
+    let header_cells: Vec<Cell> = results
+        .columns
+        .iter()
+        .map(|c| Cell::from(c.as_str()).style(Theme::text_primary().add_modifier(Modifier::BOLD)))
+        .collect();
+    let header = Row::new(header_cells).height(1);
+
+    // Build table rows
+    let rows: Vec<Row> = results
+        .rows
+        .iter()
+        .map(|row| {
+            let cells: Vec<Cell> = row
+                .iter()
+                .map(|val| {
+                    let display = if val.len() > 40 {
+                        format!("{}...", &val[..37])
+                    } else {
+                        val.clone()
+                    };
+                    Cell::from(display)
+                })
+                .collect();
+            Row::new(cells)
+        })
+        .collect();
+
+    // Calculate column widths - divide evenly with a reasonable minimum
+    let col_count = results.columns.len();
+    let widths: Vec<Constraint> = if col_count <= 4 {
+        (0..col_count)
+            .map(|_| Constraint::Percentage((100 / col_count.max(1)) as u16))
+            .collect()
+    } else {
+        // For many columns, use a fixed width with horizontal scroll potential
+        (0..col_count).map(|_| Constraint::Min(15)).collect()
+    };
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(Theme::selection());
+
+    // Update content length for scrolling
+    app.query_content_length = results.rows.len();
+    app.query_scroll_state = app.query_scroll_state.content_length(results.rows.len());
+
+    // Render with scroll state
+    let mut table_state = ratatui::widgets::TableState::default();
+    table_state.select(Some(app.query_scroll as usize));
+
+    f.render_stateful_widget(table, area, &mut table_state);
+
+    // Draw scrollbar if content exceeds visible area
+    let visible_rows = area.height.saturating_sub(3) as usize; // -3 for borders and header
+    if results.rows.len() > visible_rows {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut scrollbar_state = app
+            .query_scroll_state
+            .content_length(results.rows.len())
+            .position(app.query_scroll as usize);
+        f.render_stateful_widget(
+            scrollbar,
+            area.inner(ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            &mut scrollbar_state,
+        );
+    }
 }
 
 /// Format job descriptor fields as readable lines (generic key-value display).
@@ -1200,6 +1371,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             "Search: {}_ (Enter to confirm, Esc to cancel)",
             app.search_query
         )
+    } else if matches!(app.input_mode, InputMode::Query) {
+        "Query: Type SQL, Ctrl+Enter to execute, Esc to cancel".to_string()
     } else {
         let source_hint = match app.current_source {
             DataSource::Local => "[1]Local [2]Registry",
@@ -1210,9 +1383,17 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         let context_keys = match app.active_pane {
             ActivePane::Jobs => "[s] Stop [d] Delete [r] Refresh",
             ActivePane::Workers => "[r] Refresh",
-            ActivePane::Datasets => "[Enter] Expand [r] Refresh",
+            ActivePane::Datasets => {
+                if app.is_local() {
+                    "[Enter] Expand [r] Refresh [Q] Query"
+                } else {
+                    "[Enter] Expand [r] Refresh"
+                }
+            }
             ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => "[Ctrl+u/d] Scroll",
             ActivePane::Header => "[Tab] Navigate",
+            ActivePane::Query => "[Ctrl+Enter] Execute [Esc] Cancel",
+            ActivePane::QueryResult => "[j/k] Scroll [Q] Edit query [Esc] Back",
         };
 
         format!(

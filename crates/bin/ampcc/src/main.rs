@@ -10,6 +10,9 @@ use admin_client::{
     workers::{WorkerDetailResponse, WorkerInfo},
 };
 use anyhow::Result;
+use arrow::array::{
+    Array, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray, UInt64Array,
+};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
@@ -17,6 +20,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc;
 use worker::{job::JobId, node_id::NodeId};
@@ -26,7 +30,7 @@ mod config;
 mod registry;
 mod ui;
 
-use app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
+use app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Auto-refresh interval for jobs/workers (10 seconds).
@@ -40,6 +44,7 @@ enum AppEvent {
     WorkerDetailLoaded(Option<WorkerDetailResponse>),
     JobStopped(Result<(), String>),
     JobDeleted(Result<(), String>),
+    QueryCompleted(QueryResults),
     Error(String),
 }
 
@@ -172,6 +177,15 @@ where
                     }
                     app.stop_loading();
                 }
+                AppEvent::QueryCompleted(results) => {
+                    app.query_results = Some(results);
+                    app.query_scroll = 0;
+                    app.query_scroll_state = ratatui::widgets::ScrollbarState::default();
+                    app.content_view = ContentView::QueryResults;
+                    app.active_pane = ActivePane::QueryResult;
+                    app.input_mode = InputMode::Normal;
+                    app.stop_loading();
+                }
                 AppEvent::Error(msg) => {
                     app.error_message = Some(msg);
                     app.stop_loading();
@@ -221,6 +235,24 @@ where
                                 // Search
                                 KeyCode::Char('/') => {
                                     app.input_mode = InputMode::Search;
+                                }
+
+                                // Query mode (Q key) - only in Local mode
+                                KeyCode::Char('Q') => {
+                                    if app.is_local() {
+                                        app.input_mode = InputMode::Query;
+                                        app.active_pane = ActivePane::Query;
+                                        app.content_view = ContentView::QueryResults;
+                                        // Pre-populate with template if dataset selected and input empty
+                                        if app.query_input.is_empty()
+                                            && let Some((ns, name, _)) =
+                                                app.get_selected_manifest_params()
+                                        {
+                                            app.query_input =
+                                                format!("SELECT * FROM {}.{} LIMIT 10", ns, name);
+                                            app.query_cursor = app.query_input.len();
+                                        }
+                                    }
                                 }
 
                                 // Refresh - context sensitive
@@ -421,6 +453,54 @@ where
                             }
                             _ => {}
                         },
+                        InputMode::Query => match key.code {
+                            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Execute query with Ctrl+Enter
+                                let sql = app.query_input.clone();
+                                if !sql.trim().is_empty() {
+                                    app.start_loading("Executing query...");
+                                    spawn_execute_query(app, sql, tx.clone());
+                                }
+                            }
+                            KeyCode::Esc => {
+                                // Cancel query input, return to normal mode
+                                app.input_mode = InputMode::Normal;
+                                app.active_pane = ActivePane::Datasets;
+                                // Restore previous content view if we have results
+                                if app.query_results.is_none() {
+                                    app.content_view = ContentView::Dataset;
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                app.query_input.insert(app.query_cursor, c);
+                                app.query_cursor += 1;
+                            }
+                            KeyCode::Backspace => {
+                                if app.query_cursor > 0 {
+                                    app.query_cursor -= 1;
+                                    app.query_input.remove(app.query_cursor);
+                                }
+                            }
+                            KeyCode::Delete => {
+                                if app.query_cursor < app.query_input.len() {
+                                    app.query_input.remove(app.query_cursor);
+                                }
+                            }
+                            KeyCode::Left => {
+                                app.query_cursor = app.query_cursor.saturating_sub(1);
+                            }
+                            KeyCode::Right => {
+                                app.query_cursor =
+                                    (app.query_cursor + 1).min(app.query_input.len());
+                            }
+                            KeyCode::Home => {
+                                app.query_cursor = 0;
+                            }
+                            KeyCode::End => {
+                                app.query_cursor = app.query_input.len();
+                            }
+                            _ => {}
+                        },
                     }
                 }
                 Event::Mouse(mouse) => {
@@ -536,6 +616,29 @@ where
                                             && y < schema_area.y + schema_area.height
                                         {
                                             app.active_pane = ActivePane::Schema;
+                                        }
+                                    }
+                                    ContentView::QueryResults => {
+                                        // Split: Query input (5 lines) | Results (rest)
+                                        let query_chunks = Layout::default()
+                                            .direction(Direction::Vertical)
+                                            .constraints([
+                                                Constraint::Length(5), // Query input
+                                                Constraint::Min(0),    // Results
+                                            ])
+                                            .split(content_area);
+
+                                        let query_input_area = query_chunks[0];
+                                        let query_results_area = query_chunks[1];
+
+                                        if y >= query_input_area.y
+                                            && y < query_input_area.y + query_input_area.height
+                                        {
+                                            app.active_pane = ActivePane::Query;
+                                        } else if y >= query_results_area.y
+                                            && y < query_results_area.y + query_results_area.height
+                                        {
+                                            app.active_pane = ActivePane::QueryResult;
                                         }
                                     }
                                     ContentView::Job(_)
@@ -718,4 +821,122 @@ fn spawn_delete_job(app: &App, job_id: JobId, tx: mpsc::Sender<AppEvent>) {
             }
         }
     });
+}
+
+fn spawn_execute_query(app: &App, sql: String, tx: mpsc::Sender<AppEvent>) {
+    let query_url = app.config.local_query_url.clone();
+
+    tokio::spawn(async move {
+        let results = execute_query(&query_url, &sql).await;
+        let _ = tx.send(AppEvent::QueryCompleted(results)).await;
+    });
+}
+
+async fn execute_query(query_url: &str, sql: &str) -> QueryResults {
+    // Connect to Flight service
+    let mut client = match amp_client::AmpClient::from_endpoint(query_url).await {
+        Ok(c) => c,
+        Err(e) => {
+            return QueryResults {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                error: Some(format!("Connection failed: {}", e)),
+            };
+        }
+    };
+
+    // Execute query
+    let mut stream = match client.query(sql).await {
+        Ok(s) => s,
+        Err(e) => {
+            return QueryResults {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                error: Some(format!("Query failed: {}", e)),
+            };
+        }
+    };
+
+    // Collect results
+    let mut columns: Option<Vec<String>> = None;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    while let Some(batch_result) = stream.next().await {
+        match batch_result {
+            Ok(batch) => {
+                // Extract column names from schema (once)
+                if columns.is_none() {
+                    columns = Some(
+                        batch
+                            .schema()
+                            .fields()
+                            .iter()
+                            .map(|f| f.name().clone())
+                            .collect(),
+                    );
+                }
+
+                // Convert batch to rows
+                for row_idx in 0..batch.num_rows() {
+                    let row: Vec<String> = (0..batch.num_columns())
+                        .map(|col_idx| format_array_value(batch.column(col_idx).as_ref(), row_idx))
+                        .collect();
+                    rows.push(row);
+                }
+            }
+            Err(e) => {
+                let row_count = rows.len();
+                return QueryResults {
+                    columns: columns.unwrap_or_default(),
+                    rows,
+                    row_count,
+                    error: Some(format!("Fetch error: {}", e)),
+                };
+            }
+        }
+    }
+
+    let row_count = rows.len();
+    QueryResults {
+        columns: columns.unwrap_or_default(),
+        rows,
+        row_count,
+        error: None,
+    }
+}
+
+fn format_array_value(array: &dyn Array, idx: usize) -> String {
+    if array.is_null(idx) {
+        return "NULL".to_string();
+    }
+
+    // Handle common types
+    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
+        return arr.value(idx).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
+        return arr.value(idx).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
+        return arr.value(idx).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
+        return format!("{:.6}", arr.value(idx));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
+        return arr.value(idx).to_string();
+    }
+    // Binary types - show hex
+    if let Some(arr) = array.as_any().downcast_ref::<BinaryArray>() {
+        let bytes = arr.value(idx);
+        if bytes.len() > 16 {
+            return format!("0x{}...", hex::encode(&bytes[..16]));
+        }
+        return format!("0x{}", hex::encode(bytes));
+    }
+
+    // Fallback: use array_value_to_string from Arrow
+    arrow::util::display::array_value_to_string(array, idx).unwrap_or_else(|_| "?".to_string())
 }

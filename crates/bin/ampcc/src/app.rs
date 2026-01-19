@@ -18,6 +18,7 @@ use crate::{config::Config, registry::RegistryClient};
 pub enum InputMode {
     Normal,
     Search,
+    Query,
 }
 
 /// Active pane for focus tracking.
@@ -27,17 +28,20 @@ pub enum InputMode {
 pub enum ActivePane {
     Header,
     Datasets,
-    Jobs,     // Local only
-    Workers,  // Local only
-    Manifest, // Dataset manifest pane (content area)
-    Schema,   // Dataset schema pane (content area)
-    Detail,   // Job/Worker detail view (Local only)
+    Jobs,        // Local only
+    Workers,     // Local only
+    Manifest,    // Dataset manifest pane (content area)
+    Schema,      // Dataset schema pane (content area)
+    Detail,      // Job/Worker detail view (Local only)
+    Query,       // SQL query input pane (Local only)
+    QueryResult, // SQL query results pane (Local only)
 }
 
 impl ActivePane {
     /// Cycle to the next pane.
     /// Local mode: Header -> Datasets -> Jobs -> Workers -> Detail -> Header
     /// Registry mode: Header -> Datasets -> Manifest -> Schema -> Header
+    /// Query panes: Query -> QueryResult -> Datasets (exit query mode)
     pub fn next(self, is_local: bool) -> Self {
         match self {
             ActivePane::Header => ActivePane::Datasets,
@@ -53,12 +57,16 @@ impl ActivePane {
             ActivePane::Manifest => ActivePane::Schema,
             ActivePane::Schema => ActivePane::Detail,
             ActivePane::Detail => ActivePane::Header,
+            // Query panes cycle within query view
+            ActivePane::Query => ActivePane::QueryResult,
+            ActivePane::QueryResult => ActivePane::Datasets,
         }
     }
 
     /// Cycle to the previous pane.
     /// Local mode: Header -> Detail -> Workers -> Jobs -> Datasets -> Header
     /// Registry mode: Header -> Schema -> Manifest -> Datasets -> Header
+    /// Query panes: QueryResult -> Query -> Datasets (exit query mode)
     pub fn prev(self, is_local: bool) -> Self {
         match self {
             ActivePane::Header => {
@@ -74,6 +82,9 @@ impl ActivePane {
             ActivePane::Manifest => ActivePane::Datasets,
             ActivePane::Schema => ActivePane::Manifest,
             ActivePane::Detail => ActivePane::Workers,
+            // Query panes cycle within query view
+            ActivePane::Query => ActivePane::Datasets,
+            ActivePane::QueryResult => ActivePane::Query,
         }
     }
 }
@@ -87,8 +98,19 @@ pub enum ContentView {
     Job(JobInfo),
     /// Worker details
     Worker(WorkerDetailResponse),
+    /// SQL query results
+    QueryResults,
     /// Nothing selected
     None,
+}
+
+/// Query results from SQL execution.
+#[derive(Debug, Clone, Default)]
+pub struct QueryResults {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub row_count: usize,
+    pub error: Option<String>,
 }
 
 /// Data source for datasets.
@@ -398,6 +420,14 @@ pub struct App {
 
     // Redraw flag for CPU optimization
     pub needs_redraw: bool,
+
+    // SQL Query state (Local mode only)
+    pub query_input: String,
+    pub query_cursor: usize,
+    pub query_results: Option<QueryResults>,
+    pub query_scroll: u16,
+    pub query_scroll_state: ScrollbarState,
+    pub query_content_length: usize,
 }
 
 impl App {
@@ -449,6 +479,12 @@ impl App {
             schema_content_length: 0,
             detail_content_length: 0,
             needs_redraw: true,
+            query_input: String::new(),
+            query_cursor: 0,
+            query_results: None,
+            query_scroll: 0,
+            query_scroll_state: ScrollbarState::default(),
+            query_content_length: 0,
         })
     }
 
@@ -506,7 +542,16 @@ impl App {
                     .detail_scroll_state
                     .position(self.detail_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                self.query_scroll = self.query_scroll.saturating_sub(1);
+                self.query_scroll_state =
+                    self.query_scroll_state.position(self.query_scroll as usize);
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -540,7 +585,19 @@ impl App {
                         .position(self.detail_scroll as usize);
                 }
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                let max_scroll = self.query_content_length.saturating_sub(1);
+                if (self.query_scroll as usize) < max_scroll {
+                    self.query_scroll = self.query_scroll.saturating_add(1);
+                    self.query_scroll_state =
+                        self.query_scroll_state.position(self.query_scroll as usize);
+                }
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -552,9 +609,12 @@ impl App {
         self.schema_scroll_state = ScrollbarState::default();
         self.detail_scroll = 0;
         self.detail_scroll_state = ScrollbarState::default();
+        self.query_scroll = 0;
+        self.query_scroll_state = ScrollbarState::default();
         self.manifest_content_length = 0;
         self.schema_content_length = 0;
         self.detail_content_length = 0;
+        self.query_content_length = 0;
     }
 
     /// Page up in the focused pane.
@@ -578,7 +638,16 @@ impl App {
                     .detail_scroll_state
                     .position(self.detail_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                self.query_scroll = self.query_scroll.saturating_sub(page_size);
+                self.query_scroll_state =
+                    self.query_scroll_state.position(self.query_scroll as usize);
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -609,7 +678,17 @@ impl App {
                     .detail_scroll_state
                     .position(self.detail_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                let max_scroll = self.query_content_length.saturating_sub(1) as u16;
+                self.query_scroll = self.query_scroll.saturating_add(page_size).min(max_scroll);
+                self.query_scroll_state =
+                    self.query_scroll_state.position(self.query_scroll as usize);
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
