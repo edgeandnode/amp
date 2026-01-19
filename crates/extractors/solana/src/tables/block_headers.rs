@@ -54,8 +54,8 @@ impl BlockHeader {
         Self {
             slot: block.slot,
             parent_slot: block.parent_slot,
-            block_hash: block.blockhash,
-            previous_block_hash: block.prev_blockhash,
+            block_hash: bs58::encode(block.blockhash).into_string(),
+            previous_block_hash: bs58::encode(block.prev_blockhash).into_string(),
             block_height: block.block_height,
             block_time: Some(block.blocktime as i64),
         }

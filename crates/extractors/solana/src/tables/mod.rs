@@ -55,24 +55,18 @@ pub(crate) fn convert_of_data_to_db_rows(
         db_messages.push(db_message);
     }
 
-    let block_hash: [u8; 32] = bs58::decode(&block.blockhash)
-        .into_vec()
-        .map(TryInto::try_into)
-        .expect("failed to decode block hash from base58")
-        .expect("decoded block hash should be 32 bytes");
-    let header = block_headers::BlockHeader::from_of1_block(block);
-
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.
         numbers: slot..=slot,
         network: network.to_string(),
-        hash: block_hash.into(),
+        hash: block.blockhash.into(),
         // Previous slot could be skipped, do not set prev_hash here.
         prev_hash: None,
     };
 
     let block_headers_row = {
         let mut builder = block_headers::BlockHeaderRowsBuilder::new();
+        let header = block_headers::BlockHeader::from_of1_block(block);
         builder.append(&header);
         builder.build(range.clone())?
     };
@@ -169,7 +163,6 @@ pub(crate) fn convert_rpc_block_to_db_rows(
         .map(TryInto::try_into)
         .expect("failed to decode block hash from base58")
         .expect("decoded block hash should be 32 bytes");
-    let header = block_headers::BlockHeader::from_rpc_block(slot, &block);
 
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.
@@ -182,6 +175,7 @@ pub(crate) fn convert_rpc_block_to_db_rows(
 
     let block_headers_row = {
         let mut builder = block_headers::BlockHeaderRowsBuilder::new();
+        let header = block_headers::BlockHeader::from_rpc_block(slot, &block);
         builder.append(&header);
         builder.build(range.clone())?
     };

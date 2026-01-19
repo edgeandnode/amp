@@ -32,8 +32,8 @@ pub(crate) struct DecodedBlock {
     pub(crate) slot: Slot,
     pub(crate) parent_slot: Slot,
 
-    pub(crate) blockhash: String,
-    pub(crate) prev_blockhash: String,
+    pub(crate) blockhash: [u8; 32],
+    pub(crate) prev_blockhash: [u8; 32],
 
     pub(crate) block_height: Option<u64>,
     pub(crate) blocktime: u64,
@@ -216,7 +216,11 @@ pub(crate) fn stream(
         // (potentially) read multiple CAR files to find it.
         let mut prev_blockhash = if start == 0 {
             // Known previous blockhash for genesis block.
-            String::from("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
+            bs58::decode("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
+                .into_vec()
+                .map(TryInto::try_into)
+                .expect("invalid base-58 string")
+                .expect("blockhash is 32 bytes")
         } else {
             let mut slot = start;
             loop {
@@ -226,7 +230,11 @@ pub(crate) fn stream(
 
                 match resp {
                     Ok(block) => {
-                        break block.previous_blockhash;
+                        break bs58::decode(block.previous_blockhash)
+                            .into_vec()
+                            .map(TryInto::try_into)
+                            .expect("invalid base-58 string")
+                            .expect("blockhash is 32 bytes");
                     },
                     Err(e) if rpc_client::is_block_missing_err(&e) => {
                         if slot == 0 {
@@ -298,7 +306,7 @@ pub(crate) fn stream(
 
             let mut node_reader = car_parser::node::NodeReader::new(&mmap[..]);
 
-            while let Some(block) = read_entire_block(&mut node_reader, &prev_blockhash).await.transpose() {
+            while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await.transpose() {
                 let block = match block {
                     Ok(block) => block,
                     Err(e) => {
@@ -310,7 +318,7 @@ pub(crate) fn stream(
                         return;
                     }
                 };
-                prev_blockhash = block.blockhash.clone();
+                prev_blockhash = block.blockhash;
 
                 if block.slot < start {
                     // Skip blocks before the start of the requested range.
@@ -503,7 +511,7 @@ enum FileDownloadError {
 /// <https://github.com/lamports-dev/yellowstone-faithful-car-parser/blob/master/src/bin/counter.rs>
 async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     node_reader: &mut car_parser::node::NodeReader<R>,
-    prev_blockhash: &str,
+    prev_blockhash: [u8; 32],
 ) -> BoxResult<Option<DecodedBlock>> {
     // TODO: Could this be executed while downloading the block? As in, read from a stream and
     // attempt to decode until successful.
@@ -588,19 +596,20 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
         }
     }
 
-    let last_entry_cid = block.entries.last().expect("at least one entry");
-    let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
-    let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
-        let err = format!("expected entry node for cid {last_entry_cid}");
-        return Err(err.into());
-    };
-
     let blockhash = {
         // Hash of the last entry has the same value as that block's `blockhash` in
         // CAR files.
-        let blockhash = &last_entry.hash;
-        assert_eq!(blockhash.len(), 32);
-        bs58::encode(blockhash).into_string()
+        let last_entry_cid = block.entries.last().expect("at least one entry");
+        let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
+        let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
+            let err = format!("expected entry node for cid {last_entry_cid}");
+            return Err(err.into());
+        };
+        last_entry
+            .hash
+            .clone()
+            .try_into()
+            .expect("blockhash is 32 bytes")
     };
 
     let block = DecodedBlock {

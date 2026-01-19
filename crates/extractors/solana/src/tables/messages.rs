@@ -144,10 +144,6 @@ impl Message {
             .instructions
             .iter()
             .map(|inst| {
-                assert!(
-                    inst.stack_height.is_none(),
-                    "transaction message should not contain inner instructions"
-                );
                 let data = bs58::decode(&inst.data)
                     .into_vec()
                     .expect("invalid base-58 string");
