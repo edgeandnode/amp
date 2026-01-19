@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use monitoring::logging;
 
 use crate::{steps::run_spec, testlib::ctx::TestCtxBuilder};
@@ -21,14 +19,9 @@ async fn intra_deps_test() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec(
-        "intra-deps",
-        &test_ctx,
-        &mut client,
-        Some(Duration::from_millis(100)),
-    )
-    .await
-    .expect("Failed to run spec");
+    run_spec("intra-deps", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }
 
 #[tokio::test]
@@ -47,12 +40,7 @@ async fn multi_version_test() {
         .await
         .expect("Failed to connect FlightClient");
 
-    run_spec(
-        "multi-version",
-        &test_ctx,
-        &mut client,
-        Some(Duration::from_millis(100)),
-    )
-    .await
-    .expect("Failed to run spec");
+    run_spec("multi-version", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
 }
