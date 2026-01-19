@@ -10,6 +10,7 @@ mod it_functions;
 mod it_functions_eth_call;
 mod it_gen_manifest;
 mod it_joins;
+mod it_multi_network_batch;
 mod it_multi_table_continuous;
 mod it_non_incremental;
 mod it_reorg;

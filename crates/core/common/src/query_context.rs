@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{Arc, LazyLock},
 };
@@ -336,44 +337,54 @@ impl QueryContext {
             .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
     }
 
-    /// Return the block range that is synced for all tables referenced by the given plan.
-    /// The returned range spans the minimum start block to the minimum end block.
+    /// Return the block ranges that are synced for all tables referenced by the given plan,
+    /// grouped by network. For each network, returns the intersection of all tables' ranges
+    /// (maximum start block to minimum end block).
+    ///
+    /// Returns an empty Vec if any referenced table has no synced data.
     #[instrument(skip_all, err)]
-    pub async fn common_range(&self, plan: &LogicalPlan) -> Result<Option<BlockRange>, BoxError> {
-        let mut range: Option<BlockRange> = None;
+    pub async fn common_ranges(&self, plan: &LogicalPlan) -> Result<Vec<BlockRange>, BoxError> {
+        let mut ranges_by_network: BTreeMap<String, BlockRange> = BTreeMap::new();
         for df_table_ref in extract_table_references_from_plan(plan)? {
             let table_ref: TableReference<String> = df_table_ref.try_into()?;
             let Some(table_range) = self.get_table(&table_ref)?.synced_range() else {
-                return Ok(None);
+                // If any table has no synced data, return empty ranges
+                return Ok(vec![]);
             };
-
-            range = Some(match range {
-                None => table_range,
-                Some(mut r) => {
-                    assert_eq!(r.network, table_range.network);
-                    if table_range.start() < r.start() {
-                        r.numbers = table_range.start()..=r.end();
-                        r.prev_hash = table_range.prev_hash;
+            ranges_by_network
+                .entry(table_range.network.clone())
+                .and_modify(|existing| {
+                    // Intersect: take max start, min end
+                    if table_range.start() > existing.start() {
+                        existing.numbers = table_range.start()..=existing.end();
+                        existing.prev_hash = table_range.prev_hash;
                     }
-                    if table_range.end() < r.end() {
-                        r.numbers = r.start()..=table_range.end();
-                        r.hash = table_range.hash;
+                    if table_range.end() < existing.end() {
+                        existing.numbers = existing.start()..=table_range.end();
+                        existing.hash = table_range.hash;
                     }
-
-                    // TODO: there is a consistency error when the block numbers are equal but the
-                    // hashes are not equal.
-
-                    r
-                }
-            });
+                })
+                .or_insert(table_range);
         }
-        Ok(range)
+        Ok(ranges_by_network.into_values().collect())
     }
 
-    /// Get the most recent block that has been synced for all tables in the plan.
+    /// Get the most recent block that has been synced for all tables in the plan,
+    /// grouped by network. Returns a map from network name to the maximum end block
+    /// for that network.
+    ///
+    /// Returns an empty map if any referenced table has no synced data.
     #[instrument(skip_all, err)]
-    pub async fn max_end_block(&self, plan: &LogicalPlan) -> Result<Option<BlockNum>, BoxError> {
-        self.common_range(plan).await.map(|r| r.map(|r| r.end()))
+    pub async fn max_end_blocks(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<BTreeMap<String, BlockNum>, BoxError> {
+        Ok(self
+            .common_ranges(plan)
+            .await?
+            .into_iter()
+            .map(|range| (range.network, *range.numbers.end()))
+            .collect())
     }
 }
 
