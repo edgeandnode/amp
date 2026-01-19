@@ -26,7 +26,6 @@ fn schema() -> Schema {
         Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
         Field::new("slot", DataType::UInt64, false),
         Field::new("tx_index", DataType::UInt32, false),
-        Field::new("inner_index", DataType::UInt32, true),
         Field::new("program_id_index", DataType::UInt8, false),
         Field::new(
             "accounts",
@@ -38,7 +37,9 @@ fn schema() -> Schema {
             DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
             false,
         ),
-        Field::new("stack_height", DataType::UInt32, true),
+        // Inner instruction fields. Present only if this is an inner instruction.
+        Field::new("inner_index", DataType::UInt32, true),
+        Field::new("inner_stack_height", DataType::UInt32, true),
     ];
 
     Schema::new(fields)
@@ -48,25 +49,30 @@ fn schema() -> Schema {
 pub(crate) struct Instruction {
     pub(crate) slot: Slot,
     pub(crate) tx_index: u32,
-    /// If present, this instruction is an inner instruction. Otherwise, it is a message
-    /// instruction.
-    pub(crate) inner_index: Option<u32>,
 
     pub(crate) program_id_index: u8,
     pub(crate) accounts: Vec<u8>,
     pub(crate) data: Vec<u8>,
-    pub(crate) stack_height: Option<u32>,
+
+    /// If the fields below are present, this instruction is an inner instruction.
+    /// Otherwise, it is a message instruction.
+    ///
+    /// ## Reference
+    ///
+    /// <https://solana.com/docs/rpc/json-structures#inner-instructions>
+    pub(crate) inner_index: Option<u32>,
+    pub(crate) inner_stack_height: Option<u32>,
 }
 
 pub(crate) struct InstructionRowsBuilder {
     special_block_num: UInt64Builder,
     slot: UInt64Builder,
     tx_index: UInt32Builder,
-    inner_index: UInt32Builder,
     program_id_index: UInt8Builder,
     accounts: ListBuilder<UInt8Builder>,
     data: ListBuilder<UInt8Builder>,
-    stack_height: UInt32Builder,
+    inner_index: UInt32Builder,
+    inner_stack_height: UInt32Builder,
 }
 
 impl InstructionRowsBuilder {
@@ -76,11 +82,11 @@ impl InstructionRowsBuilder {
             special_block_num: UInt64Builder::with_capacity(capacity),
             slot: UInt64Builder::with_capacity(capacity),
             tx_index: UInt32Builder::with_capacity(capacity),
-            inner_index: UInt32Builder::with_capacity(capacity),
             program_id_index: UInt8Builder::with_capacity(capacity),
             accounts: ListBuilder::with_capacity(UInt8Builder::new(), capacity),
             data: ListBuilder::with_capacity(UInt8Builder::new(), capacity),
-            stack_height: UInt32Builder::with_capacity(capacity),
+            inner_index: UInt32Builder::with_capacity(capacity),
+            inner_stack_height: UInt32Builder::with_capacity(capacity),
         }
     }
 
@@ -88,28 +94,23 @@ impl InstructionRowsBuilder {
         let Instruction {
             slot,
             tx_index,
-            inner_index,
             program_id_index,
             accounts,
             data,
-            stack_height,
+            inner_index,
+            inner_stack_height,
         } = instruction;
 
         self.special_block_num.append_value(*slot);
         self.slot.append_value(*slot);
         self.tx_index.append_value(*tx_index);
-
-        self.inner_index.append_option(*inner_index);
-
         self.program_id_index.append_value(*program_id_index);
-
         self.accounts.values().append_slice(accounts);
         self.accounts.append(true);
-
         self.data.values().append_slice(data);
         self.data.append(true);
-
-        self.stack_height.append_option(*stack_height);
+        self.inner_index.append_option(*inner_index);
+        self.inner_stack_height.append_option(*inner_stack_height);
     }
 
     pub(crate) fn build(self, range: BlockRange) -> BoxResult<RawTableRows> {
@@ -121,18 +122,18 @@ impl InstructionRowsBuilder {
             mut program_id_index,
             mut accounts,
             mut data,
-            mut stack_height,
+            mut inner_stack_height,
         } = self;
 
         let columns = vec![
             Arc::new(special_block_num.finish()) as ArrayRef,
             Arc::new(slot.finish()),
             Arc::new(tx_index.finish()),
-            Arc::new(inner_index.finish()),
             Arc::new(program_id_index.finish()),
             Arc::new(accounts.finish()),
             Arc::new(data.finish()),
-            Arc::new(stack_height.finish()),
+            Arc::new(inner_index.finish()),
+            Arc::new(inner_stack_height.finish()),
         ];
 
         RawTableRows::new(table(range.network.clone()), range, columns)

@@ -11,6 +11,7 @@ schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 async-stream.workspace = true
 backon.workspace = true
 bs58 = "0.5.1"
+base64 = "0.22.1"
 common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
 futures.workspace = true

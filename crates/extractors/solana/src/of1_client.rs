@@ -32,8 +32,8 @@ pub(crate) struct DecodedBlock {
     pub(crate) slot: Slot,
     pub(crate) parent_slot: Slot,
 
-    pub(crate) blockhash: [u8; 32],
-    pub(crate) prev_blockhash: [u8; 32],
+    pub(crate) blockhash: String,
+    pub(crate) prev_blockhash: String,
 
     pub(crate) block_height: Option<u64>,
     pub(crate) blocktime: u64,
@@ -215,36 +215,28 @@ pub(crate) fn stream(
         // Pre-fetch the initial previous block hash via JSON-RPC so that we don't have to
         // (potentially) read multiple CAR files to find it.
         let mut prev_blockhash = if start == 0 {
-            [0u8; 32]
+            // Known previous blockhash for genesis block.
+            String::from("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
         } else {
-            let mut parent_slot = start - 1;
+            let mut slot = start;
             loop {
                 let resp = solana_rpc_client
-                    .get_block(parent_slot, get_block_config, metrics.clone())
+                    .get_block(slot, get_block_config, metrics.clone())
                     .await;
 
                 match resp {
-                    // Found the parent block, extract its blockhash.
                     Ok(block) => {
-                        let block = match bs58::decode(block.blockhash).into_vec() {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                yield Err(e.into());
-                                return;
-                            }
-                        };
-                        break block.try_into().expect("blockhash is 32 bytes");
-                    }
-                    // Parent block is missing, try the previous slot.
+                        break block.previous_blockhash;
+                    },
                     Err(e) if rpc_client::is_block_missing_err(&e) => {
-                        if parent_slot == 0 {
-                            break [0u8; 32];
+                        if slot == 0 {
+                            let err = format!("could not find previous blockhash for slot {start}");
+                            yield Err(err.into());
+                            return;
                         } else {
-                            parent_slot -= 1;
-                            continue;
+                            slot -= 1;
                         }
-                    }
-                    // Some other error occurred.
+                }
                     Err(e) => {
                         yield Err(e.into());
                         return;
@@ -306,7 +298,7 @@ pub(crate) fn stream(
 
             let mut node_reader = car_parser::node::NodeReader::new(&mmap[..]);
 
-            while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await.transpose() {
+            while let Some(block) = read_entire_block(&mut node_reader, &prev_blockhash).await.transpose() {
                 let block = match block {
                     Ok(block) => block,
                     Err(e) => {
@@ -318,7 +310,7 @@ pub(crate) fn stream(
                         return;
                     }
                 };
-                prev_blockhash = block.blockhash;
+                prev_blockhash = block.blockhash.clone();
 
                 if block.slot < start {
                     // Skip blocks before the start of the requested range.
@@ -511,7 +503,7 @@ enum FileDownloadError {
 /// <https://github.com/lamports-dev/yellowstone-faithful-car-parser/blob/master/src/bin/counter.rs>
 async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     node_reader: &mut car_parser::node::NodeReader<R>,
-    prev_blockhash: [u8; 32],
+    prev_blockhash: &str,
 ) -> BoxResult<Option<DecodedBlock>> {
     // TODO: Could this be executed while downloading the block? As in, read from a stream and
     // attempt to decode until successful.
@@ -603,17 +595,19 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
         return Err(err.into());
     };
 
-    let blockhash: [u8; 32] = last_entry
-        .hash
-        .clone()
-        .try_into()
-        .expect("blockhash is 32 bytes");
+    let blockhash = {
+        // Hash of the last entry has the same value as that block's `blockhash` in
+        // CAR files.
+        let blockhash = &last_entry.hash;
+        assert_eq!(blockhash.len(), 32);
+        bs58::encode(blockhash).into_string()
+    };
 
     let block = DecodedBlock {
         slot: block.slot,
         parent_slot: block.meta.parent_slot,
         blockhash,
-        prev_blockhash,
+        prev_blockhash: prev_blockhash.to_owned(),
         block_height: block.meta.block_height,
         blocktime: block.meta.blocktime,
         transactions,
