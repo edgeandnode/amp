@@ -241,7 +241,7 @@ impl CompactionGroup {
         let filename = FileName::new_with_random_suffix(range.start());
         let buf_writer = self
             .store
-            .create_revision_file_writer(self.table.path(), &filename);
+            .create_revision_file_writer(self.table.revision(), &filename);
         let mut writer = ParquetFileWriter::new(
             self.store,
             buf_writer,

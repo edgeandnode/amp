@@ -92,7 +92,7 @@ use std::{
 use amp_data_store::DataStore;
 use common::{
     BlockNum, BlockStreamer, BoxError, LogicalCatalog, LogicalTable,
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::physical::{Catalog, MissingRangesError, PhysicalTable},
     metadata::segments::merge_ranges,
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
@@ -133,40 +133,33 @@ pub async fn dump(
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
     for table_def in dataset.tables() {
+        let sql_table_ref_schema = dataset.reference().to_string();
+
         // Try to get existing active physical table (handles retry case)
-        let physical_table: Arc<PhysicalTable> = match ctx
+        let revision = match ctx
             .data_store
             .get_table_active_revision(dataset.reference(), table_def.name())
             .await
             .map_err(Error::GetActivePhysicalTable)?
         {
             // Reuse existing table (retry scenario)
-            Some(revision) => {
-                let sql_table_ref_schema = dataset_reference.to_reference().to_string();
-                PhysicalTable::from_active_revision(
-                    ctx.data_store.clone(),
-                    dataset.reference().clone(),
-                    dataset.start_block(),
-                    table_def.clone(),
-                    revision,
-                    sql_table_ref_schema,
-                )
-            }
+            Some(revision) => revision,
             // Create new table (initial attempt)
-            None => {
-                let sql_table_ref_schema = dataset_reference.to_reference().to_string();
-                common::catalog::physical::register_new_table_revision(
-                    ctx.data_store.clone(),
-                    dataset_reference.clone(),
-                    dataset.start_block(),
-                    table_def.clone(),
-                    sql_table_ref_schema,
-                )
+            None => ctx
+                .data_store
+                .create_new_table_revision(dataset_reference, table_def.name())
                 .await
-                .map_err(Error::RegisterNewPhysicalTable)?
-            }
-        }
-        .into();
+                .map_err(Error::RegisterNewPhysicalTable)?,
+        };
+
+        let physical_table = Arc::new(PhysicalTable::from_revision(
+            ctx.data_store.clone(),
+            dataset.reference().clone(),
+            dataset.start_block(),
+            table_def.clone(),
+            revision,
+            sql_table_ref_schema,
+        ));
 
         let compactor = AmpCompactor::start(
             ctx.metadata_db.clone(),
@@ -186,10 +179,11 @@ pub async fn dump(
 
     // Assign job writer if provided (locks tables to job)
     if let Some(writer) = writer {
-        let location_ids: Vec<_> = tables.iter().map(|(pt, _)| pt.location_id()).collect();
-        metadata_db::physical_table::assign_job_writer(&ctx.metadata_db, &location_ids, writer)
+        let tables_revs = tables.iter().map(|(pt, _)| pt.revision());
+        ctx.data_store
+            .lock_revisions_for_writer(tables_revs, writer)
             .await
-            .map_err(Error::AssignJobWriter)?;
+            .map_err(Error::LockRevisionsForWriter)?;
     }
 
     let resolved_tables: Vec<_> = tables
@@ -372,18 +366,18 @@ pub enum Error {
 
     /// Failed to register physical table revision
     ///
-    /// This error occurs when registering a new physical table revision fails,
+    /// This error occurs when creating a new physical table revision fails,
     /// typically due to storage configuration issues, database connection problems,
     /// or invalid URL construction.
-    #[error("Failed to register new physical table")]
-    RegisterNewPhysicalTable(#[source] common::catalog::physical::RegisterNewTableRevisionError),
+    #[error("Failed to create new physical table")]
+    RegisterNewPhysicalTable(#[source] amp_data_store::CreateNewTableRevisionError),
 
-    /// Failed to assign job writer
+    /// Failed to lock revisions for writer
     ///
     /// This error occurs when assigning the job as the writer for physical
     /// table locations fails, typically due to database connection issues.
-    #[error("Failed to assign job writer")]
-    AssignJobWriter(#[source] metadata_db::Error),
+    #[error("Failed to lock revisions for writer")]
+    LockRevisionsForWriter(#[source] amp_data_store::LockRevisionsForWriterError),
 
     /// Failed consistency check for table
     ///
@@ -445,7 +439,7 @@ pub enum Error {
     /// - Corrupted file metadata
     /// - Database query timeout
     #[error("Failed to get missing block ranges for table")]
-    MissingRanges(#[source] BoxError),
+    MissingRanges(#[source] MissingRangesError),
 
     /// A partition task execution failed
     ///

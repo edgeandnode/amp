@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use amp_data_store::{DataStore, file_name::FileName};
+use amp_data_store::{DataStore, PhyTableRevisionFileMetadata, file_name::FileName};
 use datafusion::parquet::{
     arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
     errors::ParquetError,
@@ -80,6 +80,21 @@ impl FileMetadata {
     }
 }
 
+impl TryFrom<PhyTableRevisionFileMetadata> for FileMetadata {
+    type Error = serde_json::Error;
+
+    fn try_from(rev_meta: PhyTableRevisionFileMetadata) -> Result<Self, Self::Error> {
+        let parquet_meta: ParquetMeta = serde_json::from_value(rev_meta.parquet_meta_json)?;
+        Ok(Self {
+            file_id: rev_meta.file_id,
+            file_name: rev_meta.file_name,
+            location_id: rev_meta.location_id,
+            object_meta: rev_meta.object_meta,
+            parquet_meta,
+        })
+    }
+}
+
 #[instrument(skip(object_meta, store), err)]
 pub async fn extract_footer_bytes_from_file(
     store: &DataStore,
@@ -149,7 +164,7 @@ async fn extract_parquet_metadata_from_file(
     object_meta: &ObjectMeta,
 ) -> Result<Arc<ParquetMetaData>, ParquetError> {
     let mut reader = store
-        .create_revision_file_reader(object_meta.location.clone())
+        .create_file_reader_from_path(object_meta.location.clone())
         .with_file_size(object_meta.size)
         .with_preload_column_index(true)
         .with_preload_offset_index(true);

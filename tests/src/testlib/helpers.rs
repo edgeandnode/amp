@@ -198,7 +198,7 @@ pub async fn load_physical_tables(
             .expect("Active revision not found");
 
         let sql_table_ref_schema = dataset_ref.to_reference().to_string();
-        let physical_table = PhysicalTable::from_active_revision(
+        let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             dataset_ref.clone(),
             dataset.start_block(),
@@ -294,7 +294,7 @@ pub async fn restore_dataset_snapshot(
             })?;
 
         let sql_table_ref_schema = dataset_ref.to_reference().to_string();
-        let physical_table = PhysicalTable::from_active_revision(
+        let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             dataset_ref.clone(),
             dataset.start_block(),
@@ -453,7 +453,7 @@ pub async fn catalog_for_dataset(
             .expect("Active revision must exist after dump");
 
         let sql_table_ref_schema = dataset_ref.to_reference().to_string();
-        let physical_table = PhysicalTable::from_active_revision(
+        let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             dataset_ref.clone(),
             dataset.start_block(),

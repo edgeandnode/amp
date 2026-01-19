@@ -995,6 +995,7 @@ impl Error {
             Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
             Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
             Error::CoreError(CoreError::DatasetError(_)) => "DATASET_ERROR",
+            Error::CoreError(CoreError::CatalogSnapshot(_)) => "CATALOG_SNAPSHOT_ERROR",
             Error::CoreError(CoreError::ConfigError(_)) => "CONFIG_ERROR",
             Error::CoreError(CoreError::PlanningError(_)) => "PLANNING_ERROR",
             Error::CoreError(CoreError::ExecutionError(_)) => "CORE_EXECUTION_ERROR",
@@ -1029,6 +1030,7 @@ impl IntoResponse for Error {
             }
             Error::CoreError(
                 CoreError::DatasetError(_)
+                | CoreError::CatalogSnapshot(_)
                 | CoreError::ConfigError(_)
                 | CoreError::PlanningError(_)
                 | CoreError::ExecutionError(_)
@@ -1073,6 +1075,7 @@ impl From<Error> for Status {
             Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(message),
             Error::CoreError(CoreError::SqlParseError(_)) => Status::invalid_argument(message),
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(message),
+            Error::CoreError(CoreError::CatalogSnapshot(_)) => Status::internal(message),
             Error::CoreError(CoreError::ConfigError(_)) => Status::internal(message),
             Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(message),
 

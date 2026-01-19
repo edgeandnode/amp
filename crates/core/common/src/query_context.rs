@@ -72,6 +72,10 @@ pub enum Error {
     #[error("dataset error")]
     DatasetError(#[source] BoxError),
 
+    /// Failed to create catalog snapshot
+    #[error("failed to create catalog snapshot")]
+    CatalogSnapshot(#[source] crate::catalog::physical::FromCatalogError),
+
     #[error("meta table error")]
     MetaTableError(#[source] DataFusionError),
 
@@ -93,17 +97,18 @@ impl IntoResponse for Error {
             Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::TableNotFoundError(_) => axum::http::StatusCode::NOT_FOUND,
             Error::DatasetError(_) => axum::http::StatusCode::BAD_REQUEST,
-            Error::ConfigError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Error::PlanningError(_) => axum::http::StatusCode::BAD_REQUEST,
-            Error::ExecutionError(_) | Error::MetaTableError(_) => {
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
-            }
+            Error::CatalogSnapshot(_)
+            | Error::ConfigError(_)
+            | Error::ExecutionError(_)
+            | Error::MetaTableError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         };
         let body = serde_json::json!({
             "error_code": match self {
                 Error::SqlParseError(_) => "SQL_PARSE_ERROR",
                 Error::InvalidPlan(_) => "INVALID_PLAN",
                 Error::DatasetError(_) => "DATASET_ERROR",
+                Error::CatalogSnapshot(_) => "CATALOG_SNAPSHOT_ERROR",
                 Error::ConfigError(_) => "CONFIG_ERROR",
                 Error::PlanningError(_) => "PLANNING_ERROR",
                 Error::ExecutionError(_) => "EXECUTION_ERROR",
@@ -225,7 +230,7 @@ impl QueryContext {
         let catalog_snapshot =
             CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments, store.clone())
                 .await
-                .map_err(Error::DatasetError)?;
+                .map_err(Error::CatalogSnapshot)?;
 
         let tiered_memory_pool: Arc<TieredMemoryPool> = {
             let per_query_bytes = env.query_max_mem_mb * 1024 * 1024;

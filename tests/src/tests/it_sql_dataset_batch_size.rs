@@ -219,7 +219,7 @@ impl TestCtx {
             .ctx
             .daemon_worker()
             .data_store()
-            .list_revision_files_in_object_store(table.path())
+            .list_revision_files_in_object_store(table.revision())
             .await
             .unwrap();
 

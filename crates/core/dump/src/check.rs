@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use amp_data_store::{DataStore, file_name::FileName};
-use common::{catalog::physical::PhysicalTable, query_context::Error as QueryError};
+use common::catalog::physical::{GetFilesError, PhysicalTable};
 use metadata_db::LocationId;
 use object_store::ObjectMeta;
 
@@ -40,13 +40,13 @@ pub async fn consistency_check(
         .await
         .map_err(|err| ConsistencyError::GetTableFiles {
             location_id,
-            source: QueryError::DatasetError(err),
+            source: err,
         })?;
 
     let registered_files: BTreeSet<FileName> = files.into_iter().map(|m| m.file_name).collect();
 
     let stored_files: BTreeMap<FileName, ObjectMeta> = store
-        .list_revision_files_in_object_store(table.path())
+        .list_revision_files_in_object_store(table.revision())
         .await
         .map_err(|err| ConsistencyError::ListObjectStore {
             location_id,
@@ -115,7 +115,7 @@ pub enum ConsistencyError {
     GetTableFiles {
         location_id: LocationId,
         #[source]
-        source: QueryError,
+        source: GetFilesError,
     },
 
     /// Failed to list files in object store

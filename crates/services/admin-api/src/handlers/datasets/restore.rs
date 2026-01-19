@@ -1,15 +1,21 @@
+use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::catalog::physical::{RestoreLatestTableRevisionError, restore_table_latest_revision};
+use common::{
+    BoxError, catalog::physical::PhysicalTable, metadata::amp_metadata_from_parquet_file,
+};
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
     table_name::TableName,
 };
-use futures::{StreamExt as _, stream::FuturesUnordered};
+use futures::{
+    StreamExt as _,
+    stream::{self, FuturesUnordered},
+};
 use metadata_db::LocationId;
 use monitoring::logging;
 use tokio::task::JoinHandle;
@@ -126,29 +132,52 @@ pub async fn handler(
 
         let task = tokio::spawn(async move {
             let sql_table_ref_schema = dataset_ref.to_reference().to_string();
-            let physical_table = restore_table_latest_revision(
-                data_store,
-                &dataset_ref,
-                start_block,
-                &table_def,
-                sql_table_ref_schema,
-            )
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    error = %err,
-                    error_source = logging::error_source(&err),
-                    table = %table_name,
-                    "failed to restore table from storage"
-                );
-                Error::RestoreTable {
+
+            // Restore latest revision from object storage
+            let info = data_store
+                .restore_latest_table_revision(&dataset_ref, table_def.name())
+                .await
+                .map_err(|err| {
+                    tracing::error!(
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        table = %table_name,
+                        "failed to restore table revision from storage"
+                    );
+                    Error::RestoreTableRevision {
+                        table: table_name.clone(),
+                        source: err,
+                    }
+                })?
+                .ok_or_else(|| Error::TableNotFound {
                     table: table_name.clone(),
-                    source: err,
-                }
-            })?
-            .ok_or_else(|| Error::TableNotFound {
-                table: table_name.clone(),
-            })?;
+                })?;
+
+            // Register all files in the revision
+            register_revision_files(&data_store, &info)
+                .await
+                .map_err(|err| {
+                    tracing::error!(
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        table = %table_name,
+                        "failed to register files for table"
+                    );
+                    Error::RegisterFiles {
+                        table: table_name.clone(),
+                        source: err,
+                    }
+                })?;
+
+            // Construct PhysicalTable with domain-specific info
+            let physical_table = PhysicalTable::from_revision(
+                data_store.clone(),
+                dataset_ref.clone(),
+                start_block,
+                table_def.clone(),
+                info,
+                sql_table_ref_schema,
+            );
 
             tracing::info!(
                 %dataset_ref,
@@ -257,17 +286,29 @@ pub enum Error {
     #[error("Failed to load dataset: {0}")]
     GetDataset(#[source] amp_dataset_store::GetDatasetError),
 
-    /// Failed to restore table from storage
+    /// Failed to restore table revision from storage
     ///
     /// This occurs when:
-    /// - Error scanning object storage for table files
+    /// - Error scanning object storage for table revision
     /// - Error registering location in metadata database
-    /// - Error re-indexing Parquet file metadata
-    #[error("Failed to restore table '{table}'")]
-    RestoreTable {
+    #[error("Failed to restore table revision for '{table}'")]
+    RestoreTableRevision {
         table: TableName,
         #[source]
-        source: RestoreLatestTableRevisionError,
+        source: amp_data_store::RestoreLatestTableRevisionError,
+    },
+
+    /// Failed to register files for table
+    ///
+    /// This occurs when:
+    /// - Error listing files in object storage
+    /// - Error reading Parquet file metadata
+    /// - Error registering file metadata in database
+    #[error("Failed to register files for table '{table}'")]
+    RegisterFiles {
+        table: TableName,
+        #[source]
+        source: RegisterRevisionFilesError,
     },
 
     /// Table data not found in object storage
@@ -297,7 +338,8 @@ impl IntoErrorResponse for Error {
             Error::NotFound { .. } => "DATASET_NOT_FOUND",
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
-            Error::RestoreTable { .. } => "RESTORE_TABLE_ERROR",
+            Error::RestoreTableRevision { .. } => "RESTORE_TABLE_REVISION_ERROR",
+            Error::RegisterFiles { .. } => "REGISTER_FILES_ERROR",
             Error::TableNotFound { .. } => "TABLE_NOT_FOUND",
             Error::TaskJoin { .. } => "TASK_JOIN_ERROR",
         }
@@ -309,9 +351,107 @@ impl IntoErrorResponse for Error {
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::RestoreTable { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::RestoreTableRevision { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::RegisterFiles { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TableNotFound { .. } => StatusCode::NOT_FOUND,
             Error::TaskJoin { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
+}
+
+/// Registers all files in a revision with their Amp-specific metadata.
+///
+/// Lists all files in the revision directory in object storage, extracts
+/// Parquet metadata including Amp-specific block range information, and
+/// registers each file in the metadata database.
+///
+/// Files are processed concurrently (up to 16 at a time).
+#[tracing::instrument(skip_all, err)]
+async fn register_revision_files(
+    store: &DataStore,
+    revision: &PhyTableRevision,
+) -> Result<(), RegisterRevisionFilesError> {
+    let files = store
+        .list_revision_files_in_object_store(revision)
+        .await
+        .map_err(RegisterRevisionFilesError::ListFiles)?;
+
+    // Process files in parallel using buffered stream
+    const CONCURRENT_METADATA_FETCHES: usize = 16;
+
+    let object_store = store.clone();
+    let mut file_stream = stream::iter(files.into_iter())
+        .map(|object_meta| {
+            let store = object_store.clone();
+            async move {
+                let (file_name, amp_meta, footer) =
+                    amp_metadata_from_parquet_file(&store, &object_meta)
+                        .await
+                        .map_err(RegisterRevisionFilesError::ReadParquetMetadata)?;
+
+                let parquet_meta_json = serde_json::to_value(amp_meta)
+                    .map_err(RegisterRevisionFilesError::SerializeMetadata)?;
+
+                let object_size = object_meta.size;
+                let object_e_tag = object_meta.e_tag;
+                let object_version = object_meta.version;
+
+                Ok((
+                    file_name,
+                    object_size,
+                    object_e_tag,
+                    object_version,
+                    parquet_meta_json,
+                    footer,
+                ))
+            }
+        })
+        .buffered(CONCURRENT_METADATA_FETCHES);
+
+    // Register all files in the metadata database as they complete
+    while let Some(result) = file_stream.next().await {
+        let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
+            result?;
+        store
+            .register_revision_file(
+                revision,
+                &file_name,
+                object_size,
+                object_e_tag,
+                object_version,
+                parquet_meta_json,
+                &footer,
+            )
+            .await
+            .map_err(RegisterRevisionFilesError::RegisterFile)?;
+    }
+
+    Ok(())
+}
+
+/// Errors that occur when registering revision files
+///
+/// This error type is used by [`register_revision_files`].
+#[derive(Debug, thiserror::Error)]
+pub enum RegisterRevisionFilesError {
+    /// Failed to list files in the revision directory
+    #[error("Failed to list files in revision")]
+    ListFiles(#[source] amp_data_store::ListRevisionFilesInObjectStoreError),
+
+    /// Failed to read Amp metadata from parquet file
+    ///
+    /// This occurs when the parquet file cannot be read or its metadata cannot be parsed.
+    ///
+    /// TODO: Replace BoxError with concrete error type when amp_metadata_from_parquet_file
+    /// is migrated to use proper error handling patterns.
+    #[error("Failed to read Amp metadata from parquet file")]
+    ReadParquetMetadata(#[source] BoxError),
+
+    /// Failed to serialize parquet metadata to JSON
+    #[error("Failed to serialize parquet metadata to JSON")]
+    SerializeMetadata(#[source] serde_json::Error),
+
+    /// Failed to register file in metadata database
+    #[error("Failed to register file in metadata database")]
+    RegisterFile(#[source] amp_data_store::RegisterFileError),
 }
