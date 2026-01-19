@@ -25,18 +25,10 @@ pub struct TextPosition {
     pub column: usize,
 }
 
-/// A history entry for a single query.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HistoryEntry {
-    pub query: String,
-    pub executed_at: String,
-}
-
 /// The history file structure for persistence.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoryFile {
-    pub version: u32,
-    pub history: Vec<HistoryEntry>,
+    pub dataset_history: HashMap<String, Vec<String>>,
 }
 
 /// The favorites file structure for persistence.
@@ -504,8 +496,8 @@ pub struct App {
     pub query_scroll_state: ScrollbarState,
     pub query_content_length: usize,
 
-    // Query history (session-only)
-    pub query_history: Vec<String>,
+    // Query history (per-dataset, persisted)
+    pub query_history: HashMap<String, Vec<String>>,
     pub query_history_index: Option<usize>, // None = current input, Some(i) = history[i]
     pub query_draft: String,                // Preserved current input when navigating history
 
@@ -588,7 +580,7 @@ impl App {
             query_scroll: 0,
             query_scroll_state: ScrollbarState::default(),
             query_content_length: 0,
-            query_history: Vec::new(),
+            query_history: HashMap::new(),
             query_history_index: None,
             query_draft: String::new(),
             history_search_active: false,
@@ -1300,9 +1292,7 @@ impl App {
 
         let content = std::fs::read_to_string(&path)?;
         let file: HistoryFile = serde_json::from_str(&content)?;
-
-        // Extract just the query strings for in-memory history
-        self.query_history = file.history.into_iter().map(|e| e.query).collect();
+        self.query_history = file.dataset_history;
 
         Ok(())
     }
@@ -1316,31 +1306,60 @@ impl App {
             std::fs::create_dir_all(parent)?;
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
-
-        // Respect history limit when saving
-        const MAX_HISTORY: usize = 100;
-        let history_to_save: Vec<HistoryEntry> = self
-            .query_history
-            .iter()
-            .rev()
-            .take(MAX_HISTORY)
-            .rev()
-            .map(|q| HistoryEntry {
-                query: q.clone(),
-                executed_at: now.clone(),
-            })
-            .collect();
+        // Limit history per dataset
+        const MAX_HISTORY_PER_DATASET: usize = 100;
+        let mut limited_history: HashMap<String, Vec<String>> = HashMap::new();
+        for (key, queries) in &self.query_history {
+            let limited: Vec<String> = queries
+                .iter()
+                .rev()
+                .take(MAX_HISTORY_PER_DATASET)
+                .rev()
+                .cloned()
+                .collect();
+            if !limited.is_empty() {
+                limited_history.insert(key.clone(), limited);
+            }
+        }
 
         let file = HistoryFile {
-            version: 1,
-            history: history_to_save,
+            dataset_history: limited_history,
         };
 
         let content = serde_json::to_string_pretty(&file)?;
         std::fs::write(&path, content)?;
 
         Ok(())
+    }
+
+    /// Get the history key for the current dataset.
+    pub fn current_history_key(&self) -> String {
+        if let Some((ns, name, _)) = self.get_selected_manifest_params() {
+            format!("{}.{}", ns, name)
+        } else {
+            "global".to_string()
+        }
+    }
+
+    /// Get the history for the current dataset.
+    pub fn current_history(&self) -> Vec<String> {
+        let key = self.current_history_key();
+        self.query_history.get(&key).cloned().unwrap_or_default()
+    }
+
+    /// Add a query to the current dataset's history.
+    pub fn add_to_history(&mut self, query: String) {
+        let key = self.current_history_key();
+        let history = self.query_history.entry(key).or_default();
+        // Avoid consecutive duplicates
+        if history.last() != Some(&query) {
+            history.push(query);
+            // Limit in-memory history
+            const MAX_HISTORY: usize = 100;
+            if history.len() > MAX_HISTORY {
+                history.remove(0);
+            }
+        }
     }
 
     // ========================================================================
@@ -1527,13 +1546,13 @@ impl App {
 
     /// Update history search matches based on current search query.
     pub fn update_history_search(&mut self) {
+        let history = self.current_history();
         if self.history_search_query.is_empty() {
             // Empty search query matches all history
-            self.history_search_matches = (0..self.query_history.len()).rev().collect();
+            self.history_search_matches = (0..history.len()).rev().collect();
         } else {
             let query_lower = self.history_search_query.to_lowercase();
-            self.history_search_matches = self
-                .query_history
+            self.history_search_matches = history
                 .iter()
                 .enumerate()
                 .filter(|(_, h)| h.to_lowercase().contains(&query_lower))
@@ -1546,8 +1565,10 @@ impl App {
         self.history_search_index = 0;
 
         // Update query input to show current match
-        if let Some(&idx) = self.history_search_matches.first() {
-            self.set_query_input(self.query_history[idx].clone());
+        if let Some(&idx) = self.history_search_matches.first()
+            && let Some(query) = history.get(idx)
+        {
+            self.set_query_input(query.clone());
         }
     }
 
@@ -1560,8 +1581,11 @@ impl App {
         self.history_search_index =
             (self.history_search_index + 1) % self.history_search_matches.len();
 
+        let history = self.current_history();
         let idx = self.history_search_matches[self.history_search_index];
-        self.set_query_input(self.query_history[idx].clone());
+        if let Some(query) = history.get(idx) {
+            self.set_query_input(query.clone());
+        }
     }
 
     /// Enter history search mode.
@@ -1631,7 +1655,9 @@ impl App {
 
             // Try numeric comparison first
             let cmp = match (val_a.parse::<f64>(), val_b.parse::<f64>()) {
-                (Ok(num_a), Ok(num_b)) => num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal),
+                (Ok(num_a), Ok(num_b)) => num_a
+                    .partial_cmp(&num_b)
+                    .unwrap_or(std::cmp::Ordering::Equal),
                 _ => val_a.cmp(val_b),
             };
 
@@ -1712,7 +1738,11 @@ impl App {
             return;
         }
 
-        if let Some(idx) = self.favorite_queries.iter().position(|f| f.trim() == trimmed) {
+        if let Some(idx) = self
+            .favorite_queries
+            .iter()
+            .position(|f| f.trim() == trimmed)
+        {
             self.favorite_queries.remove(idx);
         } else {
             self.favorite_queries.push(trimmed);

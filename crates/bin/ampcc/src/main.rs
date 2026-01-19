@@ -31,8 +31,8 @@ mod registry;
 mod ui;
 
 use app::{
-    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults,
-    QUERY_TEMPLATES,
+    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QUERY_TEMPLATES,
+    QueryResults,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -254,13 +254,17 @@ where
                                 }
                             }
                             KeyCode::Down => {
-                                if app.favorites_panel_index < app.favorite_queries.len().saturating_sub(1) {
+                                if app.favorites_panel_index
+                                    < app.favorite_queries.len().saturating_sub(1)
+                                {
                                     app.favorites_panel_index += 1;
                                 }
                             }
                             KeyCode::Enter => {
                                 // Load selected favorite into query input
-                                if let Some(query) = app.favorite_queries.get(app.favorites_panel_index).cloned() {
+                                if let Some(query) =
+                                    app.favorite_queries.get(app.favorites_panel_index).cloned()
+                                {
                                     app.set_query_input(query);
                                     app.favorites_panel_open = false;
                                 }
@@ -595,16 +599,9 @@ where
                                 // Execute query with Ctrl+Enter
                                 let sql = app.query_input.clone();
                                 if !sql.trim().is_empty() {
-                                    // Add to history (avoid consecutive duplicates)
-                                    let trimmed = sql.trim().to_string();
-                                    if app.query_history.last() != Some(&trimmed) {
-                                        app.query_history.push(trimmed);
-                                        // Cap history size at 100 entries
-                                        const MAX_HISTORY: usize = 100;
-                                        if app.query_history.len() > MAX_HISTORY {
-                                            app.query_history.remove(0);
-                                        }
-                                    }
+                                    // Add to per-dataset history
+                                    app.add_to_history(sql.trim().to_string());
+
                                     // Reset history navigation state
                                     app.query_history_index = None;
                                     app.query_draft.clear();
@@ -631,24 +628,21 @@ where
                                 // First try to move cursor up in multiline input
                                 if !app.cursor_up() {
                                     // At first line, navigate history
-                                    if !app.query_history.is_empty() {
+                                    let history = app.current_history();
+                                    if !history.is_empty() {
                                         match app.query_history_index {
                                             None => {
                                                 // Save current input as draft, load most recent history
                                                 app.query_draft = app.query_input.clone();
-                                                let last_idx = app.query_history.len() - 1;
+                                                let last_idx = history.len() - 1;
                                                 app.query_history_index = Some(last_idx);
-                                                app.set_query_input(
-                                                    app.query_history[last_idx].clone(),
-                                                );
+                                                app.set_query_input(history[last_idx].clone());
                                             }
                                             Some(idx) if idx > 0 => {
                                                 // Move to older entry
                                                 let new_idx = idx - 1;
                                                 app.query_history_index = Some(new_idx);
-                                                app.set_query_input(
-                                                    app.query_history[new_idx].clone(),
-                                                );
+                                                app.set_query_input(history[new_idx].clone());
                                             }
                                             Some(_) => {
                                                 // Already at oldest entry, do nothing
@@ -661,14 +655,13 @@ where
                                 // First try to move cursor down in multiline input
                                 if !app.cursor_down() {
                                     // At last line, navigate history
+                                    let history = app.current_history();
                                     if let Some(idx) = app.query_history_index {
-                                        if idx < app.query_history.len() - 1 {
+                                        if idx < history.len() - 1 {
                                             // Move to newer entry
                                             let new_idx = idx + 1;
                                             app.query_history_index = Some(new_idx);
-                                            app.set_query_input(
-                                                app.query_history[new_idx].clone(),
-                                            );
+                                            app.set_query_input(history[new_idx].clone());
                                         } else {
                                             // At newest entry, restore draft
                                             app.query_history_index = None;

@@ -15,8 +15,8 @@ use ratatui::{
 };
 
 use crate::app::{
-    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults,
-    QUERY_TEMPLATES,
+    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QUERY_TEMPLATES,
+    QueryResults,
 };
 
 // ============================================================================
@@ -987,16 +987,21 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let line_count = app.query_line_count();
-    let star = if app.is_current_query_favorite() { " ★" } else { "" };
+    let star = if app.is_current_query_favorite() {
+        " ★"
+    } else {
+        ""
+    };
+    let history = app.current_history();
     let title = if app.input_mode == InputMode::Query {
         if let Some(idx) = app.query_history_index {
             format!(
                 "SQL Query{} (history {}/{}) [Ctrl+Enter execute, Esc cancel]",
                 star,
                 idx + 1,
-                app.query_history.len()
+                history.len()
             )
-        } else if !app.query_history.is_empty() {
+        } else if !history.is_empty() {
             format!(
                 "SQL Query{} ({} lines) [↑↓ nav, Ctrl+F fav, F/*, Ctrl+Enter]",
                 star, line_count
@@ -1131,7 +1136,11 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
     let sort_info = if app.result_sort_pending {
         " - Press 1-9 for column".to_string()
     } else if let Some(col) = app.result_sort_column {
-        let dir = if app.result_sort_ascending { "▲" } else { "▼" };
+        let dir = if app.result_sort_ascending {
+            "▲"
+        } else {
+            "▼"
+        };
         let col_name = results.columns.get(col).map(|s| s.as_str()).unwrap_or("?");
         format!(" - sorted by {} {}", col_name, dir)
     } else {
@@ -1169,7 +1178,11 @@ fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|(idx, c)| {
             let col_num = idx + 1; // 1-indexed for user display
             let sort_indicator = if app.result_sort_column == Some(idx) {
-                if app.result_sort_ascending { " ▲" } else { " ▼" }
+                if app.result_sort_ascending {
+                    " ▲"
+                } else {
+                    " ▼"
+                }
             } else {
                 ""
             };
@@ -1786,7 +1799,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => "[Ctrl+u/d] Scroll",
             ActivePane::Header => "[Tab] Navigate",
             ActivePane::Query => {
-                if app.query_history.is_empty() {
+                if app.current_history().is_empty() {
                     "[Ctrl+Enter] Execute [Esc] Cancel"
                 } else {
                     "[↑↓] History [Ctrl+Enter] Execute [Esc] Cancel"
