@@ -39,6 +39,43 @@ pub struct HistoryFile {
     pub history: Vec<HistoryEntry>,
 }
 
+/// A SQL query template.
+#[derive(Debug, Clone)]
+pub struct QueryTemplate {
+    /// The template pattern with placeholders.
+    pub pattern: &'static str,
+    /// Short description of the template.
+    pub description: &'static str,
+}
+
+/// Available query templates.
+pub const QUERY_TEMPLATES: &[QueryTemplate] = &[
+    QueryTemplate {
+        pattern: "SELECT * FROM {table} LIMIT 10",
+        description: "Preview data",
+    },
+    QueryTemplate {
+        pattern: "SELECT COUNT(*) FROM {table}",
+        description: "Row count",
+    },
+    QueryTemplate {
+        pattern: "SELECT * FROM {table} WHERE {column} = '?'",
+        description: "Filter by column",
+    },
+    QueryTemplate {
+        pattern: "SELECT {column}, COUNT(*) FROM {table} GROUP BY {column}",
+        description: "Group by",
+    },
+    QueryTemplate {
+        pattern: "SELECT DISTINCT {column} FROM {table}",
+        description: "Unique values",
+    },
+    QueryTemplate {
+        pattern: "DESCRIBE {table}",
+        description: "Table schema",
+    },
+];
+
 /// Input mode for the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
@@ -470,6 +507,10 @@ pub struct App {
     pub history_search_query: String,
     pub history_search_matches: Vec<usize>, // indices into query_history
     pub history_search_index: usize,        // index into matches
+
+    // Template picker state
+    pub template_picker_open: bool,
+    pub template_picker_index: usize,
 }
 
 impl App {
@@ -537,6 +578,8 @@ impl App {
             history_search_query: String::new(),
             history_search_matches: Vec::new(),
             history_search_index: 0,
+            template_picker_open: false,
+            template_picker_index: 0,
         })
     }
 
@@ -1522,5 +1565,27 @@ impl App {
         self.history_search_active = false;
         self.history_search_query.clear();
         self.set_query_input(self.query_draft.clone());
+    }
+
+    /// Resolve template placeholders with current context.
+    pub fn resolve_template(&self, template: &str) -> String {
+        let table = self
+            .current_inspect
+            .as_ref()
+            .and_then(|i| i.tables.first())
+            .map(|t| t.name.as_str())
+            .unwrap_or("table_name");
+
+        let column = self
+            .current_inspect
+            .as_ref()
+            .and_then(|i| i.tables.first())
+            .and_then(|t| t.columns.first())
+            .map(|c| c.name.as_str())
+            .unwrap_or("column_name");
+
+        template
+            .replace("{table}", table)
+            .replace("{column}", column)
     }
 }

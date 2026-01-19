@@ -30,7 +30,10 @@ mod config;
 mod registry;
 mod ui;
 
-use app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults};
+use app::{
+    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults,
+    QUERY_TEMPLATES,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Auto-refresh interval for jobs/workers (10 seconds).
@@ -211,6 +214,34 @@ where
         if event::poll(tick_rate)? {
             match event::read()? {
                 Event::Key(key) => {
+                    // Handle template picker if open (modal popup)
+                    if app.template_picker_open {
+                        match key.code {
+                            KeyCode::Up => {
+                                if app.template_picker_index > 0 {
+                                    app.template_picker_index -= 1;
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.template_picker_index < QUERY_TEMPLATES.len() - 1 {
+                                    app.template_picker_index += 1;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Apply selected template
+                                let template = &QUERY_TEMPLATES[app.template_picker_index];
+                                let resolved = app.resolve_template(template.pattern);
+                                app.set_query_input(resolved);
+                                app.template_picker_open = false;
+                            }
+                            KeyCode::Esc => {
+                                app.template_picker_open = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
                     match app.input_mode {
                         InputMode::Normal => {
                             match key.code {
@@ -576,6 +607,14 @@ where
                                         }
                                     }
                                 }
+                            }
+                            KeyCode::Char('T') | KeyCode::Char('t')
+                                if key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT =>
+                            {
+                                // Open template picker (only in query mode, only 'T' or 't')
+                                app.template_picker_open = true;
+                                app.template_picker_index = 0;
                             }
                             KeyCode::Char(c) => {
                                 // Reset history navigation on edit

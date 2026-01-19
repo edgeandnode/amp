@@ -16,6 +16,7 @@ use ratatui::{
 
 use crate::app::{
     ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QueryResults,
+    QUERY_TEMPLATES,
 };
 
 // ============================================================================
@@ -488,6 +489,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_header(f, app, chunks[0]);
     draw_main(f, app, chunks[1]);
     draw_footer(f, app, chunks[2]);
+
+    // Draw template picker popup on top if open
+    if app.template_picker_open {
+        draw_template_picker(f, app);
+    }
 }
 
 /// Draw the header with source information.
@@ -1841,4 +1847,71 @@ fn truncate_url(url: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &url[..max_len - 3])
     }
+}
+
+/// Draw the template picker popup.
+fn draw_template_picker(f: &mut Frame, app: &App) {
+    // Calculate popup dimensions
+    let popup_width = 60u16;
+    let popup_height = (QUERY_TEMPLATES.len() + 4) as u16; // templates + borders + title + footer
+
+    // Center the popup
+    let area = f.area();
+    let x = area.width.saturating_sub(popup_width) / 2;
+    let y = area.height.saturating_sub(popup_height) / 2;
+    let popup_area = Rect::new(
+        x,
+        y,
+        popup_width.min(area.width),
+        popup_height.min(area.height),
+    );
+
+    // Clear the popup area with a background
+    let clear = ratatui::widgets::Clear;
+    f.render_widget(clear, popup_area);
+
+    // Build template list items
+    let items: Vec<ListItem> = QUERY_TEMPLATES
+        .iter()
+        .enumerate()
+        .map(|(idx, template)| {
+            // Resolve the template to show preview
+            let resolved = app.resolve_template(template.pattern);
+            let truncated = if resolved.len() > 50 {
+                format!("{}...", &resolved[..47])
+            } else {
+                resolved
+            };
+
+            let style = if idx == app.template_picker_index {
+                Theme::selection()
+            } else {
+                Theme::text_primary()
+            };
+
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("{:<16}", template.description),
+                    Theme::text_secondary(),
+                ),
+                Span::styled(truncated, style),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Select Template (↑↓ navigate, Enter select, Esc cancel)")
+                .borders(Borders::ALL)
+                .border_style(Theme::border_focused()),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol(">> ");
+
+    let mut state = ListState::default();
+    state.select(Some(app.template_picker_index));
+
+    f.render_stateful_widget(list, popup_area, &mut state);
 }
