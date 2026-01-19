@@ -1073,6 +1073,7 @@ dependencies = [
  "amp-client",
  "anyhow",
  "arrow",
+ "chrono",
  "crossterm 0.29.0",
  "datasets-common",
  "directories",

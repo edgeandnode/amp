@@ -53,6 +53,12 @@ async fn main() -> Result<()> {
     let config = config::Config::load()?;
     let mut app = App::new(config)?;
 
+    // Load persisted history
+    if let Err(e) = app.load_history() {
+        eprintln!("Warning: could not load history: {}", e);
+        // Continue anyway - not fatal
+    }
+
     // Fetch initial datasets
     if let Err(e) = app.fetch_datasets().await {
         eprintln!("Failed to fetch datasets: {}", e);
@@ -725,6 +731,10 @@ where
         }
 
         if app.should_quit {
+            // Save history before quitting
+            if let Err(e) = app.save_history() {
+                eprintln!("Warning: could not save history: {}", e);
+            }
             return Ok(());
         }
     }

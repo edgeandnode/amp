@@ -1,6 +1,6 @@
 //! Application state and business logic.
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
 
 use admin_client::{
     Client,
@@ -12,6 +12,20 @@ use ratatui::widgets::ScrollbarState;
 use url::Url;
 
 use crate::{config::Config, registry::RegistryClient};
+
+/// A history entry for a single query.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HistoryEntry {
+    pub query: String,
+    pub executed_at: String,
+}
+
+/// The history file structure for persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HistoryFile {
+    pub version: u32,
+    pub history: Vec<HistoryEntry>,
+}
 
 /// Input mode for the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1152,5 +1166,66 @@ impl App {
                 Ok(Some(manifest))
             }
         }
+    }
+
+    /// Get the path to the history file.
+    pub fn history_file_path() -> Result<PathBuf> {
+        let config_dir = directories::ProjectDirs::from("com", "thegraph", "ampcc")
+            .context("could not determine config directory")?
+            .config_dir()
+            .to_path_buf();
+        Ok(config_dir.join("history.json"))
+    }
+
+    /// Load history from disk on startup.
+    pub fn load_history(&mut self) -> Result<()> {
+        let path = Self::history_file_path()?;
+        if !path.exists() {
+            return Ok(()); // No history yet
+        }
+
+        let content = std::fs::read_to_string(&path)?;
+        let file: HistoryFile = serde_json::from_str(&content)?;
+
+        // Extract just the query strings for in-memory history
+        self.query_history = file.history.into_iter().map(|e| e.query).collect();
+
+        Ok(())
+    }
+
+    /// Save history to disk on shutdown.
+    pub fn save_history(&self) -> Result<()> {
+        let path = Self::history_file_path()?;
+
+        // Ensure directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Respect history limit when saving
+        const MAX_HISTORY: usize = 100;
+        let history_to_save: Vec<HistoryEntry> = self
+            .query_history
+            .iter()
+            .rev()
+            .take(MAX_HISTORY)
+            .rev()
+            .map(|q| HistoryEntry {
+                query: q.clone(),
+                executed_at: now.clone(),
+            })
+            .collect();
+
+        let file = HistoryFile {
+            version: 1,
+            history: history_to_save,
+        };
+
+        let content = serde_json::to_string_pretty(&file)?;
+        std::fs::write(&path, content)?;
+
+        Ok(())
     }
 }
