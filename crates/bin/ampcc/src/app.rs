@@ -1402,6 +1402,7 @@ impl App {
     }
 
     /// Convert byte offset to TextPosition.
+    #[allow(dead_code)]
     pub fn offset_to_cursor(input: &str, offset: usize) -> TextPosition {
         let mut line = 0;
         let mut column = 0;

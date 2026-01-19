@@ -611,17 +611,27 @@ where
                                 }
                             }
                             KeyCode::Enter => {
-                                // Insert newline (plain Enter without Ctrl)
-                                app.query_history_index = None;
-                                app.insert_char('\n');
+                                if app.history_search_active {
+                                    // Accept current match
+                                    app.accept_history_search();
+                                } else {
+                                    // Insert newline (plain Enter without Ctrl)
+                                    app.query_history_index = None;
+                                    app.insert_char('\n');
+                                }
                             }
                             KeyCode::Esc => {
-                                // Cancel query input, return to normal mode
-                                app.input_mode = InputMode::Normal;
-                                app.active_pane = ActivePane::Datasets;
-                                // Restore previous content view if we have results
-                                if app.query_results.is_none() {
-                                    app.content_view = ContentView::Dataset;
+                                if app.history_search_active {
+                                    // Cancel search, restore original input
+                                    app.cancel_history_search();
+                                } else {
+                                    // Cancel query input, return to normal mode
+                                    app.input_mode = InputMode::Normal;
+                                    app.active_pane = ActivePane::Datasets;
+                                    // Restore previous content view if we have results
+                                    if app.query_results.is_none() {
+                                        app.content_view = ContentView::Dataset;
+                                    }
                                 }
                             }
                             KeyCode::Up => {
@@ -677,6 +687,24 @@ where
                                 // Open template picker (only in query mode, only 'T' or 't')
                                 app.template_picker_open = true;
                                 app.template_picker_index = 0;
+                            }
+                            // History search (Ctrl+R)
+                            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if app.history_search_active {
+                                    // Cycle to next match
+                                    app.cycle_history_search();
+                                } else {
+                                    // Enter search mode
+                                    app.enter_history_search();
+                                }
+                            }
+                            KeyCode::Char(c) if app.history_search_active => {
+                                app.history_search_query.push(c);
+                                app.update_history_search();
+                            }
+                            KeyCode::Backspace if app.history_search_active => {
+                                app.history_search_query.pop();
+                                app.update_history_search();
                             }
                             KeyCode::Char('f') if key.modifiers == KeyModifiers::CONTROL => {
                                 // Open favorites panel with Ctrl+F
