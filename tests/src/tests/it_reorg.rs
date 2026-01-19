@@ -484,9 +484,13 @@ impl ReorgTestCtx {
             )
             .await
             .expect("Failed to create logical catalog");
-            physical_catalog::create(test_env.daemon_server().data_store(), logical)
-                .await
-                .expect("Failed to create physical catalog for SQL query")
+            physical_catalog::create(
+                test_env.daemon_server().dataset_store(),
+                test_env.daemon_server().data_store(),
+                logical,
+            )
+            .await
+            .expect("Failed to create physical catalog for SQL query")
         };
         let table = catalog
             .tables()

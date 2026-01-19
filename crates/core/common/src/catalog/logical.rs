@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     sync::Arc,
 };
 
@@ -16,12 +15,15 @@ use datasets_common::{
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf, sql::TableReference};
+use crate::{BlockNum, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 
 pub mod for_admin_api;
 pub mod for_dump;
 pub mod for_manifest_validation;
 pub mod for_query;
+pub mod table;
+
+pub use table::LogicalTable;
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -114,72 +116,6 @@ impl Table {
     }
 }
 
-/// A table that holds a reference to its dataset.
-#[derive(Debug, Clone)]
-pub struct ResolvedTable {
-    table: Table,
-    /// The dataset reference portion of SQL table references.
-    ///
-    /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
-    /// This field stores the string form of the `<dataset_ref>` portion - the schema under
-    /// which this table is registered in the catalog and referenced in SQL queries.
-    sql_table_ref_schema: String,
-    dataset_reference: HashReference,
-    dataset_start_block: Option<BlockNum>,
-}
-
-impl fmt::Display for ResolvedTable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.table_ref())
-    }
-}
-
-impl ResolvedTable {
-    pub fn new(
-        table: Table,
-        sql_table_ref_schema: String,
-        dataset_reference: HashReference,
-        dataset_start_block: Option<BlockNum>,
-    ) -> Self {
-        Self {
-            table,
-            sql_table_ref_schema,
-            dataset_reference,
-            dataset_start_block,
-        }
-    }
-
-    pub fn table(&self) -> &Table {
-        &self.table
-    }
-
-    pub fn table_ref(&self) -> TableReference {
-        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name.clone())
-    }
-
-    pub fn dataset_reference(&self) -> &HashReference {
-        &self.dataset_reference
-    }
-
-    pub fn dataset_start_block(&self) -> Option<BlockNum> {
-        self.dataset_start_block
-    }
-
-    /// Bare table name
-    pub fn name(&self) -> &TableName {
-        &self.table.name
-    }
-
-    /// Returns the dataset reference portion of SQL table references.
-    ///
-    /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
-    /// This returns the string form of the `<dataset_ref>` portion - the schema under which
-    /// this table is registered in the catalog and referenced in SQL queries.
-    pub fn sql_table_ref_schema(&self) -> &str {
-        &self.sql_table_ref_schema
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct Function {
     pub name: String,
@@ -198,13 +134,13 @@ pub struct FunctionSource {
 
 #[derive(Clone, Debug)]
 pub struct LogicalCatalog {
-    pub tables: Vec<ResolvedTable>,
+    pub tables: Vec<LogicalTable>,
     /// UDFs specific to the datasets corresponding to the resolved tables.
     pub udfs: Vec<ScalarUDF>,
 }
 
 impl LogicalCatalog {
-    pub fn from_tables<'a>(tables: impl Iterator<Item = &'a ResolvedTable>) -> Self {
+    pub fn from_tables<'a>(tables: impl Iterator<Item = &'a LogicalTable>) -> Self {
         Self {
             tables: tables.cloned().collect(),
             udfs: Vec::new(),

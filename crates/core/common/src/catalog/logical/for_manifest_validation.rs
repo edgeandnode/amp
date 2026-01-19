@@ -29,7 +29,7 @@ use crate::{
     BoxError,
     catalog::{
         dataset_access::DatasetAccess,
-        logical::{LogicalCatalog, ResolvedTable},
+        logical::{LogicalCatalog, LogicalTable},
     },
     js_udf::JsUdf,
     sql::{FunctionReference, TableReference},
@@ -50,7 +50,7 @@ pub type TableReferencesMap = BTreeMap<
 /// resolving dependency aliases to datasets for schema-only validation (no physical data access).
 ///
 /// Delegates to specialized helpers:
-/// - [`resolve_tables`] - Resolves table references to `ResolvedTable` instances
+/// - [`resolve_tables`] - Resolves table references to `LogicalTable` instances
 /// - [`resolve_udfs`] - Resolves function references to UDFs
 pub async fn create(
     dataset_store: &impl DatasetAccess,
@@ -90,7 +90,7 @@ pub async fn create(
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateLogicalCatalogError {
-    /// Failed to resolve table references to ResolvedTable instances
+    /// Failed to resolve table references to LogicalTable instances
     #[error(transparent)]
     ResolveTables(ResolveTablesError),
 
@@ -99,13 +99,13 @@ pub enum CreateLogicalCatalogError {
     ResolveUdfs(ResolveUdfsError),
 }
 
-/// Resolves table references to ResolvedTable instances using pre-resolved dependencies.
+/// Resolves table references to LogicalTable instances using pre-resolved dependencies.
 async fn resolve_tables<'a>(
     dataset_store: &impl DatasetAccess,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     refs: impl IntoIterator<Item = (&'a TableName, &'a TableReference<DepAlias>)> + 'a,
-) -> Result<Vec<ResolvedTable>, ResolveTablesError> {
-    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, ResolvedTable>> =
+) -> Result<Vec<LogicalTable>, ResolveTablesError> {
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, LogicalTable>> =
         BTreeMap::new();
 
     for (table_name, table_ref) in refs {
@@ -151,11 +151,10 @@ async fn resolve_tables<'a>(
                         reference: dataset_ref.clone(),
                     })?;
 
-                let resolved_table = ResolvedTable::new(
-                    dataset_table.clone(),
+                let resolved_table = LogicalTable::new(
                     schema.to_string(),
                     dataset_ref.clone(),
-                    dataset.start_block,
+                    dataset_table.clone(),
                 );
 
                 entry.insert(resolved_table);

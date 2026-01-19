@@ -129,7 +129,7 @@ impl Service {
             )
             .await
             .map_err(Error::CreateLogicalCatalogError)?;
-            create_physical_catalog(&self.data_store, logical)
+            create_physical_catalog(&self.dataset_store, &self.data_store, logical)
                 .await
                 .map_err(Error::PhysicalCatalogError)
         }?;
