@@ -177,6 +177,276 @@ impl Theme {
     }
 }
 
+// ============================================================================
+// SQL Syntax Highlighting
+// ============================================================================
+
+/// SQL keywords for syntax highlighting.
+const SQL_KEYWORDS: &[&str] = &[
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "LIKE",
+    "JOIN",
+    "LEFT",
+    "RIGHT",
+    "INNER",
+    "OUTER",
+    "ON",
+    "ORDER",
+    "BY",
+    "ASC",
+    "DESC",
+    "GROUP",
+    "HAVING",
+    "LIMIT",
+    "OFFSET",
+    "INSERT",
+    "INTO",
+    "VALUES",
+    "UPDATE",
+    "SET",
+    "DELETE",
+    "CREATE",
+    "TABLE",
+    "INDEX",
+    "DROP",
+    "ALTER",
+    "AS",
+    "DISTINCT",
+    "ALL",
+    "UNION",
+    "INTERSECT",
+    "EXCEPT",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "NULL",
+    "TRUE",
+    "FALSE",
+    "COUNT",
+    "SUM",
+    "AVG",
+    "MIN",
+    "MAX",
+    "DESCRIBE",
+    "IS",
+    "BETWEEN",
+    "EXISTS",
+    "CROSS",
+    "FULL",
+    "NATURAL",
+    "USING",
+    "WITH",
+    "RECURSIVE",
+    "OVER",
+    "PARTITION",
+    "WINDOW",
+    "ROWS",
+    "RANGE",
+    "UNBOUNDED",
+    "PRECEDING",
+    "FOLLOWING",
+    "CURRENT",
+    "ROW",
+];
+
+/// SQL token types for syntax highlighting.
+#[derive(Debug, Clone)]
+enum SqlToken {
+    Keyword(String),
+    String(String),
+    Number(String),
+    Operator(String),
+    Identifier(String),
+    Whitespace(String),
+    Punctuation(String),
+}
+
+/// Tokenize SQL input for syntax highlighting.
+fn tokenize_sql(input: &str) -> Vec<SqlToken> {
+    let mut tokens = Vec::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            // Whitespace
+            ' ' | '\t' | '\n' | '\r' => {
+                let mut ws = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() {
+                        ws.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::Whitespace(ws));
+            }
+            // String literal (single quote)
+            '\'' => {
+                let quote = chars.next().unwrap();
+                let mut s = String::from(quote);
+                while let Some(&c) = chars.peek() {
+                    s.push(chars.next().unwrap());
+                    if c == '\'' {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::String(s));
+            }
+            // String literal (double quote)
+            '"' => {
+                let quote = chars.next().unwrap();
+                let mut s = String::from(quote);
+                while let Some(&c) = chars.peek() {
+                    s.push(chars.next().unwrap());
+                    if c == '"' {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::String(s));
+            }
+            // Number
+            '0'..='9' => {
+                let mut num = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_digit() || c == '.' {
+                        num.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::Number(num));
+            }
+            // Operators
+            '=' | '<' | '>' | '!' | '+' | '-' | '*' | '/' | '%' => {
+                let mut op = String::new();
+                op.push(chars.next().unwrap());
+                // Handle two-character operators like !=, <=, >=, <>
+                if let Some(&next_ch) = chars.peek()
+                    && ((ch == '!' && next_ch == '=')
+                        || (ch == '<' && (next_ch == '=' || next_ch == '>'))
+                        || (ch == '>' && next_ch == '='))
+                {
+                    op.push(chars.next().unwrap());
+                }
+                tokens.push(SqlToken::Operator(op));
+            }
+            // Punctuation
+            '(' | ')' | ',' | ';' | '.' | ':' => {
+                tokens.push(SqlToken::Punctuation(chars.next().unwrap().to_string()));
+            }
+            // Word (keyword or identifier)
+            _ if ch.is_alphabetic() || ch == '_' => {
+                let mut word = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_alphanumeric() || c == '_' {
+                        word.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                if SQL_KEYWORDS.contains(&word.to_uppercase().as_str()) {
+                    tokens.push(SqlToken::Keyword(word));
+                } else {
+                    tokens.push(SqlToken::Identifier(word));
+                }
+            }
+            // Other characters (backticks, brackets, etc.)
+            _ => {
+                tokens.push(SqlToken::Identifier(chars.next().unwrap().to_string()));
+            }
+        }
+    }
+
+    tokens
+}
+
+/// Get the style for a SQL token.
+fn sql_token_style(token: &SqlToken) -> Style {
+    match token {
+        SqlToken::Keyword(_) => Theme::accent(),
+        SqlToken::String(_) => Theme::status_success(),
+        SqlToken::Number(_) => Theme::type_annotation(),
+        SqlToken::Operator(_) => Theme::text_secondary(),
+        SqlToken::Identifier(_) => Theme::text_primary(),
+        SqlToken::Whitespace(_) => Style::default(),
+        SqlToken::Punctuation(_) => Theme::text_secondary(),
+    }
+}
+
+/// Get the text content of a SQL token.
+fn sql_token_text(token: &SqlToken) -> &str {
+    match token {
+        SqlToken::Keyword(s)
+        | SqlToken::String(s)
+        | SqlToken::Number(s)
+        | SqlToken::Operator(s)
+        | SqlToken::Identifier(s)
+        | SqlToken::Whitespace(s)
+        | SqlToken::Punctuation(s) => s,
+    }
+}
+
+/// Highlight SQL and insert cursor at specified position.
+/// Returns spans for a single line with cursor indicator.
+fn highlight_sql_with_cursor(line: &str, cursor_col: Option<usize>) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+
+    if let Some(col) = cursor_col {
+        // Tokenize the entire line
+        let tokens = tokenize_sql(line);
+
+        let mut current_pos = 0;
+        let mut cursor_inserted = false;
+
+        for token in &tokens {
+            let token_text = sql_token_text(token);
+            let token_len = token_text.len();
+            let token_end = current_pos + token_len;
+            let style = sql_token_style(token);
+
+            if !cursor_inserted && col >= current_pos && col < token_end {
+                // Cursor is within this token
+                let offset_in_token = col - current_pos;
+                let (before, after) = token_text.split_at(offset_in_token);
+                if !before.is_empty() {
+                    result.push(Span::styled(before.to_string(), style));
+                }
+                result.push(Span::styled("_", Theme::status_warning()));
+                cursor_inserted = true;
+                if !after.is_empty() {
+                    result.push(Span::styled(after.to_string(), style));
+                }
+            } else {
+                result.push(Span::styled(token_text.to_string(), style));
+            }
+
+            current_pos = token_end;
+        }
+
+        // If cursor is at end of line
+        if !cursor_inserted && col >= current_pos {
+            result.push(Span::styled("_", Theme::status_warning()));
+        }
+    } else {
+        // No cursor on this line - just highlight without cursor
+        for token in tokenize_sql(line) {
+            let style = sql_token_style(&token);
+            let text = sql_token_text(&token).to_string();
+            result.push(Span::styled(text, style));
+        }
+    }
+
+    result
+}
+
 /// ASCII art logo for splash screen (displayed when Header pane is focused).
 const AMP_LOGO: &str = r#"
                     ▒█░                     
@@ -731,32 +1001,26 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    // Build lines with cursor rendering for multi-line input
+    // Build lines with SQL syntax highlighting and cursor rendering
     let lines: Vec<Line> = if app.input_mode == InputMode::Query {
         let query_lines = app.query_lines();
         query_lines
             .iter()
             .enumerate()
             .map(|(line_idx, line_text)| {
-                if line_idx == app.query_cursor.line {
-                    // This is the line with the cursor
-                    let col = app.query_cursor.column.min(line_text.len());
-                    let (before, after) = line_text.split_at(col);
-                    Line::from(vec![
-                        Span::styled(before.to_string(), Theme::text_primary()),
-                        Span::styled("_", Theme::status_warning()),
-                        Span::styled(after.to_string(), Theme::text_primary()),
-                    ])
+                let cursor_col = if line_idx == app.query_cursor.line {
+                    Some(app.query_cursor.column.min(line_text.len()))
                 } else {
-                    Line::from(Span::styled(line_text.to_string(), Theme::text_primary()))
-                }
+                    None
+                };
+                Line::from(highlight_sql_with_cursor(line_text, cursor_col))
             })
             .collect()
     } else {
-        // Not in query mode, just show the text without cursor
+        // Not in query mode, show syntax highlighting without cursor
         app.query_lines()
             .iter()
-            .map(|line| Line::from(Span::styled(line.to_string(), Theme::text_primary())))
+            .map(|line| Line::from(highlight_sql_with_cursor(line, None)))
             .collect()
     };
 
