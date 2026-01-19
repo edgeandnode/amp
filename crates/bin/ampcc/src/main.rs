@@ -62,6 +62,9 @@ async fn main() -> Result<()> {
         // Continue anyway - not fatal
     }
 
+    // Load favorites
+    app.load_favorites();
+
     // Fetch initial datasets
     if let Err(e) = app.fetch_datasets().await {
         eprintln!("Failed to fetch datasets: {}", e);
@@ -236,6 +239,38 @@ where
                             }
                             KeyCode::Esc => {
                                 app.template_picker_open = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    // Handle favorites panel if open (modal popup)
+                    if app.favorites_panel_open {
+                        match key.code {
+                            KeyCode::Up => {
+                                if app.favorites_panel_index > 0 {
+                                    app.favorites_panel_index -= 1;
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.favorites_panel_index < app.favorite_queries.len().saturating_sub(1) {
+                                    app.favorites_panel_index += 1;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Load selected favorite into query input
+                                if let Some(query) = app.favorite_queries.get(app.favorites_panel_index).cloned() {
+                                    app.set_query_input(query);
+                                    app.favorites_panel_open = false;
+                                }
+                            }
+                            KeyCode::Char('d') => {
+                                // Delete the selected favorite
+                                app.remove_favorite(app.favorites_panel_index);
+                            }
+                            KeyCode::Esc => {
+                                app.favorites_panel_open = false;
                             }
                             _ => {}
                         }
@@ -650,6 +685,20 @@ where
                                 app.template_picker_open = true;
                                 app.template_picker_index = 0;
                             }
+                            KeyCode::Char('f') if key.modifiers == KeyModifiers::CONTROL => {
+                                // Open favorites panel with Ctrl+F
+                                if !app.favorite_queries.is_empty() {
+                                    app.favorites_panel_open = true;
+                                    app.favorites_panel_index = 0;
+                                }
+                            }
+                            KeyCode::Char('*') | KeyCode::Char('F')
+                                if key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT =>
+                            {
+                                // Toggle favorite for current query
+                                app.toggle_favorite();
+                            }
                             KeyCode::Char(c) => {
                                 // Reset history navigation on edit
                                 app.query_history_index = None;
@@ -843,10 +892,11 @@ where
         }
 
         if app.should_quit {
-            // Save history before quitting
+            // Save history and favorites before quitting
             if let Err(e) = app.save_history() {
                 eprintln!("Warning: could not save history: {}", e);
             }
+            app.save_favorites();
             return Ok(());
         }
     }

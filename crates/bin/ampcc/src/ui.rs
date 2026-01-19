@@ -494,6 +494,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.template_picker_open {
         draw_template_picker(f, app);
     }
+
+    // Draw favorites panel popup on top if open
+    if app.favorites_panel_open {
+        draw_favorites_panel(f, app);
+    }
 }
 
 /// Draw the header with source information.
@@ -982,26 +987,28 @@ fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let line_count = app.query_line_count();
+    let star = if app.is_current_query_favorite() { " ★" } else { "" };
     let title = if app.input_mode == InputMode::Query {
         if let Some(idx) = app.query_history_index {
             format!(
-                "SQL Query (history {}/{}) [Ctrl+Enter execute, Esc cancel]",
+                "SQL Query{} (history {}/{}) [Ctrl+Enter execute, Esc cancel]",
+                star,
                 idx + 1,
                 app.query_history.len()
             )
         } else if !app.query_history.is_empty() {
             format!(
-                "SQL Query ({} lines) [↑↓ nav, Enter newline, Ctrl+Enter execute]",
-                line_count
+                "SQL Query{} ({} lines) [↑↓ nav, Ctrl+F fav, F/*, Ctrl+Enter]",
+                star, line_count
             )
         } else {
             format!(
-                "SQL Query ({} lines) [Enter newline, Ctrl+Enter execute]",
-                line_count
+                "SQL Query{} ({} lines) [F/* toggle fav, Ctrl+Enter execute]",
+                star, line_count
             )
         }
     } else {
-        "SQL Query (press Q to edit)".to_string()
+        format!("SQL Query{} (press Q to edit)", star)
     };
 
     let block = Block::default()
@@ -1939,6 +1946,79 @@ fn draw_template_picker(f: &mut Frame, app: &App) {
 
     let mut state = ListState::default();
     state.select(Some(app.template_picker_index));
+
+    f.render_stateful_widget(list, popup_area, &mut state);
+}
+
+/// Draw the favorites panel popup.
+fn draw_favorites_panel(f: &mut Frame, app: &App) {
+    // Calculate popup dimensions
+    let popup_width = 70u16;
+    let popup_height = (app.favorite_queries.len().min(10) + 4) as u16;
+
+    // Center the popup
+    let area = f.area();
+    let x = area.width.saturating_sub(popup_width) / 2;
+    let y = area.height.saturating_sub(popup_height) / 2;
+    let popup_area = Rect::new(
+        x,
+        y,
+        popup_width.min(area.width),
+        popup_height.min(area.height),
+    );
+
+    // Clear the popup area
+    let clear = ratatui::widgets::Clear;
+    f.render_widget(clear, popup_area);
+
+    if app.favorite_queries.is_empty() {
+        // Show empty message
+        let block = Block::default()
+            .title("Favorites (empty)")
+            .borders(Borders::ALL)
+            .border_style(Theme::border_focused());
+        let text = Paragraph::new("No favorites yet. Press * or F in query mode to add.")
+            .block(block)
+            .style(Theme::text_secondary());
+        f.render_widget(text, popup_area);
+        return;
+    }
+
+    // Build favorites list items
+    let items: Vec<ListItem> = app
+        .favorite_queries
+        .iter()
+        .enumerate()
+        .map(|(idx, query)| {
+            // Truncate long queries
+            let truncated = if query.len() > 60 {
+                format!("{}...", &query[..57])
+            } else {
+                query.clone()
+            };
+
+            let style = if idx == app.favorites_panel_index {
+                Theme::selection()
+            } else {
+                Theme::text_primary()
+            };
+
+            ListItem::new(Span::styled(truncated, style))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Favorites (↑↓ nav, Enter load, d delete, Esc close)")
+                .borders(Borders::ALL)
+                .border_style(Theme::border_focused()),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol("★ ");
+
+    let mut state = ListState::default();
+    state.select(Some(app.favorites_panel_index));
 
     f.render_stateful_widget(list, popup_area, &mut state);
 }

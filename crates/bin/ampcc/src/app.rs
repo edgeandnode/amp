@@ -39,6 +39,13 @@ pub struct HistoryFile {
     pub history: Vec<HistoryEntry>,
 }
 
+/// The favorites file structure for persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FavoritesFile {
+    pub version: u32,
+    pub favorites: Vec<String>,
+}
+
 /// A SQL query template.
 #[derive(Debug, Clone)]
 pub struct QueryTemplate {
@@ -516,6 +523,11 @@ pub struct App {
     pub result_sort_column: Option<usize>,
     pub result_sort_ascending: bool,
     pub result_sort_pending: bool, // true when waiting for column number input
+
+    // Favorite queries state
+    pub favorite_queries: Vec<String>,
+    pub favorites_panel_open: bool,
+    pub favorites_panel_index: usize,
 }
 
 impl App {
@@ -588,6 +600,9 @@ impl App {
             result_sort_column: None,
             result_sort_ascending: true,
             result_sort_pending: false,
+            favorite_queries: Vec::new(),
+            favorites_panel_open: false,
+            favorites_panel_index: 0,
         })
     }
 
@@ -1646,5 +1661,74 @@ impl App {
         self.result_sort_column = None;
         self.result_sort_ascending = true;
         self.result_sort_pending = false;
+    }
+
+    /// Get the path to the favorites file.
+    pub fn favorites_file_path() -> Result<PathBuf> {
+        let config_dir = directories::ProjectDirs::from("com", "thegraph", "ampcc")
+            .context("could not determine config directory")?
+            .config_dir()
+            .to_path_buf();
+        Ok(config_dir.join("favorites.json"))
+    }
+
+    /// Load favorites from disk.
+    pub fn load_favorites(&mut self) {
+        if let Ok(path) = Self::favorites_file_path()
+            && path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&path)
+            && let Ok(file) = serde_json::from_str::<FavoritesFile>(&contents)
+        {
+            self.favorite_queries = file.favorites;
+        }
+    }
+
+    /// Save favorites to disk.
+    pub fn save_favorites(&self) {
+        if let Ok(path) = Self::favorites_file_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let file = FavoritesFile {
+                version: 1,
+                favorites: self.favorite_queries.clone(),
+            };
+            if let Ok(contents) = serde_json::to_string_pretty(&file) {
+                let _ = std::fs::write(&path, contents);
+            }
+        }
+    }
+
+    /// Check if current query is a favorite.
+    pub fn is_current_query_favorite(&self) -> bool {
+        let trimmed = self.query_input.trim();
+        !trimmed.is_empty() && self.favorite_queries.iter().any(|f| f.trim() == trimmed)
+    }
+
+    /// Toggle favorite status for current query.
+    pub fn toggle_favorite(&mut self) {
+        let trimmed = self.query_input.trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        if let Some(idx) = self.favorite_queries.iter().position(|f| f.trim() == trimmed) {
+            self.favorite_queries.remove(idx);
+        } else {
+            self.favorite_queries.push(trimmed);
+        }
+    }
+
+    /// Remove a favorite by index.
+    pub fn remove_favorite(&mut self, idx: usize) {
+        if idx < self.favorite_queries.len() {
+            self.favorite_queries.remove(idx);
+            // Adjust panel index if needed
+            if self.favorites_panel_index >= self.favorite_queries.len()
+                && !self.favorite_queries.is_empty()
+            {
+                self.favorites_panel_index = self.favorite_queries.len() - 1;
+            }
+        }
     }
 }
