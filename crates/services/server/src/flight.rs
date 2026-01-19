@@ -29,23 +29,38 @@ use common::{
         ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
     },
     catalog::{
-        errors::{CatalogForSqlError, PlanningCtxForSqlError},
-        physical::Catalog,
-        sql::{catalog_for_sql, planning_ctx_for_sql},
+        logical::{
+            self,
+            for_query::{
+                CreateCatalogError as CreateLogicalCatalogError, create as create_logical_catalog,
+            },
+        },
+        physical::{
+            Catalog,
+            for_query::{
+                CreateCatalogError as PhysicalCreateCatalogError, create as create_physical_catalog,
+            },
+        },
     },
     metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv},
+    sql::{
+        ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
+        resolve_table_references,
+    },
     sql_str::SqlStr,
     utils::error_with_causes,
 };
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
+use datasets_common::partial_reference::{PartialReference, PartialReferenceError};
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 use prost::Message as _;
@@ -102,14 +117,22 @@ impl Service {
     ) -> Result<QueryResultStream, Error> {
         let query = common::sql::parse(sql.as_ref())
             .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
-        let catalog = catalog_for_sql(
-            &self.dataset_store,
-            &self.data_store,
-            &query,
-            self.env.clone(),
-        )
-        .await
-        .map_err(Error::CatalogForSqlError)?;
+        let catalog = {
+            let table_refs = resolve_table_references::<PartialReference>(&query)
+                .map_err(Error::TableReferenceResolution)?;
+            let func_refs = resolve_function_references::<PartialReference>(&query)
+                .map_err(Error::FunctionReferenceResolution)?;
+            let logical = create_logical_catalog(
+                &self.dataset_store,
+                &self.env.isolate_pool,
+                (table_refs, func_refs),
+            )
+            .await
+            .map_err(Error::CreateLogicalCatalogError)?;
+            create_physical_catalog(&self.data_store, logical)
+                .await
+                .map_err(Error::PhysicalCatalogError)
+        }?;
 
         let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx
@@ -282,11 +305,25 @@ impl Service {
                         .query
                         .parse::<SqlStr>()
                         .map_err(|err| Error::InvalidQuery(err.to_string()))?;
+
                     let query = common::sql::parse(&sql_str)
                         .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
-                    let plan_ctx = planning_ctx_for_sql(&self.dataset_store, &query)
+                    let plan_ctx = {
+                        let table_refs = resolve_table_references::<PartialReference>(&query)
+                            .map_err(Error::TableReferenceResolution)?;
+                        let func_refs = resolve_function_references::<PartialReference>(&query)
+                            .map_err(Error::FunctionReferenceResolution)?;
+
+                        create_logical_catalog(
+                            &self.dataset_store,
+                            &IsolatePool::dummy(),
+                            (table_refs, func_refs),
+                        )
                         .await
-                        .map_err(Error::PlanningCtxForSqlError)?;
+                        .map(PlanningContext::new)
+                        .map_err(Error::CreateLogicalCatalogError)
+                    }?;
+
                     let is_streaming = streaming_override
                         .unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
                     let schema = plan_ctx
@@ -912,11 +949,17 @@ pub enum Error {
     #[error("error looking up datasets")]
     DatasetStoreError(#[source] GetDatasetError),
 
-    #[error("error loading catalog for SQL")]
-    CatalogForSqlError(#[source] CatalogForSqlError),
+    #[error("error creating logical catalog")]
+    CreateLogicalCatalogError(#[source] CreateLogicalCatalogError),
 
-    #[error("error creating planning context")]
-    PlanningCtxForSqlError(#[source] PlanningCtxForSqlError),
+    #[error("error creating physical catalog")]
+    PhysicalCatalogError(#[source] PhysicalCreateCatalogError),
+
+    #[error("Failed to resolve table references from SQL")]
+    TableReferenceResolution(#[source] ResolveTableReferencesError<PartialReferenceError>),
+
+    #[error("Failed to resolve function references from SQL")]
+    FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<PartialReferenceError>),
 
     #[error(transparent)]
     CoreError(CoreError),
@@ -942,8 +985,10 @@ impl Error {
             Error::UnsupportedFlightDescriptorCommand(_) => "UNSUPPORTED_FLIGHT_DESCRIPTOR_COMMAND",
             Error::ExecutionError(_) => "EXECUTION_ERROR",
             Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
-            Error::CatalogForSqlError(_) => "CATALOG_FOR_SQL_ERROR",
-            Error::PlanningCtxForSqlError(_) => "PLANNING_CTX_FOR_SQL_ERROR",
+            Error::CreateLogicalCatalogError(_) => "CREATE_LOGICAL_CATALOG_ERROR",
+            Error::PhysicalCatalogError(_) => "PHYSICAL_CATALOG_ERROR",
+            Error::TableReferenceResolution(_) => "TABLE_REFERENCE_RESOLUTION",
+            Error::FunctionReferenceResolution(_) => "FUNCTION_REFERENCE_RESOLUTION",
             Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
             Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
             Error::CoreError(CoreError::DatasetError(_)) => "DATASET_ERROR",
@@ -990,9 +1035,13 @@ impl IntoResponse for Error {
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::CatalogForSqlError(ref e) if e.is_table_not_found() => StatusCode::NOT_FOUND,
-            Error::CatalogForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::PlanningCtxForSqlError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CreateLogicalCatalogError(CreateLogicalCatalogError::ResolveTables(
+                logical::for_query::ResolveTablesError::TableNotFoundInDataset { .. },
+            )) => StatusCode::NOT_FOUND,
+            Error::CreateLogicalCatalogError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PhysicalCatalogError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TableReferenceResolution(_) => StatusCode::BAD_REQUEST,
+            Error::FunctionReferenceResolution(_) => StatusCode::BAD_REQUEST,
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
@@ -1032,8 +1081,10 @@ impl From<Error> for Status {
 
             Error::ExecutionError(df) => datafusion_error_to_status(df, message),
             Error::StreamingExecutionError(_) => Status::internal(message),
-            Error::CatalogForSqlError(_) => Status::internal(message),
-            Error::PlanningCtxForSqlError(_) => Status::internal(message),
+            Error::CreateLogicalCatalogError(_) => Status::internal(message),
+            Error::PhysicalCatalogError(_) => Status::internal(message),
+            Error::TableReferenceResolution(_) => Status::invalid_argument(message),
+            Error::FunctionReferenceResolution(_) => Status::invalid_argument(message),
             Error::InvalidQuery(_) => Status::invalid_argument(message),
             Error::TicketEncodingError(_) => Status::invalid_argument(message),
             Error::TicketDecodingError(_) => Status::invalid_argument(message),

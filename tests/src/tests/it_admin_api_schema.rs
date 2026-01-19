@@ -1424,7 +1424,7 @@ async fn function_not_in_dataset_fails_at_catalog_construction() {
         "should return FUNCTION_NOT_FOUND_IN_DATASET error"
     );
     assert!(
-        response.error_message.contains("eth.nonexistent_function")
+        response.error_message.contains("nonexistent_function")
             && response.error_message.contains("_/eth_firehose"),
         "error message should indicate function and dataset, got: {}",
         response.error_message
@@ -1473,8 +1473,7 @@ async fn multiple_tables_with_missing_function_fails_on_first() {
     );
     // Should fail on table2 which references fake_decode
     assert!(
-        response.error_message.contains("table2")
-            && response.error_message.contains("eth.fake_decode"),
+        response.error_message.contains("table2") && response.error_message.contains("fake_decode"),
         "error message should reference the failing table and function, got: {}",
         response.error_message
     );
@@ -1726,7 +1725,7 @@ async fn multiple_functions_mixed_validity_fails() {
         "should return FUNCTION_NOT_FOUND_IN_DATASET error"
     );
     assert!(
-        response.error_message.contains("eth.nonexistent_fn"),
+        response.error_message.contains("nonexistent_fn"),
         "error message should indicate the invalid function, got: {}",
         response.error_message
     );

@@ -8,11 +8,16 @@ use axum::{
 };
 use common::{
     BoxError,
+    catalog::logical::for_admin_api::{
+        self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
+        TableReferencesMap,
+    },
     plan_visitors::prepend_special_block_num_field,
+    planning_context::PlanningContext,
     query_context::Error as QueryContextError,
     sql::{
-        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
-        TableReference, resolve_function_references, resolve_table_references,
+        ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
+        resolve_table_references,
     },
     sql_str::SqlStr,
 };
@@ -26,12 +31,7 @@ use datasets_common::{
     hash_reference::HashReference,
     table_name::TableName,
 };
-use datasets_derived::{
-    catalog::{
-        PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
-    },
-    manifest::{Function, TableSchema},
-};
+use datasets_derived::manifest::{Function, TableSchema};
 use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
 
@@ -39,15 +39,6 @@ use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
 };
-
-/// Type alias for table references map with dependency aliases or self-references
-type TableReferencesMap = BTreeMap<
-    TableName,
-    (
-        Vec<TableReference<DepAlias>>,
-        Vec<FunctionReference<DepAliasOrSelfRef>>,
-    ),
->;
 
 /// Handler for the `POST /schema` endpoint
 ///
@@ -267,66 +258,66 @@ pub async fn handler(
         (statements, references)
     };
 
-    // Create planning context using resolved dependencies
-    let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
+    // Create logical catalog using resolved dependencies
+    let catalog = catalog::create(
         &ctx.dataset_store,
-        references,
+        IsolatePool::dummy(), // For schema validation only (no JS execution)
         dependencies,
         functions,
-        IsolatePool::dummy(), // For schema validation only (no JS execution)
+        references,
     )
     .await
     .map_err(|err| match &err {
-        PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
-            Error::UnqualifiedTable(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { source, .. } => {
-            // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
-            // When the underlying error is GetDatasetError::DatasetNotFound, we map to
-            // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
-            // (and other error types) map to Error::GetDataset for HTTP 500.
-            if source
-                .downcast_ref::<GetDatasetError>()
-                .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
-            {
-                Error::DatasetNotFound(err)
-            } else {
-                Error::GetDataset(err)
+        CreateLogicalCatalogError::ResolveTables(inner) => match inner {
+            ResolveTablesError::UnqualifiedTable { .. } => Error::UnqualifiedTable(err),
+            ResolveTablesError::DependencyAliasNotFound { .. } => {
+                Error::DependencyAliasNotFound(err)
             }
-        }
-        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { source, .. } => {
-            // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
-            // When the underlying error is GetDatasetError::DatasetNotFound, we map to
-            // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
-            // (and other error types) map to Error::GetDataset for HTTP 500.
-            if source
-                .downcast_ref::<GetDatasetError>()
-                .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
-            {
-                Error::DatasetNotFound(err)
-            } else {
-                Error::GetDataset(err)
+            ResolveTablesError::GetDataset { source, .. } => {
+                // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
+                // When the underlying error is GetDatasetError::DatasetNotFound, we map to
+                // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
+                // (and other error types) map to Error::GetDataset for HTTP 500.
+                if source
+                    .downcast_ref::<GetDatasetError>()
+                    .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
+                {
+                    Error::DatasetNotFound(err)
+                } else {
+                    Error::GetDataset(err)
+                }
             }
-        }
-        PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
-            Error::EthCallUdfCreation(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
-            Error::DependencyAliasNotFound(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef { .. } => {
-            Error::DependencyAliasNotFound(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
-            Error::TableNotFoundInDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
-            Error::FunctionNotFoundInDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
-            Error::EthCallNotAvailable(err)
-        }
+            ResolveTablesError::TableNotFoundInDataset { .. } => Error::TableNotFoundInDataset(err),
+        },
+        CreateLogicalCatalogError::ResolveUdfs(inner) => match inner {
+            ResolveUdfsError::DependencyAliasNotFound { .. } => Error::DependencyAliasNotFound(err),
+            ResolveUdfsError::GetDataset { source, .. } => {
+                // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
+                // When the underlying error is GetDatasetError::DatasetNotFound, we map to
+                // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
+                // (and other error types) map to Error::GetDataset for HTTP 500.
+                if source
+                    .downcast_ref::<GetDatasetError>()
+                    .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
+                {
+                    Error::DatasetNotFound(err)
+                } else {
+                    Error::GetDataset(err)
+                }
+            }
+            ResolveUdfsError::EthCallUdfCreation { .. } => Error::EthCallUdfCreation(err),
+            ResolveUdfsError::EthCallNotAvailable { .. } => Error::EthCallNotAvailable(err),
+            ResolveUdfsError::FunctionNotFoundInDataset { .. } => {
+                Error::FunctionNotFoundInDataset(err)
+            }
+            ResolveUdfsError::SelfReferencedFunctionNotFound { .. } => {
+                Error::FunctionNotFoundInDataset(err)
+            }
+        },
     })?;
+
+    // Create planning context from catalog
+    let planning_ctx = PlanningContext::new(catalog);
 
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
@@ -560,7 +551,7 @@ enum Error {
     /// All tables must be qualified with a dataset reference in the schema portion.
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error(transparent)]
-    UnqualifiedTable(PlanningCtxForSqlTablesWithDepsError),
+    UnqualifiedTable(CreateLogicalCatalogError),
 
     /// Invalid table name
     ///
@@ -575,7 +566,7 @@ enum Error {
     ///
     /// The referenced dataset does not exist in the store.
     #[error(transparent)]
-    DatasetNotFound(PlanningCtxForSqlTablesWithDepsError),
+    DatasetNotFound(CreateLogicalCatalogError),
 
     /// Failed to retrieve dataset from store
     ///
@@ -584,31 +575,31 @@ enum Error {
     /// - Unsupported dataset kind
     /// - Storage backend errors
     #[error(transparent)]
-    GetDataset(PlanningCtxForSqlTablesWithDepsError),
+    GetDataset(CreateLogicalCatalogError),
 
     /// Failed to create ETH call UDF
     ///
     /// This occurs when creating the eth_call user-defined function fails.
     #[error(transparent)]
-    EthCallUdfCreation(PlanningCtxForSqlTablesWithDepsError),
+    EthCallUdfCreation(CreateLogicalCatalogError),
 
     /// Table not found in dataset
     ///
     /// The referenced table does not exist in the dataset.
     #[error(transparent)]
-    TableNotFoundInDataset(PlanningCtxForSqlTablesWithDepsError),
+    TableNotFoundInDataset(CreateLogicalCatalogError),
 
     /// Function not found in dataset
     ///
     /// The referenced function does not exist in the dataset.
     #[error(transparent)]
-    FunctionNotFoundInDataset(PlanningCtxForSqlTablesWithDepsError),
+    FunctionNotFoundInDataset(CreateLogicalCatalogError),
 
     /// eth_call function not available
     ///
     /// The eth_call function is not available for the referenced dataset.
     #[error(transparent)]
-    EthCallNotAvailable(PlanningCtxForSqlTablesWithDepsError),
+    EthCallNotAvailable(CreateLogicalCatalogError),
 
     /// Invalid dependency alias in table reference
     ///
@@ -661,7 +652,7 @@ enum Error {
     ///
     /// A table or function reference uses an alias that was not provided in the dependencies map.
     #[error(transparent)]
-    DependencyAliasNotFound(PlanningCtxForSqlTablesWithDepsError),
+    DependencyAliasNotFound(CreateLogicalCatalogError),
 
     /// Failed to infer schema for table
     ///

@@ -17,12 +17,19 @@ use common::{
     BlockNum, BoxError, Dataset, Table as LogicalTable,
     catalog::{
         dataset_access::DatasetAccess,
-        logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
+        logical::{
+            Function as LogicalFunction, FunctionSource as LogicalFunctionSource,
+            for_manifest_validation::{
+                self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
+                TableReferencesMap,
+            },
+        },
     },
+    planning_context::PlanningContext,
     query_context::Error as QueryContextErr,
     sql::{
-        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
-        TableReference, resolve_function_references, resolve_table_references,
+        ResolveFunctionReferencesError, ResolveTableReferencesError, TableReference,
+        resolve_function_references, resolve_table_references,
     },
     utils::dfs,
 };
@@ -36,9 +43,6 @@ use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     DerivedDatasetKind, Manifest,
-    catalog::{
-        PlanningCtxForSqlTablesWithDepsError, planning_ctx_for_sql_tables_with_deps_and_funcs,
-    },
     manifest::{TableInput, View},
 };
 
@@ -281,17 +285,6 @@ pub struct TableDependencySortError {
     pub table_name: TableName,
 }
 
-/// Type alias for the table references map used in multi-table validation
-///
-/// Maps table names to their SQL references (table refs and function refs) using dependency aliases or self-references.
-type TableReferencesMap = BTreeMap<
-    TableName,
-    (
-        Vec<TableReference<DepAlias>>,
-        Vec<FunctionReference<DepAliasOrSelfRef>>,
-    ),
->;
-
 /// Validates a derived dataset manifest with comprehensive checks.
 ///
 /// This function performs deep validation of a manifest by:
@@ -329,10 +322,9 @@ pub async fn validate(
                 reference: reference.to_string(),
                 source: err,
             })?
-            .ok_or_else(|| ManifestValidationError::DependencyResolution {
+            .ok_or_else(|| ManifestValidationError::DependencyNotFound {
                 alias: alias.to_string(),
                 reference: reference.to_string(),
-                source: format!("Dependency '{}' not found", reference).into(),
             })?;
 
         dependencies.insert(alias.clone(), reference);
@@ -340,8 +332,8 @@ pub async fn validate(
 
     // Check if the start block is before the earliest available block of the dependencies
     if let Some(dataset_start_block) = &manifest.start_block {
-        for (alias, hash_ref) in &dependencies {
-            let dataset = store.get_dataset(hash_ref).await.map_err(|err| {
+        for (alias, dataset_ref) in &dependencies {
+            let dataset = store.get_dataset(dataset_ref).await.map_err(|err| {
                 ManifestValidationError::FetchDependencyDataset {
                     alias: alias.to_string(),
                     source: err,
@@ -407,45 +399,49 @@ pub async fn validate(
     // - Bare function references can be created as UDFs or are assumed to be built-ins
     // - Table references use valid dataset aliases from dependencies
     // - Schema compatibility across dependencies
-    let planning_ctx = planning_ctx_for_sql_tables_with_deps_and_funcs(
+    let planning_ctx = catalog::create(
         store,
-        references,
+        IsolatePool::dummy(), // For manifest validation only (no JS execution)
         dependencies,
         manifest.functions.clone(),
-        IsolatePool::dummy(), // For manifest validation only (no JS execution)
+        references,
     )
     .await
+    .map(PlanningContext::new)
     .map_err(|err| match &err {
-        PlanningCtxForSqlTablesWithDepsError::UnqualifiedTable { .. } => {
-            ManifestValidationError::UnqualifiedTable(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::GetDatasetForTableRef { .. } => {
-            ManifestValidationError::GetDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::GetDatasetForFunction { .. } => {
-            ManifestValidationError::GetDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::EthCallUdfCreationForFunction { .. } => {
-            ManifestValidationError::EthCallUdfCreation(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForTableRef { .. } => {
-            ManifestValidationError::DependencyAliasNotFound(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::DependencyAliasNotFoundForFunctionRef { .. } => {
-            ManifestValidationError::DependencyAliasNotFound(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::TableNotFoundInDataset { .. } => {
-            ManifestValidationError::TableNotFoundInDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::FunctionNotFoundInDataset { .. } => {
-            ManifestValidationError::FunctionNotFoundInDataset(err)
-        }
-        PlanningCtxForSqlTablesWithDepsError::EthCallNotAvailable { .. } => {
-            ManifestValidationError::EthCallNotAvailable(err)
-        }
+        CreateLogicalCatalogError::ResolveTables(resolve_error) => match resolve_error {
+            ResolveTablesError::UnqualifiedTable { .. } => {
+                ManifestValidationError::UnqualifiedTable(err)
+            }
+            ResolveTablesError::DependencyAliasNotFound { .. } => {
+                ManifestValidationError::DependencyAliasNotFound(err)
+            }
+            ResolveTablesError::GetDataset { .. } => ManifestValidationError::GetDataset(err),
+            ResolveTablesError::TableNotFoundInDataset { .. } => {
+                ManifestValidationError::TableNotFoundInDataset(err)
+            }
+        },
+        CreateLogicalCatalogError::ResolveUdfs(resolve_error) => match resolve_error {
+            ResolveUdfsError::DependencyAliasNotFound { .. } => {
+                ManifestValidationError::DependencyAliasNotFound(err)
+            }
+            ResolveUdfsError::GetDataset { .. } => ManifestValidationError::GetDataset(err),
+            ResolveUdfsError::EthCallUdfCreation { .. } => {
+                ManifestValidationError::EthCallUdfCreation(err)
+            }
+            ResolveUdfsError::EthCallNotAvailable { .. } => {
+                ManifestValidationError::EthCallNotAvailable(err)
+            }
+            ResolveUdfsError::FunctionNotFoundInDataset { .. } => {
+                ManifestValidationError::FunctionNotFoundInDataset(err)
+            }
+            ResolveUdfsError::SelfReferencedFunctionNotFound { .. } => {
+                ManifestValidationError::FunctionNotFoundInDataset(err)
+            }
+        },
     })?;
 
-    // Step 4: Validate that all table SQL queries are incremental
+    // Step 4: Validate that all table SQL queries are incremental.
     // Incremental processing is required for derived datasets to efficiently update
     // as new blocks arrive. This check ensures no non-incremental operations are used.
     for (table_name, table) in &manifest.tables {
@@ -489,6 +485,7 @@ pub enum ManifestValidationError {
     /// - Query parsing fails for other reasons
     #[error("Invalid SQL query for table '{table_name}': {source}")]
     InvalidTableSql {
+        /// The table whose SQL query is invalid
         table_name: TableName,
         #[source]
         source: common::sql::ParseSqlError,
@@ -497,6 +494,7 @@ pub enum ManifestValidationError {
     /// Failed to resolve table references from SQL query
     #[error("Failed to resolve table references in table '{table_name}': {source}")]
     TableReferenceResolution {
+        /// The table whose SQL query contains unresolvable table references
         table_name: TableName,
         #[source]
         source: ResolveTableReferencesError<DepAliasError>,
@@ -505,6 +503,7 @@ pub enum ManifestValidationError {
     /// Failed to resolve function references from SQL query
     #[error("Failed to resolve function references in table '{table_name}': {source}")]
     FunctionReferenceResolution {
+        /// The table whose SQL query contains unresolvable function references
         table_name: TableName,
         #[source]
         source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
@@ -512,16 +511,28 @@ pub enum ManifestValidationError {
 
     /// Failed to resolve dependency reference to hash
     ///
-    /// This occurs when resolving a dependency reference fails:
+    /// This occurs when resolving a dependency reference fails due to:
     /// - Invalid reference format
-    /// - Dependency not found in the dataset store
     /// - Storage backend errors when reading the dependency
     #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
     DependencyResolution {
+        /// The dependency alias used in the manifest
         alias: String,
+        /// The dataset reference string (e.g., "dataset@version" or "dataset@hash")
         reference: String,
         #[source]
         source: BoxError,
+    },
+
+    /// Dependency dataset not found
+    ///
+    /// This occurs when the dependency reference does not exist in the dataset store.
+    #[error("Dependency '{alias}' not found ({reference})")]
+    DependencyNotFound {
+        /// The dependency alias used in the manifest
+        alias: String,
+        /// The dataset reference string (e.g., "dataset@version" or "dataset@hash")
+        reference: String,
     },
 
     /// Failed to fetch dependency dataset for start_block validation
@@ -531,6 +542,7 @@ pub enum ManifestValidationError {
     /// loading the actual dataset from the store failed.
     #[error("Failed to fetch dependency '{alias}' for start_block validation: {source}")]
     FetchDependencyDataset {
+        /// The dependency alias that failed to load
         alias: String,
         #[source]
         source: BoxError,
@@ -543,6 +555,7 @@ pub enum ManifestValidationError {
     /// This error occurs during SQL parsing when a 3-part table reference is detected.
     #[error("Catalog-qualified table reference in table '{table_name}': {source}")]
     CatalogQualifiedTableInSql {
+        /// The table whose SQL query contains a catalog-qualified table reference
         table_name: TableName,
         #[source]
         source: ResolveTableReferencesError<DepAliasError>,
@@ -553,7 +566,7 @@ pub enum ManifestValidationError {
     /// All tables must be qualified with a dataset reference in the schema portion.
     /// Unqualified tables (e.g., just `table_name`) are not allowed.
     #[error("Unqualified table reference: {0}")]
-    UnqualifiedTable(#[source] PlanningCtxForSqlTablesWithDepsError),
+    UnqualifiedTable(#[source] CreateLogicalCatalogError),
 
     /// Invalid table name
     ///
@@ -566,7 +579,7 @@ pub enum ManifestValidationError {
     ///
     /// The referenced dataset does not exist in the store.
     #[error("Dataset not found: {0}")]
-    DatasetNotFound(#[source] PlanningCtxForSqlTablesWithDepsError),
+    DatasetNotFound(#[source] CreateLogicalCatalogError),
 
     /// Failed to retrieve dataset from store
     ///
@@ -575,44 +588,44 @@ pub enum ManifestValidationError {
     /// - Unsupported dataset kind
     /// - Storage backend errors
     #[error("Failed to retrieve dataset from store: {0}")]
-    GetDataset(#[source] PlanningCtxForSqlTablesWithDepsError),
+    GetDataset(#[source] CreateLogicalCatalogError),
 
     /// Failed to create ETH call UDF
     ///
     /// This occurs when creating the eth_call user-defined function fails.
     #[error("Failed to create ETH call UDF: {0}")]
-    EthCallUdfCreation(#[source] PlanningCtxForSqlTablesWithDepsError),
+    EthCallUdfCreation(#[source] CreateLogicalCatalogError),
 
     /// Table not found in dataset
     ///
     /// The referenced table does not exist in the dataset.
     #[error("Table not found in dataset: {0}")]
-    TableNotFoundInDataset(#[source] PlanningCtxForSqlTablesWithDepsError),
+    TableNotFoundInDataset(#[source] CreateLogicalCatalogError),
 
     /// Function not found in dataset
     ///
     /// The referenced function does not exist in the dataset.
     #[error("Function not found in dataset: {0}")]
-    FunctionNotFoundInDataset(#[source] PlanningCtxForSqlTablesWithDepsError),
+    FunctionNotFoundInDataset(#[source] CreateLogicalCatalogError),
 
     /// eth_call function not available
     ///
     /// The eth_call function is not available for the referenced dataset.
     #[error("eth_call function not available: {0}")]
-    EthCallNotAvailable(#[source] PlanningCtxForSqlTablesWithDepsError),
+    EthCallNotAvailable(#[source] CreateLogicalCatalogError),
 
     /// Invalid dependency alias
     ///
     /// The dependency alias does not conform to alias rules (must start with letter,
     /// contain only alphanumeric/underscore, and be <= 63 bytes).
     #[error("Invalid dependency alias: {0}")]
-    InvalidDependencyAlias(#[source] PlanningCtxForSqlTablesWithDepsError),
+    InvalidDependencyAlias(#[source] CreateLogicalCatalogError),
 
     /// Dependency alias not found
     ///
     /// A table reference uses an alias that was not provided in the dependencies map.
     #[error("Dependency alias not found: {0}")]
-    DependencyAliasNotFound(#[source] PlanningCtxForSqlTablesWithDepsError),
+    DependencyAliasNotFound(#[source] CreateLogicalCatalogError),
 
     /// Non-incremental SQL operation in table query
     ///
@@ -640,6 +653,7 @@ pub enum ManifestValidationError {
     /// - Ensure queries only use incremental operations (projection, filter, inner join, union)
     #[error("Table '{table_name}' contains non-incremental SQL: {source}")]
     NonIncrementalSql {
+        /// The table whose SQL query contains non-incremental operations
         table_name: TableName,
         #[source]
         source: BoxError,
@@ -655,6 +669,7 @@ pub enum ManifestValidationError {
     /// - Unsupported SQL features
     #[error("Failed to plan query for table '{table_name}': {source}")]
     SqlPlanningError {
+        /// The table whose SQL query failed to plan
         table_name: TableName,
         #[source]
         source: QueryContextErr,
@@ -668,7 +683,9 @@ pub enum ManifestValidationError {
         "derived dataset start_block ({dataset_start_block}) is before dependency's earliest available block ({dependency_earliest_block})"
     )]
     StartBlockBeforeDependencies {
+        /// The start block of the derived dataset
         dataset_start_block: BlockNum,
+        /// The earliest available block of the dependency dataset
         dependency_earliest_block: BlockNum,
     },
 }

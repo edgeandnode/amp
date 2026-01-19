@@ -176,3 +176,29 @@ pub struct Field {
     /// Whether the field can contain null values
     pub nullable: bool,
 }
+
+/// User-defined function specification.
+///
+/// Defines a custom function with input/output types and implementation source.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct Function {
+    // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
+    /// Arrow data types for function input parameters
+    pub input_types: Vec<DataType>,
+    /// Arrow data type for function return value
+    pub output_type: DataType,
+    /// Function implementation source code and metadata
+    pub source: FunctionSource,
+}
+
+/// Source code and metadata for a user-defined function.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct FunctionSource {
+    /// Function implementation source code
+    pub source: Arc<str>,
+    /// Filename where the function is defined
+    pub filename: String,
+}
