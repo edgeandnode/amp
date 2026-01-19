@@ -14,6 +14,7 @@ pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 
 pub use self::{
     client::BeaconClient,
+    dataset::Dataset,
     dataset_kind::{EthBeaconDatasetKind, EthBeaconDatasetKindError},
 };
 

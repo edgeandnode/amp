@@ -16,6 +16,7 @@ pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 
 pub use self::{
     client::JsonRpcClient,
+    dataset::Dataset,
     dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
 };
 

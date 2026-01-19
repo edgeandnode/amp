@@ -18,6 +18,7 @@ pub mod logical;
 pub mod manifest;
 
 pub use self::{
+    dataset::Dataset,
     dataset_kind::{DerivedDatasetKind, DerivedDatasetKindError},
     logical::{
         DatasetError, ManifestValidationError, SortTablesByDependenciesError,

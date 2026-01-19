@@ -14,9 +14,11 @@ pub mod metrics;
 #[expect(clippy::enum_variant_names)]
 mod proto;
 
-pub use client::Client;
-
-pub use self::dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError};
+pub use self::{
+    client::Client,
+    dataset::Dataset,
+    dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError},
+};
 
 /// Errors that can occur when working with Firehose data sources.
 #[derive(Debug, thiserror::Error)]

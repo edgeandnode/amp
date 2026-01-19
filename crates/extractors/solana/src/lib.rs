@@ -27,6 +27,7 @@ mod rpc_client;
 pub mod tables;
 
 pub use self::{
+    dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
     extractor::SolanaExtractor,
 };
