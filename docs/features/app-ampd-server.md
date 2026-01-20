@@ -1,6 +1,7 @@
 ---
 name: "app-ampd-server"
 description: "ampd query server endpoints and configuration. Load when asking about ampd server, query endpoints, or server ports"
+type: feature
 components: "app:ampd,service:server,crate:config"
 ---
 

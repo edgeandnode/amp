@@ -1,6 +1,7 @@
 ---
 name: "query-sql-streaming"
 description: "Real-time SQL query execution with microbatch processing and block-based streaming. Load when asking about streaming queries, SETTINGS stream, microbatches, or real-time data"
+type: feature
 components: "service:server,crate:common,crate:dump"
 ---
 

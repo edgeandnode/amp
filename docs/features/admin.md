@@ -1,6 +1,7 @@
 ---
 name: "admin"
 description: "Management and administration features for Amp. Load when asking about administration, management, jobs, datasets, or operators"
+type: meta
 components: "app:ampd,app:ampctl,service:controller,crate:admin-client,crate:admin-api"
 ---
 

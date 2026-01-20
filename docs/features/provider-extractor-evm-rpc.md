@@ -1,6 +1,7 @@
 ---
 name: "provider-extractor-evm-rpc"
 description: "EVM JSON-RPC provider configuration for Ethereum and compatible chains. Load when asking about RPC providers, EVM endpoints, rate limiting, or batch requests"
+type: feature
 components: "crate:evm-rpc,crate:common"
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin-evm-hex"
 description: "evm_encode_hex, evm_decode_hex functions. Load when converting addresses or hashes between hex strings and binary"
+type: feature
 components: "crate:common"
 ---
 

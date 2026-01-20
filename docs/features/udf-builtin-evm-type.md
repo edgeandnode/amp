@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin-evm-type"
 description: "evm_encode_type, evm_decode_type functions. Load when ABI encoding/decoding Solidity types like uint256, address, bool"
+type: feature
 components: "crate:common"
 ---
 

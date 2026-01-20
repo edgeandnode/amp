@@ -1,6 +1,7 @@
 ---
 name: "udf"
 description: "SQL UDFs for blockchain data transformation. Load when asking about custom functions or extending SQL queries"
+type: meta
 components: "crate:common"
 ---
 

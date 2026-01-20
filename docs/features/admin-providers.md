@@ -1,6 +1,7 @@
 ---
 name: "admin-providers"
 description: "Provider registration, listing, and deletion via Admin API and CLI. Load when asking about registering providers, listing providers, or managing provider configurations"
+type: feature
 components: "service:admin-api,crate:admin-client,app:ampctl"
 ---
 

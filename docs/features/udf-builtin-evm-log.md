@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin-evm-log"
 description: "evm_topic, evm_decode_log functions. Load when computing event signatures or decoding Ethereum event logs"
+type: feature
 components: "crate:common"
 ---
 

@@ -45,6 +45,7 @@ Keep feature docs focused and concise. CLAUDE.md should NOT hardcode feature lis
 ---
 name: "feature-name-kebab-case"
 description: "A one line short description of the feature/functionality"
+type: "meta|feature|component"
 components: "prefix:name,prefix:name"
 ---
 ```
@@ -55,7 +56,34 @@ components: "prefix:name,prefix:name"
 |-------|----------|--------|-------------|
 | `name` | YES | kebab-case | Unique identifier matching filename (minus .md) |
 | `description` | YES | Single line, succinct | Discovery-optimized description (see guidelines below) |
+| `type` | YES | `meta`, `feature`, or `component` | Document classification (see Type Definitions below) |
 | `components` | YES | Prefixed, comma-separated | Related crates/modules with type prefix |
+
+### Type Definitions
+
+| Type | Purpose | Characteristics |
+|------|---------|-----------------|
+| `meta` | Groups related features/concepts | High-level overview, no Usage section, cannot link to children |
+| `feature` | Documents a product capability | User-facing functionality, requires Usage section with examples |
+| `component` | Documents a software component | Internal architecture, requires Implementation section |
+
+**meta docs:**
+- Describe a domain or capability group (e.g., `data`, `admin`, `query`)
+- Provide conceptual foundation and terminology
+- MUST NOT link to child docs (children link up to meta)
+- May omit Usage section (concrete usage lives in children)
+
+**feature docs:**
+- Describe user-facing product capabilities
+- Focus on "what can users do" and "how to use it"
+- MUST include Usage section with working examples
+- May link to related features and parent meta docs
+
+**component docs:**
+- Describe internal software components/crates
+- Focus on architecture, responsibilities, and integration
+- MUST include Implementation section with source files
+- May link to related components, features, and parent meta docs
 
 ### Component Prefixes (MANDATORY)
 
@@ -189,24 +217,39 @@ admin                           # Meta-doc: Management and administration
 
 ## 4. Document Structure
 
-### Required Sections (in order)
+### Required Sections by Type
+
+Different document types have different required sections:
+
+| Section | meta | feature | component |
+|---------|:----:|:-------:|:---------:|
+| H1 Title | ✓ | ✓ | ✓ |
+| Summary | ✓ | ✓ | ✓ |
+| Table of Contents | ✓ | ✓ | ✓ |
+| Key Concepts | ✓ | ✓ | ✓ |
+| Usage | ✗ | ✓ | optional |
+| Architecture | optional | optional | optional |
+| Implementation | ✗ | optional | ✓ |
+| References | optional | optional | optional |
+
+**Section descriptions:**
 
 1. **H1 Title** - Human-readable feature name
 2. **Summary** - 2-4 sentences expanding on the frontmatter description
 3. **Table of Contents** - Links to all sections
 4. **Key Concepts** - Core terminology and definitions
 5. **Usage** - How to use/interact with the feature (with code examples)
+6. **Architecture** - How the feature fits into the system (data flow, component interaction)
+7. **Implementation** - Database schemas, file locations, internal notes
+8. **References** - Cross-references to other feature docs
 
 ### Optional Sections
 
-Include when relevant:
+Include when relevant (for any type):
 
-- **Architecture** - How the feature fits into the system. Include when the feature is complex enough to warrant high-level architecture explanation (data flow, component interaction, request/response cycles). Omit for simple features where usage examples are self-explanatory.
 - **Configuration** - Configuration options and defaults
 - **API Reference** - Key API endpoints or functions
-- **Implementation** - Database schemas (if apply), file locations, internal notes
 - **Limitations** - Known constraints or limitations
-- **References** - Cross-references to other feature docs (at the end)
 
 **CRITICAL**: No empty sections allowed. If you include a section header, it must have content. Omit optional sections entirely rather than leaving them empty.
 
@@ -226,10 +269,18 @@ Use simple list format with relationship type:
 
 ### Reference Direction Rules
 
-**CRITICAL**: References ALWAYS flow UP the hierarchy, not down. This applies to ALL links anywhere in the document—not just the References section.
+Reference rules depend on document type:
 
-- ✅ **Concrete → Meta**: Child/specific docs reference parent/meta docs
-- ❌ **Meta → Concrete**: Meta docs MUST NOT link to child/specific docs
+| From Type | Can Link To |
+|-----------|-------------|
+| `meta` | Other meta docs only (siblings at same level) |
+| `feature` | Parent meta, sibling features, related components |
+| `component` | Parent meta, related features, child components |
+
+**Key principles:**
+- ✅ **meta** docs MUST NOT link to children (features or components link UP to meta)
+- ✅ **component** docs MAY link to child components they manage
+- ✅ **feature** and **component** docs link UP to their parent meta doc
 
 **This rule applies to:**
 - The References section
@@ -243,10 +294,11 @@ Use simple list format with relationship type:
 - Circular dependency patterns in documentation
 
 **Examples:**
-- ✅ `provider-extractor-evm-rpc.md` → links to `provider.md` (child → parent)
-- ✅ `admin-provider.md` → links to `admin.md` (specific → meta)
-- ❌ `provider.md` → links to `provider-config.md` (FORBIDDEN: parent → child)
-- ❌ `udf-builtin.md` → lists `udf-builtin-evm-hex.md` (FORBIDDEN: meta → specific)
+- ✅ `data-store.md` (component) → links to `data.md` (meta) — child to parent
+- ✅ `data-store.md` (component) → links to `data-metadata-caching.md` (feature) — component to managed feature
+- ✅ `data-metadata-caching.md` (feature) → links to `data.md` (meta) — feature to parent meta
+- ❌ `data.md` (meta) → links to `data-store.md` (component) — FORBIDDEN: meta to child
+- ❌ `query.md` (meta) → lists `query-sql-streaming.md` (feature) — FORBIDDEN: meta to child
 
 ---
 
@@ -293,6 +345,7 @@ Use this template when creating new feature docs:
 ---
 name: "{{feature-name-kebab-case}}"
 description: "{{What it explains + when to load it, third person, no period}}"
+type: "{{meta|feature|component}}"
 components: "{{prefix:name,prefix:name - use crate:, service:, or app:}}"
 ---
 
@@ -306,13 +359,13 @@ Explain what this feature does, why it exists, and its primary use case.}}
 ## Table of Contents
 
 1. [Key Concepts](#key-concepts)
-2. [Architecture](#architecture) {{if feature is complex}}
+2. [Architecture](#architecture) {{if complex}}
 3. [Configuration](#configuration) {{if applicable}}
-4. [Usage](#usage)
+4. [Usage](#usage) {{REQUIRED for feature type, optional for component, omit for meta}}
 5. [API Reference](#api-reference) {{if applicable}}
-6. [Implementation](#implementation) {{if applicable}}
+6. [Implementation](#implementation) {{REQUIRED for component type, optional for feature, omit for meta}}
 7. [Limitations](#limitations) {{if applicable}}
-8. [References](#references) {{if other features are referenced}}
+8. [References](#references) {{if cross-referencing - follow type rules}}
 
 ## Key Concepts
 
@@ -413,20 +466,28 @@ Before committing feature documentation:
 
 - [ ] Valid YAML frontmatter with opening and closing `---`
 - [ ] `name` is kebab-case and matches filename (minus .md)
+- [ ] `type` is one of: `meta`, `feature`, `component`
 - [ ] `description` explains what it covers and when to load it (no ending period)
 - [ ] `components` uses prefixes: `crate:`, `service:`, or `app:`
 
-### Structure
+### Structure (type-aware)
 
 - [ ] H1 title (human readable) after frontmatter
 - [ ] Summary section (2-4 sentences) after H1
 - [ ] Table of Contents after Summary
 - [ ] Key Concepts section with clear definitions
-- [ ] Usage section with working code examples
-- [ ] Architecture section (if feature is complex - optional)
-- [ ] Implementation section (if DB schemas or file locations apply - optional)
-- [ ] References section (if cross-referencing other features - optional)
+- [ ] **If type=feature**: Usage section with working code examples (REQUIRED)
+- [ ] **If type=component**: Implementation section with source files (REQUIRED)
+- [ ] **If type=meta**: No Usage or Implementation sections
+- [ ] Architecture section (optional for all types)
+- [ ] References section follows type rules (optional)
 - [ ] No empty sections (omit optional sections rather than leaving them empty)
+
+### Reference Direction (type-aware)
+
+- [ ] **meta** docs do NOT link to children (features or components)
+- [ ] **feature** docs link UP to parent meta, MAY link to related components
+- [ ] **component** docs link UP to parent meta, MAY link to child components
 
 ### Quality
 

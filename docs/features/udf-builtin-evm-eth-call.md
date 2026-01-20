@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin-evm-eth-call"
 description: "eth_call function for read-only contract calls. Load when querying contract state or calling view functions in SQL"
+type: feature
 components: "crate:common"
 ---
 

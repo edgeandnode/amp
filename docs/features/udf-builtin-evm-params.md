@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin-evm-params"
 description: "evm_encode_params, evm_decode_params functions. Load when encoding or decoding contract function calldata"
+type: feature
 components: "crate:common"
 ---
 
