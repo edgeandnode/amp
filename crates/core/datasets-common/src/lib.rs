@@ -19,11 +19,11 @@ pub mod revision;
 pub mod table_name;
 pub mod version;
 
-/// Re-exports of UDF-related types for extractors.
+/// Re-exports of UDF-related types for derived datasets and the common crate.
 ///
 /// This module provides convenient access to types needed for implementing
-/// user-defined functions without requiring direct dependencies on `js-runtime`
-/// or `datafusion` crates.
+/// the [`dataset::DatasetWithFunctions`] trait and for query execution contexts
+/// that support user-defined JavaScript functions.
 pub mod udf {
     pub use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
     pub use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};

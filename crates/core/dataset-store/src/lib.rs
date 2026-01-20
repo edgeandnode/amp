@@ -200,14 +200,12 @@ impl DatasetStore {
                         kind,
                         source,
                     })?;
-                Arc::new(
-                    datasets_derived::dataset(reference.clone(), manifest).map_err(|source| {
-                        GetDatasetError::CreateDerivedDataset {
-                            reference: reference.clone(),
-                            source,
-                        }
-                    })?,
-                )
+                datasets_derived::dataset(reference.clone(), manifest)
+                    .map(Arc::new)
+                    .map_err(|source| GetDatasetError::CreateDerivedDataset {
+                        reference: reference.clone(),
+                        source,
+                    })?
             }
         };
 
@@ -434,7 +432,7 @@ impl DatasetStore {
         sql_table_ref_schema: &str,
         dataset: &dyn datasets_common::dataset::Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        if dataset.kind().as_str() != EvmRpcDatasetKind {
+        if dataset.kind() != EvmRpcDatasetKind {
             return Ok(None);
         }
 
@@ -547,7 +545,7 @@ pub async fn dataset_and_dependencies(
             .ok_or_else(|| BoxError::from(format!("dataset '{}' not found", dataset_ref)))?;
         let dataset = store.get_dataset(&hash_ref).await?;
 
-        if dataset.kind().as_str() != DerivedDatasetKind {
+        if dataset.kind() != DerivedDatasetKind {
             deps.insert(dataset_ref, vec![]);
             continue;
         }

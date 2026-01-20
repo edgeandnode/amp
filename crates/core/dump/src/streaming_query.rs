@@ -774,7 +774,7 @@ async fn search_dependencies_for_raw_dataset(
             continue;
         }
 
-        if dataset.kind().as_str() != DerivedDatasetKind
+        if dataset.kind() != DerivedDatasetKind
             && let Some(dataset_network) = dataset.network()
             && dataset_network == network
         {
