@@ -105,16 +105,7 @@ impl EthCall {
             name,
             client,
             signature: Signature {
-                type_signature: TypeSignature::Exact(vec![
-                    // from (optional)
-                    DataType::FixedSizeBinary(20),
-                    // to
-                    DataType::FixedSizeBinary(20),
-                    // input data (optional)
-                    DataType::Binary,
-                    // block
-                    DataType::Utf8,
-                ]),
+                type_signature: TypeSignature::Any(4),
                 volatility: Volatility::Volatile,
                 parameter_names: Some(vec![
                     "from".to_string(),
@@ -171,13 +162,40 @@ impl AsyncScalarUDFImpl for EthCall {
         let [from, to, input_data, block] = args.as_slice() else {
             return internal_err!("{}: expected 4 arguments, but got {}", name, args.len());
         };
-        let from = from
-            .as_any()
-            .downcast_ref::<FixedSizeBinaryArray>()
-            .unwrap();
-        let to = to.as_any().downcast_ref::<FixedSizeBinaryArray>().unwrap();
-        let input_data = input_data.as_any().downcast_ref::<BinaryArray>().unwrap();
-        let block = block.as_any().downcast_ref::<StringArray>().unwrap();
+
+        // from: Optional, only accepts address
+        let from = match from.data_type() {
+            DataType::Null => {
+                let from_len = from.len();
+                &FixedSizeBinaryArray::new_null(20, from_len)
+            }
+            DataType::FixedSizeBinary(20) => from
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap(),
+            _ => return plan_err!("{}: 'from' address is not a valid address", name),
+        };
+        // to: Required, only accepts address
+        let to = match to.data_type() {
+            DataType::FixedSizeBinary(20) => {
+                to.as_any().downcast_ref::<FixedSizeBinaryArray>().unwrap()
+            }
+            _ => return plan_err!("{}: 'to' address is not a valid address", name),
+        };
+        // input_data: Optional, only accepts binary
+        let input_data = match input_data.data_type() {
+            DataType::Null => {
+                let input_data_len = input_data.len();
+                &BinaryArray::new_null(input_data_len)
+            }
+            DataType::Binary => input_data.as_any().downcast_ref::<BinaryArray>().unwrap(),
+            _ => return plan_err!("{}: input data is not a valid data", name),
+        };
+        // block: Required, only accepts block number or tag as string
+        let block = match block.data_type() {
+            DataType::Utf8 => block.as_any().downcast_ref::<StringArray>().unwrap(),
+            _ => return plan_err!("{}: 'block' is not a valid block number or tag", name),
+        };
 
         // Make the eth_call requests.
         let mut result_builder = StructBuilder::from_fields(fields, from.len());
