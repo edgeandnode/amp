@@ -104,8 +104,18 @@ impl From<BTreeMap<String, (BlockNum, [u8; 32])>> for ResumeWatermark {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
     pub id: FileId,
-    pub range: BlockRange,
+    pub ranges: Vec<BlockRange>,
     pub object: ObjectMeta,
+}
+
+impl Segment {
+    /// Check if this segment is adjacent to another on all networks.
+    /// Assumes ranges are ordered consistently across segments.
+    #[inline]
+    pub fn adjacent(&self, other: &Self) -> bool {
+        self.ranges.len() == other.ranges.len()
+            && std::iter::zip(&self.ranges, &other.ranges).all(|(r1, r2)| r1.adjacent(r2))
+    }
 }
 
 /// A sequence of adjacent segments.
@@ -116,8 +126,8 @@ impl Chain {
     #[cfg(test)]
     fn check_invariants(&self) {
         assert!(!self.0.is_empty());
-        for w in self.0.windows(2) {
-            assert!(BlockRange::adjacent(&w[0].range, &w[1].range));
+        for segments in self.0.windows(2) {
+            assert!(segments[0].adjacent(&segments[1]));
         }
     }
 
@@ -130,11 +140,11 @@ impl Chain {
     }
 
     pub fn first(&self) -> &BlockRange {
-        &self.0.first().unwrap().range
+        &self.0.first().unwrap().ranges[0]
     }
 
     pub fn last(&self) -> &BlockRange {
-        &self.0.last().unwrap().range
+        &self.0.last().unwrap().ranges[0]
     }
 
     pub fn range(&self) -> BlockRange {
@@ -204,7 +214,7 @@ pub fn missing_ranges(
 
     // remove overlapping ranges from each segment
     for segment in &segments {
-        let segment_range = segment.range.numbers.clone();
+        let segment_range = segment.ranges[0].numbers.clone();
         let mut index = 0;
         while index < missing.len() {
             if block_range_intersection(missing[index].clone(), segment_range.clone()).is_none() {
@@ -226,7 +236,7 @@ pub fn missing_ranges(
         let canonical_segments = &chains.canonical.0;
         let canonical_range = canonical_segments
             .iter()
-            .map(|s| s.range.numbers.clone())
+            .map(|s| s.ranges[0].numbers.clone())
             .rfind(|r| r.contains(&reorg_block));
         if let Some(canonical_range) = canonical_range {
             let reorg_range = *canonical_range.start()..=reorg_block;
@@ -263,10 +273,10 @@ struct Chains {
 // favoring segments with the latest object `last_modified` timestamp.
 #[inline]
 fn chains(segments: Vec<Segment>) -> Option<Chains> {
-    let min_start = segments.iter().map(|s| s.range.start()).min()?;
+    let min_start = segments.iter().map(|s| s.ranges[0].start()).min()?;
     let mut by_end: BTreeMap<BlockNum, Vec<Segment>> = Default::default();
     for s in segments {
-        by_end.entry(s.range.end()).or_default().push(s);
+        by_end.entry(s.ranges[0].end()).or_default().push(s);
     }
 
     fn pick_segment(
@@ -277,7 +287,7 @@ fn chains(segments: Vec<Segment>) -> Option<Chains> {
         let segments = by_end.get_mut(&end)?;
         segments.sort_unstable_by_key(|s| s.object.last_modified);
         let index = segments.iter().rposition(|s| {
-            next.map(|next| BlockRange::adjacent(&s.range, next))
+            next.map(|next| BlockRange::adjacent(&s.ranges[0], next))
                 .unwrap_or(true)
         })?;
         let segment = segments.remove(index);
@@ -294,7 +304,7 @@ fn chains(segments: Vec<Segment>) -> Option<Chains> {
         };
         let mut chain = vec![latest];
         loop {
-            let next = &chain.last().unwrap().range;
+            let next = &chain.last().unwrap().ranges[0];
             if next.start() == 0 {
                 break;
             }
@@ -426,7 +436,7 @@ mod test {
             version: None,
         };
         Segment {
-            range,
+            ranges: vec![range],
             object,
             id: FileId::try_from(1i64).expect("FileId::MIN is 1"),
         }
@@ -674,7 +684,7 @@ mod test {
             loop {
                 let start = segments
                     .last()
-                    .map(|s| s.range.end() + 1)
+                    .map(|s| s.ranges[0].end() + 1)
                     .unwrap_or(*numbers.start());
                 let end = rng.random_range(start..=*numbers.end());
                 segments.push(test_segment(start..=end, (fork, fork), 0));

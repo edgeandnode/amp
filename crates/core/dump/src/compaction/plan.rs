@@ -53,7 +53,7 @@ impl CompactionFile {
         is_tail: bool,
     ) -> CompactionResult<Self> {
         let file_id = segment.id;
-        let range = segment.range.clone();
+        let range = segment.ranges[0].clone();
 
         let mut file_meta = FileMeta::from(segment.object.clone());
 

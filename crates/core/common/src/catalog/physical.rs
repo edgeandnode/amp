@@ -603,19 +603,13 @@ impl PhysicalTable {
             .map(|result| {
                 let FileMetadata {
                     file_id,
-                    file_name,
                     object_meta,
-                    parquet_meta: ParquetMeta { mut ranges, .. },
+                    parquet_meta: ParquetMeta { ranges, .. },
                     ..
                 } = result?;
-                if ranges.len() != 1 {
-                    return Err(BoxError::from(format!(
-                        "expected exactly 1 range for {file_name}"
-                    )));
-                }
                 Ok(Segment {
                     id: file_id,
-                    range: ranges.remove(0),
+                    ranges,
                     object: object_meta,
                 })
             })
@@ -714,13 +708,13 @@ impl TableSnapshot {
     /// block range has been synced.
     pub fn synced_range(&self) -> Option<BlockRange> {
         let segments = &self.canonical_segments;
-        let start = segments.iter().min_by_key(|s| s.range.start())?;
-        let end = segments.iter().max_by_key(|s| s.range.end())?;
+        let start = segments.iter().min_by_key(|s| s.ranges[0].start())?;
+        let end = segments.iter().max_by_key(|s| s.ranges[0].end())?;
         Some(BlockRange {
-            network: start.range.network.clone(),
-            numbers: start.range.start()..=end.range.end(),
-            hash: end.range.hash,
-            prev_hash: start.range.prev_hash,
+            network: start.ranges[0].network.clone(),
+            numbers: start.ranges[0].start()..=end.ranges[0].end(),
+            hash: end.ranges[0].hash,
+            prev_hash: start.ranges[0].prev_hash,
         })
     }
 
