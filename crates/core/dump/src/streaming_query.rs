@@ -34,6 +34,101 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{Instrument, instrument};
 
+/// Errors that occur when spawning a streaming query
+///
+/// Streaming queries execute SQL continuously over blockchain data, processing
+/// new blocks as they arrive. This error type covers all initialization phases:
+/// query planning, network validation, and blocks table resolution.
+#[derive(thiserror::Error, Debug)]
+pub enum SpawnError {
+    /// Failed to propagate `_block_num` column through query plan
+    ///
+    /// The `_block_num` column is a special column added to all tables to enable
+    /// incremental query processing. This error occurs when the logical plan
+    /// transformation to propagate this column through the query fails.
+    ///
+    /// Common causes:
+    /// - Invalid query structure that cannot support block number propagation
+    /// - Incompatible aggregations or window functions
+    /// - Schema conflicts when adding the special column
+    /// - DataFusion internal errors during plan transformation
+    ///
+    /// This prevents the streaming query from being initialized as incremental
+    /// processing requires the block number column.
+    #[error("failed to propagate _block_num column in query plan")]
+    PropagateBlockNum(#[source] DataFusionError),
+
+    /// Failed to optimize query plan
+    ///
+    /// This occurs when DataFusion's logical optimizer fails to process the query
+    /// plan during initialization. The optimizer applies transformations like
+    /// predicate pushdown, projection pruning, and constant folding.
+    ///
+    /// Common causes:
+    /// - Invalid logical plan structure
+    /// - Optimizer rule failures
+    /// - Type inference errors
+    /// - Schema inconsistencies
+    ///
+    /// Optimization failures prevent the streaming query from starting with an
+    /// efficient execution plan.
+    #[error("failed to optimize query plan")]
+    OptimizePlan(#[source] common::query_context::Error),
+
+    /// Query references tables from multiple blockchain networks
+    ///
+    /// Streaming queries must operate on a single blockchain network. This error
+    /// occurs when the catalog contains tables from different networks (e.g., both
+    /// Ethereum mainnet and Polygon).
+    ///
+    /// Common causes:
+    /// - User query joins tables across different networks
+    /// - Catalog construction error including wrong network tables
+    /// - Dataset dependency resolution pulling in multi-network data
+    ///
+    /// The networks field lists all detected networks in the query.
+    ///
+    /// Streaming queries require a single chain for consistent block ordering
+    /// and watermark tracking.
+    #[error("multi-network streaming queries are not supported: {networks:?}")]
+    MultiNetwork { networks: Vec<String> },
+
+    /// Failed to resolve blocks table for network
+    ///
+    /// Every streaming query requires access to a `blocks` table containing the
+    /// canonical blockchain data for the network. This error occurs when finding
+    /// or loading the blocks table fails.
+    ///
+    /// Common causes:
+    /// - No raw dataset with blocks table exists for the network
+    /// - Dataset dependency tree doesn't include a blocks table
+    /// - Blocks table exists but hasn't been synced (no active revision)
+    /// - Data store errors when loading table metadata
+    /// - Dataset manifest not found or corrupted
+    ///
+    /// Without a blocks table, the streaming query cannot determine block ranges
+    /// or detect chain reorganizations.
+    #[error("failed to resolve blocks table for network")]
+    ResolveBlocksTable(#[source] BoxError),
+
+    /// Failed to convert resume watermark to target network
+    ///
+    /// When resuming a streaming query from a previous watermark, the watermark
+    /// must be converted to the target network's format. This error occurs when
+    /// the resume watermark doesn't contain an entry for the expected network.
+    ///
+    /// Common causes:
+    /// - Resume watermark from a different network than current query
+    /// - Corrupted or invalid resume watermark state
+    /// - Network name mismatch (e.g., "ethereum" vs "mainnet")
+    /// - Resume state out of sync with current catalog
+    ///
+    /// This prevents the query from resuming at the correct position and may
+    /// require starting from scratch or using a different resume point.
+    #[error("failed to convert resume watermark")]
+    ConvertResumeWatermark(#[source] BoxError),
+}
+
 /// Awaits any update for tables in a query context catalog.
 struct TableUpdates {
     subscriptions: BTreeMap<LocationId, watch::Receiver<()>>,
@@ -216,7 +311,7 @@ impl StreamingQuery {
         destination: Option<Arc<PhysicalTable>>,
         microbatch_max_interval: u64,
         keep_alive_interval: Option<u64>,
-    ) -> Result<StreamingQueryHandle, BoxError> {
+    ) -> Result<StreamingQueryHandle, SpawnError> {
         let (tx, rx) = mpsc::channel(10);
 
         // Preserve `_block_num` for SQL materializaiton or if explicitly selected in the schema.
@@ -231,10 +326,14 @@ impl StreamingQuery {
         // - Propagate the `_block_num` column.
         // - Run logical optimizations ahead of execution.
         let plan = {
-            let plan = plan.propagate_block_num()?;
+            let plan = plan
+                .propagate_block_num()
+                .map_err(SpawnError::PropagateBlockNum)?;
 
             let ctx = PlanningContext::new(catalog.logical().clone());
-            ctx.optimize_plan(&plan).await?
+            ctx.optimize_plan(&plan)
+                .await
+                .map_err(SpawnError::OptimizePlan)?
         };
 
         let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
@@ -242,9 +341,7 @@ impl StreamingQuery {
         let networks: BTreeSet<&str> = tables.iter().map(|t| t.network()).collect();
         if networks.len() != 1 {
             let networks: Vec<String> = networks.into_iter().map(ToString::to_string).collect();
-            return Err(
-                format!("Multi-network streaming queries are not supported: {networks:?}").into(),
-            );
+            return Err(SpawnError::MultiNetwork { networks });
         }
         let network = networks.into_iter().next().unwrap();
 
@@ -257,12 +354,14 @@ impl StreamingQuery {
             unique_refs.into_iter(),
             network,
         )
-        .await?;
+        .await
+        .map_err(SpawnError::ResolveBlocksTable)?;
 
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_watermark = resume_watermark
             .map(|w| w.to_watermark(network))
-            .transpose()?;
+            .transpose()
+            .map_err(SpawnError::ConvertResumeWatermark)?;
         let streaming_query = Self {
             query_env,
             data_store,
