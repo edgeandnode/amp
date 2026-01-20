@@ -198,10 +198,10 @@ impl Service {
 
             for range in &block_ranges {
                 tracing::debug!(
-                    "execute range [{}-{}] on network {}",
+                    range.network,
+                    "execute range [{}-{}]",
                     range.start(),
                     range.end(),
-                    range.network
                 );
             }
 
