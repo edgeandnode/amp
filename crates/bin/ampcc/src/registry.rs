@@ -1,9 +1,9 @@
 //! Registry client for the public Amp dataset registry.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::auth::AuthStorage;
 
 /// Errors that can occur when interacting with the registry.
 #[derive(Error, Debug)]
@@ -74,10 +74,24 @@ pub struct RegistryClient {
 }
 
 impl RegistryClient {
-    /// Create a new registry client with optional auto-detected authentication.
+    /// Create a new registry client with auto-detected authentication.
+    ///
+    /// Loads auth token from:
+    /// 1. AMP_AUTH_TOKEN environment variable (highest priority)
+    /// 2. Auth storage file (~/.amp/cache/amp_cli_auth)
     pub fn new(base_url: String) -> Self {
-        let auth_token = Self::load_auth_token();
-        // Use Client::new() like other working clients in the codebase
+        // Load from auth storage file, then pass to with_token which checks env var
+        let file_token = AuthStorage::load().map(|a| a.access_token);
+        Self::with_token(base_url, file_token)
+    }
+
+    /// Create a new registry client with an explicit auth token.
+    ///
+    /// If `token` is `None`, falls back to AMP_AUTH_TOKEN environment variable.
+    /// Use this when the app's auth state changes (login, logout, refresh).
+    pub fn with_token(base_url: String, token: Option<String>) -> Self {
+        // Use explicit token if provided, otherwise fall back to env var
+        let auth_token = token.or_else(Self::load_auth_from_env);
         let http = reqwest::Client::new();
 
         Self {
@@ -87,49 +101,13 @@ impl RegistryClient {
         }
     }
 
-    /// Create a new registry client with a specific auth token.
-    #[allow(dead_code)]
-    pub fn with_auth(base_url: String, token: String) -> Self {
-        let http = reqwest::Client::new();
-
-        Self {
-            http,
-            base_url: base_url.trim_end_matches('/').to_string(),
-            auth_token: Some(token),
-        }
-    }
-
-    /// Load auth token from environment or auth file.
+    /// Load auth token from AMP_AUTH_TOKEN environment variable.
     ///
-    /// Priority:
-    /// 1. AMP_AUTH_TOKEN environment variable
-    /// 2. ~/.amp/cache/amp_cli_auth file
-    fn load_auth_token() -> Option<String> {
-        // Check environment variable first
-        if let Ok(token) = std::env::var("AMP_AUTH_TOKEN")
-            && !token.is_empty()
-        {
-            return Some(token);
-        }
-
-        // Try loading from auth file (~/.amp/cache/amp_cli_auth)
-        if let Some(home) = std::env::var_os("HOME") {
-            let auth_path: PathBuf = PathBuf::from(home)
-                .join(".amp")
-                .join("cache")
-                .join("amp_cli_auth");
-            if let Ok(contents) = std::fs::read_to_string(&auth_path) {
-                // Parse JSON and extract accessToken
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents)
-                    && let Some(token) = json.get("accessToken").and_then(|v| v.as_str())
-                    && !token.is_empty()
-                {
-                    return Some(token.to_string());
-                }
-            }
-        }
-
-        None
+    /// This is used as a fallback for CI/automation scenarios.
+    fn load_auth_from_env() -> Option<String> {
+        std::env::var("AMP_AUTH_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
     }
 
     /// Build a request with optional auth header.
