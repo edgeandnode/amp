@@ -9,7 +9,5 @@ pub mod get_manifest;
 pub mod list_all;
 pub mod list_jobs;
 pub mod list_versions;
-pub mod progress;
 pub mod register;
 pub mod restore;
-pub mod table_progress;

@@ -49,14 +49,6 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/datasets/{namespace}/{name}/versions/{revision}/jobs",
             get(datasets::list_jobs::handler),
         )
-        .route(
-            "/datasets/{namespace}/{name}/versions/{revision}/progress",
-            get(datasets::progress::handler),
-        )
-        .route(
-            "/datasets/{namespace}/{name}/versions/{revision}/tables/{table}/progress",
-            get(datasets::table_progress::handler),
-        )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/jobs",
@@ -67,6 +59,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
             get(jobs::get_by_id::handler).delete(jobs::delete_by_id::handler),
         )
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
+        .route("/jobs/{id}/progress", get(jobs::progress::handler))
         .route(
             "/manifests",
             get(manifests::list_all::handler)
@@ -108,8 +101,6 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::list_all::handler,
         handlers::datasets::list_versions::handler,
         handlers::datasets::list_jobs::handler,
-        handlers::datasets::progress::handler,
-        handlers::datasets::table_progress::handler,
         handlers::datasets::get::handler,
         handlers::datasets::get_manifest::handler,
         handlers::datasets::register::handler,
@@ -128,6 +119,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::jobs::get_all::handler,
         handlers::jobs::get_by_id::handler,
         handlers::jobs::stop::handler,
+        handlers::jobs::progress::handler,
         handlers::jobs::delete::handler,
         handlers::jobs::delete_by_id::handler,
         // Provider endpoints
@@ -164,9 +156,9 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::deploy::DeployResponse,
         handlers::datasets::restore::RestoreResponse,
         handlers::datasets::restore::RestoredTableInfo,
-        handlers::datasets::progress::SyncProgressResponse,
-        handlers::datasets::progress::TableSyncProgress,
         // Job schemas
+        handlers::jobs::progress::JobProgressResponse,
+        handlers::jobs::progress::TableProgress,
         handlers::jobs::job_info::JobInfo,
         handlers::jobs::get_all::JobsResponse,
         handlers::jobs::delete::JobStatusFilter,

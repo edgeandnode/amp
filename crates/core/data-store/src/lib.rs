@@ -529,18 +529,17 @@ impl DataStore {
 
 /// Progress and status tracking
 impl DataStore {
-    /// Gets active tables with writer info for a dataset.
+    /// Gets tables written by a specific job.
     ///
-    /// Returns a list of active tables for the given dataset manifest hash,
-    /// along with their writer job information (job ID and status).
-    pub async fn get_active_tables_with_writer_info(
+    /// Returns a list of active tables where the specified job is the writer,
+    /// along with metadata about each table including dataset information.
+    pub async fn get_tables_written_by_job(
         &self,
-        manifest_hash: impl Into<metadata_db::ManifestHash<'_>> + std::fmt::Debug,
-    ) -> Result<Vec<metadata_db::progress::TableWriterInfo>, GetActiveTablesWithWriterInfoError>
-    {
-        metadata_db::progress::get_active_tables_with_writer_info(&self.metadata_db, manifest_hash)
+        job_id: impl Into<metadata_db::jobs::JobId> + std::fmt::Debug,
+    ) -> Result<Vec<metadata_db::progress::JobTableInfo>, GetTablesWrittenByJobError> {
+        metadata_db::progress::get_tables_written_by_job(&self.metadata_db, job_id)
             .await
-            .map_err(GetActiveTablesWithWriterInfoError)
+            .map_err(GetTablesWrittenByJobError)
     }
 }
 
@@ -920,20 +919,20 @@ pub struct DeleteFileInObjectStoreError(#[source] pub object_store::Error);
 #[error("Failed to delete file during streaming deletion")]
 pub struct DeleteFilesStreamError(#[source] pub object_store::Error);
 
-/// Failed to get active tables with writer info from metadata database
+/// Failed to get tables written by job from metadata database
 ///
-/// This error occurs when querying the metadata database for active tables
-/// and their writer job information fails. This typically happens during
-/// progress reporting operations.
+/// This error occurs when querying the metadata database for tables
+/// written by a specific job fails. This typically happens during
+/// job progress reporting operations.
 ///
 /// Common causes:
 /// - Database connection lost during query
 /// - Database server unreachable
 /// - Network connectivity issues
-/// - Invalid manifest hash format
+/// - Invalid job ID
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to get active tables with writer info from metadata database")]
-pub struct GetActiveTablesWithWriterInfoError(#[source] pub metadata_db::Error);
+#[error("Failed to get tables written by job from metadata database")]
+pub struct GetTablesWrittenByJobError(#[source] pub metadata_db::Error);
 
 /// Cached parquet data including metadata and computed statistics.
 #[derive(Clone)]
