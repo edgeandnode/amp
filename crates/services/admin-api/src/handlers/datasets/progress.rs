@@ -110,20 +110,19 @@ pub async fn handler(
         })?;
 
     // Query active tables info from metadata database (job_id, status)
-    let writer_infos = metadata_db::progress::get_active_tables_with_writer_info(
-        &ctx.metadata_db,
-        resolved_ref.hash(),
-    )
-    .await
-    .map_err(|err| {
-        tracing::error!(
-            dataset_reference = %resolved_ref,
-            error = %err,
-            error_source = logging::error_source(&err),
-            "failed to get progress for dataset"
-        );
-        Error::GetSyncProgress(err)
-    })?;
+    let writer_infos = ctx
+        .data_store
+        .get_active_tables_with_writer_info(resolved_ref.hash())
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                dataset_reference = %resolved_ref,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to get progress for dataset"
+            );
+            Error::GetSyncProgress(err)
+        })?;
 
     // Index writer info by table name for quick lookup
     let writer_info_map: HashMap<_, _> = writer_infos
@@ -288,7 +287,7 @@ pub enum Error {
 
     /// Failed to get progress from metadata database
     #[error("failed to get progress for dataset")]
-    GetSyncProgress(#[source] metadata_db::Error),
+    GetSyncProgress(#[source] amp_data_store::GetActiveTablesWithWriterInfoError),
 
     /// Failed to access physical table metadata
     #[error("failed to access physical table")]

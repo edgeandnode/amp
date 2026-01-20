@@ -527,6 +527,23 @@ impl DataStore {
     }
 }
 
+/// Progress and status tracking
+impl DataStore {
+    /// Gets active tables with writer info for a dataset.
+    ///
+    /// Returns a list of active tables for the given dataset manifest hash,
+    /// along with their writer job information (job ID and status).
+    pub async fn get_active_tables_with_writer_info(
+        &self,
+        manifest_hash: impl Into<metadata_db::ManifestHash<'_>> + std::fmt::Debug,
+    ) -> Result<Vec<metadata_db::progress::TableWriterInfo>, GetActiveTablesWithWriterInfoError>
+    {
+        metadata_db::progress::get_active_tables_with_writer_info(&self.metadata_db, manifest_hash)
+            .await
+            .map_err(GetActiveTablesWithWriterInfoError)
+    }
+}
+
 /// Object store file readers and writers
 impl DataStore {
     /// Creates a buffered writer for writing a file to a table revision.
@@ -902,6 +919,21 @@ pub struct DeleteFileInObjectStoreError(#[source] pub object_store::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to delete file during streaming deletion")]
 pub struct DeleteFilesStreamError(#[source] pub object_store::Error);
+
+/// Failed to get active tables with writer info from metadata database
+///
+/// This error occurs when querying the metadata database for active tables
+/// and their writer job information fails. This typically happens during
+/// progress reporting operations.
+///
+/// Common causes:
+/// - Database connection lost during query
+/// - Database server unreachable
+/// - Network connectivity issues
+/// - Invalid manifest hash format
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to get active tables with writer info from metadata database")]
+pub struct GetActiveTablesWithWriterInfoError(#[source] pub metadata_db::Error);
 
 /// Cached parquet data including metadata and computed statistics.
 #[derive(Clone)]
