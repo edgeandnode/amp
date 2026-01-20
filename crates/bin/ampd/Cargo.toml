@@ -34,4 +34,4 @@ tracing.workspace = true
 worker = { path = "../../services/worker" }
 
 [build-dependencies]
-vergen-gitcl = { version = "1.0.8", features = ["build"] }
+vergen-gitcl = { version = "9.0.0", features = ["build"] }
