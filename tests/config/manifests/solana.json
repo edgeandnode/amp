@@ -20,16 +20,12 @@
             },
             {
               "name": "block_hash",
-              "type": {
-                "FixedSizeBinary": 32
-              },
+              "type": "Utf8",
               "nullable": false
             },
             {
               "name": "previous_block_hash",
-              "type": {
-                "FixedSizeBinary": 32
-              },
+              "type": "Utf8",
               "nullable": false
             },
             {
@@ -60,11 +56,6 @@
               "name": "tx_index",
               "type": "UInt32",
               "nullable": false
-            },
-            {
-              "name": "inner_index",
-              "type": "UInt32",
-              "nullable": true
             },
             {
               "name": "program_id_index",
@@ -100,7 +91,12 @@
               "nullable": false
             },
             {
-              "name": "stack_height",
+              "name": "inner_index",
+              "type": "UInt32",
+              "nullable": true
+            },
+            {
+              "name": "inner_stack_height",
               "type": "UInt32",
               "nullable": true
             }
@@ -124,18 +120,35 @@
               "nullable": false
             },
             {
-              "name": "num_required_signatures",
-              "type": "UInt8",
-              "nullable": false
-            },
-            {
-              "name": "num_readonly_signed_accounts",
-              "type": "UInt8",
-              "nullable": false
-            },
-            {
-              "name": "num_readonly_unsigned_accounts",
-              "type": "UInt8",
+              "name": "header",
+              "type": {
+                "Struct": [
+                  {
+                    "name": "num_required_signatures",
+                    "data_type": "UInt8",
+                    "nullable": false,
+                    "dict_id": 0,
+                    "dict_is_ordered": false,
+                    "metadata": {}
+                  },
+                  {
+                    "name": "num_readonly_signed_accounts",
+                    "data_type": "UInt8",
+                    "nullable": false,
+                    "dict_id": 0,
+                    "dict_is_ordered": false,
+                    "metadata": {}
+                  },
+                  {
+                    "name": "num_readonly_unsigned_accounts",
+                    "data_type": "UInt8",
+                    "nullable": false,
+                    "dict_id": 0,
+                    "dict_is_ordered": false,
+                    "metadata": {}
+                  }
+                ]
+              },
               "nullable": false
             },
             {
@@ -213,9 +226,7 @@
             },
             {
               "name": "recent_block_hash",
-              "type": {
-                "FixedSizeBinary": 32
-              },
+              "type": "Utf8",
               "nullable": false
             }
           ]
@@ -238,7 +249,7 @@
               "nullable": false
             },
             {
-              "name": "tx_signatures",
+              "name": "signatures",
               "type": {
                 "List": {
                   "name": "item",
@@ -574,35 +585,21 @@
             },
             {
               "name": "return_data_program_id",
-              "type": {
-                "List": {
-                  "name": "item",
-                  "data_type": "UInt8",
-                  "nullable": true,
-                  "dict_id": 0,
-                  "dict_is_ordered": false,
-                  "metadata": {}
-                }
-              },
-              "nullable": true
-            },
-            {
-              "name": "return_data",
-              "type": {
-                "List": {
-                  "name": "item",
-                  "data_type": "UInt8",
-                  "nullable": true,
-                  "dict_id": 0,
-                  "dict_is_ordered": false,
-                  "metadata": {}
-                }
-              },
-              "nullable": true
-            },
-            {
-              "name": "return_data_encoding",
               "type": "Utf8",
+              "nullable": true
+            },
+            {
+              "name": "return_data_data",
+              "type": {
+                "List": {
+                  "name": "item",
+                  "data_type": "UInt8",
+                  "nullable": true,
+                  "dict_id": 0,
+                  "dict_is_ordered": false,
+                  "metadata": {}
+                }
+              },
               "nullable": true
             },
             {

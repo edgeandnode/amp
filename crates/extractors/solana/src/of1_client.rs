@@ -215,36 +215,36 @@ pub(crate) fn stream(
         // Pre-fetch the initial previous block hash via JSON-RPC so that we don't have to
         // (potentially) read multiple CAR files to find it.
         let mut prev_blockhash = if start == 0 {
-            [0u8; 32]
+            // Known previous blockhash for genesis block.
+            bs58::decode("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
+                .into_vec()
+                .map(TryInto::try_into)
+                .expect("invalid base-58 string")
+                .expect("blockhash is 32 bytes")
         } else {
-            let mut parent_slot = start - 1;
+            let mut slot = start;
             loop {
                 let resp = solana_rpc_client
-                    .get_block(parent_slot, get_block_config, metrics.clone())
+                    .get_block(slot, get_block_config, metrics.clone())
                     .await;
 
                 match resp {
-                    // Found the parent block, extract its blockhash.
                     Ok(block) => {
-                        let block = match bs58::decode(block.blockhash).into_vec() {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                yield Err(e.into());
-                                return;
-                            }
-                        };
-                        break block.try_into().expect("blockhash is 32 bytes");
-                    }
-                    // Parent block is missing, try the previous slot.
+                        break bs58::decode(block.previous_blockhash)
+                            .into_vec()
+                            .map(TryInto::try_into)
+                            .expect("invalid base-58 string")
+                            .expect("blockhash is 32 bytes");
+                    },
                     Err(e) if rpc_client::is_block_missing_err(&e) => {
-                        if parent_slot == 0 {
-                            break [0u8; 32];
+                        if slot == 0 {
+                            let err = format!("could not find previous blockhash for slot {start}");
+                            yield Err(err.into());
+                            return;
                         } else {
-                            parent_slot -= 1;
-                            continue;
+                            slot -= 1;
                         }
-                    }
-                    // Some other error occurred.
+                }
                     Err(e) => {
                         yield Err(e.into());
                         return;
@@ -596,24 +596,27 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
         }
     }
 
-    let last_entry_cid = block.entries.last().expect("at least one entry");
-    let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
-    let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
-        let err = format!("expected entry node for cid {last_entry_cid}");
-        return Err(err.into());
+    let blockhash = {
+        // Hash of the last entry has the same value as that block's `blockhash` in
+        // CAR files.
+        let last_entry_cid = block.entries.last().expect("at least one entry");
+        let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
+        let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
+            let err = format!("expected entry node for cid {last_entry_cid}");
+            return Err(err.into());
+        };
+        last_entry
+            .hash
+            .clone()
+            .try_into()
+            .expect("blockhash is 32 bytes")
     };
-
-    let blockhash: [u8; 32] = last_entry
-        .hash
-        .clone()
-        .try_into()
-        .expect("blockhash is 32 bytes");
 
     let block = DecodedBlock {
         slot: block.slot,
         parent_slot: block.meta.parent_slot,
         blockhash,
-        prev_blockhash,
+        prev_blockhash: prev_blockhash.to_owned(),
         block_height: block.meta.block_height,
         blocktime: block.meta.blocktime,
         transactions,

@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use base64::Engine;
 use common::{
     BoxResult, RawTableRows, SPECIAL_BLOCK_NUM, Table,
     arrow::{
@@ -32,10 +33,11 @@ fn schema() -> Schema {
         Field::new("slot", DataType::UInt64, false),
         Field::new("tx_index", DataType::UInt32, false),
         Field::new(
-            "tx_signatures",
+            "signatures",
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
             false,
         ),
+        // Transaction status meta fields.
         Field::new("status", DataType::Boolean, true),
         Field::new("fee", DataType::UInt64, true),
         Field::new(
@@ -70,17 +72,12 @@ fn schema() -> Schema {
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
             true,
         ),
+        Field::new("return_data_program_id", DataType::Utf8, true),
         Field::new(
-            "return_data_program_id",
+            "return_data_data",
             DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
             true,
         ),
-        Field::new(
-            "return_data",
-            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
-            true,
-        ),
-        Field::new("return_data_encoding", DataType::Utf8, true),
         Field::new("compute_units_consumed", DataType::UInt64, true),
         Field::new("cost_units", DataType::UInt64, true),
     ];
@@ -169,14 +166,17 @@ impl Transaction {
                                         "the format of inner instructions has already been verified"
                                     )
                                 };
+                                let data = bs58::decode(&compiled.data)
+                                    .into_vec()
+                                    .expect("invalid base-58 string");
                                 super::instructions::Instruction {
                                     slot,
                                     tx_index,
-                                    inner_index: Some(inner.index as u32),
                                     program_id_index: compiled.program_id_index,
                                     accounts: compiled.accounts,
-                                    data: compiled.data.bytes().collect(),
-                                    stack_height: compiled.stack_height,
+                                    data,
+                                    inner_index: Some(inner.index as u32),
+                                    inner_stack_height: compiled.stack_height,
                                 }
                             })
                             .collect()
@@ -219,18 +219,22 @@ impl Transaction {
                 meta.loaded_addresses
                     .clone()
                     .map(|loaded_addresses| LoadedAddresses {
-                        writable: loaded_addresses.writable,
-                        readonly: loaded_addresses.readonly,
+                        writable: loaded_addresses.writable.clone(),
+                        readonly: loaded_addresses.readonly.clone(),
                     });
 
-            let return_data = meta
-                .return_data
-                .clone()
-                .map(|return_data| TransactionReturnData {
-                    program_id: return_data.program_id.bytes().collect(),
-                    data: return_data.data.0.bytes().collect(),
-                    encoding: return_data.data.1.into(),
-                });
+            let return_data = meta.return_data.clone().map(|return_data| {
+                let (data, encoding) = return_data.data;
+                let data = match encoding {
+                    rpc_client::UiReturnDataEncoding::Base64 => base64::prelude::BASE64_STANDARD
+                        .decode(data)
+                        .expect("invalid base-64 string"),
+                };
+                TransactionReturnData {
+                    program_id: return_data.program_id,
+                    data,
+                }
+            });
 
             TransactionStatusMeta {
                 status: meta.err.is_none(),
@@ -296,11 +300,11 @@ impl TransactionStatusMeta {
                             .map(|inst| super::instructions::Instruction {
                                 slot,
                                 tx_index,
-                                inner_index: Some(inner_instructions.index as u32),
                                 program_id_index: inst.instruction.program_id_index,
                                 accounts: inst.instruction.accounts,
                                 data: inst.instruction.data,
-                                stack_height: inst.stack_height,
+                                inner_index: Some(inner_instructions.index as u32),
+                                inner_stack_height: inst.stack_height,
                             })
                             .collect()
                     })
@@ -349,9 +353,8 @@ impl TransactionStatusMeta {
         let return_data = rpc_tx_meta
             .return_data
             .map(|return_data| TransactionReturnData {
-                program_id: Vec::from(return_data.program_id.to_bytes()),
+                program_id: return_data.program_id.to_string(),
                 data: return_data.data,
-                encoding: ReturnDataEncoding::Base64,
             });
 
         Self {
@@ -387,11 +390,11 @@ impl TransactionStatusMeta {
                     .map(|inst| super::instructions::Instruction {
                         slot,
                         tx_index,
-                        inner_index: Some(inner.index),
                         program_id_index: inst.program_id_index as u8,
                         accounts: inst.accounts,
                         data: inst.data,
-                        stack_height: inst.stack_height,
+                        inner_index: Some(inner.index),
+                        inner_stack_height: inst.stack_height,
                     })
                     .collect()
             })
@@ -430,23 +433,22 @@ impl TransactionStatusMeta {
             writable: of_tx_meta
                 .loaded_writable_addresses
                 .iter()
-                .map(|addr| String::from_utf8(addr.clone()).expect("invalid utf-8"))
+                .map(|a| bs58::encode(&a).into_string())
                 .collect(),
             readonly: of_tx_meta
                 .loaded_readonly_addresses
                 .iter()
-                .map(|addr| String::from_utf8(addr.clone()).expect("invalid utf-8"))
+                .map(|a| bs58::encode(&a).into_string())
                 .collect(),
         };
 
-        let return_data = of_tx_meta
-            .return_data
-            .clone()
-            .map(|return_data| TransactionReturnData {
-                program_id: return_data.program_id,
+        let return_data = of_tx_meta.return_data.clone().map(|return_data| {
+            let program_id = bs58::encode(&return_data.program_id).into_string();
+            TransactionReturnData {
+                program_id,
                 data: return_data.data,
-                encoding: ReturnDataEncoding::Base64,
-            });
+            }
+        });
 
         TransactionStatusMeta {
             status: of_tx_meta.err.is_none(),
@@ -599,31 +601,8 @@ pub(crate) struct LoadedAddresses {
 
 #[derive(Debug, Default, Deserialize, Clone)]
 pub(crate) struct TransactionReturnData {
-    program_id: Vec<u8>,
+    program_id: String,
     data: Vec<u8>,
-    encoding: ReturnDataEncoding,
-}
-
-#[derive(Debug, Default, Deserialize, Clone)]
-enum ReturnDataEncoding {
-    #[default]
-    Base64,
-}
-
-impl std::fmt::Display for ReturnDataEncoding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReturnDataEncoding::Base64 => write!(f, "base64"),
-        }
-    }
-}
-
-impl From<rpc_client::UiReturnDataEncoding> for ReturnDataEncoding {
-    fn from(value: rpc_client::UiReturnDataEncoding) -> Self {
-        match value {
-            rpc_client::UiReturnDataEncoding::Base64 => Self::Base64,
-        }
-    }
 }
 
 pub(crate) struct TransactionRowsBuilder {
@@ -643,9 +622,8 @@ pub(crate) struct TransactionRowsBuilder {
     rewards: ListBuilder<StructBuilder>,
     loaded_addresses_writable: ListBuilder<StringBuilder>,
     loaded_addresses_readonly: ListBuilder<StringBuilder>,
-    return_data_program_id: ListBuilder<UInt8Builder>,
-    return_data: ListBuilder<UInt8Builder>,
-    return_data_encoding: StringBuilder,
+    return_data_program_id: StringBuilder,
+    return_data_data: ListBuilder<UInt8Builder>,
     compute_units_consumed: UInt64Builder,
     cost_units: UInt64Builder,
 }
@@ -722,9 +700,8 @@ impl TransactionRowsBuilder {
             rewards: ListBuilder::with_capacity(reward_builder(), count),
             loaded_addresses_writable: ListBuilder::with_capacity(StringBuilder::new(), count),
             loaded_addresses_readonly: ListBuilder::with_capacity(StringBuilder::new(), count),
-            return_data_program_id: ListBuilder::with_capacity(UInt8Builder::new(), count),
-            return_data: ListBuilder::with_capacity(UInt8Builder::new(), count),
-            return_data_encoding: StringBuilder::with_capacity(count, 0),
+            return_data_program_id: StringBuilder::with_capacity(count, 0),
+            return_data_data: ListBuilder::with_capacity(UInt8Builder::new(), count),
             compute_units_consumed: UInt64Builder::with_capacity(count),
             cost_units: UInt64Builder::with_capacity(count),
 
@@ -924,17 +901,14 @@ impl TransactionRowsBuilder {
 
             if let Some(return_data) = &meta.return_data {
                 self.return_data_program_id
+                    .append_value(&return_data.program_id);
+                self.return_data_data
                     .values()
-                    .append_slice(&return_data.program_id);
-                self.return_data_program_id.append(true);
-                self.return_data.values().append_slice(&return_data.data);
-                self.return_data.append(true);
-                self.return_data_encoding
-                    .append_value(return_data.encoding.to_string());
+                    .append_slice(&return_data.data);
+                self.return_data_data.append(true);
             } else {
                 self.return_data_program_id.append_null();
-                self.return_data.append_null();
-                self.return_data_encoding.append_null();
+                self.return_data_data.append_null();
             }
 
             self.compute_units_consumed
@@ -952,8 +926,7 @@ impl TransactionRowsBuilder {
             self.loaded_addresses_writable.append_null();
             self.loaded_addresses_readonly.append_null();
             self.return_data_program_id.append_null();
-            self.return_data.append_null();
-            self.return_data_encoding.append_null();
+            self.return_data_data.append_null();
             self.compute_units_consumed.append_null();
             self.cost_units.append_null();
         }
@@ -977,8 +950,7 @@ impl TransactionRowsBuilder {
             mut loaded_addresses_writable,
             mut loaded_addresses_readonly,
             mut return_data_program_id,
-            mut return_data,
-            mut return_data_encoding,
+            mut return_data_data,
             mut compute_units_consumed,
             mut cost_units,
             mut slot,
@@ -1000,8 +972,7 @@ impl TransactionRowsBuilder {
             Arc::new(loaded_addresses_writable.finish()),
             Arc::new(loaded_addresses_readonly.finish()),
             Arc::new(return_data_program_id.finish()),
-            Arc::new(return_data.finish()),
-            Arc::new(return_data_encoding.finish()),
+            Arc::new(return_data_data.finish()),
             Arc::new(compute_units_consumed.finish()),
             Arc::new(cost_units.finish()),
         ];
