@@ -238,7 +238,16 @@ impl StreamingQuery {
         };
 
         let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
-        let network = tables.iter().map(|t| t.network()).next().unwrap();
+
+        let networks: BTreeSet<&str> = tables.iter().map(|t| t.network()).collect();
+        if networks.len() != 1 {
+            let networks: Vec<String> = networks.into_iter().map(ToString::to_string).collect();
+            return Err(
+                format!("Multi-network streaming queries are not supported: {networks:?}").into(),
+            );
+        }
+        let network = networks.into_iter().next().unwrap();
+
         let unique_refs: BTreeSet<&HashReference> =
             tables.iter().map(|t| t.dataset_reference()).collect();
 
