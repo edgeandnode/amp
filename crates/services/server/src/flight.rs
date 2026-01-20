@@ -129,7 +129,7 @@ impl Service {
             )
             .await
             .map_err(Error::CreateLogicalCatalogError)?;
-            create_physical_catalog(&self.data_store, logical)
+            create_physical_catalog(&self.dataset_store, &self.data_store, logical)
                 .await
                 .map_err(Error::PhysicalCatalogError)
         }?;
@@ -191,13 +191,18 @@ impl Service {
             .map_err(Error::CoreError)?;
             let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
 
-            let block_range = ctx
-                .common_range(&plan)
+            let block_ranges = ctx
+                .common_ranges(&plan)
                 .await
                 .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
-            if let Some(ref range) = block_range {
-                tracing::debug!("execute range [{}-{}]", range.start(), range.end());
+            for range in &block_ranges {
+                tracing::debug!(
+                    range.network,
+                    "execute range [{}-{}]",
+                    range.start(),
+                    range.end(),
+                );
             }
 
             let record_batches = ctx
@@ -207,7 +212,7 @@ impl Service {
             let stream = QueryResultStream::NonIncremental {
                 stream: NonEmptyRecordBatchStream::new(record_batches).boxed(),
                 schema,
-                block_range,
+                block_ranges,
             };
 
             if let Some(metrics) = &self.metrics {
@@ -236,7 +241,7 @@ impl Service {
                 return Ok(QueryResultStream::NonIncremental {
                     stream: Box::pin(empty_stream),
                     schema,
-                    block_range: None,
+                    block_ranges: vec![],
                 });
             };
 
@@ -555,7 +560,7 @@ pub enum QueryResultStream {
     NonIncremental {
         stream: BoxStream<'static, Result<RecordBatch, DataFusionError>>,
         schema: SchemaRef,
-        block_range: Option<BlockRange>,
+        block_ranges: Vec<BlockRange>,
     },
     Incremental {
         stream: BoxStream<'static, Result<QueryMessage, Error>>,
@@ -569,7 +574,7 @@ impl QueryResultStream {
             Self::NonIncremental {
                 stream,
                 schema: _,
-                block_range: _,
+                block_ranges: _,
             } => stream
                 .map_err(|err| Error::StreamingExecutionError(err.to_string()))
                 .boxed(),
@@ -613,7 +618,7 @@ fn track_query_metrics(
         QueryResultStream::NonIncremental {
             stream: record_batch_stream,
             schema,
-            block_range,
+            block_ranges,
         } => {
             let wrapped_stream = stream! {
                 let mut total_rows = 0u64;
@@ -652,7 +657,7 @@ fn track_query_metrics(
             QueryResultStream::NonIncremental {
                 stream: wrapped_stream.boxed(),
                 schema,
-                block_range,
+                block_ranges,
             }
         }
         QueryResultStream::Incremental {
@@ -724,7 +729,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
         QueryResultStream::NonIncremental {
             stream: non_incremental_stream,
             schema,
-            block_range,
+            block_ranges,
         } => {
             // Use manual encoding for NonIncremental streams to preserve empty batches
             // (arrow-flight's FlightDataEncoderBuilder filters them out)
@@ -736,11 +741,10 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                 yield Ok(schema_message);
 
                 // Prepare metadata for data batches (ranges_complete: false)
-                let data_metadata = block_range.as_ref().map(|range| {
-                    json!({
-                        "ranges": [range],
-                        "ranges_complete": false,
-                    })
+                // Always include metadata, even if ranges are empty
+                let data_metadata = json!({
+                    "ranges": &block_ranges,
+                    "ranges_complete": false,
                 });
 
                 // Encode each data batch with ranges_complete: false
@@ -748,7 +752,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                 while let Some(result) = non_incremental_stream.next().await {
                     match result {
                         Ok(batch) => {
-                            match encode_record_batch(batch, data_metadata.as_ref(), &mut dictionary_tracker) {
+                            match encode_record_batch(batch, Some(&data_metadata), &mut dictionary_tracker) {
                                 Ok(encoded) => {
                                     for message in encoded {
                                         yield Ok(message);
@@ -767,23 +771,22 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                     }
                 }
 
-                // Send final empty batch with ranges_complete: true (if we have a block_range)
-                if let Some(range) = block_range {
-                    let empty_batch = RecordBatch::new_empty(schema.clone());
-                    let completion_metadata = json!({
-                        "ranges": [range],
-                        "ranges_complete": true,
-                    });
-                    match encode_record_batch(empty_batch, Some(&completion_metadata), &mut dictionary_tracker) {
-                        Ok(encoded) => {
-                            for message in encoded {
-                                yield Ok(message);
-                            }
+                // Send final empty batch with ranges_complete: true
+                // Always include metadata, even if ranges are empty
+                let empty_batch = RecordBatch::new_empty(schema.clone());
+                let completion_metadata = json!({
+                    "ranges": &block_ranges,
+                    "ranges_complete": true,
+                });
+                match encode_record_batch(empty_batch, Some(&completion_metadata), &mut dictionary_tracker) {
+                    Ok(encoded) => {
+                        for message in encoded {
+                            yield Ok(message);
                         }
-                        Err(err) => {
-                            yield Err(err);
-                            return;
-                        }
+                    }
+                    Err(err) => {
+                        yield Err(err);
+                        return;
                     }
                 }
             }

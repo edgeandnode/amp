@@ -9,6 +9,7 @@ use amp_data_store::DataStore;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 
 use crate::catalog::{
+    dataset_access::DatasetAccess,
     logical::LogicalCatalog,
     physical::{Catalog, PhysicalTable},
 };
@@ -20,6 +21,7 @@ use crate::catalog::{
 ///
 /// ## Parameters
 ///
+/// - `dataset_store`: Used to retrieve dataset metadata including start_block
 /// - `data_store`: Used to query metadata database for physical parquet locations
 /// - `logical`: Pre-created logical catalog containing table schemas and UDFs
 ///
@@ -36,8 +38,10 @@ use crate::catalog::{
 /// The function:
 /// 1. Iterates through tables in the logical catalog
 /// 2. Queries metadata database for physical parquet locations
-/// 3. Constructs physical catalog for query execution
+/// 3. Retrieves dataset metadata to get start_block
+/// 4. Constructs physical catalog for query execution
 pub async fn create(
+    dataset_store: &impl DatasetAccess,
     data_store: &DataStore,
     logical: LogicalCatalog,
 ) -> Result<Catalog, CreateCatalogError> {
@@ -58,10 +62,19 @@ pub async fn create(
                 table: table.name().clone(),
             })?;
 
+        // Retrieve dataset to get start_block
+        let dataset = dataset_store
+            .get_dataset(dataset_ref)
+            .await
+            .map_err(|source| CreateCatalogError::DatasetRetrieval {
+                dataset: dataset_ref.clone(),
+                source,
+            })?;
+
         let physical_table = PhysicalTable::from_active_revision(
             data_store.clone(),
             table.dataset_reference().clone(),
-            table.dataset_start_block(),
+            dataset.start_block,
             table.table().clone(),
             revision,
             table.sql_table_ref_schema().to_string(),
@@ -103,5 +116,16 @@ pub enum CreateCatalogError {
         dataset: HashReference,
         /// The name of the table that has not been synced
         table: TableName,
+    },
+
+    /// Failed to retrieve dataset metadata.
+    ///
+    /// This occurs when retrieving the dataset to extract start_block fails.
+    #[error("Failed to retrieve dataset {dataset}")]
+    DatasetRetrieval {
+        /// The hash reference of the dataset
+        dataset: HashReference,
+        #[source]
+        source: crate::BoxError,
     },
 }

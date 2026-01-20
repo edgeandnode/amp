@@ -13,7 +13,7 @@ use datasets_common::{
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
-    BoxError, ResolvedTable,
+    BoxError, LogicalTable,
     catalog::{dataset_access::DatasetAccess, logical::LogicalCatalog},
     sql::{FunctionReference, TableReference},
 };
@@ -66,17 +66,17 @@ pub async fn create(
     Ok(LogicalCatalog { tables, udfs })
 }
 
-/// Resolves table references to ResolvedTable instances using dynamic resolution.
+/// Resolves table references to LogicalTable instances using dynamic resolution.
 ///
 /// Processes each table reference, resolves the dataset reference to a hash,
-/// loads the dataset, finds the table, and creates a ResolvedTable for catalog construction.
+/// loads the dataset, finds the table, and creates a LogicalTable for catalog construction.
 async fn resolve_tables(
     dataset_store: &impl DatasetAccess,
     refs: impl IntoIterator<Item = TableReference<PartialReference>>,
-) -> Result<Vec<ResolvedTable>, ResolveTablesError> {
+) -> Result<Vec<LogicalTable>, ResolveTablesError> {
     // Use hash-based map to deduplicate datasets and collect resolved tables
-    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
-    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<PartialReference>, ResolvedTable>> =
+    // Inner map: table_ref -> LogicalTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<PartialReference>, LogicalTable>> =
         BTreeMap::new();
 
     for table_ref in refs {
@@ -131,12 +131,10 @@ async fn resolve_tables(
                         reference: dataset_ref.clone(),
                     })?;
 
-                // Create ResolvedTable
-                let resolved_table = ResolvedTable::new(
-                    dataset_table.clone(),
+                let resolved_table = LogicalTable::new(
                     schema.to_string(),
                     dataset_ref.clone(),
-                    dataset.start_block,
+                    dataset_table.clone(),
                 );
 
                 // Insert into vacant entry
@@ -145,7 +143,7 @@ async fn resolve_tables(
         }
     }
 
-    // Flatten to Vec<ResolvedTable>
+    // Flatten to Vec<LogicalTable>
     Ok(tables
         .into_values()
         .flat_map(|map| map.into_values())
@@ -244,7 +242,7 @@ async fn resolve_udfs(
 /// a logical catalog for Arrow Flight query planning (GetFlightInfo).
 #[derive(Debug, thiserror::Error)]
 pub enum CreateCatalogError {
-    /// Failed to resolve table references to ResolvedTable instances.
+    /// Failed to resolve table references to LogicalTable instances.
     #[error(transparent)]
     ResolveTables(ResolveTablesError),
 

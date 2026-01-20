@@ -10,8 +10,8 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
-    QueryContext, ResolvedTable, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, LogicalTable,
+    PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
@@ -383,11 +383,10 @@ impl StreamingQuery {
             // Construct a catalog for the single `blocks_table`.
             let catalog = {
                 let table = &self.blocks_table;
-                let resolved_table = ResolvedTable::new(
-                    table.table().clone(),
+                let resolved_table = LogicalTable::new(
                     table.sql_table_ref_schema().to_string(),
                     table.dataset_reference().clone(),
-                    table.dataset_start_block(),
+                    table.table().clone(),
                 );
                 let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
                 Catalog::new(vec![self.blocks_table.clone()], logical)

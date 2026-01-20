@@ -480,7 +480,7 @@ async fn dump_table(
             (table_refs, func_refs),
         )
         .await?;
-        physical_catalog::create(&ctx.data_store, logical).await?
+        physical_catalog::create(&ctx.dataset_store, &ctx.data_store, logical).await?
     };
     let planning_ctx = PlanningContext::new(catalog.logical().clone());
     let manifest_start_block = manifest.start_block;
@@ -519,9 +519,12 @@ async fn dump_table(
                         false,
                     )
                     .await?;
-                    query_ctx
-                        .max_end_block(&plan.clone().attach_to(&query_ctx)?)
-                        .await
+                    let max_end_blocks = query_ctx
+                        .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
+                        .await?;
+                    // For now, all materialized tables only support single networks.
+                    assert_eq!(max_end_blocks.len(), 1);
+                    Ok::<Option<BlockNum>, BoxError>(max_end_blocks.into_values().next())
                 })
                 .await?;
 

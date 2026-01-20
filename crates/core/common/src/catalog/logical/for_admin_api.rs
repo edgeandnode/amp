@@ -29,7 +29,7 @@ use crate::{
     BoxError,
     catalog::{
         dataset_access::DatasetAccess,
-        logical::{LogicalCatalog, ResolvedTable},
+        logical::{LogicalCatalog, LogicalTable},
     },
     js_udf::JsUdf,
     sql::{FunctionReference, TableReference},
@@ -52,14 +52,14 @@ pub type TableReferencesMap = BTreeMap<
 /// ## Process
 ///
 /// 1. Flattens table references from the references map
-/// 2. Resolves all table references to ResolvedTable instances
+/// 2. Resolves all table references to LogicalTable instances
 /// 3. Flattens function references from the references map
 /// 4. Resolves all function references to ScalarUDF instances
 /// 5. Creates and returns a LogicalCatalog
 ///
 /// ## Related Functions
 ///
-/// - [`resolve_tables`] - Resolves table references to ResolvedTable instances
+/// - [`resolve_tables`] - Resolves table references to LogicalTable instances
 /// - [`resolve_udfs`] - Resolves function references to UDFs
 pub async fn create(
     dataset_store: &impl DatasetAccess,
@@ -99,7 +99,7 @@ pub async fn create(
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateLogicalCatalogError {
-    /// Failed to resolve table references to ResolvedTable instances
+    /// Failed to resolve table references to LogicalTable instances
     #[error(transparent)]
     ResolveTables(ResolveTablesError),
 
@@ -108,18 +108,18 @@ pub enum CreateLogicalCatalogError {
     ResolveUdfs(ResolveUdfsError),
 }
 
-/// Resolves table references to ResolvedTable instances using pre-resolved dependencies.
+/// Resolves table references to LogicalTable instances using pre-resolved dependencies.
 ///
 /// Processes each table reference across all tables, looks up datasets by hash, finds tables
-/// within datasets, and creates ResolvedTable instances for catalog construction.
+/// within datasets, and creates LogicalTable instances for catalog construction.
 async fn resolve_tables<'a>(
     dataset_store: &impl DatasetAccess,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     refs: impl IntoIterator<Item = (&'a TableName, &'a TableReference<DepAlias>)> + 'a,
-) -> Result<Vec<ResolvedTable>, ResolveTablesError> {
+) -> Result<Vec<LogicalTable>, ResolveTablesError> {
     // Use hash-based map to deduplicate datasets across ALL tables
-    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
-    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, ResolvedTable>> =
+    // Inner map: table_ref -> LogicalTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, LogicalTable>> =
         BTreeMap::new();
 
     // Process all table references - fail fast on first error
@@ -170,12 +170,10 @@ async fn resolve_tables<'a>(
                         reference: dataset_ref.clone(),
                     })?;
 
-                // Create ResolvedTable
-                let resolved_table = ResolvedTable::new(
-                    dataset_table.clone(),
+                let resolved_table = LogicalTable::new(
                     schema.to_string(),
                     dataset_ref.clone(),
-                    dataset.start_block,
+                    dataset_table.clone(),
                 );
 
                 // Insert into vacant entry
@@ -184,7 +182,7 @@ async fn resolve_tables<'a>(
         }
     }
 
-    // Flatten to Vec<ResolvedTable>
+    // Flatten to Vec<LogicalTable>
     Ok(tables
         .into_values()
         .flat_map(|map| map.into_values())

@@ -20,7 +20,7 @@ use datasets_common::{
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
-    BoxError, ResolvedTable,
+    BoxError, LogicalTable,
     catalog::{dataset_access::DatasetAccess, logical::LogicalCatalog},
     js_udf::JsUdf,
     sql::{FunctionReference, TableReference},
@@ -46,7 +46,7 @@ pub type ResolvedReferences = (
 ///
 /// The function:
 /// 1. Destructures the references tuple into table and function references
-/// 2. Resolves table references to ResolvedTable instances using pre-resolved dependencies
+/// 2. Resolves table references to LogicalTable instances using pre-resolved dependencies
 /// 3. Resolves function references to ScalarUDF instances
 /// 4. Returns a LogicalCatalog containing tables and UDFs
 pub async fn create(
@@ -74,18 +74,18 @@ pub async fn create(
     Ok(LogicalCatalog { tables, udfs })
 }
 
-/// Resolves table references to ResolvedTable instances using pre-resolved dependencies.
+/// Resolves table references to LogicalTable instances using pre-resolved dependencies.
 ///
 /// Processes each table reference, looks up the dataset by hash, finds the table
-/// within the dataset, and creates a ResolvedTable for catalog construction.
+/// within the dataset, and creates a LogicalTable for catalog construction.
 async fn resolve_tables(
     dataset_store: &impl DatasetAccess,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     refs: impl IntoIterator<Item = TableReference<DepAlias>>,
-) -> Result<Vec<ResolvedTable>, ResolveTablesError> {
+) -> Result<Vec<LogicalTable>, ResolveTablesError> {
     // Use hash-based map to deduplicate datasets and collect resolved tables
-    // Inner map: table_ref -> ResolvedTable (deduplicates table references)
-    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, ResolvedTable>> =
+    // Inner map: table_ref -> LogicalTable (deduplicates table references)
+    let mut tables: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, LogicalTable>> =
         BTreeMap::new();
 
     for table_ref in refs {
@@ -131,12 +131,11 @@ async fn resolve_tables(
                         reference: dataset_ref.clone(),
                     })?;
 
-                // Create ResolvedTable
-                let resolved_table = ResolvedTable::new(
-                    dataset_table.clone(),
+                // Create LogicalTable
+                let resolved_table = LogicalTable::new(
                     schema.to_string(),
                     dataset_ref.clone(),
-                    dataset.start_block,
+                    dataset_table.clone(),
                 );
 
                 // Insert into vacant entry
@@ -145,7 +144,7 @@ async fn resolve_tables(
         }
     }
 
-    // Flatten to Vec<ResolvedTable>
+    // Flatten to Vec<LogicalTable>
     Ok(tables
         .into_values()
         .flat_map(|map| map.into_values())
@@ -285,7 +284,7 @@ async fn resolve_udfs(
 /// a logical catalog for derived dataset execution.
 #[derive(Debug, thiserror::Error)]
 pub enum CreateCatalogError {
-    /// Failed to resolve table references to ResolvedTable instances.
+    /// Failed to resolve table references to LogicalTable instances.
     #[error(transparent)]
     ResolveTables(ResolveTablesError),
 

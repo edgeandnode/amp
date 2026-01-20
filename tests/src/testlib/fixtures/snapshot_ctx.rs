@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use common::{
-    BoxError, LogicalCatalog, QueryContext, ResolvedTable,
+    BoxError, LogicalCatalog, LogicalTable, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
 };
 use server::config::Config;
@@ -40,11 +40,10 @@ impl SnapshotContext {
         let resolved_tables: Vec<_> = tables
             .iter()
             .map(|t| {
-                ResolvedTable::new(
-                    t.table().clone(),
+                LogicalTable::new(
                     t.sql_table_ref_schema().to_string(),
                     t.dataset_reference().clone(),
-                    t.dataset_start_block(),
+                    t.table().clone(),
                 )
             })
             .collect();
