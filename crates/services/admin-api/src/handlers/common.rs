@@ -141,7 +141,7 @@ pub enum ParseDerivedManifestError {
 
 /// Parse and re-serialize a raw dataset manifest to canonical JSON format
 ///
-/// This function handles the common pattern for raw datasets (EvmRpc, Firehose, EthBeacon):
+/// This function handles the common pattern for raw datasets (EvmRpc, Firehose, Solana):
 /// 1. Deserialize from JSON string
 /// 2. Re-serialize to canonical JSON
 ///
@@ -160,7 +160,7 @@ where
 /// Error type for raw dataset manifest parsing and canonicalization
 ///
 /// Represents the different failure points when processing raw dataset manifests
-/// (EvmRpc, Firehose, EthBeacon) through the parse → canonicalize pipeline.
+/// (EvmRpc, Firehose, Solana) through the parse → canonicalize pipeline.
 #[derive(Debug, thiserror::Error)]
 pub enum ParseRawManifestError {
     /// Failed to deserialize the JSON string into the manifest struct

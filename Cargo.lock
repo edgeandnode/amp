@@ -40,7 +40,6 @@ dependencies = [
  "datasets-common",
  "datasets-derived",
  "dump",
- "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
@@ -1000,7 +999,6 @@ dependencies = [
  "datafusion",
  "datasets-common",
  "datasets-derived",
- "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
@@ -1046,6 +1044,9 @@ name = "amp-providers-registry"
 version = "0.1.0"
 dependencies = [
  "datasets-common",
+ "datasets-derived",
+ "evm-rpc-datasets",
+ "firehose-datasets",
  "futures",
  "indoc",
  "monitoring",
@@ -1091,7 +1092,6 @@ dependencies = [
  "console",
  "datasets-common",
  "dump",
- "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
  "monitoring",
@@ -4065,17 +4065,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "datasets-eth-beacon-gen"
-version = "0.1.0"
-dependencies = [
- "datasets-raw",
- "eth-beacon-datasets",
- "schemars 1.2.0",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "datasets-evm-rpc-gen"
 version = "0.1.0"
 dependencies = [
@@ -4622,25 +4611,6 @@ dependencies = [
  "cfg-if",
  "home",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "eth-beacon-datasets"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "async-stream",
- "common",
- "datasets-common",
- "futures",
- "governor 0.10.4",
- "reqwest",
- "schemars 1.2.0",
- "serde",
- "serde_json",
- "serde_with",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]

@@ -13,7 +13,6 @@ common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 datasets-derived = { path = "../datasets-derived" }
-eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true

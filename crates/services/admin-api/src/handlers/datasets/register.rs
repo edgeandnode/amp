@@ -13,7 +13,6 @@ use datasets_common::{
     namespace::Namespace,
     version::Version,
 };
-use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
 use monitoring::logging;
@@ -200,10 +199,6 @@ pub async fn handler(
                     .map_err(Error::from)?,
                     DatasetKind::Firehose => parse_and_canonicalize_raw_dataset_manifest::<
                         FirehoseManifest,
-                    >(manifest_content.get())
-                    .map_err(Error::from)?,
-                    DatasetKind::EthBeacon => parse_and_canonicalize_raw_dataset_manifest::<
-                        EthBeaconManifest,
                     >(manifest_content.get())
                     .map_err(Error::from)?,
                 };

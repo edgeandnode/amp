@@ -8,8 +8,8 @@
 //! # Supported Dataset Kinds
 //!
 //! - **evm-rpc**: EVM RPC dataset manifests
-//! - **eth-beacon**: Ethereum Beacon chain dataset manifests
 //! - **firehose**: Firehose dataset manifests
+//! - **solana**: Solana dataset manifests
 //!
 //! Note: Derived datasets are not supported for automatic generation as they
 //! require custom SQL transformation definitions.
@@ -31,7 +31,7 @@ use monitoring::logging;
 /// Command-line arguments for the `manifest generate` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Kind of the dataset (evm-rpc, eth-beacon, firehose).
+    /// Kind of the dataset (evm-rpc, firehose, solana).
     #[arg(long, required = true, env = "GM_KIND", value_parser = clap::value_parser!(DatasetKind))]
     pub kind: DatasetKind,
 
@@ -124,24 +124,6 @@ where
                 })
                 .collect();
             let manifest = solana_datasets::Manifest {
-                kind: kind.as_str().parse().expect("kind is valid"),
-                network: network.clone(),
-                start_block: start_block.unwrap_or(0),
-                finalized_blocks_only,
-                tables,
-            };
-            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
-        }
-        DatasetKind::EthBeacon => {
-            let tables = eth_beacon_datasets::all_tables(network.clone())
-                .iter()
-                .map(|table| {
-                    let schema = table_schema_from_logical_table(table);
-                    let manifest_table = eth_beacon_datasets::Table::new(schema, network.clone());
-                    (table.name().to_string(), manifest_table)
-                })
-                .collect();
-            let manifest = eth_beacon_datasets::Manifest {
                 kind: kind.as_str().parse().expect("kind is valid"),
                 network: network.clone(),
                 start_block: start_block.unwrap_or(0),
