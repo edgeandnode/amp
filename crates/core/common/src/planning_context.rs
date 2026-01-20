@@ -18,7 +18,7 @@ use datafusion::{
 use tracing::instrument;
 
 use crate::{
-    BoxError, LogicalCatalog, QueryContext, ResolvedTable,
+    BoxError, LogicalCatalog, LogicalTable, QueryContext,
     plan_visitors::{is_incremental, propagate_block_num},
     query_context::{Error, default_catalog_name},
     sql::TableReference,
@@ -80,7 +80,7 @@ impl PlanningContext {
         }
     }
 
-    pub fn catalog(&self) -> &[ResolvedTable] {
+    pub fn catalog(&self) -> &[LogicalTable] {
         &self.catalog.tables
     }
 
@@ -104,7 +104,7 @@ impl PlanningContext {
 }
 
 #[derive(Clone, Debug)]
-struct PlanningTable(ResolvedTable);
+struct PlanningTable(LogicalTable);
 
 #[async_trait]
 impl TableProvider for PlanningTable {

@@ -91,7 +91,7 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
-    BlockNum, BlockStreamer, BoxError, LogicalCatalog, ResolvedTable,
+    BlockNum, BlockStreamer, BoxError, LogicalCatalog, LogicalTable,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::merge_ranges,
 };
@@ -195,11 +195,10 @@ pub async fn dump(
     let resolved_tables: Vec<_> = tables
         .iter()
         .map(|(t, _)| {
-            ResolvedTable::new(
-                t.table().clone(),
+            LogicalTable::new(
                 t.sql_table_ref_schema().to_string(),
                 dataset_reference.clone(),
-                dataset.start_block,
+                t.table().clone(),
             )
         })
         .collect();

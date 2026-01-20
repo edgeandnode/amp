@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BoxError, LogicalCatalog, ResolvedTable,
+    BoxError, LogicalCatalog, LogicalTable,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::BlockRange,
@@ -251,7 +251,7 @@ pub async fn restore_dataset_snapshot(
         "Restored tables via Admin API, loading PhysicalTable objects"
     );
 
-    // 2. Load the dataset to get ResolvedTables
+    // 2. Load the dataset to get LogicalTables
     let dataset_ref = dataset_store
         .resolve_revision(dataset_ref)
         .await?
@@ -466,11 +466,10 @@ pub async fn catalog_for_dataset(
     let resolved_tables: Vec<_> = tables
         .iter()
         .map(|t| {
-            ResolvedTable::new(
-                t.table().clone(),
+            LogicalTable::new(
                 t.sql_table_ref_schema().to_string(),
                 dataset_ref.clone(),
-                dataset.start_block,
+                t.table().clone(),
             )
         })
         .collect();
