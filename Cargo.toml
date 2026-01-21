@@ -8,6 +8,7 @@ members = [
     "crates/bin/ampd",
     "crates/bin/ampsync",
     "crates/bin/ampup",
+    "crates/bin/ampup-gen-release-manifest",
     "crates/clients/flight",
     "crates/core/common",
     "crates/core/data-store",

@@ -194,6 +194,41 @@ jobs:
         with:
           draft: false
 
+  release-manifest:
+    name: Release Manifest
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Setup rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+        with:
+          cache: true
+
+      - name: Generate release manifest
+        run: |
+          # Create release directory
+          mkdir -p release
+
+          # Run manifest generator binary (outputs to stdout, redirect to file)
+          cargo run --bin ampup-gen-release-manifest -- \
+            ${{ github.repository }} \
+            ${{ github.ref_name }} \
+            > release/manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload manifest to release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          files: release/manifest.json
+          fail_on_unmatched_files: true
+
   containerize:
     name: Containerize (${{ matrix.title }})
     runs-on: ubuntu-latest

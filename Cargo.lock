@@ -1169,6 +1169,7 @@ name = "ampup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "console 0.15.11",
  "dialoguer",
@@ -1178,9 +1179,25 @@ dependencies = [
  "reqwest",
  "semver 1.0.27",
  "serde",
+ "serde_json",
  "tempfile",
+ "thiserror 2.0.17",
  "tokio",
  "vergen-gitcl",
+]
+
+[[package]]
+name = "ampup-gen-release-manifest"
+version = "0.1.0"
+dependencies = [
+ "ampup",
+ "chrono",
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
 ]
 
 [[package]]
