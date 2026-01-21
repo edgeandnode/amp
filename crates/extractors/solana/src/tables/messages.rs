@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM,
+    BlockRange, BoxResult, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{
             ArrayRef, ListBuilder, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
@@ -9,9 +9,9 @@ use common::{
         },
         datatypes::{DataType, Field, Fields, Schema, SchemaRef},
     },
-    metadata::segments::BlockRange,
 };
 use datasets_common::dataset::Table;
+use datasets_raw::rows::TableRows;
 use solana_clock::Slot;
 
 use crate::{rpc_client::UiRawMessage, tables::BASE58_ENCODED_HASH_LEN};
@@ -191,7 +191,7 @@ pub(crate) struct AddressTableLookup {
     pub(crate) readonly_indexes: Vec<u8>,
 }
 
-/// A builder for converting [Message]s into [RawTableRows].
+/// A builder for converting [Message]s into [TableRows].
 pub(crate) struct MessageRowsBuilder {
     special_block_num: UInt64Builder,
     slot: UInt64Builder,
@@ -326,8 +326,8 @@ impl MessageRowsBuilder {
         self.recent_block_hash.append_value(recent_block_hash);
     }
 
-    /// Builds the [RawTableRows] from the appended data.
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<RawTableRows> {
+    /// Builds the [TableRows] from the appended data.
+    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -348,6 +348,6 @@ impl MessageRowsBuilder {
             Arc::new(recent_block_hash.finish()),
         ];
 
-        RawTableRows::new(table(range.network.clone()), range, columns)
+        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
     }
 }

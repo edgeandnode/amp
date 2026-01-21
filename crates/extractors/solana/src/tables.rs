@@ -1,4 +1,5 @@
-use common::{BoxResult, RawDatasetRows, metadata::segments::BlockRange};
+use common::{BlockRange, BoxResult};
+use datasets_raw::rows::Rows;
 use solana_clock::Slot;
 
 use crate::rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage};
@@ -23,7 +24,7 @@ pub fn all(network: &str) -> Vec<datasets_common::dataset::Table> {
 pub(crate) fn convert_of_data_to_db_rows(
     mut block: crate::of1_client::DecodedBlock,
     network: &str,
-) -> BoxResult<RawDatasetRows> {
+) -> BoxResult<Rows> {
     let of_transactions = std::mem::take(&mut block.transactions);
     let of_transactions_meta = std::mem::take(&mut block.transaction_metas);
     let mut db_transactions = Vec::new();
@@ -96,7 +97,7 @@ pub(crate) fn convert_of_data_to_db_rows(
         builder.build(range)?
     };
 
-    Ok(RawDatasetRows::new(vec![
+    Ok(Rows::new(vec![
         block_headers_row,
         transactions_row,
         messages_row,
@@ -108,7 +109,7 @@ pub(crate) fn convert_rpc_block_to_db_rows(
     slot: Slot,
     mut block: UiConfirmedBlock,
     network: &str,
-) -> BoxResult<RawDatasetRows> {
+) -> BoxResult<Rows> {
     let rpc_transactions = std::mem::take(&mut block.transactions).unwrap_or_default();
     let mut db_transactions = Vec::new();
     let mut db_messages = Vec::new();
@@ -196,14 +197,14 @@ pub(crate) fn convert_rpc_block_to_db_rows(
         builder.build(range)?
     };
 
-    Ok(RawDatasetRows::new(vec![
+    Ok(Rows::new(vec![
         block_headers_row,
         transactions_row,
         messages_row,
     ]))
 }
 
-pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<RawDatasetRows> {
+pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<Rows> {
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.
         numbers: slot..=slot,
@@ -236,7 +237,7 @@ pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<RawDatasetRo
         builder.build(range)?
     };
 
-    Ok(RawDatasetRows::new(vec![
+    Ok(Rows::new(vec![
         block_headers_row,
         transactions_row,
         messages_row,

@@ -9,11 +9,7 @@ use std::{
 };
 
 use amp_data_store::{DataStore, file_name::FileName};
-use common::{
-    BlockNum,
-    catalog::physical::PhysicalTable,
-    metadata::{SegmentSize, segments::BlockRange},
-};
+use common::{BlockNum, BlockRange, catalog::physical::PhysicalTable, metadata::SegmentSize};
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
 use monitoring::logging;

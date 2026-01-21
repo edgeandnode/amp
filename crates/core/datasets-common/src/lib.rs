@@ -3,6 +3,7 @@
 //! This module provides shared structures used across different dataset definition formats,
 //! including serializable schema representations and common dataset metadata.
 
+pub mod block_range;
 pub mod dataset;
 pub mod deps;
 pub mod fqn;
@@ -18,6 +19,8 @@ pub mod reference;
 pub mod revision;
 pub mod table_name;
 pub mod version;
+
+pub use self::dataset::{BlockNum, SPECIAL_BLOCK_NUM};
 
 /// Re-exports of UDF-related types for derived datasets and the common crate.
 ///

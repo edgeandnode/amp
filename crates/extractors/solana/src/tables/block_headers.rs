@@ -1,14 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM,
+    BlockRange, BoxResult, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{ArrayRef, Int64Builder, StringBuilder, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
-    metadata::segments::BlockRange,
 };
 use datasets_common::dataset::Table;
+use datasets_raw::rows::TableRows;
 use solana_clock::Slot;
 
 use crate::{rpc_client::UiConfirmedBlock, tables::BASE58_ENCODED_HASH_LEN};
@@ -81,7 +81,7 @@ impl BlockHeader {
     }
 }
 
-/// A builder for converting [BlockHeader]s into [RawTableRows].
+/// A builder for converting [BlockHeader]s into [TableRows].
 pub(crate) struct BlockHeaderRowsBuilder {
     special_block_num: UInt64Builder,
     slot: UInt64Builder,
@@ -126,8 +126,8 @@ impl BlockHeaderRowsBuilder {
         self.block_time.append_option(*block_time);
     }
 
-    /// Builds the [RawTableRows] from the appended data.
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<RawTableRows> {
+    /// Builds the [TableRows] from the appended data.
+    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -148,6 +148,6 @@ impl BlockHeaderRowsBuilder {
             Arc::new(block_time.finish()),
         ];
 
-        RawTableRows::new(table(range.network.clone()), range, columns)
+        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
     }
 }

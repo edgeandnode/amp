@@ -4,7 +4,8 @@ use std::{
 };
 
 use async_stream::stream;
-use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
+use common::{BlockNum, BoxError};
+use datasets_raw::{client::BlockStreamer, rows::Rows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use monitoring::telemetry;
 use pbfirehose::{Response as StreamResponse, stream_client::StreamClient};
@@ -176,7 +177,7 @@ impl BlockStreamer for Client {
         mut self,
         start_block: u64,
         end_block: u64,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
         stream! {

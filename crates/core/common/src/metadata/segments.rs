@@ -4,50 +4,24 @@ use alloy::primitives::BlockHash;
 use metadata_db::files::FileId;
 use object_store::ObjectMeta;
 
-use crate::{BlockNum, BoxError, block_range_intersection};
+use crate::{BlockNum, BlockRange, BoxError, block_range_intersection};
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-pub struct BlockRange {
-    pub numbers: RangeInclusive<BlockNum>,
-    pub network: String,
-    pub hash: BlockHash,
-    pub prev_hash: Option<BlockHash>,
-}
-
-impl BlockRange {
-    #[inline]
-    pub fn start(&self) -> BlockNum {
-        *self.numbers.start()
-    }
-
-    #[inline]
-    pub fn end(&self) -> BlockNum {
-        *self.numbers.end()
-    }
-
-    #[inline]
-    pub fn watermark(&self) -> Watermark {
-        Watermark {
-            number: self.end(),
-            hash: self.hash,
-        }
-    }
-
-    /// Return true iff `self` is sequenced immediately before `other`.
-    #[inline]
-    fn adjacent(&self, other: &Self) -> bool {
-        self.network == other.network
-            && (self.end() + 1) == other.start()
-            && other.prev_hash.map(|h| h == self.hash).unwrap_or(true)
-    }
-}
-
+/// A watermark representing a specific block in the chain.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Watermark {
-    /// The segment end block
+    /// The segment end block.
     pub number: BlockNum,
-    /// The hash associated with the segment end block
+    /// The hash associated with the segment end block.
     pub hash: BlockHash,
+}
+
+impl From<&BlockRange> for Watermark {
+    fn from(range: &BlockRange) -> Self {
+        Self {
+            number: range.end(),
+            hash: range.hash,
+        }
+    }
 }
 
 /// Public interface for resuming a stream from a watermark.
@@ -56,17 +30,16 @@ pub struct Watermark {
 pub struct ResumeWatermark(pub BTreeMap<String, Watermark>);
 
 impl ResumeWatermark {
+    /// Create a ResumeWatermark from a slice of BlockRanges.
     pub fn from_ranges(ranges: &[BlockRange]) -> Self {
         let watermark = ranges
             .iter()
-            .map(|r| {
-                let watermark = r.watermark();
-                (r.network.clone(), watermark)
-            })
+            .map(|r| (r.network.clone(), r.into()))
             .collect();
         Self(watermark)
     }
 
+    /// Extract the watermark for a specific network.
     pub fn to_watermark(self, network: &str) -> Result<Watermark, BoxError> {
         self.0
             .into_iter()
@@ -388,14 +361,12 @@ mod test {
 
     use alloy::primitives::BlockHash;
     use chrono::DateTime;
+    use datasets_common::BlockNum;
     use metadata_db::files::FileId;
     use object_store::ObjectMeta;
     use rand::{Rng as _, RngCore as _, SeedableRng as _, rngs::StdRng, seq::SliceRandom};
 
-    use crate::{
-        BlockNum, BlockRange,
-        metadata::segments::{Chain, Chains, Segment},
-    };
+    use super::{BlockRange, Chain, Chains, Segment};
 
     fn test_range(numbers: RangeInclusive<BlockNum>, fork: (u8, u8)) -> BlockRange {
         fn test_hash(number: u8, fork: u8) -> BlockHash {

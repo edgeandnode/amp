@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use amp_data_store::{DataStore, file_name::FileName};
 use common::{
-    BoxError, Timestamp,
+    BlockRange, BoxError, Timestamp,
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
@@ -10,7 +10,6 @@ use common::{
         parquet::{
             GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
         },
-        segments::BlockRange,
     },
     parquet::{
         arrow::AsyncArrowWriter, errors::ParquetError,

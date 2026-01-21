@@ -12,6 +12,7 @@ alloy.workspace = true
 async-stream.workspace = true
 common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
+datasets-raw = { path = "../../core/datasets-raw" }
 futures.workspace = true
 monitoring = { path = "../../core/monitoring" }
 schemars = { workspace = true, optional = true }

@@ -272,11 +272,11 @@ mod tests {
     use std::sync::Arc;
 
     use common::{
+        BlockRange,
         arrow::{
             array::UInt64Array,
             datatypes::{DataType, Field, Schema},
         },
-        metadata::segments::BlockRange,
     };
     use futures::{StreamExt, stream};
 

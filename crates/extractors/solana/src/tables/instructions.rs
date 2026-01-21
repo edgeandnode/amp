@@ -1,14 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM,
+    BlockRange, BoxResult, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{ArrayRef, ListBuilder, UInt8Builder, UInt32Builder, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
-    metadata::segments::BlockRange,
 };
 use datasets_common::dataset::Table;
+use datasets_raw::rows::TableRows;
 use serde::Deserialize;
 use solana_clock::Slot;
 
@@ -114,7 +114,7 @@ impl InstructionRowsBuilder {
         self.inner_stack_height.append_option(*inner_stack_height);
     }
 
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<RawTableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -137,6 +137,6 @@ impl InstructionRowsBuilder {
             Arc::new(inner_stack_height.finish()),
         ];
 
-        RawTableRows::new(table(range.network.clone()), range, columns)
+        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
     }
 }

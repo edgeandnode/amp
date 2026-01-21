@@ -2,12 +2,13 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use amp_data_store::{DataStore, file_name::FileName};
 use common::{
-    BlockNum, BoxError, RawTableRows,
+    BlockNum, BlockRange, BoxError,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::{Generation, segments::BlockRange},
+    metadata::Generation,
 };
 use datasets_common::table_name::TableName;
+use datasets_raw::rows::TableRows;
 use metadata_db::MetadataDb;
 
 use crate::{
@@ -59,7 +60,7 @@ impl RawDatasetWriter {
         })
     }
 
-    pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
+    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), BoxError> {
         let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
         if let Some(ParquetFileWriterOutput {
@@ -171,7 +172,7 @@ impl RawTableWriter {
 
     pub async fn write(
         &mut self,
-        table_rows: RawTableRows,
+        table_rows: TableRows,
     ) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
         assert_eq!(table_rows.table.name(), self.table.table_name());
 

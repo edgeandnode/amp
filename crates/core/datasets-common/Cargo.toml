@@ -9,6 +9,7 @@ license-file.workspace = true
 default = ["metadata-db"]
 
 [dependencies]
+alloy = { workspace = true }
 datafusion = { workspace = true }
 hex = { workspace = true }
 metadata-db = { path = "../metadata-db", optional = true }

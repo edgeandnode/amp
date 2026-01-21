@@ -28,11 +28,11 @@ use object_store::ObjectStore;
 use url::Url;
 
 use crate::{
-    BlockNum, BoxError, LogicalCatalog,
+    BlockNum, BlockRange, BoxError, LogicalCatalog,
     metadata::{
         FileMetadata,
         parquet::ParquetMeta,
-        segments::{BlockRange, Chain, Segment, canonical_chain, missing_ranges},
+        segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
     sql::TableReference,
 };

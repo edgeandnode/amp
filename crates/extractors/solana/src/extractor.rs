@@ -15,7 +15,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use common::{BlockNum, BlockStreamer, BoxError, BoxResult, RawDatasetRows};
+use common::{BlockNum, BoxError, BoxResult};
+use datasets_raw::{client::BlockStreamer, rows::Rows};
 use futures::{Stream, StreamExt};
 use url::Url;
 
@@ -86,7 +87,7 @@ impl SolanaExtractor {
         end: BlockNum,
         historical_block_stream: T,
         get_block_config: rpc_client::rpc_config::RpcBlockConfig,
-    ) -> impl Stream<Item = BoxResult<RawDatasetRows>>
+    ) -> impl Stream<Item = BoxResult<Rows>>
     where
         T: Stream<Item = BoxResult<of1_client::DecodedBlock>>,
     {
@@ -184,7 +185,7 @@ impl BlockStreamer for SolanaExtractor {
         self,
         start: BlockNum,
         end: BlockNum,
-    ) -> impl Stream<Item = BoxResult<RawDatasetRows>> {
+    ) -> impl Stream<Item = BoxResult<Rows>> {
         let get_block_config = rpc_client::rpc_config::RpcBlockConfig {
             encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
             transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),

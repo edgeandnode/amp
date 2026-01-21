@@ -3,9 +3,8 @@ use std::{collections::BTreeMap, ops::RangeInclusive, time::Duration};
 use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
 use common::{
-    BlockNum,
+    BlockNum, BlockRange,
     catalog::{logical::for_query as logical_catalog, physical::for_query as physical_catalog},
-    metadata::segments::BlockRange,
     sql::{self, resolve_function_references, resolve_table_references},
     sql_str::SqlStr,
 };

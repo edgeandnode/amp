@@ -4,12 +4,14 @@ use arrow::{
     array::{ArrayRef, BinaryBuilder, UInt64Builder},
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
+use datasets_common::dataset::Table;
+use datasets_raw::rows::TableRows;
 
 use crate::{
-    BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
-    EVM_CURRENCY_TYPE, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
-    EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM, Table, Timestamp,
-    TimestampArrayBuilder, arrow, metadata::segments::BlockRange, timestamp_type,
+    BYTES32_TYPE, BlockRange, BoxError, Bytes32, Bytes32ArrayBuilder,
+    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE, EvmAddress as Address,
+    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, SPECIAL_BLOCK_NUM, Timestamp,
+    TimestampArrayBuilder, arrow, timestamp_type,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -197,7 +199,7 @@ impl BlockRowsBuilder {
         self.requests_hash.append_option(*requests_hash);
     }
 
-    pub fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
+    pub fn build(self, range: BlockRange) -> Result<TableRows, BoxError> {
         let Self {
             mut special_block_num,
             mut block_num,
@@ -252,7 +254,7 @@ impl BlockRowsBuilder {
             Arc::new(requests_hash.finish()),
         ];
 
-        RawTableRows::new(table(range.network.clone()), range, columns)
+        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
     }
 }
 

@@ -8,11 +8,9 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
+    BlockRange,
     catalog::physical::{PhysicalTable, TableSnapshot, reader::AmpReaderFactory},
-    metadata::{
-        SegmentSize,
-        segments::{BlockRange, Segment},
-    },
+    metadata::{SegmentSize, segments::Segment},
     parquet::arrow::{
         ParquetRecordBatchStreamBuilder,
         arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},

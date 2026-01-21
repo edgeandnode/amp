@@ -91,11 +91,12 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
-    BlockNum, BlockStreamer, BoxError, LogicalCatalog, LogicalTable,
+    BlockNum, BoxError, LogicalCatalog, LogicalTable,
     catalog::physical::{Catalog, MissingRangesError, PhysicalTable},
     metadata::segments::merge_ranges,
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use datasets_raw::client::BlockStreamer;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use monitoring::logging;
