@@ -1180,7 +1180,7 @@ dependencies = [
  "dialoguer",
  "fs-err",
  "futures",
- "indicatif 0.17.11",
+ "indicatif",
  "reqwest",
  "semver 1.0.27",
  "serde",
@@ -5970,19 +5970,6 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.17.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
-dependencies = [
- "console 0.15.11",
- "number_prefix",
- "portable-atomic",
- "unicode-width",
- "web-time",
-]
-
-[[package]]
-name = "indicatif"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9375e112e4b463ec1b1c6c011953545c65a30164fbab5b581df32b3abf0dcb88"
@@ -7008,12 +6995,6 @@ checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "number_prefix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "nybbles"
@@ -8723,7 +8704,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9656,7 +9637,7 @@ dependencies = [
  "futures",
  "futures-util",
  "indexmap 2.13.0",
- "indicatif 0.18.3",
+ "indicatif",
  "log",
  "quinn",
  "rayon",
@@ -10532,7 +10513,7 @@ dependencies = [
  "bincode 1.3.3",
  "bs58",
  "futures",
- "indicatif 0.18.3",
+ "indicatif",
  "log",
  "reqwest",
  "reqwest-middleware",
@@ -11045,7 +11026,7 @@ dependencies = [
  "bincode 1.3.3",
  "futures-util",
  "indexmap 2.13.0",
- "indicatif 0.18.3",
+ "indicatif",
  "log",
  "rayon",
  "solana-client-traits",
@@ -11774,6 +11755,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
