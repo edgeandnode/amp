@@ -155,7 +155,7 @@ pub async fn dump(
 
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
-    for table_def in &dataset.tables {
+    for table_def in dataset.tables() {
         // Try to get existing active physical table (handles retry case)
         let physical_table: Arc<PhysicalTable> = match ctx
             .data_store
@@ -169,7 +169,7 @@ pub async fn dump(
                 PhysicalTable::from_active_revision(
                     ctx.data_store.clone(),
                     dataset.reference().clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                     table_def.clone(),
                     revision,
                     sql_table_ref_schema,
@@ -181,7 +181,7 @@ pub async fn dump(
                 common::catalog::physical::register_new_table_revision(
                     ctx.data_store.clone(),
                     dataset.reference().clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                     table_def.clone(),
                     sql_table_ref_schema,
                 )

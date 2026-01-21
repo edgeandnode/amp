@@ -2,7 +2,13 @@ use std::collections::BTreeMap;
 
 use common::BlockNum;
 // Reuse types from datasets-common for consistency
-pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
+pub use datasets_common::manifest::TableSchema;
+use datasets_common::{
+    dataset::Table as DatasetTable,
+    deps::{alias::DepAlias, reference::DepReference},
+    hash_reference::HashReference,
+    raw_dataset_kind::RawDatasetKind,
+};
 
 use crate::dataset_kind::FirehoseDatasetKind;
 
@@ -50,4 +56,50 @@ pub struct ProviderConfig {
     pub network: String,
     pub url: String,
     pub token: Option<String>,
+}
+
+pub struct Dataset {
+    pub(crate) tables: Vec<DatasetTable>,
+    pub(crate) start_block: Option<BlockNum>,
+    pub(crate) kind: FirehoseDatasetKind,
+    pub(crate) dependencies: BTreeMap<DepAlias, DepReference>,
+    pub(crate) reference: HashReference,
+    pub(crate) network: Option<String>,
+    pub(crate) finalized_blocks_only: bool,
+}
+
+impl datasets_common::dataset::Dataset for Dataset {
+    fn tables(&self) -> &[DatasetTable] {
+        &self.tables
+    }
+
+    fn start_block(&self) -> Option<BlockNum> {
+        self.start_block
+    }
+
+    fn kind(&self) -> RawDatasetKind {
+        self.kind.into()
+    }
+
+    fn dependencies(&self) -> &BTreeMap<DepAlias, DepReference> {
+        &self.dependencies
+    }
+
+    fn reference(&self) -> &HashReference {
+        &self.reference
+    }
+
+    fn network(&self) -> Option<&String> {
+        self.network.as_ref()
+    }
+
+    fn finalized_blocks_only(&self) -> bool {
+        self.finalized_blocks_only
+    }
+
+    fn as_dataset_with_functions(
+        &self,
+    ) -> Option<&dyn datasets_common::dataset::DatasetWithFunctions> {
+        None
+    }
 }

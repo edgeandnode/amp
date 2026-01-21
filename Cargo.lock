@@ -2731,7 +2731,6 @@ dependencies = [
  "governor 0.10.4",
  "indoc",
  "itertools 0.14.0",
- "js-runtime",
  "metadata-db",
  "monitoring",
  "object_store",
@@ -4054,6 +4053,7 @@ version = "0.1.0"
 dependencies = [
  "datafusion",
  "hex",
+ "js-runtime",
  "metadata-db",
  "schemars 1.2.0",
  "semver 1.0.27",
@@ -4125,8 +4125,8 @@ dependencies = [
 name = "datasets-raw"
 version = "0.1.0"
 dependencies = [
- "common",
  "datafusion",
+ "datasets-common",
 ]
 
 [[package]]
@@ -6163,10 +6163,12 @@ dependencies = [
 name = "js-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "blake3",
  "datafusion",
  "deadpool",
  "hex",
+ "indoc",
  "num-traits",
  "num_cpus",
  "thiserror 2.0.18",

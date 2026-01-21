@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    BlockNum, BoxError, Dataset, Table as LogicalTable,
+    BlockNum, BoxError,
     catalog::{
         dataset_access::DatasetAccess,
         logical::{
@@ -35,6 +35,7 @@ use common::{
 };
 use datafusion::sql::parser;
 use datasets_common::{
+    dataset::Table as LogicalTable,
     deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     hash_reference::HashReference,
     table_name::TableName,
@@ -51,7 +52,10 @@ use crate::{
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
 /// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
 /// name, version, hash reference) must be provided externally as they are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Result<Dataset, DatasetError> {
+pub fn dataset(
+    reference: HashReference,
+    manifest: Manifest,
+) -> Result<crate::dataset::Dataset, DatasetError> {
     let queries = {
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
@@ -91,10 +95,10 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> Result<Dataset, 
         })
         .collect();
 
-    Ok(Dataset {
+    Ok(crate::dataset::Dataset {
         reference,
         dependencies: manifest.dependencies,
-        kind: DerivedDatasetKind.to_string(),
+        kind: DerivedDatasetKind,
         network: None,
         start_block: manifest.start_block,
         finalized_blocks_only: false,
@@ -340,7 +344,7 @@ pub async fn validate(
                 }
             })?;
 
-            if let Some(dep_start_block) = dataset.start_block
+            if let Some(dep_start_block) = dataset.start_block()
                 && *dataset_start_block < dep_start_block
             {
                 return Err(ManifestValidationError::StartBlockBeforeDependencies {

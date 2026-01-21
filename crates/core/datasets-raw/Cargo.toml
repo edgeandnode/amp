@@ -9,7 +9,7 @@ gen-schema = ["dep:datafusion"]
 
 [dependencies]
 # Always available - provides Table type
-common = { path = "../common" }
+datasets-common = { path = "../datasets-common" }
 
 # Only for schema generation
 datafusion = { workspace = true, optional = true }

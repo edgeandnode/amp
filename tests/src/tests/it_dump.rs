@@ -254,7 +254,7 @@ impl TestCtx {
             .expect("Failed to load dataset");
 
         dataset
-            .start_block
+            .start_block()
             .expect("Dataset should have a start block")
     }
 

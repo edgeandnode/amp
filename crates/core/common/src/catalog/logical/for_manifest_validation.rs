@@ -22,8 +22,8 @@ use datasets_common::{
     hash_reference::HashReference,
     manifest::Function,
     table_name::TableName,
+    udf::{IsolatePool, JsUdf},
 };
-use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     BoxError,
@@ -31,7 +31,6 @@ use crate::{
         dataset_access::DatasetAccess,
         logical::{LogicalCatalog, LogicalTable},
     },
-    js_udf::JsUdf,
     sql::{FunctionReference, TableReference},
 };
 
@@ -142,7 +141,7 @@ async fn resolve_tables<'a>(
                     })?;
 
                 let dataset_table = dataset
-                    .tables
+                    .tables()
                     .iter()
                     .find(|t| t.name() == table)
                     .ok_or_else(|| ResolveTablesError::TableNotFoundInDataset {
@@ -215,7 +214,7 @@ async fn resolve_udfs<'a>(
 
                     let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                         dataset_store
-                            .eth_call_for_dataset(&schema.to_string(), &dataset)
+                            .eth_call_for_dataset(&schema.to_string(), dataset.as_ref())
                             .await
                             .map_err(|err| ResolveUdfsError::EthCallUdfCreation {
                                 table_name: table_name.clone(),
@@ -228,7 +227,14 @@ async fn resolve_udfs<'a>(
                             })?
                     } else {
                         dataset
-                            .function_by_name(schema.to_string(), function, IsolatePool::dummy())
+                            .as_dataset_with_functions()
+                            .and_then(|d| {
+                                d.function_by_name(
+                                    schema.to_string(),
+                                    function,
+                                    IsolatePool::dummy(),
+                                )
+                            })
                             .ok_or_else(|| ResolveUdfsError::FunctionNotFoundInDataset {
                                 table_name: table_name.clone(),
                                 function_name: (**function).clone(),

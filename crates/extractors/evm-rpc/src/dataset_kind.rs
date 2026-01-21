@@ -120,6 +120,18 @@ impl PartialEq<EvmRpcDatasetKind> for String {
     }
 }
 
+impl PartialEq<RawDatasetKind> for EvmRpcDatasetKind {
+    fn eq(&self, other: &RawDatasetKind) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<EvmRpcDatasetKind> for RawDatasetKind {
+    fn eq(&self, _other: &EvmRpcDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
+    }
+}
+
 /// Error returned when parsing an invalid EVM-RPC dataset kind string.
 ///
 /// This error is returned when attempting to parse a string that does not

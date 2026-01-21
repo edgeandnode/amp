@@ -9,8 +9,8 @@ use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{
     func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, hash_reference::HashReference,
     partial_reference::PartialReference, reference::Reference, table_name::TableName,
+    udf::IsolatePool,
 };
-use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     BoxError, LogicalTable,
@@ -123,7 +123,7 @@ async fn resolve_tables(
 
                 // Find table in dataset
                 let dataset_table = dataset
-                    .tables
+                    .tables()
                     .iter()
                     .find(|t| t.name() == table)
                     .ok_or_else(|| ResolveTablesError::TableNotFoundInDataset {
@@ -206,7 +206,7 @@ async fn resolve_udfs(
                 // Get the UDF for this function reference
                 let udf = if function.as_ref() == ETH_CALL_FUNCTION_NAME {
                     dataset_store
-                        .eth_call_for_dataset(&schema.to_string(), &dataset)
+                        .eth_call_for_dataset(&schema.to_string(), dataset.as_ref())
                         .await
                         .map_err(|err| ResolveUdfsError::EthCallUdfCreation {
                             reference: dataset_ref.clone(),
@@ -217,7 +217,10 @@ async fn resolve_udfs(
                         })?
                 } else {
                     dataset
-                        .function_by_name(schema.to_string(), function, isolate_pool.clone())
+                        .as_dataset_with_functions()
+                        .and_then(|d| {
+                            d.function_by_name(schema.to_string(), function, isolate_pool.clone())
+                        })
                         .ok_or_else(|| ResolveUdfsError::FunctionNotFoundInDataset {
                             function_name: func_ref.to_string(),
                             reference: dataset_ref,

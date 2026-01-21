@@ -4,6 +4,7 @@ pub mod convert;
 pub mod exception;
 pub mod isolate;
 pub mod isolate_pool;
+pub mod js_udf;
 
 #[cfg(test)]
 mod tests;

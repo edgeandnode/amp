@@ -1,11 +1,12 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError, Dataset};
+use common::{BlockNum, BoxError};
 use datasets_common::hash_reference::HashReference;
 use serde_with::serde_as;
 use url::Url;
 
 mod client;
+mod dataset;
 mod dataset_kind;
 pub mod metrics;
 pub mod tables;
@@ -15,6 +16,7 @@ pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 
 pub use self::{
     client::JsonRpcClient,
+    dataset::Dataset,
     dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
 };
 
@@ -83,17 +85,16 @@ pub struct ProviderConfig {
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
     let network = manifest.network;
-    Dataset {
+    crate::dataset::Dataset {
         reference,
         dependencies: BTreeMap::new(),
-        kind: manifest.kind.to_string(),
+        kind: manifest.kind,
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
         tables: tables::all(&network),
         network: Some(network),
-        functions: vec![],
     }
 }
 

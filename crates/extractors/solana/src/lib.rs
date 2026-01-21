@@ -13,11 +13,12 @@
 
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError, Dataset};
+use common::{BlockNum, BoxError};
 use datasets_common::{hash_reference::HashReference, manifest::TableSchema};
 use serde_with::serde_as;
 use url::Url;
 
+mod dataset;
 mod dataset_kind;
 mod extractor;
 mod metrics;
@@ -26,6 +27,7 @@ mod rpc_client;
 pub mod tables;
 
 pub use self::{
+    dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
     extractor::SolanaExtractor,
 };
@@ -88,16 +90,15 @@ pub struct ProviderConfig {
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
-    Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
+    crate::dataset::Dataset {
         reference,
         dependencies: BTreeMap::new(),
-        kind: manifest.kind.to_string(),
+        kind: manifest.kind,
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
         tables: tables::all(&manifest.network),
         network: Some(manifest.network),
-        functions: vec![],
     }
 }
 

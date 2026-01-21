@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use common::{
-    BoxError, RawTableRows, SPECIAL_BLOCK_NUM, Table,
+    BoxError, RawTableRows, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{ArrayRef, FixedSizeBinaryArray, StringArray, UInt64Array},
         datatypes::{DataType, Field, Schema},
     },
     metadata::segments::BlockRange,
 };
+use datasets_common::dataset::Table;
 
 pub fn table(network: String) -> Table {
     let name = "blocks".parse().expect("table name is valid");
