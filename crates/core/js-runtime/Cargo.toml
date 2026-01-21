@@ -5,7 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-v8 = "135.1.0"
+v8 = "145.0.0"
 datafusion.workspace = true
 thiserror.workspace = true
 blake3.workspace = true
