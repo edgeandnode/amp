@@ -1218,7 +1218,7 @@ pub enum RegisterError {
     /// Unsupported dataset kind (400, UNSUPPORTED_DATASET_KIND)
     ///
     /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, eth-beacon)
+    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
     #[error("unsupported dataset kind")]
     UnsupportedDatasetKind(#[source] ApiError),
 

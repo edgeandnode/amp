@@ -14,7 +14,6 @@ threads-required = "num-test-threads"
 # Exclude tests that require external dependencies
 default-filter = '''
   all() -
-  test(eth_beacon_single_dump) -
   test(eth_firehose_single_dump) -
   test(evm_rpc_single_dump) -
   test(evm_rpc_base_single_dump) -

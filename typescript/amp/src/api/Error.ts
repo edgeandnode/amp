@@ -438,7 +438,7 @@ export class ManifestValidationError extends Schema.Class<ManifestValidationErro
  * UnsupportedDatasetKind - Dataset kind is not supported.
  *
  * Causes:
- * - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, eth-beacon)
+ * - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
  * - Invalid or unknown dataset kind value
  * - Legacy dataset kinds that are no longer supported
  *

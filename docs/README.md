@@ -49,7 +49,6 @@ JSON schemas for defining datasets:
 
 - **[EVM RPC Schema](schemas/evm-rpc.md)** - Schema for Ethereum-compatible JSON-RPC data sources
 - **[Firehose EVM Schema](schemas/firehose-evm.md)** - Schema for StreamingFast Firehose protocol data
-- **[Ethereum Beacon Chain Schema](schemas/eth-beacon.md)** - Schema for Ethereum consensus layer data
 
 #### [User-Defined Functions (UDFs)](udfs.md)
 

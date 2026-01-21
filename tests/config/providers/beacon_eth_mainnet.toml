@@ -1,3 +1,0 @@
-kind = "eth-beacon"
-url = "${BEACON_ETH_MAINNET_URL}"
-network = "mainnet-beacon"

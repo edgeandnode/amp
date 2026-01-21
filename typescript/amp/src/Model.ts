@@ -49,11 +49,11 @@ export const DatasetName = Schema.String.pipe(
 )
 
 export type DatasetKind = typeof DatasetKind.Type
-export const DatasetKind = Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose").pipe(
+export const DatasetKind = Schema.Literal("manifest", "evm-rpc", "firehose").pipe(
   Schema.annotations({
     title: "DatasetKind",
     description: "the kind of dataset",
-    examples: ["manifest", "evm-rpc", "eth-beacon", "firehose"],
+    examples: ["manifest", "evm-rpc", "firehose"],
   }),
   Schema.brand("DatasetKind"),
 )
@@ -342,14 +342,6 @@ export class DatasetEvmRpc extends Schema.Class<DatasetEvmRpc>("DatasetEvmRpc")(
   tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
 }) {}
 
-export class DatasetEthBeacon extends Schema.Class<DatasetEthBeacon>("DatasetEthBeacon")({
-  kind: Schema.Literal("eth-beacon"),
-  network: Network,
-  startBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("start_block")),
-  finalizedBlocksOnly: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("finalized_blocks_only")),
-  tables: Schema.Record({ key: Schema.String, value: RawDatasetTable }),
-}) {}
-
 export class DatasetFirehose extends Schema.Class<DatasetFirehose>("DatasetFirehose")({
   kind: Schema.Literal("firehose"),
   network: Network,
@@ -367,10 +359,9 @@ export class DatasetFirehose extends Schema.Class<DatasetFirehose>("DatasetFireh
  * Supported kinds:
  * - DatasetDerived (kind: "manifest") - SQL-based derived datasets
  * - DatasetEvmRpc (kind: "evm-rpc") - EVM RPC extraction datasets
- * - DatasetEthBeacon (kind: "eth-beacon") - ETH beacon extraction datasets
  * - DatasetFirehose (kind: "firehose") - Firehose extraction datasets
  */
-export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc, DatasetEthBeacon, DatasetFirehose)
+export const DatasetManifest = Schema.Union(DatasetDerived, DatasetEvmRpc, DatasetFirehose)
 export type DatasetManifest = Schema.Schema.Type<typeof DatasetManifest>
 
 export const JobId = Schema.Number.pipe(

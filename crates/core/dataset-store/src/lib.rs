@@ -20,9 +20,6 @@ use datasets_common::{
     reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
-use eth_beacon_datasets::{
-    Manifest as EthBeaconManifest, ProviderConfig as EthBeaconProviderConfig,
-};
 use evm_rpc_datasets::{
     EvmRpcDatasetKind, Manifest as EvmRpcManifest, ProviderConfig as EvmRpcProviderConfig,
 };
@@ -171,16 +168,6 @@ impl DatasetStore {
                         source,
                     })?;
                 Arc::new(solana_datasets::dataset(reference.clone(), manifest))
-            }
-            DatasetKind::EthBeacon => {
-                let manifest = manifest_content
-                    .try_into_manifest::<EthBeaconManifest>()
-                    .map_err(|source| GetDatasetError::ParseManifest {
-                        reference: reference.clone(),
-                        kind,
-                        source,
-                    })?;
-                Arc::new(eth_beacon_datasets::dataset(reference.clone(), manifest))
             }
             DatasetKind::Firehose => {
                 let manifest = manifest_content
@@ -338,15 +325,6 @@ impl DatasetStore {
                         name: provider_name.to_string(),
                         source: err,
                     })?
-            }
-            DatasetKind::EthBeacon => {
-                let config = config
-                    .try_into_config::<EthBeaconProviderConfig>()
-                    .map_err(|err| GetClientError::ProviderConfigParseError {
-                        name: provider_name.clone(),
-                        source: err,
-                    })?;
-                BlockStreamClient::EthBeacon(eth_beacon_datasets::client(config))
             }
             DatasetKind::Firehose => {
                 let config = config

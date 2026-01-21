@@ -45,6 +45,7 @@ Central command dispatcher with the following commands:
 - **Admin API Server** (port 1610): Management and control API
 
 Features:
+
 - SQL query execution via DataFusion
 - Streaming query support
 
@@ -68,11 +69,6 @@ Features:
 - Old Faithful archive support (CAR file format)
 - Solana RPC WebSocket subscriptions
 - Real-time block streaming
-
-#### ETH Beacon (`eth-beacon`)
-
-- Ethereum Beacon chain data extraction
-- Consensus layer data support
 
 ### Core Libraries
 

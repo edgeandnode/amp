@@ -209,22 +209,18 @@ gen:
     RUSTFLAGS="--cfg gen_schema_manifest --cfg gen_schema_tables --cfg gen_openapi_spec" cargo check --workspace
     @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}} {{GEN_TABLE_SCHEMAS_OUTDIR}}
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
-    @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/eth-beacon.spec.json
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
     @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/solana.spec.json
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json
-    @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/eth-beacon.md
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/evm-rpc.md
     @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/solana.md
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/firehose-evm.md
     @cp -f $(ls -t target/debug/build/admin-api-gen-*/out/openapi.spec.json | head -1) {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json
     @echo "Schemas generated and copied:"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json"
-    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/eth-beacon.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/solana.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json"
-    @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/eth-beacon.md"
     @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/evm-rpc.md"
     @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/firehose-evm.md"
     @echo "  {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json"
@@ -238,14 +234,6 @@ gen-derived-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
-
-# Generate the ETH Beacon dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema_manifest" cargo build)
-[group: 'codegen']
-gen-eth-beacon-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
-    RUSTFLAGS="--cfg gen_schema_manifest" cargo check -p datasets-eth-beacon-gen
-    @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/schema.json | head -1) {{DEST_DIR}}/eth-beacon.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/eth-beacon.spec.json"
 
 # Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema_manifest" cargo build)
 [group: 'codegen']
@@ -272,14 +260,6 @@ gen-firehose-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
 
 ### Table Schema markdown generation
-
-# Generate the ETH Beacon table schema markdown (RUSTFLAGS="--cfg gen_schema_tables" cargo build)
-[group: 'codegen']
-gen-eth-beacon-tables-schema DEST_DIR=GEN_TABLE_SCHEMAS_OUTDIR:
-    RUSTFLAGS="--cfg gen_schema_tables" cargo check -p datasets-eth-beacon-gen
-    @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-eth-beacon-gen-*/out/tables.md | head -1) {{DEST_DIR}}/eth-beacon.md
-    @echo "Table schema markdown generated and copied to {{DEST_DIR}}/eth-beacon.md"
 
 # Generate the EVM RPC table schema markdown (RUSTFLAGS="--cfg gen_schema_tables" cargo build)
 [group: 'codegen']

@@ -51,7 +51,7 @@ pub enum GetDatasetError {
     /// Dataset kind is not supported
     ///
     /// This occurs when the `kind` field in the manifest contains a value that
-    /// doesn't match any supported dataset type (evm-rpc, eth-beacon, firehose, derived).
+    /// doesn't match any supported dataset type (evm-rpc, firehose, derived).
     #[error("Unsupported dataset kind '{kind}' for dataset '{reference}'")]
     UnsupportedKind {
         reference: HashReference,
@@ -181,16 +181,16 @@ pub enum GetClientError {
     /// The dataset kind is not a raw dataset type.
     ///
     /// This occurs when trying to get a client for a dataset that is not a raw data source.
-    /// Only raw dataset kinds (evm-rpc, eth-beacon, firehose) can have clients retrieved.
+    /// Only raw dataset kinds (evm-rpc, firehose) can have clients retrieved.
     /// SQL and Derived datasets cannot have clients as they are views over other datasets.
     #[error(
-        "Dataset has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc, eth-beacon, or firehose)"
+        "Dataset has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc or firehose)"
     )]
     UnsupportedKind { kind: String },
 
     /// Dataset is missing the required 'network' field.
     ///
-    /// This occurs when a raw dataset definition (evm-rpc, eth-beacon, or firehose)
+    /// This occurs when a raw dataset definition (evm-rpc or firehose)
     /// does not include the network field, which is required to determine the appropriate provider configuration.
     #[error("Dataset is missing required 'network' field for raw dataset kind")]
     MissingNetwork,

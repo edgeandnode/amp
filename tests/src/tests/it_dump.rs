@@ -32,34 +32,6 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
-async fn eth_beacon_single_dump() {
-    //* Given
-    let test = TestCtx::setup(
-        "eth_beacon_single_dump",
-        "_/eth_beacon@0.0.0",
-        "beacon_eth_mainnet",
-    )
-    .await;
-
-    let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
-
-    //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
-
-    //* Then
-    // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
-            .await
-            .expect("Table consistency check failed");
-    }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
-}
-
-#[tokio::test]
 async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     //* Given
     let test = TestCtx::setup(

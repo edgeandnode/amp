@@ -22,7 +22,6 @@ console = "0.16.1"
 amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
-eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 monitoring = { path = "../../core/monitoring" }

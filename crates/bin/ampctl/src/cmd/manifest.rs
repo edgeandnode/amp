@@ -12,7 +12,7 @@ pub mod remove;
 pub enum Commands {
     /// Generate a dataset manifest file
     ///
-    /// Creates a dataset manifest for supported dataset kinds (evm-rpc, eth-beacon,
+    /// Creates a dataset manifest for supported dataset kinds (evm-rpc,
     /// firehose). The manifest can be written to a file or printed to stdout.
     ///
     /// If the output is a directory, the filename will match the dataset kind.

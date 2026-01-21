@@ -17,7 +17,6 @@ amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
-eth-beacon-datasets = { path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true

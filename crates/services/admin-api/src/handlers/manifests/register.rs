@@ -11,7 +11,6 @@ use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
 };
-use eth_beacon_datasets::Manifest as EthBeaconManifest;
 use evm_rpc_datasets::Manifest as EvmRpcManifest;
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
 use monitoring::logging;
@@ -38,7 +37,7 @@ use crate::{
 /// The request body should contain a complete manifest JSON object. The manifest kind determines
 /// the validation rules:
 /// - `kind="manifest"` (Derived): Validates SQL dependencies
-/// - `kind="evm-rpc"`, `kind="firehose"`, `kind="eth-beacon"` (Raw): Validates structure only
+/// - `kind="evm-rpc"`, `kind="firehose"`, `kind="solana"` (Raw): Validates structure only
 ///
 /// ## Response
 /// - **201 Created**: Manifest successfully registered, returns the computed hash
@@ -128,10 +127,6 @@ pub async fn handler(
             parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&manifest_str)
                 .map_err(Error::from)?
         }
-        DatasetKind::EthBeacon => {
-            parse_and_canonicalize_raw_dataset_manifest::<EthBeaconManifest>(&manifest_str)
-                .map_err(Error::from)?
-        }
     };
 
     // Compute manifest hash from canonical serialization
@@ -209,10 +204,10 @@ pub enum Error {
     /// Unsupported dataset kind
     ///
     /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, eth-beacon)
+    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
     /// - The 'kind' field in the manifest contains an unrecognized value
     #[error(
-        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose', 'eth-beacon'"
+        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose'"
     )]
     UnsupportedDatasetKind(String),
 
