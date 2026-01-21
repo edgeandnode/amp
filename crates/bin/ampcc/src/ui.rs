@@ -9,11 +9,15 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+        ScrollbarOrientation, Table, Wrap,
     },
 };
 
-use crate::app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
+use crate::app::{
+    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QUERY_TEMPLATES,
+    QueryResults,
+};
 
 // ============================================================================
 // The Graph Color Palette
@@ -176,6 +180,276 @@ impl Theme {
     }
 }
 
+// ============================================================================
+// SQL Syntax Highlighting
+// ============================================================================
+
+/// SQL keywords for syntax highlighting.
+const SQL_KEYWORDS: &[&str] = &[
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "LIKE",
+    "JOIN",
+    "LEFT",
+    "RIGHT",
+    "INNER",
+    "OUTER",
+    "ON",
+    "ORDER",
+    "BY",
+    "ASC",
+    "DESC",
+    "GROUP",
+    "HAVING",
+    "LIMIT",
+    "OFFSET",
+    "INSERT",
+    "INTO",
+    "VALUES",
+    "UPDATE",
+    "SET",
+    "DELETE",
+    "CREATE",
+    "TABLE",
+    "INDEX",
+    "DROP",
+    "ALTER",
+    "AS",
+    "DISTINCT",
+    "ALL",
+    "UNION",
+    "INTERSECT",
+    "EXCEPT",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "NULL",
+    "TRUE",
+    "FALSE",
+    "COUNT",
+    "SUM",
+    "AVG",
+    "MIN",
+    "MAX",
+    "DESCRIBE",
+    "IS",
+    "BETWEEN",
+    "EXISTS",
+    "CROSS",
+    "FULL",
+    "NATURAL",
+    "USING",
+    "WITH",
+    "RECURSIVE",
+    "OVER",
+    "PARTITION",
+    "WINDOW",
+    "ROWS",
+    "RANGE",
+    "UNBOUNDED",
+    "PRECEDING",
+    "FOLLOWING",
+    "CURRENT",
+    "ROW",
+];
+
+/// SQL token types for syntax highlighting.
+#[derive(Debug, Clone)]
+enum SqlToken {
+    Keyword(String),
+    String(String),
+    Number(String),
+    Operator(String),
+    Identifier(String),
+    Whitespace(String),
+    Punctuation(String),
+}
+
+/// Tokenize SQL input for syntax highlighting.
+fn tokenize_sql(input: &str) -> Vec<SqlToken> {
+    let mut tokens = Vec::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            // Whitespace
+            ' ' | '\t' | '\n' | '\r' => {
+                let mut ws = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() {
+                        ws.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::Whitespace(ws));
+            }
+            // String literal (single quote)
+            '\'' => {
+                let quote = chars.next().unwrap();
+                let mut s = String::from(quote);
+                while let Some(&c) = chars.peek() {
+                    s.push(chars.next().unwrap());
+                    if c == '\'' {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::String(s));
+            }
+            // String literal (double quote)
+            '"' => {
+                let quote = chars.next().unwrap();
+                let mut s = String::from(quote);
+                while let Some(&c) = chars.peek() {
+                    s.push(chars.next().unwrap());
+                    if c == '"' {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::String(s));
+            }
+            // Number
+            '0'..='9' => {
+                let mut num = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_digit() || c == '.' {
+                        num.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(SqlToken::Number(num));
+            }
+            // Operators
+            '=' | '<' | '>' | '!' | '+' | '-' | '*' | '/' | '%' => {
+                let mut op = String::new();
+                op.push(chars.next().unwrap());
+                // Handle two-character operators like !=, <=, >=, <>
+                if let Some(&next_ch) = chars.peek()
+                    && ((ch == '!' && next_ch == '=')
+                        || (ch == '<' && (next_ch == '=' || next_ch == '>'))
+                        || (ch == '>' && next_ch == '='))
+                {
+                    op.push(chars.next().unwrap());
+                }
+                tokens.push(SqlToken::Operator(op));
+            }
+            // Punctuation
+            '(' | ')' | ',' | ';' | '.' | ':' => {
+                tokens.push(SqlToken::Punctuation(chars.next().unwrap().to_string()));
+            }
+            // Word (keyword or identifier)
+            _ if ch.is_alphabetic() || ch == '_' => {
+                let mut word = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_alphanumeric() || c == '_' {
+                        word.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                if SQL_KEYWORDS.contains(&word.to_uppercase().as_str()) {
+                    tokens.push(SqlToken::Keyword(word));
+                } else {
+                    tokens.push(SqlToken::Identifier(word));
+                }
+            }
+            // Other characters (backticks, brackets, etc.)
+            _ => {
+                tokens.push(SqlToken::Identifier(chars.next().unwrap().to_string()));
+            }
+        }
+    }
+
+    tokens
+}
+
+/// Get the style for a SQL token.
+fn sql_token_style(token: &SqlToken) -> Style {
+    match token {
+        SqlToken::Keyword(_) => Theme::accent(),
+        SqlToken::String(_) => Theme::status_success(),
+        SqlToken::Number(_) => Theme::type_annotation(),
+        SqlToken::Operator(_) => Theme::text_secondary(),
+        SqlToken::Identifier(_) => Theme::text_primary(),
+        SqlToken::Whitespace(_) => Style::default(),
+        SqlToken::Punctuation(_) => Theme::text_secondary(),
+    }
+}
+
+/// Get the text content of a SQL token.
+fn sql_token_text(token: &SqlToken) -> &str {
+    match token {
+        SqlToken::Keyword(s)
+        | SqlToken::String(s)
+        | SqlToken::Number(s)
+        | SqlToken::Operator(s)
+        | SqlToken::Identifier(s)
+        | SqlToken::Whitespace(s)
+        | SqlToken::Punctuation(s) => s,
+    }
+}
+
+/// Highlight SQL and insert cursor at specified position.
+/// Returns spans for a single line with cursor indicator.
+fn highlight_sql_with_cursor(line: &str, cursor_col: Option<usize>) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+
+    if let Some(col) = cursor_col {
+        // Tokenize the entire line
+        let tokens = tokenize_sql(line);
+
+        let mut current_pos = 0;
+        let mut cursor_inserted = false;
+
+        for token in &tokens {
+            let token_text = sql_token_text(token);
+            let token_len = token_text.len();
+            let token_end = current_pos + token_len;
+            let style = sql_token_style(token);
+
+            if !cursor_inserted && col >= current_pos && col < token_end {
+                // Cursor is within this token
+                let offset_in_token = col - current_pos;
+                let (before, after) = token_text.split_at(offset_in_token);
+                if !before.is_empty() {
+                    result.push(Span::styled(before.to_string(), style));
+                }
+                result.push(Span::styled("_", Theme::status_warning()));
+                cursor_inserted = true;
+                if !after.is_empty() {
+                    result.push(Span::styled(after.to_string(), style));
+                }
+            } else {
+                result.push(Span::styled(token_text.to_string(), style));
+            }
+
+            current_pos = token_end;
+        }
+
+        // If cursor is at end of line
+        if !cursor_inserted && col >= current_pos {
+            result.push(Span::styled("_", Theme::status_warning()));
+        }
+    } else {
+        // No cursor on this line - just highlight without cursor
+        for token in tokenize_sql(line) {
+            let style = sql_token_style(&token);
+            let text = sql_token_text(&token).to_string();
+            result.push(Span::styled(text, style));
+        }
+    }
+
+    result
+}
+
 /// ASCII art logo for splash screen (displayed when Header pane is focused).
 const AMP_LOGO: &str = r#"
                     ▒█░                     
@@ -215,6 +489,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_header(f, app, chunks[0]);
     draw_main(f, app, chunks[1]);
     draw_footer(f, app, chunks[2]);
+
+    // Draw template picker popup on top if open
+    if app.template_picker_open {
+        draw_template_picker(f, app);
+    }
+
+    // Draw favorites panel popup on top if open
+    if app.favorites_panel_open {
+        draw_favorites_panel(f, app);
+    }
 }
 
 /// Draw the header with source information.
@@ -659,6 +943,20 @@ fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
         ContentView::Worker(worker) => {
             draw_worker_detail(f, app, worker.clone(), area);
         }
+        ContentView::QueryResults => {
+            // Dynamic height for query input: line count + 2 (borders), clamped to 3-10 lines
+            let query_height = (app.query_line_count() as u16 + 2).clamp(3, 10);
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(query_height), // Query input
+                    Constraint::Min(0),               // Results
+                ])
+                .split(area);
+
+            draw_query_input(f, app, chunks[0]);
+            draw_query_results(f, app, chunks[1]);
+        }
         ContentView::None => {
             draw_empty_content(f, area);
         }
@@ -678,6 +976,285 @@ fn draw_empty_content(f: &mut Frame, area: Rect) {
         .alignment(Alignment::Center);
 
     f.render_widget(text, area);
+}
+
+/// Draw the SQL query input panel.
+fn draw_query_input(f: &mut Frame, app: &App, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::Query {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let line_count = app.query_line_count();
+    let star = if app.is_current_query_favorite() {
+        " ★"
+    } else {
+        ""
+    };
+    let history = app.current_history();
+    let title = if app.input_mode == InputMode::Query {
+        if let Some(idx) = app.query_history_index {
+            format!(
+                "SQL Query{} (history {}/{}) [Ctrl+Enter execute, Esc cancel]",
+                star,
+                idx + 1,
+                history.len()
+            )
+        } else if !history.is_empty() {
+            format!(
+                "SQL Query{} ({} lines) [↑↓ nav, Ctrl+F fav, F/*, Ctrl+Enter]",
+                star, line_count
+            )
+        } else {
+            format!(
+                "SQL Query{} ({} lines) [F/* toggle fav, Ctrl+Enter execute]",
+                star, line_count
+            )
+        }
+    } else {
+        format!("SQL Query{} (press Q to edit)", star)
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Build lines with SQL syntax highlighting and cursor rendering
+    let lines: Vec<Line> = if app.input_mode == InputMode::Query {
+        let query_lines = app.query_lines();
+        query_lines
+            .iter()
+            .enumerate()
+            .map(|(line_idx, line_text)| {
+                let cursor_col = if line_idx == app.query_cursor.line {
+                    Some(app.query_cursor.column.min(line_text.len()))
+                } else {
+                    None
+                };
+                Line::from(highlight_sql_with_cursor(line_text, cursor_col))
+            })
+            .collect()
+    } else {
+        // Not in query mode, show syntax highlighting without cursor
+        app.query_lines()
+            .iter()
+            .map(|line| Line::from(highlight_sql_with_cursor(line, None)))
+            .collect()
+    };
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.query_input_scroll, 0));
+    f.render_widget(paragraph, area);
+}
+
+/// Calculate column widths based on content, with min/max constraints.
+///
+/// Returns a vector of pixel widths for each column, auto-sized based on content
+/// and scaled proportionally if total exceeds available width.
+fn calculate_column_widths(results: &QueryResults, available_width: u16) -> Vec<u16> {
+    let col_count = results.columns.len();
+    if col_count == 0 {
+        return vec![];
+    }
+
+    // Calculate max width needed for each column (considering headers)
+    let mut max_widths: Vec<usize> = results.columns.iter().map(|c| c.len()).collect();
+
+    // Check data rows for wider content
+    for row in &results.rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < max_widths.len() {
+                max_widths[i] = max_widths[i].max(cell.len());
+            }
+        }
+    }
+
+    // Apply min (5 chars) and max (50 chars) constraints
+    const MIN_WIDTH: u16 = 5;
+    const MAX_WIDTH: u16 = 50;
+
+    let mut widths: Vec<u16> = max_widths
+        .iter()
+        .map(|&w| (w as u16).clamp(MIN_WIDTH, MAX_WIDTH))
+        .collect();
+
+    // Account for borders and spacing between columns (3 chars per column for " | ")
+    let total_padding = (col_count as u16).saturating_mul(3);
+    let usable = available_width.saturating_sub(total_padding);
+
+    // Scale proportionally if total exceeds available width
+    let total: u16 = widths.iter().sum();
+    if total > usable && total > 0 {
+        let scale = usable as f32 / total as f32;
+        widths = widths
+            .iter()
+            .map(|&w| ((w as f32 * scale) as u16).max(MIN_WIDTH))
+            .collect();
+    }
+
+    widths
+}
+
+/// Draw the SQL query results table.
+fn draw_query_results(f: &mut Frame, app: &mut App, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::QueryResult {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let Some(results) = &app.query_results else {
+        let block = Block::default()
+            .title("Query Results")
+            .borders(Borders::ALL)
+            .border_style(border_style);
+        let text = Paragraph::new("No query executed yet. Press Q to enter a SQL query.")
+            .block(block)
+            .style(Theme::text_secondary());
+        f.render_widget(text, area);
+        return;
+    };
+
+    // Show error if present
+    if let Some(error) = &results.error {
+        let block = Block::default()
+            .title("Query Error")
+            .borders(Borders::ALL)
+            .border_style(Theme::status_error());
+        let text = Paragraph::new(error.as_str())
+            .block(block)
+            .style(Theme::status_error())
+            .wrap(Wrap { trim: false });
+        f.render_widget(text, area);
+        return;
+    }
+
+    // Build title with sort info
+    let sort_info = if app.result_sort_pending {
+        " - Press 1-9 for column".to_string()
+    } else if let Some(col) = app.result_sort_column {
+        let dir = if app.result_sort_ascending {
+            "▲"
+        } else {
+            "▼"
+        };
+        let col_name = results.columns.get(col).map(|s| s.as_str()).unwrap_or("?");
+        format!(" - sorted by {} {}", col_name, dir)
+    } else {
+        String::new()
+    };
+
+    let title = format!(
+        "Query Results ({} rows){} [E]xport [s]ort [S]clear",
+        results.row_count, sort_info
+    );
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Handle empty results
+    if results.columns.is_empty() {
+        let text = Paragraph::new("Query returned no columns.")
+            .block(block)
+            .style(Theme::text_secondary());
+        f.render_widget(text, area);
+        return;
+    }
+
+    // Calculate auto-sized column widths based on content
+    // Account for 2 chars of border on each side of the table
+    let available_width = area.width.saturating_sub(2);
+    let col_widths = calculate_column_widths(results, available_width);
+
+    // Build table header with column numbers and sort indicators
+    let header_cells: Vec<Cell> = results
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(idx, c)| {
+            let col_num = idx + 1; // 1-indexed for user display
+            let sort_indicator = if app.result_sort_column == Some(idx) {
+                if app.result_sort_ascending {
+                    " ▲"
+                } else {
+                    " ▼"
+                }
+            } else {
+                ""
+            };
+            let header_text = format!("[{}] {}{}", col_num, c, sort_indicator);
+            Cell::from(header_text).style(Theme::text_primary().add_modifier(Modifier::BOLD))
+        })
+        .collect();
+    let header = Row::new(header_cells).height(1);
+
+    // Build table rows with truncation based on calculated column widths
+    // Use sorted indices if sorting is active, otherwise use original order
+    let sorted_indices = app.get_sorted_indices();
+    let row_indices: Vec<usize> =
+        sorted_indices.unwrap_or_else(|| (0..results.rows.len()).collect());
+
+    let rows: Vec<Row> = row_indices
+        .iter()
+        .map(|&row_idx| {
+            let row = &results.rows[row_idx];
+            let cells: Vec<Cell> = row
+                .iter()
+                .enumerate()
+                .map(|(col_idx, val)| {
+                    // Get the calculated width for this column (default to 50 if out of bounds)
+                    let max_width = col_widths.get(col_idx).copied().unwrap_or(50) as usize;
+                    let display = if val.len() > max_width && max_width > 3 {
+                        format!("{}...", &val[..max_width.saturating_sub(3)])
+                    } else {
+                        val.clone()
+                    };
+                    Cell::from(display)
+                })
+                .collect();
+            Row::new(cells)
+        })
+        .collect();
+
+    // Convert widths to constraints for the table
+    let widths: Vec<Constraint> = col_widths.iter().map(|&w| Constraint::Length(w)).collect();
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(Theme::selection());
+
+    // Update content length for scrolling
+    app.query_content_length = results.rows.len();
+    app.query_scroll_state = app.query_scroll_state.content_length(results.rows.len());
+
+    // Render with scroll state
+    let mut table_state = ratatui::widgets::TableState::default();
+    table_state.select(Some(app.query_scroll as usize));
+
+    f.render_stateful_widget(table, area, &mut table_state);
+
+    // Draw scrollbar if content exceeds visible area
+    let visible_rows = area.height.saturating_sub(3) as usize; // -3 for borders and header
+    if results.rows.len() > visible_rows {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut scrollbar_state = app
+            .query_scroll_state
+            .content_length(results.rows.len())
+            .position(app.query_scroll as usize);
+        f.render_stateful_widget(
+            scrollbar,
+            area.inner(ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            &mut scrollbar_state,
+        );
+    }
 }
 
 /// Format job descriptor fields as readable lines (generic key-value display).
@@ -1200,6 +1777,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             "Search: {}_ (Enter to confirm, Esc to cancel)",
             app.search_query
         )
+    } else if matches!(app.input_mode, InputMode::Query) {
+        "Query: Type SQL, Ctrl+Enter to execute, Esc to cancel".to_string()
     } else {
         let source_hint = match app.current_source {
             DataSource::Local => "[1]Local [2]Registry",
@@ -1210,9 +1789,29 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         let context_keys = match app.active_pane {
             ActivePane::Jobs => "[s] Stop [d] Delete [r] Refresh",
             ActivePane::Workers => "[r] Refresh",
-            ActivePane::Datasets => "[Enter] Expand [r] Refresh",
+            ActivePane::Datasets => {
+                if app.is_local() {
+                    "[Enter] Expand [r] Refresh [Q] Query"
+                } else {
+                    "[Enter] Expand [r] Refresh"
+                }
+            }
             ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => "[Ctrl+u/d] Scroll",
             ActivePane::Header => "[Tab] Navigate",
+            ActivePane::Query => {
+                if app.current_history().is_empty() {
+                    "[Ctrl+Enter] Execute [Esc] Cancel"
+                } else {
+                    "[↑↓] History [Ctrl+Enter] Execute [Esc] Cancel"
+                }
+            }
+            ActivePane::QueryResult => {
+                if app.result_sort_pending {
+                    "Sort: Press 1-9 for column, Esc to cancel"
+                } else {
+                    "[s] Sort [S] Clear sort [E] Export [j/k] Scroll [Q] Edit"
+                }
+            }
         };
 
         format!(
@@ -1221,7 +1820,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         )
     };
 
-    // Build the right side (loading indicator or error message)
+    // Build the right side (loading indicator, success message, or error message)
     let (right_spans, right_width): (Vec<Span>, u16) = if app.loading {
         // Show loading spinner
         let mut spans = Vec::new();
@@ -1238,6 +1837,19 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             .map(|m| m.len() + 1)
             .unwrap_or(0);
         (spans, (msg_len + 2) as u16)
+    } else if let Some(success) = &app.success_message {
+        // Show success message (green)
+        let display_success = if success.len() > 60 {
+            format!("{}...", &success[..57])
+        } else {
+            success.clone()
+        };
+        let spans = vec![Span::styled(
+            format!("✓ {}", display_success),
+            Theme::status_success(),
+        )];
+        let width = (display_success.len() + 3) as u16; // icon + space + message
+        (spans, width)
     } else if let Some(error) = &app.error_message {
         // Show error message
         let display_error = if error.len() > 50 {
@@ -1282,4 +1894,144 @@ fn truncate_url(url: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &url[..max_len - 3])
     }
+}
+
+/// Draw the template picker popup.
+fn draw_template_picker(f: &mut Frame, app: &App) {
+    // Calculate popup dimensions
+    let popup_width = 60u16;
+    let popup_height = (QUERY_TEMPLATES.len() + 4) as u16; // templates + borders + title + footer
+
+    // Center the popup
+    let area = f.area();
+    let x = area.width.saturating_sub(popup_width) / 2;
+    let y = area.height.saturating_sub(popup_height) / 2;
+    let popup_area = Rect::new(
+        x,
+        y,
+        popup_width.min(area.width),
+        popup_height.min(area.height),
+    );
+
+    // Clear the popup area with a background
+    let clear = ratatui::widgets::Clear;
+    f.render_widget(clear, popup_area);
+
+    // Build template list items
+    let items: Vec<ListItem> = QUERY_TEMPLATES
+        .iter()
+        .enumerate()
+        .map(|(idx, template)| {
+            // Resolve the template to show preview
+            let resolved = app.resolve_template(template.pattern);
+            let truncated = if resolved.len() > 50 {
+                format!("{}...", &resolved[..47])
+            } else {
+                resolved
+            };
+
+            let style = if idx == app.template_picker_index {
+                Theme::selection()
+            } else {
+                Theme::text_primary()
+            };
+
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("{:<16}", template.description),
+                    Theme::text_secondary(),
+                ),
+                Span::styled(truncated, style),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Select Template (↑↓ navigate, Enter select, Esc cancel)")
+                .borders(Borders::ALL)
+                .border_style(Theme::border_focused()),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol(">> ");
+
+    let mut state = ListState::default();
+    state.select(Some(app.template_picker_index));
+
+    f.render_stateful_widget(list, popup_area, &mut state);
+}
+
+/// Draw the favorites panel popup.
+fn draw_favorites_panel(f: &mut Frame, app: &App) {
+    // Calculate popup dimensions
+    let popup_width = 70u16;
+    let popup_height = (app.favorite_queries.len().min(10) + 4) as u16;
+
+    // Center the popup
+    let area = f.area();
+    let x = area.width.saturating_sub(popup_width) / 2;
+    let y = area.height.saturating_sub(popup_height) / 2;
+    let popup_area = Rect::new(
+        x,
+        y,
+        popup_width.min(area.width),
+        popup_height.min(area.height),
+    );
+
+    // Clear the popup area
+    let clear = ratatui::widgets::Clear;
+    f.render_widget(clear, popup_area);
+
+    if app.favorite_queries.is_empty() {
+        // Show empty message
+        let block = Block::default()
+            .title("Favorites (empty)")
+            .borders(Borders::ALL)
+            .border_style(Theme::border_focused());
+        let text = Paragraph::new("No favorites yet. Press * or F in query mode to add.")
+            .block(block)
+            .style(Theme::text_secondary());
+        f.render_widget(text, popup_area);
+        return;
+    }
+
+    // Build favorites list items
+    let items: Vec<ListItem> = app
+        .favorite_queries
+        .iter()
+        .enumerate()
+        .map(|(idx, query)| {
+            // Truncate long queries
+            let truncated = if query.len() > 60 {
+                format!("{}...", &query[..57])
+            } else {
+                query.clone()
+            };
+
+            let style = if idx == app.favorites_panel_index {
+                Theme::selection()
+            } else {
+                Theme::text_primary()
+            };
+
+            ListItem::new(Span::styled(truncated, style))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Favorites (↑↓ nav, Enter load, d delete, Esc close)")
+                .borders(Borders::ALL)
+                .border_style(Theme::border_focused()),
+        )
+        .highlight_style(Theme::selection())
+        .highlight_symbol("★ ");
+
+    let mut state = ListState::default();
+    state.select(Some(app.favorites_panel_index));
+
+    f.render_stateful_widget(list, popup_area, &mut state);
 }

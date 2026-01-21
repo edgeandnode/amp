@@ -10,6 +10,9 @@ use admin_client::{
     workers::{WorkerDetailResponse, WorkerInfo},
 };
 use anyhow::Result;
+use arrow::array::{
+    Array, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray, UInt64Array,
+};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
@@ -17,6 +20,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc;
 use worker::{job::JobId, node_id::NodeId};
@@ -26,7 +30,10 @@ mod config;
 mod registry;
 mod ui;
 
-use app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
+use app::{
+    ActivePane, App, ContentView, DataSource, InputMode, InspectResult, QUERY_TEMPLATES,
+    QueryResults,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Auto-refresh interval for jobs/workers (10 seconds).
@@ -40,6 +47,7 @@ enum AppEvent {
     WorkerDetailLoaded(Option<WorkerDetailResponse>),
     JobStopped(Result<(), String>),
     JobDeleted(Result<(), String>),
+    QueryCompleted(QueryResults),
     Error(String),
 }
 
@@ -47,6 +55,15 @@ enum AppEvent {
 async fn main() -> Result<()> {
     let config = config::Config::load()?;
     let mut app = App::new(config)?;
+
+    // Load persisted history
+    if let Err(e) = app.load_history() {
+        eprintln!("Warning: could not load history: {}", e);
+        // Continue anyway - not fatal
+    }
+
+    // Load favorites
+    app.load_favorites();
 
     // Fetch initial datasets
     if let Err(e) = app.fetch_datasets().await {
@@ -107,6 +124,13 @@ where
         // Tick spinner animation (only when loading)
         if app.loading {
             app.tick_spinner();
+            app.needs_redraw = true;
+        }
+
+        // Tick message expiration (for success messages)
+        let had_message = app.success_message.is_some();
+        app.tick_messages();
+        if had_message && app.success_message.is_none() {
             app.needs_redraw = true;
         }
 
@@ -172,6 +196,15 @@ where
                     }
                     app.stop_loading();
                 }
+                AppEvent::QueryCompleted(results) => {
+                    app.query_results = Some(results);
+                    app.query_scroll = 0;
+                    app.query_scroll_state = ratatui::widgets::ScrollbarState::default();
+                    app.content_view = ContentView::QueryResults;
+                    app.active_pane = ActivePane::QueryResult;
+                    app.input_mode = InputMode::Normal;
+                    app.stop_loading();
+                }
                 AppEvent::Error(msg) => {
                     app.error_message = Some(msg);
                     app.stop_loading();
@@ -184,6 +217,70 @@ where
         if event::poll(tick_rate)? {
             match event::read()? {
                 Event::Key(key) => {
+                    // Handle template picker if open (modal popup)
+                    if app.template_picker_open {
+                        match key.code {
+                            KeyCode::Up => {
+                                if app.template_picker_index > 0 {
+                                    app.template_picker_index -= 1;
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.template_picker_index < QUERY_TEMPLATES.len() - 1 {
+                                    app.template_picker_index += 1;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Apply selected template
+                                let template = &QUERY_TEMPLATES[app.template_picker_index];
+                                let resolved = app.resolve_template(template.pattern);
+                                app.set_query_input(resolved);
+                                app.template_picker_open = false;
+                            }
+                            KeyCode::Esc => {
+                                app.template_picker_open = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    // Handle favorites panel if open (modal popup)
+                    if app.favorites_panel_open {
+                        match key.code {
+                            KeyCode::Up => {
+                                if app.favorites_panel_index > 0 {
+                                    app.favorites_panel_index -= 1;
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.favorites_panel_index
+                                    < app.favorite_queries.len().saturating_sub(1)
+                                {
+                                    app.favorites_panel_index += 1;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Load selected favorite into query input
+                                if let Some(query) =
+                                    app.favorite_queries.get(app.favorites_panel_index).cloned()
+                                {
+                                    app.set_query_input(query);
+                                    app.favorites_panel_open = false;
+                                }
+                            }
+                            KeyCode::Char('d') => {
+                                // Delete the selected favorite
+                                app.remove_favorite(app.favorites_panel_index);
+                            }
+                            KeyCode::Esc => {
+                                app.favorites_panel_open = false;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
                     match app.input_mode {
                         InputMode::Normal => {
                             match key.code {
@@ -221,6 +318,25 @@ where
                                 // Search
                                 KeyCode::Char('/') => {
                                     app.input_mode = InputMode::Search;
+                                }
+
+                                // Query mode (Q key) - only in Local mode
+                                KeyCode::Char('Q') => {
+                                    if app.is_local() {
+                                        app.input_mode = InputMode::Query;
+                                        app.active_pane = ActivePane::Query;
+                                        app.content_view = ContentView::QueryResults;
+                                        // Pre-populate with template if dataset selected and input empty
+                                        if app.query_input.is_empty()
+                                            && let Some((ns, name, _)) =
+                                                app.get_selected_manifest_params()
+                                        {
+                                            app.set_query_input(format!(
+                                                "SELECT * FROM {}.{} LIMIT 10",
+                                                ns, name
+                                            ));
+                                        }
+                                    }
                                 }
 
                                 // Refresh - context sensitive
@@ -263,10 +379,9 @@ where
                                     }
                                 }
 
-                                // Stop job (s key)
-                                KeyCode::Char('s') => {
-                                    if app.active_pane == ActivePane::Jobs
-                                        && let Some(job) = app.get_selected_job()
+                                // Stop job (s key in Jobs pane)
+                                KeyCode::Char('s') if app.active_pane == ActivePane::Jobs => {
+                                    if let Some(job) = app.get_selected_job()
                                         && App::can_stop_job(&job.status)
                                     {
                                         let job_id = job.id;
@@ -399,6 +514,64 @@ where
                                     app.active_pane = app.active_pane.prev(is_local);
                                 }
 
+                                // Export query results to CSV (E key in QueryResult pane)
+                                KeyCode::Char('E') | KeyCode::Char('e')
+                                    if app.active_pane == ActivePane::QueryResult =>
+                                {
+                                    if let Some(results) = &app.query_results {
+                                        match export_results_csv(results) {
+                                            Ok(filename) => {
+                                                app.set_success_message(format!(
+                                                    "Exported {} rows to {}",
+                                                    results.row_count, filename
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                app.error_message =
+                                                    Some(format!("Export failed: {}", e));
+                                            }
+                                        }
+                                    } else {
+                                        app.error_message =
+                                            Some("No results to export".to_string());
+                                    }
+                                }
+
+                                // Sort query results (s key in QueryResult pane)
+                                KeyCode::Char('s')
+                                    if app.active_pane == ActivePane::QueryResult
+                                        && app.query_results.is_some() =>
+                                {
+                                    app.result_sort_pending = true;
+                                }
+
+                                // Clear sort (S key in QueryResult pane)
+                                KeyCode::Char('S')
+                                    if app.active_pane == ActivePane::QueryResult =>
+                                {
+                                    app.clear_sort();
+                                }
+
+                                // Column selection for sorting (1-9 keys when sort pending)
+                                KeyCode::Char(c @ '1'..='9')
+                                    if app.result_sort_pending
+                                        && app.active_pane == ActivePane::QueryResult =>
+                                {
+                                    let col = c.to_digit(10).unwrap() as usize - 1; // 0-indexed
+                                    if let Some(results) = &app.query_results {
+                                        if col < results.columns.len() {
+                                            app.toggle_sort(col);
+                                        } else {
+                                            app.result_sort_pending = false;
+                                        }
+                                    }
+                                }
+
+                                // Cancel sort mode with Escape
+                                KeyCode::Esc if app.result_sort_pending => {
+                                    app.result_sort_pending = false;
+                                }
+
                                 _ => {}
                             }
                         }
@@ -418,6 +591,161 @@ where
                             KeyCode::Backspace => {
                                 app.search_query.pop();
                                 app.update_search();
+                            }
+                            _ => {}
+                        },
+                        InputMode::Query => match key.code {
+                            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Execute query with Ctrl+Enter
+                                let sql = app.query_input.clone();
+                                if !sql.trim().is_empty() {
+                                    // Add to per-dataset history
+                                    app.add_to_history(sql.trim().to_string());
+
+                                    // Reset history navigation state
+                                    app.query_history_index = None;
+                                    app.query_draft.clear();
+
+                                    app.start_loading("Executing query...");
+                                    spawn_execute_query(app, sql, tx.clone());
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if app.history_search_active {
+                                    // Accept current match
+                                    app.accept_history_search();
+                                } else {
+                                    // Insert newline (plain Enter without Ctrl)
+                                    app.query_history_index = None;
+                                    app.insert_char('\n');
+                                }
+                            }
+                            KeyCode::Esc => {
+                                if app.history_search_active {
+                                    // Cancel search, restore original input
+                                    app.cancel_history_search();
+                                } else {
+                                    // Cancel query input, return to normal mode
+                                    app.input_mode = InputMode::Normal;
+                                    app.active_pane = ActivePane::Datasets;
+                                    // Restore previous content view if we have results
+                                    if app.query_results.is_none() {
+                                        app.content_view = ContentView::Dataset;
+                                    }
+                                }
+                            }
+                            KeyCode::Up => {
+                                // First try to move cursor up in multiline input
+                                if !app.cursor_up() {
+                                    // At first line, navigate history
+                                    let history = app.current_history();
+                                    if !history.is_empty() {
+                                        match app.query_history_index {
+                                            None => {
+                                                // Save current input as draft, load most recent history
+                                                app.query_draft = app.query_input.clone();
+                                                let last_idx = history.len() - 1;
+                                                app.query_history_index = Some(last_idx);
+                                                app.set_query_input(history[last_idx].clone());
+                                            }
+                                            Some(idx) if idx > 0 => {
+                                                // Move to older entry
+                                                let new_idx = idx - 1;
+                                                app.query_history_index = Some(new_idx);
+                                                app.set_query_input(history[new_idx].clone());
+                                            }
+                                            Some(_) => {
+                                                // Already at oldest entry, do nothing
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                // First try to move cursor down in multiline input
+                                if !app.cursor_down() {
+                                    // At last line, navigate history
+                                    let history = app.current_history();
+                                    if let Some(idx) = app.query_history_index {
+                                        if idx < history.len() - 1 {
+                                            // Move to newer entry
+                                            let new_idx = idx + 1;
+                                            app.query_history_index = Some(new_idx);
+                                            app.set_query_input(history[new_idx].clone());
+                                        } else {
+                                            // At newest entry, restore draft
+                                            app.query_history_index = None;
+                                            app.set_query_input(app.query_draft.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('T') | KeyCode::Char('t')
+                                if key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT =>
+                            {
+                                // Open template picker (only in query mode, only 'T' or 't')
+                                app.template_picker_open = true;
+                                app.template_picker_index = 0;
+                            }
+                            // History search (Ctrl+R)
+                            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if app.history_search_active {
+                                    // Cycle to next match
+                                    app.cycle_history_search();
+                                } else {
+                                    // Enter search mode
+                                    app.enter_history_search();
+                                }
+                            }
+                            KeyCode::Char(c) if app.history_search_active => {
+                                app.history_search_query.push(c);
+                                app.update_history_search();
+                            }
+                            KeyCode::Backspace if app.history_search_active => {
+                                app.history_search_query.pop();
+                                app.update_history_search();
+                            }
+                            KeyCode::Char('f') if key.modifiers == KeyModifiers::CONTROL => {
+                                // Open favorites panel with Ctrl+F
+                                if !app.favorite_queries.is_empty() {
+                                    app.favorites_panel_open = true;
+                                    app.favorites_panel_index = 0;
+                                }
+                            }
+                            KeyCode::Char('*') | KeyCode::Char('F')
+                                if key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT =>
+                            {
+                                // Toggle favorite for current query
+                                app.toggle_favorite();
+                            }
+                            KeyCode::Char(c) => {
+                                // Reset history navigation on edit
+                                app.query_history_index = None;
+                                app.insert_char(c);
+                            }
+                            KeyCode::Backspace => {
+                                // Reset history navigation on edit
+                                app.query_history_index = None;
+                                app.backspace();
+                            }
+                            KeyCode::Delete => {
+                                // Reset history navigation on edit
+                                app.query_history_index = None;
+                                app.delete_char();
+                            }
+                            KeyCode::Left => {
+                                app.cursor_left();
+                            }
+                            KeyCode::Right => {
+                                app.cursor_right();
+                            }
+                            KeyCode::Home => {
+                                app.cursor_home();
+                            }
+                            KeyCode::End => {
+                                app.cursor_end();
                             }
                             _ => {}
                         },
@@ -538,6 +866,31 @@ where
                                             app.active_pane = ActivePane::Schema;
                                         }
                                     }
+                                    ContentView::QueryResults => {
+                                        // Dynamic height for query input
+                                        let query_height =
+                                            (app.query_line_count() as u16 + 2).clamp(3, 10);
+                                        let query_chunks = Layout::default()
+                                            .direction(Direction::Vertical)
+                                            .constraints([
+                                                Constraint::Length(query_height), // Query input
+                                                Constraint::Min(0),               // Results
+                                            ])
+                                            .split(content_area);
+
+                                        let query_input_area = query_chunks[0];
+                                        let query_results_area = query_chunks[1];
+
+                                        if y >= query_input_area.y
+                                            && y < query_input_area.y + query_input_area.height
+                                        {
+                                            app.active_pane = ActivePane::Query;
+                                        } else if y >= query_results_area.y
+                                            && y < query_results_area.y + query_results_area.height
+                                        {
+                                            app.active_pane = ActivePane::QueryResult;
+                                        }
+                                    }
                                     ContentView::Job(_)
                                     | ContentView::Worker(_)
                                     | ContentView::None => {
@@ -560,6 +913,11 @@ where
         }
 
         if app.should_quit {
+            // Save history and favorites before quitting
+            if let Err(e) = app.save_history() {
+                eprintln!("Warning: could not save history: {}", e);
+            }
+            app.save_favorites();
             return Ok(());
         }
     }
@@ -718,4 +1076,147 @@ fn spawn_delete_job(app: &App, job_id: JobId, tx: mpsc::Sender<AppEvent>) {
             }
         }
     });
+}
+
+fn spawn_execute_query(app: &App, sql: String, tx: mpsc::Sender<AppEvent>) {
+    let query_url = app.config.local_query_url.clone();
+
+    tokio::spawn(async move {
+        let results = execute_query(&query_url, &sql).await;
+        let _ = tx.send(AppEvent::QueryCompleted(results)).await;
+    });
+}
+
+async fn execute_query(query_url: &str, sql: &str) -> QueryResults {
+    // Connect to Flight service
+    let mut client = match amp_client::AmpClient::from_endpoint(query_url).await {
+        Ok(c) => c,
+        Err(e) => {
+            return QueryResults {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                error: Some(format!("Connection failed: {}", e)),
+            };
+        }
+    };
+
+    // Execute query
+    let mut stream = match client.query(sql).await {
+        Ok(s) => s,
+        Err(e) => {
+            return QueryResults {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                error: Some(format!("Query failed: {}", e)),
+            };
+        }
+    };
+
+    // Collect results
+    let mut columns: Option<Vec<String>> = None;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    while let Some(batch_result) = stream.next().await {
+        match batch_result {
+            Ok(batch) => {
+                // Extract column names from schema (once)
+                if columns.is_none() {
+                    columns = Some(
+                        batch
+                            .schema()
+                            .fields()
+                            .iter()
+                            .map(|f| f.name().clone())
+                            .collect(),
+                    );
+                }
+
+                // Convert batch to rows
+                for row_idx in 0..batch.num_rows() {
+                    let row: Vec<String> = (0..batch.num_columns())
+                        .map(|col_idx| format_array_value(batch.column(col_idx).as_ref(), row_idx))
+                        .collect();
+                    rows.push(row);
+                }
+            }
+            Err(e) => {
+                let row_count = rows.len();
+                return QueryResults {
+                    columns: columns.unwrap_or_default(),
+                    rows,
+                    row_count,
+                    error: Some(format!("Fetch error: {}", e)),
+                };
+            }
+        }
+    }
+
+    let row_count = rows.len();
+    QueryResults {
+        columns: columns.unwrap_or_default(),
+        rows,
+        row_count,
+        error: None,
+    }
+}
+
+fn format_array_value(array: &dyn Array, idx: usize) -> String {
+    if array.is_null(idx) {
+        return "NULL".to_string();
+    }
+
+    // Handle common types
+    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
+        return arr.value(idx).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
+        return arr.value(idx).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<UInt64Array>() {
+        return arr.value(idx).to_string();
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
+        return format!("{:.6}", arr.value(idx));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
+        return arr.value(idx).to_string();
+    }
+    // Binary types - show hex
+    if let Some(arr) = array.as_any().downcast_ref::<BinaryArray>() {
+        let bytes = arr.value(idx);
+        if bytes.len() > 16 {
+            return format!("0x{}...", hex::encode(&bytes[..16]));
+        }
+        return format!("0x{}", hex::encode(bytes));
+    }
+
+    // Fallback: use array_value_to_string from Arrow
+    arrow::util::display::array_value_to_string(array, idx).unwrap_or_else(|_| "?".to_string())
+}
+
+/// Export query results to a CSV file.
+///
+/// Returns the filename on success, or an error message on failure.
+fn export_results_csv(results: &QueryResults) -> Result<String, String> {
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("query_results_{}.csv", timestamp);
+
+    let mut wtr =
+        csv::Writer::from_path(&filename).map_err(|e| format!("Failed to create file: {}", e))?;
+
+    // Write header
+    wtr.write_record(&results.columns)
+        .map_err(|e| format!("Failed to write header: {}", e))?;
+
+    // Write rows
+    for row in &results.rows {
+        wtr.write_record(row)
+            .map_err(|e| format!("Failed to write row: {}", e))?;
+    }
+
+    wtr.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+
+    Ok(filename)
 }

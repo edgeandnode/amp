@@ -1,6 +1,11 @@
 //! Application state and business logic.
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use admin_client::{
     Client,
@@ -13,11 +18,69 @@ use url::Url;
 
 use crate::{config::Config, registry::RegistryClient};
 
+/// Cursor position in multi-line text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextPosition {
+    pub line: usize,
+    pub column: usize,
+}
+
+/// The history file structure for persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HistoryFile {
+    pub dataset_history: HashMap<String, Vec<String>>,
+}
+
+/// The favorites file structure for persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FavoritesFile {
+    pub version: u32,
+    pub favorites: Vec<String>,
+}
+
+/// A SQL query template.
+#[derive(Debug, Clone)]
+pub struct QueryTemplate {
+    /// The template pattern with placeholders.
+    pub pattern: &'static str,
+    /// Short description of the template.
+    pub description: &'static str,
+}
+
+/// Available query templates.
+pub const QUERY_TEMPLATES: &[QueryTemplate] = &[
+    QueryTemplate {
+        pattern: "SELECT * FROM {table} LIMIT 10",
+        description: "Preview data",
+    },
+    QueryTemplate {
+        pattern: "SELECT COUNT(*) FROM {table}",
+        description: "Row count",
+    },
+    QueryTemplate {
+        pattern: "SELECT * FROM {table} WHERE {column} = '?'",
+        description: "Filter by column",
+    },
+    QueryTemplate {
+        pattern: "SELECT {column}, COUNT(*) FROM {table} GROUP BY {column}",
+        description: "Group by",
+    },
+    QueryTemplate {
+        pattern: "SELECT DISTINCT {column} FROM {table}",
+        description: "Unique values",
+    },
+    QueryTemplate {
+        pattern: "DESCRIBE {table}",
+        description: "Table schema",
+    },
+];
+
 /// Input mode for the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Search,
+    Query,
 }
 
 /// Active pane for focus tracking.
@@ -27,17 +90,20 @@ pub enum InputMode {
 pub enum ActivePane {
     Header,
     Datasets,
-    Jobs,     // Local only
-    Workers,  // Local only
-    Manifest, // Dataset manifest pane (content area)
-    Schema,   // Dataset schema pane (content area)
-    Detail,   // Job/Worker detail view (Local only)
+    Jobs,        // Local only
+    Workers,     // Local only
+    Manifest,    // Dataset manifest pane (content area)
+    Schema,      // Dataset schema pane (content area)
+    Detail,      // Job/Worker detail view (Local only)
+    Query,       // SQL query input pane (Local only)
+    QueryResult, // SQL query results pane (Local only)
 }
 
 impl ActivePane {
     /// Cycle to the next pane.
     /// Local mode: Header -> Datasets -> Jobs -> Workers -> Detail -> Header
     /// Registry mode: Header -> Datasets -> Manifest -> Schema -> Header
+    /// Query panes: Query -> QueryResult -> Datasets (exit query mode)
     pub fn next(self, is_local: bool) -> Self {
         match self {
             ActivePane::Header => ActivePane::Datasets,
@@ -53,12 +119,16 @@ impl ActivePane {
             ActivePane::Manifest => ActivePane::Schema,
             ActivePane::Schema => ActivePane::Detail,
             ActivePane::Detail => ActivePane::Header,
+            // Query panes cycle within query view
+            ActivePane::Query => ActivePane::QueryResult,
+            ActivePane::QueryResult => ActivePane::Datasets,
         }
     }
 
     /// Cycle to the previous pane.
     /// Local mode: Header -> Detail -> Workers -> Jobs -> Datasets -> Header
     /// Registry mode: Header -> Schema -> Manifest -> Datasets -> Header
+    /// Query panes: QueryResult -> Query -> Datasets (exit query mode)
     pub fn prev(self, is_local: bool) -> Self {
         match self {
             ActivePane::Header => {
@@ -74,6 +144,9 @@ impl ActivePane {
             ActivePane::Manifest => ActivePane::Datasets,
             ActivePane::Schema => ActivePane::Manifest,
             ActivePane::Detail => ActivePane::Workers,
+            // Query panes cycle within query view
+            ActivePane::Query => ActivePane::Datasets,
+            ActivePane::QueryResult => ActivePane::Query,
         }
     }
 }
@@ -87,8 +160,19 @@ pub enum ContentView {
     Job(JobInfo),
     /// Worker details
     Worker(WorkerDetailResponse),
+    /// SQL query results
+    QueryResults,
     /// Nothing selected
     None,
+}
+
+/// Query results from SQL execution.
+#[derive(Debug, Clone, Default)]
+pub struct QueryResults {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub row_count: usize,
+    pub error: Option<String>,
 }
 
 /// Data source for datasets.
@@ -379,6 +463,10 @@ pub struct App {
     pub loading: bool,
     pub error_message: Option<String>,
 
+    // Success message (auto-expires after 3 seconds)
+    pub success_message: Option<String>,
+    pub message_expires: Option<Instant>,
+
     // Spinner animation state
     pub spinner_frame: usize,
     pub loading_message: Option<String>,
@@ -398,6 +486,40 @@ pub struct App {
 
     // Redraw flag for CPU optimization
     pub needs_redraw: bool,
+
+    // SQL Query state (Local mode only)
+    pub query_input: String,
+    pub query_cursor: TextPosition,
+    pub query_input_scroll: u16, // Scroll offset for tall query input
+    pub query_results: Option<QueryResults>,
+    pub query_scroll: u16,
+    pub query_scroll_state: ScrollbarState,
+    pub query_content_length: usize,
+
+    // Query history (per-dataset, persisted)
+    pub query_history: HashMap<String, Vec<String>>,
+    pub query_history_index: Option<usize>, // None = current input, Some(i) = history[i]
+    pub query_draft: String,                // Preserved current input when navigating history
+
+    // History search state (Ctrl+R)
+    pub history_search_active: bool,
+    pub history_search_query: String,
+    pub history_search_matches: Vec<usize>, // indices into query_history
+    pub history_search_index: usize,        // index into matches
+
+    // Template picker state
+    pub template_picker_open: bool,
+    pub template_picker_index: usize,
+
+    // Result sorting state
+    pub result_sort_column: Option<usize>,
+    pub result_sort_ascending: bool,
+    pub result_sort_pending: bool, // true when waiting for column number input
+
+    // Favorite queries state
+    pub favorite_queries: Vec<String>,
+    pub favorites_panel_open: bool,
+    pub favorites_panel_index: usize,
 }
 
 impl App {
@@ -437,6 +559,8 @@ impl App {
             current_inspect: None,
             loading: false,
             error_message: None,
+            success_message: None,
+            message_expires: None,
             spinner_frame: 0,
             loading_message: None,
             manifest_scroll: 0,
@@ -449,6 +573,28 @@ impl App {
             schema_content_length: 0,
             detail_content_length: 0,
             needs_redraw: true,
+            query_input: String::new(),
+            query_cursor: TextPosition::default(),
+            query_input_scroll: 0,
+            query_results: None,
+            query_scroll: 0,
+            query_scroll_state: ScrollbarState::default(),
+            query_content_length: 0,
+            query_history: HashMap::new(),
+            query_history_index: None,
+            query_draft: String::new(),
+            history_search_active: false,
+            history_search_query: String::new(),
+            history_search_matches: Vec::new(),
+            history_search_index: 0,
+            template_picker_open: false,
+            template_picker_index: 0,
+            result_sort_column: None,
+            result_sort_ascending: true,
+            result_sort_pending: false,
+            favorite_queries: Vec::new(),
+            favorites_panel_open: false,
+            favorites_panel_index: 0,
         })
     }
 
@@ -485,6 +631,24 @@ impl App {
         self.loading_message = None;
     }
 
+    /// Set a success message that auto-expires after 3 seconds.
+    pub fn set_success_message(&mut self, msg: String) {
+        self.success_message = Some(msg);
+        self.message_expires = Some(Instant::now() + Duration::from_secs(3));
+        // Clear any error message when showing success
+        self.error_message = None;
+    }
+
+    /// Tick message expiration - call in main loop.
+    pub fn tick_messages(&mut self) {
+        if let Some(expires) = self.message_expires
+            && Instant::now() > expires
+        {
+            self.success_message = None;
+            self.message_expires = None;
+        }
+    }
+
     /// Scroll up in the focused pane.
     pub fn scroll_up(&mut self) {
         match self.active_pane {
@@ -506,7 +670,16 @@ impl App {
                     .detail_scroll_state
                     .position(self.detail_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                self.query_scroll = self.query_scroll.saturating_sub(1);
+                self.query_scroll_state =
+                    self.query_scroll_state.position(self.query_scroll as usize);
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -540,7 +713,19 @@ impl App {
                         .position(self.detail_scroll as usize);
                 }
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                let max_scroll = self.query_content_length.saturating_sub(1);
+                if (self.query_scroll as usize) < max_scroll {
+                    self.query_scroll = self.query_scroll.saturating_add(1);
+                    self.query_scroll_state =
+                        self.query_scroll_state.position(self.query_scroll as usize);
+                }
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -552,9 +737,12 @@ impl App {
         self.schema_scroll_state = ScrollbarState::default();
         self.detail_scroll = 0;
         self.detail_scroll_state = ScrollbarState::default();
+        self.query_scroll = 0;
+        self.query_scroll_state = ScrollbarState::default();
         self.manifest_content_length = 0;
         self.schema_content_length = 0;
         self.detail_content_length = 0;
+        self.query_content_length = 0;
     }
 
     /// Page up in the focused pane.
@@ -578,7 +766,16 @@ impl App {
                     .detail_scroll_state
                     .position(self.detail_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                self.query_scroll = self.query_scroll.saturating_sub(page_size);
+                self.query_scroll_state =
+                    self.query_scroll_state.position(self.query_scroll as usize);
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -609,7 +806,17 @@ impl App {
                     .detail_scroll_state
                     .position(self.detail_scroll as usize);
             }
-            ActivePane::Header | ActivePane::Datasets | ActivePane::Jobs | ActivePane::Workers => {}
+            ActivePane::QueryResult => {
+                let max_scroll = self.query_content_length.saturating_sub(1) as u16;
+                self.query_scroll = self.query_scroll.saturating_add(page_size).min(max_scroll);
+                self.query_scroll_state =
+                    self.query_scroll_state.position(self.query_scroll as usize);
+            }
+            ActivePane::Header
+            | ActivePane::Datasets
+            | ActivePane::Jobs
+            | ActivePane::Workers
+            | ActivePane::Query => {}
         }
     }
 
@@ -981,9 +1188,43 @@ impl App {
     async fn fetch_versions(&self, namespace: &str, name: &str) -> Result<Vec<VersionEntry>> {
         match self.current_source {
             DataSource::Local => {
-                // Local doesn't have version listing in admin-client currently
-                // Return just the latest version if available
-                Ok(Vec::new())
+                use datasets_common::fqn::FullyQualifiedName;
+
+                // Construct FQN for the dataset
+                let fqn_str = format!("{}/{}", namespace, name);
+                let fqn: FullyQualifiedName = fqn_str
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("invalid FQN: {}", e))?;
+
+                // Call admin API to list versions
+                match self.local_client.datasets().list_versions(&fqn).await {
+                    Ok(versions_response) => {
+                        // Determine which version is the latest
+                        let latest_version = versions_response.special_tags.latest.as_ref();
+
+                        // Map API response to VersionEntry structs
+                        let versions = versions_response
+                            .versions
+                            .into_iter()
+                            .map(|v| {
+                                let is_latest =
+                                    latest_version.map(|lv| lv == &v.version).unwrap_or(false);
+                                VersionEntry {
+                                    version_tag: v.version.to_string(),
+                                    status: "registered".to_string(),
+                                    created_at: v.created_at,
+                                    is_latest,
+                                }
+                            })
+                            .collect();
+                        Ok(versions)
+                    }
+                    Err(e) => {
+                        // Log error but don't crash - graceful degradation
+                        eprintln!("Failed to fetch versions for {}: {}", fqn_str, e);
+                        Ok(Vec::new())
+                    }
+                }
             }
             DataSource::Registry => {
                 let versions = self.registry_client.get_versions(namespace, name).await?;
@@ -1029,6 +1270,495 @@ impl App {
                     .get_manifest(namespace, name, version)
                     .await?;
                 Ok(Some(manifest))
+            }
+        }
+    }
+
+    /// Get the path to the history file.
+    pub fn history_file_path() -> Result<PathBuf> {
+        let config_dir = directories::ProjectDirs::from("com", "thegraph", "ampcc")
+            .context("could not determine config directory")?
+            .config_dir()
+            .to_path_buf();
+        Ok(config_dir.join("history.json"))
+    }
+
+    /// Load history from disk on startup.
+    pub fn load_history(&mut self) -> Result<()> {
+        let path = Self::history_file_path()?;
+        if !path.exists() {
+            return Ok(()); // No history yet
+        }
+
+        let content = std::fs::read_to_string(&path)?;
+        let file: HistoryFile = serde_json::from_str(&content)?;
+        self.query_history = file.dataset_history;
+
+        Ok(())
+    }
+
+    /// Save history to disk on shutdown.
+    pub fn save_history(&self) -> Result<()> {
+        let path = Self::history_file_path()?;
+
+        // Ensure directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Limit history per dataset
+        const MAX_HISTORY_PER_DATASET: usize = 100;
+        let mut limited_history: HashMap<String, Vec<String>> = HashMap::new();
+        for (key, queries) in &self.query_history {
+            let limited: Vec<String> = queries
+                .iter()
+                .rev()
+                .take(MAX_HISTORY_PER_DATASET)
+                .rev()
+                .cloned()
+                .collect();
+            if !limited.is_empty() {
+                limited_history.insert(key.clone(), limited);
+            }
+        }
+
+        let file = HistoryFile {
+            dataset_history: limited_history,
+        };
+
+        let content = serde_json::to_string_pretty(&file)?;
+        std::fs::write(&path, content)?;
+
+        Ok(())
+    }
+
+    /// Get the history key for the current dataset.
+    pub fn current_history_key(&self) -> String {
+        if let Some((ns, name, _)) = self.get_selected_manifest_params() {
+            format!("{}.{}", ns, name)
+        } else {
+            "global".to_string()
+        }
+    }
+
+    /// Get the history for the current dataset.
+    pub fn current_history(&self) -> Vec<String> {
+        let key = self.current_history_key();
+        self.query_history.get(&key).cloned().unwrap_or_default()
+    }
+
+    /// Add a query to the current dataset's history.
+    pub fn add_to_history(&mut self, query: String) {
+        let key = self.current_history_key();
+        let history = self.query_history.entry(key).or_default();
+        // Avoid consecutive duplicates
+        if history.last() != Some(&query) {
+            history.push(query);
+            // Limit in-memory history
+            const MAX_HISTORY: usize = 100;
+            if history.len() > MAX_HISTORY {
+                history.remove(0);
+            }
+        }
+    }
+
+    // ========================================================================
+    // Multi-line Query Input Helpers
+    // ========================================================================
+
+    /// Get the lines of query input.
+    pub fn query_lines(&self) -> Vec<&str> {
+        if self.query_input.is_empty() {
+            vec![""]
+        } else {
+            self.query_input.split('\n').collect()
+        }
+    }
+
+    /// Get the number of lines in query input.
+    pub fn query_line_count(&self) -> usize {
+        if self.query_input.is_empty() {
+            1
+        } else {
+            self.query_input.split('\n').count()
+        }
+    }
+
+    /// Get the length of a specific line.
+    pub fn get_line_length(&self, line: usize) -> usize {
+        self.query_lines().get(line).map(|l| l.len()).unwrap_or(0)
+    }
+
+    /// Convert TextPosition to byte offset in query_input.
+    pub fn cursor_to_offset(&self) -> usize {
+        let mut offset = 0;
+        for (i, line) in self.query_input.split('\n').enumerate() {
+            if i == self.query_cursor.line {
+                return offset + self.query_cursor.column.min(line.len());
+            }
+            offset += line.len() + 1; // +1 for newline
+        }
+        self.query_input.len()
+    }
+
+    /// Convert byte offset to TextPosition.
+    #[allow(dead_code)]
+    pub fn offset_to_cursor(input: &str, offset: usize) -> TextPosition {
+        let mut line = 0;
+        let mut column = 0;
+        let mut current = 0;
+
+        for ch in input.chars() {
+            if current >= offset {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 0;
+            } else {
+                column += 1;
+            }
+            current += ch.len_utf8();
+        }
+
+        TextPosition { line, column }
+    }
+
+    /// Move cursor up one line (returns true if moved).
+    pub fn cursor_up(&mut self) -> bool {
+        if self.query_cursor.line > 0 {
+            self.query_cursor.line -= 1;
+            let line_len = self.get_line_length(self.query_cursor.line);
+            self.query_cursor.column = self.query_cursor.column.min(line_len);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move cursor down one line (returns true if moved).
+    pub fn cursor_down(&mut self) -> bool {
+        let line_count = self.query_line_count();
+        if self.query_cursor.line < line_count.saturating_sub(1) {
+            self.query_cursor.line += 1;
+            let line_len = self.get_line_length(self.query_cursor.line);
+            self.query_cursor.column = self.query_cursor.column.min(line_len);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move cursor left, wrapping to previous line if at start.
+    pub fn cursor_left(&mut self) {
+        if self.query_cursor.column > 0 {
+            self.query_cursor.column -= 1;
+        } else if self.query_cursor.line > 0 {
+            // Move to end of previous line
+            self.query_cursor.line -= 1;
+            self.query_cursor.column = self.get_line_length(self.query_cursor.line);
+        }
+    }
+
+    /// Move cursor right, wrapping to next line if at end.
+    pub fn cursor_right(&mut self) {
+        let line_len = self.get_line_length(self.query_cursor.line);
+        if self.query_cursor.column < line_len {
+            self.query_cursor.column += 1;
+        } else if self.query_cursor.line < self.query_line_count().saturating_sub(1) {
+            // Move to start of next line
+            self.query_cursor.line += 1;
+            self.query_cursor.column = 0;
+        }
+    }
+
+    /// Move cursor to start of current line.
+    pub fn cursor_home(&mut self) {
+        self.query_cursor.column = 0;
+    }
+
+    /// Move cursor to end of current line.
+    pub fn cursor_end(&mut self) {
+        self.query_cursor.column = self.get_line_length(self.query_cursor.line);
+    }
+
+    /// Insert a character at cursor position.
+    pub fn insert_char(&mut self, c: char) {
+        let offset = self.cursor_to_offset();
+        self.query_input.insert(offset, c);
+        if c == '\n' {
+            self.query_cursor.line += 1;
+            self.query_cursor.column = 0;
+        } else {
+            self.query_cursor.column += 1;
+        }
+    }
+
+    /// Delete character before cursor (backspace).
+    /// Returns true if something was deleted.
+    pub fn backspace(&mut self) -> bool {
+        if self.query_cursor.column > 0 {
+            // Delete character in current line
+            let offset = self.cursor_to_offset();
+            self.query_input.remove(offset - 1);
+            self.query_cursor.column -= 1;
+            true
+        } else if self.query_cursor.line > 0 {
+            // Join with previous line
+            let offset = self.cursor_to_offset();
+            let prev_line_len = self.get_line_length(self.query_cursor.line - 1);
+            self.query_input.remove(offset - 1); // Remove the newline
+            self.query_cursor.line -= 1;
+            self.query_cursor.column = prev_line_len;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Delete character at cursor position (delete key).
+    /// Returns true if something was deleted.
+    pub fn delete_char(&mut self) -> bool {
+        let offset = self.cursor_to_offset();
+        if offset < self.query_input.len() {
+            self.query_input.remove(offset);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set query input and reset cursor to end.
+    pub fn set_query_input(&mut self, input: String) {
+        self.query_input = input;
+        // Move cursor to end of input
+        let line_count = self.query_line_count();
+        if line_count > 0 {
+            self.query_cursor.line = line_count - 1;
+            self.query_cursor.column = self.get_line_length(self.query_cursor.line);
+        } else {
+            self.query_cursor = TextPosition::default();
+        }
+    }
+
+    // ========================================================================
+    // History Search (Ctrl+R)
+    // ========================================================================
+
+    /// Update history search matches based on current search query.
+    pub fn update_history_search(&mut self) {
+        let history = self.current_history();
+        if self.history_search_query.is_empty() {
+            // Empty search query matches all history
+            self.history_search_matches = (0..history.len()).rev().collect();
+        } else {
+            let query_lower = self.history_search_query.to_lowercase();
+            self.history_search_matches = history
+                .iter()
+                .enumerate()
+                .filter(|(_, h)| h.to_lowercase().contains(&query_lower))
+                .map(|(i, _)| i)
+                .rev() // Most recent first
+                .collect();
+        }
+
+        // Reset to first match
+        self.history_search_index = 0;
+
+        // Update query input to show current match
+        if let Some(&idx) = self.history_search_matches.first()
+            && let Some(query) = history.get(idx)
+        {
+            self.set_query_input(query.clone());
+        }
+    }
+
+    /// Cycle to the next history search match.
+    pub fn cycle_history_search(&mut self) {
+        if self.history_search_matches.is_empty() {
+            return;
+        }
+
+        self.history_search_index =
+            (self.history_search_index + 1) % self.history_search_matches.len();
+
+        let history = self.current_history();
+        let idx = self.history_search_matches[self.history_search_index];
+        if let Some(query) = history.get(idx) {
+            self.set_query_input(query.clone());
+        }
+    }
+
+    /// Enter history search mode.
+    pub fn enter_history_search(&mut self) {
+        // Save current input as draft before starting search
+        if !self.history_search_active {
+            self.query_draft = self.query_input.clone();
+        }
+        self.history_search_active = true;
+        self.history_search_query.clear();
+        self.history_search_matches.clear();
+        self.history_search_index = 0;
+    }
+
+    /// Exit history search mode, accepting current match.
+    pub fn accept_history_search(&mut self) {
+        self.history_search_active = false;
+        self.history_search_query.clear();
+        // query_input already has the selected match
+    }
+
+    /// Cancel history search mode, restoring original input.
+    pub fn cancel_history_search(&mut self) {
+        self.history_search_active = false;
+        self.history_search_query.clear();
+        self.set_query_input(self.query_draft.clone());
+    }
+
+    /// Resolve template placeholders with current context.
+    pub fn resolve_template(&self, template: &str) -> String {
+        let table = self
+            .current_inspect
+            .as_ref()
+            .and_then(|i| i.tables.first())
+            .map(|t| t.name.as_str())
+            .unwrap_or("table_name");
+
+        let column = self
+            .current_inspect
+            .as_ref()
+            .and_then(|i| i.tables.first())
+            .and_then(|t| t.columns.first())
+            .map(|c| c.name.as_str())
+            .unwrap_or("column_name");
+
+        template
+            .replace("{table}", table)
+            .replace("{column}", column)
+    }
+
+    /// Get sorted indices for query results based on current sort state.
+    /// Returns None if no sort is active, otherwise returns sorted row indices.
+    pub fn get_sorted_indices(&self) -> Option<Vec<usize>> {
+        let col = self.result_sort_column?;
+        let results = self.query_results.as_ref()?;
+
+        if col >= results.columns.len() {
+            return None;
+        }
+
+        let mut indices: Vec<usize> = (0..results.rows.len()).collect();
+        let ascending = self.result_sort_ascending;
+
+        indices.sort_by(|&a, &b| {
+            let val_a = results.rows[a].get(col).map(|s| s.as_str()).unwrap_or("");
+            let val_b = results.rows[b].get(col).map(|s| s.as_str()).unwrap_or("");
+
+            // Try numeric comparison first
+            let cmp = match (val_a.parse::<f64>(), val_b.parse::<f64>()) {
+                (Ok(num_a), Ok(num_b)) => num_a
+                    .partial_cmp(&num_b)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                _ => val_a.cmp(val_b),
+            };
+
+            if ascending { cmp } else { cmp.reverse() }
+        });
+
+        Some(indices)
+    }
+
+    /// Toggle sort on the specified column.
+    /// If already sorted by this column, reverses direction.
+    /// If sorted by different column, starts ascending sort on new column.
+    pub fn toggle_sort(&mut self, col: usize) {
+        if self.result_sort_column == Some(col) {
+            // Toggle direction
+            self.result_sort_ascending = !self.result_sort_ascending;
+        } else {
+            // New column, start ascending
+            self.result_sort_column = Some(col);
+            self.result_sort_ascending = true;
+        }
+        self.result_sort_pending = false;
+    }
+
+    /// Clear all sorting.
+    pub fn clear_sort(&mut self) {
+        self.result_sort_column = None;
+        self.result_sort_ascending = true;
+        self.result_sort_pending = false;
+    }
+
+    /// Get the path to the favorites file.
+    pub fn favorites_file_path() -> Result<PathBuf> {
+        let config_dir = directories::ProjectDirs::from("com", "thegraph", "ampcc")
+            .context("could not determine config directory")?
+            .config_dir()
+            .to_path_buf();
+        Ok(config_dir.join("favorites.json"))
+    }
+
+    /// Load favorites from disk.
+    pub fn load_favorites(&mut self) {
+        if let Ok(path) = Self::favorites_file_path()
+            && path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&path)
+            && let Ok(file) = serde_json::from_str::<FavoritesFile>(&contents)
+        {
+            self.favorite_queries = file.favorites;
+        }
+    }
+
+    /// Save favorites to disk.
+    pub fn save_favorites(&self) {
+        if let Ok(path) = Self::favorites_file_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let file = FavoritesFile {
+                version: 1,
+                favorites: self.favorite_queries.clone(),
+            };
+            if let Ok(contents) = serde_json::to_string_pretty(&file) {
+                let _ = std::fs::write(&path, contents);
+            }
+        }
+    }
+
+    /// Check if current query is a favorite.
+    pub fn is_current_query_favorite(&self) -> bool {
+        let trimmed = self.query_input.trim();
+        !trimmed.is_empty() && self.favorite_queries.iter().any(|f| f.trim() == trimmed)
+    }
+
+    /// Toggle favorite status for current query.
+    pub fn toggle_favorite(&mut self) {
+        let trimmed = self.query_input.trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        if let Some(idx) = self
+            .favorite_queries
+            .iter()
+            .position(|f| f.trim() == trimmed)
+        {
+            self.favorite_queries.remove(idx);
+        } else {
+            self.favorite_queries.push(trimmed);
+        }
+    }
+
+    /// Remove a favorite by index.
+    pub fn remove_favorite(&mut self, idx: usize) {
+        if idx < self.favorite_queries.len() {
+            self.favorite_queries.remove(idx);
+            // Adjust panel index if needed
+            if self.favorites_panel_index >= self.favorite_queries.len()
+                && !self.favorite_queries.is_empty()
+            {
+                self.favorites_panel_index = self.favorite_queries.len() - 1;
             }
         }
     }
