@@ -58,7 +58,7 @@ pub trait Dataset: Sync + Send + 'static {
     /// Returns this dataset as a [`DatasetWithFunctions`] if it supports user-defined functions.
     ///
     /// Only derived datasets support user-defined functions. Raw extractor datasets
-    /// (e.g., evm-rpc, eth-beacon) return `None`.
+    /// (e.g., evm-rpc, firehose) return `None`.
     fn as_dataset_with_functions(&self) -> Option<&dyn DatasetWithFunctions>;
 }
 

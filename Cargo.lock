@@ -1053,6 +1053,7 @@ dependencies = [
  "object_store",
  "parking_lot",
  "serde",
+ "solana-datasets",
  "thiserror 2.0.18",
  "tokio",
  "toml",

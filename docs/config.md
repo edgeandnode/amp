@@ -147,9 +147,9 @@ ampctl manifest generate --network mainnet --kind evm-rpc --finalized-blocks-onl
 #### Parameters
 
 - `--network`: Network name (e.g., mainnet, goerli, polygon, anvil)
-- `--kind`: Dataset type (evm-rpc, firehose, eth-beacon)
+- `--kind`: Dataset type (evm-rpc, firehose)
 - `--out` (or `-o`): Optional output file or directory path. If a directory is specified, the file will be named `{kind}.json`. If not specified, the manifest is printed to stdout.
-- `--start-block`: Starting block number for extraction (defaults to 0). Applies to evm-rpc, firehose, and eth-beacon datasets.
+- `--start-block`: Starting block number for extraction (defaults to 0). Applies to evm-rpc and firehose datasets.
 - `--finalized-blocks-only`: Only include finalized block data (flag, defaults to false)
 
 The generated manifest includes the complete schema definition with all tables and columns for the specified dataset type and network.
@@ -181,7 +181,6 @@ The `kind` field in a provider configuration must be one of the following:
 
 - **`evm-rpc`**: Ethereum-compatible JSON-RPC endpoints (supports HTTP, WebSocket, and IPC connections)
 - **`firehose`**: Firehose gRPC endpoints
-- **`eth-beacon`**: Ethereum Beacon Chain (consensus layer) REST API endpoints
 
 Each kind has its own set of required and optional configuration fields.
 
@@ -201,7 +200,5 @@ Complete sample configuration files for each provider kind are available in the 
 - **[evm-rpc.sample.toml](providers/evm-rpc.sample.toml)** - Configuration for Ethereum-compatible JSON-RPC endpoints. Includes fields for URL (HTTP/WebSocket/IPC), concurrent request limits, RPC batching, rate limiting, and receipt fetching options.
 
 - **[firehose.sample.toml](providers/firehose.sample.toml)** - Configuration for StreamingFast Firehose gRPC endpoints. Includes fields for gRPC URL and authentication token.
-
-- **[eth-beacon.sample.toml](providers/eth-beacon.sample.toml)** - Configuration for Ethereum Beacon Chain REST API endpoints. Includes fields for API URL, concurrent request limits, and rate limiting.
 
 These sample files document all available configuration fields for each provider kind, including both required and optional parameters with their default values.

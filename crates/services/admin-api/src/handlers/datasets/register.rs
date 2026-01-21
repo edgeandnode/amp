@@ -68,7 +68,6 @@ use crate::{
 /// - **Derived dataset** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
 /// - **EVM-RPC dataset** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
 /// - **Firehose dataset** (kind="firehose"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol
-/// - **Eth Beacon dataset** (kind="eth-beacon"): Registers a raw dataset that extracts Ethereum Beacon Chain data
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
 /// ## Registration Process
@@ -454,9 +453,9 @@ pub enum Error {
     /// Unsupported dataset kind
     ///
     /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, eth-beacon)
+    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
     #[error(
-        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose', 'eth-beacon'"
+        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose'"
     )]
     UnsupportedDatasetKind(String),
 
