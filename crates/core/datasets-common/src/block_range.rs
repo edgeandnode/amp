@@ -23,21 +23,6 @@ pub struct BlockRange {
 }
 
 impl BlockRange {
-    /// Create a new BlockRange.
-    pub fn new(
-        numbers: RangeInclusive<BlockNum>,
-        network: String,
-        hash: BlockHash,
-        prev_hash: Option<BlockHash>,
-    ) -> Self {
-        Self {
-            numbers,
-            network,
-            hash,
-            prev_hash,
-        }
-    }
-
     /// Get the start block number.
     #[inline]
     pub fn start(&self) -> BlockNum {
