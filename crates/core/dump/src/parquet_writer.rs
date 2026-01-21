@@ -22,7 +22,6 @@ use metadata_db::{
     files::{FileId, FooterBytes},
 };
 use object_store::{ObjectMeta, buffered::BufWriter};
-use tracing::{debug, instrument, trace};
 use url::Url;
 
 pub async fn commit_metadata(
@@ -54,7 +53,7 @@ pub async fn commit_metadata(
     .await?;
 
     // Notify that the dataset has been changed
-    trace!("notifying location change for location_id: {}", location_id);
+    tracing::trace!("notifying location change for location_id: {}", location_id);
     metadata_db::physical_table::send_location_change_notif(metadata_db, location_id).await?;
 
     Ok(())
@@ -93,7 +92,7 @@ impl ParquetFileWriter {
         // Criteria: If adding another batch of this size would exceed the max row group size, flush now.
         let forecasted_size = self.writer.in_progress_size() + batch.get_array_memory_size();
         if forecasted_size >= self.max_row_group_bytes {
-            trace!(
+            tracing::trace!(
                 "flushing row group for {} (in-progress size: {} bytes)",
                 self.filename,
                 self.writer.in_progress_size()
@@ -105,7 +104,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use = "Dropping without closing the writer will result in an incomplete Parquet file."]
-    #[instrument(skip_all, fields(table = %self.table.table_ref_compact(), location = %self.table.location_id()), err)]
+    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref_compact(), location = %self.table.location_id()), err)]
     pub async fn close(
         mut self,
         range: BlockRange,
@@ -140,7 +139,7 @@ impl ParquetFileWriter {
 
         let meta = self.writer.close().await?;
 
-        debug!(
+        tracing::debug!(
             "wrote {} for range {} to {}, row count {}",
             self.filename,
             range.start(),
@@ -150,7 +149,7 @@ impl ParquetFileWriter {
 
         let object_meta = self
             .store
-            .head_revision_file_in_object_store(self.table.path(), &self.filename)
+            .head_revision_file_in_object_store(self.table.revision(), &self.filename)
             .await?;
 
         let footer = extract_footer_bytes_from_file(&self.store, &object_meta).await?;

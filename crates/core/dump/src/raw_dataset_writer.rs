@@ -144,7 +144,7 @@ impl RawTableWriter {
         let current_file = match ranges_to_write.last() {
             Some(range) => {
                 let filename = FileName::new_with_random_suffix(*range.start());
-                let buf_writer = store.create_revision_file_writer(table.path(), &filename);
+                let buf_writer = store.create_revision_file_writer(table.revision(), &filename);
                 Some(ParquetFileWriter::new(
                     store.clone(),
                     buf_writer,
@@ -194,7 +194,7 @@ impl RawTableWriter {
                     let filename = FileName::new_with_random_suffix(*range.start());
                     let buf_writer = self
                         .store
-                        .create_revision_file_writer(self.table.path(), &filename);
+                        .create_revision_file_writer(self.table.revision(), &filename);
                     ParquetFileWriter::new(
                         self.store.clone(),
                         buf_writer,
@@ -251,7 +251,7 @@ impl RawTableWriter {
             let filename = FileName::new_with_random_suffix(block_num);
             let buf_writer = self
                 .store
-                .create_revision_file_writer(self.table.path(), &filename);
+                .create_revision_file_writer(self.table.revision(), &filename);
             let new_file = Some(ParquetFileWriter::new(
                 self.store.clone(),
                 buf_writer,

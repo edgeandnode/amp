@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use common::{
     BoxError,
+    catalog::physical::SnapshotError,
     parquet::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
     },
@@ -37,7 +38,7 @@ pub enum CompactorError {
     ///
     /// This error prevents compaction from proceeding as there's no valid merge plan.
     #[error("failed to build canonical chain: {0}")]
-    CanonicalChain(#[source] BoxError),
+    CanonicalChain(#[source] SnapshotError),
 
     /// Failed to create compaction writer
     ///
@@ -173,7 +174,7 @@ pub enum CompactorError {
 }
 
 impl CompactorError {
-    pub fn chain_error(err: BoxError) -> Self {
+    pub fn chain_error(err: SnapshotError) -> Self {
         Self::CanonicalChain(err)
     }
 

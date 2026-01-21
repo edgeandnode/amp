@@ -851,7 +851,7 @@ async fn resolve_blocks_table(
         })?;
 
     let sql_table_ref_schema = dataset.reference().to_reference().to_string();
-    Ok(PhysicalTable::from_active_revision(
+    Ok(PhysicalTable::from_revision(
         data_store,
         dataset.reference().clone(),
         dataset.start_block(),

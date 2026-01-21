@@ -67,7 +67,7 @@ pub async fn create(
                 source,
             })?;
 
-        let physical_table = PhysicalTable::from_active_revision(
+        let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             table.dataset_reference().clone(),
             dataset.start_block(),

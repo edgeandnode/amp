@@ -49,7 +49,7 @@ impl ParquetFileReaderFactory for AmpReaderFactory {
         let file_metrics = ParquetFileMetrics::new(partition_index, path.as_ref(), metrics);
         let inner = self
             .store
-            .create_revision_file_reader(path.clone())
+            .create_file_reader_from_path(path.clone())
             .with_file_size(file_meta.object_meta.size);
         let location_id = self.location_id;
         let file_id = file_meta
