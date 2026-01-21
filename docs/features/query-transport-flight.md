@@ -1,6 +1,7 @@
 ---
 name: "query-transport-flight"
 description: "Arrow Flight RPC transport for high-performance SQL queries. Load when asking about Flight endpoint, port 1602, gRPC queries, or streaming queries"
+type: feature
 components: "service:server"
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: "provider-config"
 description: "Provider configuration format, TOML storage, and environment variable substitution. Load when asking about provider config files, secrets, or provider storage"
+type: feature
 components: "crate:dataset-store"
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: "app-ampctl"
 description: "Administration CLI for Amp operators. Load when asking about ampctl, admin commands, or operator tooling"
+type: feature
 components: "app:ampctl,crate:admin-client"
 ---
 

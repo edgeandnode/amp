@@ -1,6 +1,7 @@
 ---
 name: "app-ampd-solo"
 description: "ampd solo mode for local development and testing. Load when asking about solo mode, development setup, or single-node deployments"
+type: feature
 components: "app:ampd,service:server,service:controller,service:worker"
 ---
 

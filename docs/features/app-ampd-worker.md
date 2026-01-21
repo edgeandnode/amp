@@ -1,6 +1,7 @@
 ---
 name: "app-ampd-worker"
 description: "ampd worker for blockchain data extraction. Load when asking about workers, extraction jobs, or data ingestion"
+type: feature
 components: "app:ampd,service:worker,crate:config"
 ---
 

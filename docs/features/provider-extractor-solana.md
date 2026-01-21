@@ -1,6 +1,7 @@
 ---
 name: "provider-extractor-solana"
 description: "Solana blockchain provider with Old Faithful archive support. Load when asking about Solana providers, Old Faithful, or CAR files"
+type: feature
 components: "crate:solana"
 ---
 

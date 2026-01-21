@@ -1,6 +1,7 @@
 ---
 name: "dataset-registry"
 description: "DatasetsRegistry for manifest storage, version tags (latest/dev/semantic), revision resolution. Load when working with dataset versioning or manifest management"
+type: component
 components: "crate:amp-datasets-registry,crate:metadata-db,crate:amp-object-store"
 ---
 

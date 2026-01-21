@@ -1,6 +1,7 @@
 ---
 name: "query-sql-batch"
 description: "One-shot SQL query execution that runs to completion before returning results. Load when asking about batch queries, one-shot queries, or non-streaming execution"
+type: feature
 components: "service:server,crate:common,crate:dump"
 ---
 

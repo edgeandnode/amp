@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin"
 description: "Built-in EVM SQL functions for decoding blockchain data. Load when asking about address encoding, log decoding, or contract calls in SQL"
+type: meta
 components: "crate:common"
 ---
 

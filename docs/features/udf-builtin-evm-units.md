@@ -1,6 +1,7 @@
 ---
 name: "udf-builtin-evm-units"
 description: "shift_units function. Load when converting token amounts between wei and human-readable decimals"
+type: feature
 components: "crate:common"
 ---
 

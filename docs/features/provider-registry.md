@@ -1,6 +1,7 @@
 ---
 name: "providers-registry"
 description: "Provider configuration storage, CRUD operations, and caching. Load when working with provider management, RPC/Firehose endpoints, or blockchain data source configuration"
+type: component
 components: "crate:amp-providers-registry,crate:object-store,crate:datasets-derived,crate:eth-beacon-datasets,crate:evm-rpc-datasets,crate:firehose-datasets,crate:solana-datasets"
 ---
 

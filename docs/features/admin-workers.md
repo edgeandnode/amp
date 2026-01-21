@@ -1,6 +1,7 @@
 ---
 name: "admin-workers"
 description: "Worker node management and monitoring. Load when asking about workers, heartbeats, node status, or worker list"
+type: feature
 components: "service:admin-api,crate:admin-client,crate:metadata-db"
 ---
 

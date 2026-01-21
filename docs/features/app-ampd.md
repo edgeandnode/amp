@@ -1,6 +1,7 @@
 ---
 name: "app-ampd"
 description: "ampd daemon for data extraction, transformation, and query serving. Load when asking about ampd, operational modes, or the Amp daemon"
+type: meta
 components: "app:ampd"
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: "provider"
 description: "Provider system overview and concepts. Load when asking about providers, data sources, or blockchain connections"
+type: meta
 components: "crate:dataset-store,crate:common"
 ---
 

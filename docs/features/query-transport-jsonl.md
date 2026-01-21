@@ -1,6 +1,7 @@
 ---
 name: "query-transport-jsonl"
 description: "HTTP transport for SQL queries returning JSON Lines (NDJSON) responses. Load when asking about JSONL endpoint, port 1603, or HTTP query interface"
+type: feature
 components: "service:server"
 ---
 

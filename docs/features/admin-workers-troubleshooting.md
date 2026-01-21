@@ -1,6 +1,7 @@
 ---
 name: "admin-workers-troubleshooting"
 description: "Worker debugging workflows and troubleshooting. Load when debugging worker issues, troubleshooting heartbeats, or investigating worker failures"
+type: feature
 components: "service:admin-api,crate:admin-client,crate:metadata-db,service:worker"
 ---
 

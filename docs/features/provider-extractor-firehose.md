@@ -1,6 +1,7 @@
 ---
 name: "provider-extractor-firehose"
 description: "StreamingFast Firehose provider for high-throughput blockchain streaming. Load when asking about Firehose, gRPC streaming, or StreamingFast"
+type: feature
 components: "crate:firehose"
 ---
 
