@@ -35,7 +35,7 @@ impl LogicalTable {
     }
 
     pub fn table_ref(&self) -> TableReference {
-        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name.clone())
+        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name().clone())
     }
 
     pub fn dataset_reference(&self) -> &HashReference {
@@ -44,7 +44,7 @@ impl LogicalTable {
 
     /// Bare table name
     pub fn name(&self) -> &TableName {
-        &self.table.name
+        self.table.name()
     }
 
     /// Returns the dataset reference portion of SQL table references.

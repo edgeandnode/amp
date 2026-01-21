@@ -10,8 +10,8 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BlockNum, BoxError, Dataset, DetachedLogicalPlan, LogicalCatalog, LogicalTable,
-    PlanningContext, QueryContext, ResolvedTable, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, DetachedLogicalPlan, LogicalCatalog, LogicalTable, PlanningContext,
+    QueryContext, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,

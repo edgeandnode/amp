@@ -1,8 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use common::{
-    BYTES32_TYPE, BoxResult, BoxResult, Bytes32ArrayBuilder, RawTableRows, RawTableRows,
-    SPECIAL_BLOCK_NUM,
+    BoxResult, RawTableRows, SPECIAL_BLOCK_NUM,
     arrow::{
         array::{
             ArrayRef, ListBuilder, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
