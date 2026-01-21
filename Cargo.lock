@@ -1046,18 +1046,12 @@ name = "amp-providers-registry"
 version = "0.1.0"
 dependencies = [
  "datasets-common",
- "datasets-derived",
- "eth-beacon-datasets",
- "evm-rpc-datasets",
- "firehose-datasets",
  "futures",
  "indoc",
  "monitoring",
  "object_store",
  "parking_lot",
  "serde",
- "serde_json",
- "solana-datasets",
  "thiserror 2.0.18",
  "tokio",
  "toml",
@@ -1094,7 +1088,6 @@ dependencies = [
  "amp-object-store",
  "anyhow",
  "clap",
- "common",
  "console 0.16.2",
  "datasets-common",
  "dump",
@@ -2728,7 +2721,6 @@ dependencies = [
  "datasets-common",
  "futures",
  "governor 0.10.4",
- "indoc",
  "itertools 0.14.0",
  "metadata-db",
  "monitoring",
@@ -4066,7 +4058,6 @@ dependencies = [
 name = "datasets-derived"
 version = "0.1.0"
 dependencies = [
- "amp-data-store",
  "common",
  "datafusion",
  "datasets-common",
@@ -4075,7 +4066,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -4427,7 +4417,6 @@ dependencies = [
  "alloy",
  "amp-data-store",
  "amp-dataset-store",
- "amp-providers-registry",
  "async-stream",
  "common",
  "datafusion",
@@ -13760,7 +13749,6 @@ dependencies = [
  "amp-config",
  "amp-data-store",
  "amp-dataset-store",
- "amp-providers-registry",
  "backon",
  "chrono",
  "common",

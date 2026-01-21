@@ -20,7 +20,6 @@ datafusion-tracing.workspace = true
 datasets-common = { path = "../datasets-common" }
 futures.workspace = true
 governor.workspace = true
-indoc.workspace = true
 itertools.workspace = true
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }

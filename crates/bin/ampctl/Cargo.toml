@@ -18,7 +18,6 @@ admin-client = { path = "../../clients/admin" }
 amp-object-store = { path = "../../core/object-store" }
 anyhow.workspace = true
 clap.workspace = true
-common = { path = "../../core/common" }
 console = "0.16.1"
 amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
