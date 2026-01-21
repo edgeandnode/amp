@@ -999,6 +999,7 @@ dependencies = [
  "datafusion",
  "datasets-common",
  "datasets-derived",
+ "datasets-raw",
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
@@ -2720,6 +2721,7 @@ dependencies = [
  "datafusion-datasource",
  "datafusion-tracing",
  "datasets-common",
+ "datasets-raw",
  "futures",
  "governor 0.10.4",
  "itertools 0.14.0",
@@ -4030,6 +4032,7 @@ dependencies = [
 name = "datasets-common"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "datafusion",
  "hex",
  "js-runtime",
@@ -4091,8 +4094,18 @@ dependencies = [
 name = "datasets-raw"
 version = "0.1.0"
 dependencies = [
+ "alloy",
+ "arrow",
+ "async-stream",
+ "backon",
  "datafusion",
  "datasets-common",
+ "futures",
+ "monitoring",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4398,6 +4411,7 @@ dependencies = [
  "datafusion",
  "datasets-common",
  "datasets-derived",
+ "datasets-raw",
  "futures",
  "metadata-db",
  "monitoring",
@@ -4652,6 +4666,7 @@ dependencies = [
  "async-stream",
  "common",
  "datasets-common",
+ "datasets-raw",
  "futures",
  "monitoring",
  "schemars 1.2.0",
@@ -4792,6 +4807,7 @@ dependencies = [
  "async-stream",
  "common",
  "datasets-common",
+ "datasets-raw",
  "futures",
  "hex",
  "monitoring",
@@ -9752,6 +9768,7 @@ dependencies = [
  "bs58",
  "common",
  "datasets-common",
+ "datasets-raw",
  "fs-err",
  "futures",
  "governor 0.10.4",

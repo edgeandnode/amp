@@ -1,9 +1,13 @@
 use async_stream::stream;
-use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
+use datasets_common::BlockNum;
+use datasets_raw::{
+    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    rows::Rows,
+};
 use futures::Stream;
 
 #[derive(Clone)]
-pub(crate) enum BlockStreamClient {
+pub enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
     Solana(solana_datasets::SolanaExtractor),
     Firehose(Box<firehose_datasets::Client>),
@@ -14,7 +18,7 @@ impl BlockStreamer for BlockStreamClient {
         self,
         start_block: BlockNum,
         end_block: BlockNum,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>> + Send {
         // Each client returns a different concrete stream type, so we
         // use `stream!` to unify them into a wrapper stream
         stream! {
@@ -41,7 +45,10 @@ impl BlockStreamer for BlockStreamClient {
         }
     }
 
-    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
+    async fn latest_block(
+        &mut self,
+        finalized: bool,
+    ) -> Result<Option<BlockNum>, LatestBlockError> {
         match self {
             Self::EvmRpc(client) => client.latest_block(finalized).await,
             Self::Solana(client) => client.latest_block(finalized).await,
@@ -49,7 +56,7 @@ impl BlockStreamer for BlockStreamClient {
         }
     }
 
-    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
         match self {
             Self::EvmRpc(client) => client.wait_for_cleanup().await,
             Self::Solana(client) => client.wait_for_cleanup().await,

@@ -37,14 +37,13 @@ use thiserror::Error;
 use tracing::{field, instrument};
 
 use crate::{
-    BlockNum, BoxError, arrow,
+    BlockNum, BlockRange, BoxError, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
         EvmEncodeType, EvmTopic, ShiftUnits,
     },
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
-    metadata::segments::BlockRange,
     plan_visitors::{
         extract_table_references_from_plan, forbid_duplicate_field_names,
         forbid_underscore_prefixed_aliases,

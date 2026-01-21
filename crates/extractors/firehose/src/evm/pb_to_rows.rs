@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use alloy::primitives::U256;
 use common::{
-    BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
+    BlockRange, BoxError, Bytes32, EvmCurrency, Timestamp,
     evm::tables::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    metadata::segments::BlockRange,
 };
+use datasets_raw::rows::Rows;
 use thiserror::Error;
 
 use super::{
@@ -34,7 +34,7 @@ pub enum ProtobufToRowError {
 pub fn protobufs_to_rows(
     block: pbethereum::Block,
     network: &str,
-) -> Result<RawDatasetRows, ProtobufToRowError> {
+) -> Result<Rows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
     fn transactions_iter(
@@ -242,7 +242,7 @@ pub fn protobufs_to_rows(
     let calls_rows = calls.build(block.clone()).map_err(ArrowError)?;
     let logs_rows = logs.build(block.clone()).map_err(ArrowError)?;
 
-    Ok(RawDatasetRows::new(vec![
+    Ok(Rows::new(vec![
         header_row,
         transactions_rows,
         calls_rows,

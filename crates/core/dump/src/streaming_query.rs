@@ -10,12 +10,12 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BlockNum, BoxError, DetachedLogicalPlan, LogicalCatalog, LogicalTable, PlanningContext,
-    QueryContext, SPECIAL_BLOCK_NUM,
+    BlockNum, BlockRange, BoxError, DetachedLogicalPlan, LogicalCatalog, LogicalTable,
+    PlanningContext, QueryContext, ResumeWatermark, SPECIAL_BLOCK_NUM, Watermark,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::{Catalog, PhysicalTable},
     incrementalizer::incrementalize_plan,
-    metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
+    metadata::segments::Segment,
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
     query_context::QueryEnv,
     sql_str::SqlStr,
@@ -469,7 +469,7 @@ impl StreamingQuery {
                 // If we reached the end block, we are done
                 return Ok(());
             }
-            self.prev_watermark = Some(range.watermark());
+            self.prev_watermark = Some((&range).into());
         }
     }
 
@@ -615,7 +615,7 @@ impl StreamingQuery {
         let mut latest_src_watermarks: Vec<Watermark> = Default::default();
         'chain_loop: for chain in chains {
             for segment in chain.iter().rev() {
-                let watermark = segment.range.watermark();
+                let watermark = (&segment.range).into();
                 if self.blocks_table_contains(ctx, &watermark).await? {
                     latest_src_watermarks.push(watermark);
                     continue 'chain_loop;

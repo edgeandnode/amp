@@ -14,6 +14,7 @@ bs58 = "0.5.1"
 base64 = "0.22.1"
 common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
+datasets-raw = { path = "../../core/datasets-raw" }
 futures.workspace = true
 fs-err.workspace = true
 governor.workspace = true

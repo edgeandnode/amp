@@ -21,7 +21,7 @@ use async_stream::stream;
 use axum::{Router, http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    BlockNum, DetachedLogicalPlan, PlanningContext, QueryContext,
+    BlockNum, BlockRange, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
     arrow::{
         self,
         array::RecordBatch,
@@ -42,7 +42,6 @@ use common::{
             },
         },
     },
-    metadata::segments::{BlockRange, ResumeWatermark},
     query_context::{Error as CoreError, QueryEnv},
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,

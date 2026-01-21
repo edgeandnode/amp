@@ -8,7 +8,7 @@ use std::{
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
 use common::{
-    BlockStreamer, BlockStreamerExt, BoxError,
+    BoxError,
     evm::{self, udfs::EthCall},
 };
 use datafusion::{
@@ -20,6 +20,7 @@ use datasets_common::{
     reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
+use datasets_raw::client::{BlockStreamer, BlockStreamerExt};
 use evm_rpc_datasets::{
     EvmRpcDatasetKind, Manifest as EvmRpcManifest, ProviderConfig as EvmRpcProviderConfig,
 };
@@ -33,12 +34,12 @@ use solana_datasets::{Manifest as SolanaManifest, ProviderConfig as SolanaProvid
 use tracing::instrument;
 use url::Url;
 
-mod block_stream_client;
+mod client;
 mod dataset_kind;
 mod env_substitute;
 mod error;
 
-use self::block_stream_client::BlockStreamClient;
+use self::client::BlockStreamClient;
 pub use self::{
     dataset_kind::DatasetKind,
     error::{

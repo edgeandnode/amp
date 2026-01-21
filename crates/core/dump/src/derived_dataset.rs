@@ -98,12 +98,12 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use amp_data_store::file_name::FileName;
 use common::{
-    BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
+    BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
     catalog::{
         logical::for_dump as logical_catalog,
         physical::{Catalog, PhysicalTable, for_dump as physical_catalog},
     },
-    metadata::{Generation, segments::ResumeWatermark},
+    metadata::Generation,
     query_context::QueryEnv,
     sql::{resolve_function_references, resolve_table_references},
 };

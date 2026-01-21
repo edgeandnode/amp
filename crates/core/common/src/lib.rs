@@ -13,7 +13,6 @@ pub mod stream_helpers;
 pub mod utils;
 
 use std::{
-    future::Future,
     ops::RangeInclusive,
     time::{Duration, SystemTime},
 };
@@ -22,26 +21,18 @@ use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
 use datafusion::arrow::{
-    array::{ArrayRef, AsArray as _, RecordBatch},
-    datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit, UInt64Type},
+    datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit},
     error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};
-use datasets_common::dataset::Table;
-use futures::{Stream, StreamExt};
-use metadata::segments::BlockRange;
+pub use datasets_common::{BlockNum, SPECIAL_BLOCK_NUM, block_range::BlockRange};
+pub use metadata::segments::{ResumeWatermark, Watermark};
 pub use planning_context::{DetachedLogicalPlan, PlanningContext};
 pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub type BoxResult<T> = Result<T, BoxError>;
-
-/// Special column name for block numbers. These are implicitly selected when doing streaming
-/// queries, and in some other cases.
-pub const SPECIAL_BLOCK_NUM: &str = "_block_num";
-
-pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
 pub type EvmAddress = [u8; 20];
 pub type EvmCurrency = i128; // Payment amount in the EVM. Used for gas or value transfers.
@@ -82,227 +73,6 @@ pub fn timestamp_type() -> DataType {
 
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
 pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
-
-/// A record batch associated with a single block of chain data, for populating raw datasets.
-pub struct RawTableRows {
-    pub table: Table,
-    pub rows: RecordBatch,
-    pub range: BlockRange,
-}
-
-impl RawTableRows {
-    pub fn new(table: Table, range: BlockRange, columns: Vec<ArrayRef>) -> Result<Self, BoxError> {
-        let schema = table.schema().clone();
-        let rows = RecordBatch::try_new(schema, columns)?;
-        Self::check_invariants(&range, &rows)
-            .map_err(|err| format!("malformed table {}: {}", table.name(), err))?;
-        Ok(RawTableRows { table, rows, range })
-    }
-
-    pub fn block_num(&self) -> BlockNum {
-        self.range.start()
-    }
-
-    fn check_invariants(range: &BlockRange, rows: &RecordBatch) -> Result<(), BoxError> {
-        if range.start() != range.end() {
-            return Err("block range must contain a single block number".into());
-        }
-        if rows.num_rows() == 0 {
-            return Ok(());
-        }
-
-        let block_nums = rows
-            .column_by_name(SPECIAL_BLOCK_NUM)
-            .ok_or("missing _block_num column")?;
-        let block_nums = block_nums
-            .as_primitive_opt::<UInt64Type>()
-            .ok_or("_block_num column is not uint64")?;
-
-        // Unwrap: `rows` is not empty.
-        let start = arrow::compute::kernels::aggregate::min(block_nums).unwrap();
-        let end = arrow::compute::kernels::aggregate::max(block_nums).unwrap();
-        if start != range.start() {
-            return Err(format!("contains unexpected block_num: {}", start).into());
-        };
-        if end != range.start() {
-            return Err(format!("contains unexpected block_num: {}", end).into());
-        };
-
-        Ok(())
-    }
-}
-
-pub struct RawDatasetRows(Vec<RawTableRows>);
-
-impl RawDatasetRows {
-    pub fn new(rows: Vec<RawTableRows>) -> Self {
-        assert!(!rows.is_empty());
-        assert!(rows.iter().skip(1).all(|r| r.range == rows[0].range));
-        Self(rows)
-    }
-
-    pub fn block_num(&self) -> BlockNum {
-        self.0[0].block_num()
-    }
-}
-
-impl IntoIterator for RawDatasetRows {
-    type Item = RawTableRows;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-pub trait BlockStreamer: Clone + 'static {
-    fn block_stream(
-        self,
-        start: BlockNum,
-        end: BlockNum,
-    ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
-
-    fn latest_block(
-        &mut self,
-        finalized: bool,
-    ) -> impl Future<Output = Result<Option<BlockNum>, BoxError>> + Send;
-
-    /// Waits for any background work and resources associated with this [`BlockStreamer`]
-    /// to be cleaned up.
-    ///
-    /// This should be called once the user no longer needs to create new block streams
-    /// to allow implementations to terminate internal tasks, flush or release network
-    /// connections, and free any other resources.
-    ///
-    /// After requesting cleanup, callers should not call [BlockStreamer::block_stream]
-    /// again on the same instance. Behavior when creating new streams after cleanup is
-    /// implementation-defined and must not be relied on.
-    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), BoxError>> + Send;
-
-    fn provider_name(&self) -> &str;
-}
-
-impl<T: BlockStreamer> BlockStreamerExt for T {}
-
-pub trait BlockStreamerExt: BlockStreamer {
-    fn with_retry(self) -> BlockStreamerWithRetry<Self> {
-        BlockStreamerWithRetry(self)
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockStreamerWithRetry<T: BlockStreamer>(T);
-
-impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T> {
-    async fn block_stream(
-        self,
-        start: BlockNum,
-        end: BlockNum,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
-        const DEBUG_RETRY_LIMIT: u16 = 8;
-        const DEBUG_RETRY_DELAY: Duration = Duration::from_millis(50);
-        const WARN_RETRY_LIMIT: u16 = 16;
-        const WARN_RETRY_DELAY: Duration = Duration::from_millis(100);
-        const ERROR_RETRY_DELAY: Duration = Duration::from_millis(300);
-
-        let mut current_block = start;
-        let mut num_retries = 0;
-
-        async_stream::stream! {
-            'retry: loop {
-                let inner_stream = self.0.clone().block_stream(current_block, end).await;
-                futures::pin_mut!(inner_stream);
-                while let Some(block) = inner_stream.next().await {
-                    match &block {
-                        Ok(_) => {
-                            num_retries = 0;
-                            current_block += 1;
-                            yield block;
-                        }
-                        Err(e) => {
-                            let error_source = monitoring::logging::error_source(e.as_ref());
-                            // Progressively more severe logging and longer retry interval.
-                            match num_retries {
-                                0 => {
-                                    // First error, make sure it is visible in info (default) logs.
-                                    num_retries += 1;
-                                    tracing::info!(
-                                        block = %current_block,
-                                        error = %e,
-                                        error_source,
-                                        "Block streaming failed, retrying"
-                                    );
-                                    tokio::time::sleep(DEBUG_RETRY_DELAY).await;
-                                }
-                                1..DEBUG_RETRY_LIMIT => {
-                                    num_retries += 1;
-                                    tracing::debug!(
-                                        block = %current_block,
-                                        error = %e,
-                                        error_source,
-                                        "Block streaming failed, retrying");
-                                    tokio::time::sleep(DEBUG_RETRY_DELAY).await;
-                                }
-                                DEBUG_RETRY_LIMIT..WARN_RETRY_LIMIT => {
-                                    num_retries += 1;
-                                    tracing::warn!(
-                                        block = %current_block,
-                                        error = %e,
-                                        error_source,
-                                        "Block streaming failed, retrying"
-                                    );
-                                    tokio::time::sleep(WARN_RETRY_DELAY).await;
-                                }
-                                _ => {
-                                    tracing::error!(
-                                        block = %current_block,
-                                        error = %e,
-                                        error_source,
-                                        "Block streaming failed, retrying"
-                                    );
-                                    tokio::time::sleep(ERROR_RETRY_DELAY).await;
-                                }
-                            }
-                            continue 'retry;
-                        }
-                    }
-                }
-                break 'retry;
-            }
-        }
-    }
-
-    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
-        use backon::{ExponentialBuilder, Retryable};
-
-        (|| async {
-            let mut inner = self.0.clone();
-            inner.latest_block(finalized).await
-        })
-        .retry(
-            ExponentialBuilder::default()
-                .with_min_delay(Duration::from_secs(2))
-                .with_max_delay(Duration::from_secs(20))
-                .with_max_times(10),
-        )
-        .notify(|err, dur| {
-            tracing::warn!(
-                error = %err,
-                "Failed to get latest block. Retrying in {:.1}s",
-                dur.as_secs_f32()
-            );
-        })
-        .await
-    }
-
-    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), BoxError>> + Send {
-        self.0.wait_for_cleanup()
-    }
-
-    fn provider_name(&self) -> &str {
-        self.0.provider_name()
-    }
-}
 
 pub fn block_range_intersection(
     a: RangeInclusive<BlockNum>,

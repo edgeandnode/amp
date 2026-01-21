@@ -1,5 +1,5 @@
 use arrow_flight::FlightData;
-use common::metadata::segments::BlockRange;
+use common::BlockRange;
 use monitoring::logging;
 use serde::Deserialize;
 use tokio::sync::mpsc;

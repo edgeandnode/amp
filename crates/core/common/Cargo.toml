@@ -18,6 +18,7 @@ datafusion.workspace = true
 datafusion-datasource.workspace = true
 datafusion-tracing.workspace = true
 datasets-common = { path = "../datasets-common" }
+datasets-raw = { path = "../datasets-raw" }
 futures.workspace = true
 governor.workspace = true
 itertools.workspace = true

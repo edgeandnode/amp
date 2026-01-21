@@ -23,7 +23,7 @@ use alloy::{
 };
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BoxError, BoxResult, EvmCurrency, RawDatasetRows, Timestamp,
+    BlockNum, BlockRange, BoxError, BoxResult, EvmCurrency, Timestamp,
     evm::{
         self,
         tables::{
@@ -31,8 +31,8 @@ use common::{
             logs::{self, LogRowsBuilder},
         },
     },
-    metadata::segments::BlockRange,
 };
+use datasets_raw::{client::BlockStreamer, rows::Rows};
 use futures::{Stream, future::try_join_all};
 use thiserror::Error;
 use tracing::{instrument, warn};
@@ -197,7 +197,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
         assert!(end_block >= start_block);
         let total_blocks_to_stream = end_block - start_block + 1;
 
@@ -309,7 +309,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
         tracing::info!("Fetching blocks (batched) {} to {}", start_block, end_block);
         let batching_client =
             BatchingRpcWrapper::new(self.client.clone(), self.batch_size, self.limiter.clone());
@@ -435,7 +435,7 @@ impl BlockStreamer for JsonRpcClient {
         self,
         start: BlockNum,
         end: BlockNum,
-    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
         // Each function returns a different concrete stream type, so we
         // use `stream!` to unify them into a wrapper stream
         stream! {
@@ -586,7 +586,7 @@ fn rpc_to_rows(
     block: AnyRpcBlock,
     receipts: Vec<AnyTxReceipt>,
     network: &str,
-) -> Result<RawDatasetRows, BoxError> {
+) -> Result<Rows, BoxError> {
     if block.transactions.len() != receipts.len() {
         let err = format!(
             "mismatched tx and receipt count for block {}: {} txs, {} receipts",
@@ -652,11 +652,7 @@ fn rpc_to_rows(
         builder.build(block.clone())?
     };
 
-    Ok(RawDatasetRows::new(vec![
-        header_row,
-        logs_row,
-        transactions_row,
-    ]))
+    Ok(Rows::new(vec![header_row, logs_row, transactions_row]))
 }
 
 fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {

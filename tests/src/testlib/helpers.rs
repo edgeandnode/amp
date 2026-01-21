@@ -12,10 +12,9 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BoxError, LogicalCatalog, LogicalTable,
+    BlockRange, BoxError, LogicalCatalog, LogicalTable,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::segments::BlockRange,
     sql,
     sql_str::SqlStr,
 };
