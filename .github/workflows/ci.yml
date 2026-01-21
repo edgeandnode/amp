@@ -109,7 +109,6 @@ jobs:
           FIREHOSE_ETH_BASE_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }} # Token is the same for both networks
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
-          BEACON_ETH_MAINNET_URL: ${{ secrets.BEACON_ETH_MAINNET_URL }}
 
   ampup-tests:
     name: Test ampup

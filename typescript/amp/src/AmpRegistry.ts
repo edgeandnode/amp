@@ -555,7 +555,7 @@ export class AmpRegistryInsertDatasetVersionDto
     changelog: Schema.String.pipe(Schema.optionalWith({ nullable: true })),
     version_tag: Model.DatasetRevision,
     manifest: Model.DatasetManifest,
-    kind: Schema.Literal("manifest", "evm-rpc", "eth-beacon", "firehose"),
+    kind: Schema.Literal("manifest", "evm-rpc", "firehose"),
     ancestors: Schema.Array(Model.DatasetReferenceString),
   })
 {}
