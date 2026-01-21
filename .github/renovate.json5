@@ -25,6 +25,26 @@
   ignoreDeps: [
     'serde_yaml', // Ignore serde_yaml because it is marked as deprecated. No new releases will be made.
   ], 
+  packageRules: [
+    // Group console-rs terminal UI crates (must upgrade together for compatibility)
+    {
+      groupName: 'console-rs terminal UI',
+      matchManagers: ['cargo'],
+      matchPackagePatterns: ['^console$', '^indicatif$', '^dialoguer$'],
+    },
+    // Group Solana agave crates (validator/client)
+    {
+      groupName: 'solana-agave',
+      matchManagers: ['cargo'],
+      matchSourceUrls: ['https://github.com/anza-xyz/agave'],
+    },
+    // Group Solana SDK crates
+    {
+      groupName: 'solana-sdk',
+      matchManagers: ['cargo'],
+      matchSourceUrls: ['https://github.com/anza-xyz/solana-sdk'],
+    },
+  ],
   customManagers: [
     {
       customType: 'regex',
