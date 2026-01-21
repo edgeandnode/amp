@@ -1045,7 +1045,6 @@ dependencies = [
 name = "amp-providers-registry"
 version = "0.1.0"
 dependencies = [
- "common",
  "datasets-common",
  "datasets-derived",
  "eth-beacon-datasets",

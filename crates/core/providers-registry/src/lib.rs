@@ -15,7 +15,6 @@
 
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
-use common::BoxError;
 use datasets_common::raw_dataset_kind::RawDatasetKind;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
@@ -473,44 +472,9 @@ async fn load_and_parse_file(
     Ok(provider)
 }
 
-/// Errors that can occur when fetching provider configurations.
-#[derive(Debug, thiserror::Error)]
-pub enum FetchError {
-    /// Failed to fetch provider configuration from the underlying store.
-    ///
-    /// This wraps errors from the storage layer when attempting to read provider
-    /// configuration files, such as file not found, permission errors, or network
-    /// issues for remote stores.
-    #[error("failed to fetch provider configuration: {0}")]
-    StoreFetchFailed(#[from] BoxError),
-
-    /// Failed to parse provider configuration as valid TOML.
-    ///
-    /// This occurs when a provider configuration file exists but contains invalid
-    /// TOML syntax, missing required fields, or field values that cannot be
-    /// deserialized into the expected types.
-    #[error("TOML parse error: {0}")]
-    TomlParseError(#[from] toml::de::Error),
-
-    /// Provider configuration file contains invalid UTF-8.
-    ///
-    /// This occurs when a provider configuration file exists but contains binary data
-    /// or text in a non-UTF-8 encoding, preventing it from being parsed as a text file.
-    #[error("provider configuration file is not valid UTF-8 at {location}: {source}")]
-    InvalidUtf8 {
-        /// The location (file path) of the invalid UTF-8 file
-        location: String,
-        /// The underlying UTF-8 decoding error
-        source: std::string::FromUtf8Error,
-    },
-}
-
 /// Error that can occur when registering a provider configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum RegisterError {
-    /// Failed to fetch existing provider configurations from the store.
-    #[error("failed to fetch existing provider configurations from store: {0}")]
-    FetchError(#[from] FetchError),
     /// Provider configuration already exists with the same name.
     #[error("provider configuration '{name}' already exists")]
     Conflict { name: String },
