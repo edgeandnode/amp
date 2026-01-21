@@ -6,8 +6,9 @@
     ':semanticCommitTypeAll(chore)',
     'helpers:pinGitHubActionDigests',
   ],
-  schedule: [ 
-    '* 5 1,15 * *', // At 05:00AM on day-of-month 1 and 15
+  schedule: [
+    // At 05:00AM on day-of-month 1 and 15
+    '* 5 1,15 * *',
   ],
   configMigration: true,
   rebaseWhen: 'behind-base-branch',
@@ -23,26 +24,41 @@
     'custom.regex',
   ],
   ignoreDeps: [
-    'serde_yaml', // Ignore serde_yaml because it is marked as deprecated. No new releases will be made.
-  ], 
+    // Ignore serde_yaml because it is marked as deprecated. No new releases will be made.
+    'serde_yaml',
+  ],
   packageRules: [
     // Group console-rs terminal UI crates (must upgrade together for compatibility)
     {
       groupName: 'console-rs terminal UI',
-      matchManagers: ['cargo'],
-      matchPackagePatterns: ['^console$', '^indicatif$', '^dialoguer$'],
+      matchManagers: [
+        'cargo',
+      ],
+      matchPackageNames: [
+        '/^console$/',
+        '/^indicatif$/',
+        '/^dialoguer$/',
+      ],
     },
     // Group Solana agave crates (validator/client)
     {
       groupName: 'solana-agave',
-      matchManagers: ['cargo'],
-      matchSourceUrls: ['https://github.com/anza-xyz/agave'],
+      matchManagers: [
+        'cargo',
+      ],
+      matchSourceUrls: [
+        'https://github.com/anza-xyz/agave',
+      ],
     },
     // Group Solana SDK crates
     {
       groupName: 'solana-sdk',
-      matchManagers: ['cargo'],
-      matchSourceUrls: ['https://github.com/anza-xyz/solana-sdk'],
+      matchManagers: [
+        'cargo',
+      ],
+      matchSourceUrls: [
+        'https://github.com/anza-xyz/solana-sdk',
+      ],
     },
   ],
   customManagers: [
