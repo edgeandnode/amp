@@ -93,7 +93,7 @@ jobs:
         run: echo "${{ secrets.APPLE_APP_STORE_CONNECT_API_KEY_JSON }}" | base64 -d > key.json
 
       - name: Sign binary
-        uses: indygreg/apple-code-sign-action@7833348d60ab2228e66dda72322120fb89db09ee
+        uses: indygreg/apple-code-sign-action@a00d97f64dc70cb0e9bbc1e5f13d1892dd1c333a
         with:
           input_path: binaries/${{ matrix.binary }}
           sign: true
@@ -111,7 +111,7 @@ jobs:
           zip ${{ matrix.binary }}.zip ${{ matrix.binary }}
 
       - name: Notarize binary
-        uses: indygreg/apple-code-sign-action@7833348d60ab2228e66dda72322120fb89db09ee
+        uses: indygreg/apple-code-sign-action@a00d97f64dc70cb0e9bbc1e5f13d1892dd1c333a
         with:
           input_path: binaries/${{ matrix.binary }}.zip
           sign: false
