@@ -110,9 +110,10 @@ fn render_status(f: &mut Frame, area: Rect, status: &DeviceFlowStatus) {
             "Opening browser... Complete authentication to continue.".into(),
             Theme::status_warning(),
         ),
-        DeviceFlowStatus::Polling => {
-            ("Waiting for authentication...".into(), Theme::status_warning())
-        }
+        DeviceFlowStatus::Polling => (
+            "Waiting for authentication...".into(),
+            Theme::status_warning(),
+        ),
         DeviceFlowStatus::OpenBrowserFailure(url) => (
             format!("Failed to open browser. Go to: {url} to authenticate").into(),
             Theme::status_warning(),

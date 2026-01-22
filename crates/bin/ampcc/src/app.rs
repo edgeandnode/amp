@@ -1290,7 +1290,7 @@ impl App {
                 let mut copy_to_clipboard_failed = false;
                 // Copy user code to clipboard
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    if let Err(_) = clipboard.set_text(&user_code) {
+                    if clipboard.set_text(&user_code).is_err() {
                         copy_to_clipboard_failed = true;
                     }
                 } else {
@@ -1310,9 +1310,12 @@ impl App {
 
             Action::AuthDeviceFlowConfirm => {
                 if let Some(ref mut flow) = self.auth_device_flow {
-                    if let Err(_) = crate::auth::PkceDeviceFlowClient::open_browser(&flow.verification_uri) {
+                    if crate::auth::PkceDeviceFlowClient::open_browser(&flow.verification_uri)
+                        .is_err()
+                    {
                         // pass the auth URL to the error to print in the auth screen
-                        flow.status = DeviceFlowStatus::OpenBrowserFailure(self.config.auth_url.clone());
+                        flow.status =
+                            DeviceFlowStatus::OpenBrowserFailure(self.config.auth_url.clone());
                     } else {
                         flow.status = DeviceFlowStatus::WaitingForBrowser;
                     }
