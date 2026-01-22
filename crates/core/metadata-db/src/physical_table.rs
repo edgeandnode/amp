@@ -307,7 +307,7 @@ impl LocationWithDetails {
 }
 
 /// Writer info for a table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TableWriterInfo {
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,
@@ -318,7 +318,7 @@ pub struct TableWriterInfo {
 }
 
 /// Info about a table written by a job
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct JobTableInfo {
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,

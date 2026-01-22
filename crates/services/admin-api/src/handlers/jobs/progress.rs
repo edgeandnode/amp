@@ -174,13 +174,13 @@ pub async fn handler(
                     error_source = logging::error_source(&err),
                     "failed to get active physical table"
                 );
-                Error::PhysicalTable(err.into())
+                Error::GetActiveRevision(err)
             })?
             .map(|revision| {
-                PhysicalTable::from_active_revision(
+                PhysicalTable::from_revision(
                     ctx.data_store.clone(),
                     hash_ref.clone(),
-                    dataset.start_block,
+                    dataset.start_block(),
                     table_config.clone(),
                     revision,
                     sql_table_ref_schema.clone(),
@@ -196,10 +196,10 @@ pub async fn handler(
                         tracing::error!(
                             table = %table_name,
                             error = %err,
-                            error_source = logging::error_source(&*err),
+                            error_source = logging::error_source(&err),
                             "failed to snapshot physical table"
                         );
-                        Error::PhysicalTable(err)
+                        Error::SnapshotTable(err)
                     })?;
 
                 let synced_range = snapshot.synced_range();
@@ -297,9 +297,13 @@ pub enum Error {
     #[error("failed to get dataset definition")]
     GetDataset(#[source] amp_dataset_store::GetDatasetError),
 
-    /// Failed to access physical table metadata
-    #[error("failed to access physical table")]
-    PhysicalTable(#[source] common::BoxError),
+    /// Failed to get active table revision
+    #[error("failed to get active table revision")]
+    GetActiveRevision(#[source] amp_data_store::GetTableActiveRevisionError),
+
+    /// Failed to snapshot physical table
+    #[error("failed to snapshot physical table")]
+    SnapshotTable(#[source] common::catalog::physical::SnapshotError),
 }
 
 impl IntoErrorResponse for Error {
@@ -310,7 +314,8 @@ impl IntoErrorResponse for Error {
             Error::GetJob(_) => "GET_JOB_ERROR",
             Error::GetTables(_) => "GET_TABLES_ERROR",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
-            Error::PhysicalTable(_) => "PHYSICAL_TABLE_ERROR",
+            Error::GetActiveRevision(_) => "GET_ACTIVE_REVISION_ERROR",
+            Error::SnapshotTable(_) => "SNAPSHOT_TABLE_ERROR",
         }
     }
 
@@ -321,7 +326,8 @@ impl IntoErrorResponse for Error {
             Error::GetJob(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetTables(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::PhysicalTable(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetActiveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SnapshotTable(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
