@@ -88,17 +88,17 @@ pub async fn handler(
         }
     };
 
-    // Get all tables written by this job
+    // Get all tables associated with this job's writer
     let job_tables = ctx
         .data_store
-        .get_tables_written_by_job(job_id)
+        .get_tables_by_writer(job_id)
         .await
         .map_err(|err| {
             tracing::error!(
                 job_id = ?job_id,
                 error = %err,
                 error_source = logging::error_source(&err),
-                "failed to get tables written by job"
+                "failed to get tables by writer"
             );
             Error::GetTables(err)
         })?;
@@ -289,9 +289,9 @@ pub enum Error {
     #[error("failed to get job")]
     GetJob(#[source] scheduler::GetJobError),
 
-    /// Failed to get tables written by this job
-    #[error("failed to get tables written by job")]
-    GetTables(#[source] amp_data_store::GetTablesWrittenByJobError),
+    /// Failed to get tables by writer
+    #[error("failed to get tables by writer")]
+    GetTables(#[source] amp_data_store::GetTablesByWriterError),
 
     /// Failed to get dataset definition
     #[error("failed to get dataset definition")]

@@ -372,11 +372,11 @@ where
         .await
 }
 
-/// Query tables written by a specific job
-pub async fn get_tables_written_by_job<'c, E>(
+/// Query tables associated with a specific writer
+pub async fn get_tables_by_writer<'c, E>(
     exe: E,
-    job_id: JobId,
-) -> Result<Vec<super::JobTableInfo>, sqlx::Error>
+    writer_id: JobId,
+) -> Result<Vec<super::WriterTableInfo>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -393,5 +393,5 @@ where
         ORDER BY pt.table_name
     "#};
 
-    sqlx::query_as(query).bind(job_id).fetch_all(exe).await
+    sqlx::query_as(query).bind(writer_id).fetch_all(exe).await
 }

@@ -529,17 +529,17 @@ impl DataStore {
 
 /// Progress and status tracking
 impl DataStore {
-    /// Gets tables written by a specific job.
+    /// Gets tables associated with a specific writer.
     ///
-    /// Returns a list of active tables where the specified job is the writer,
+    /// Returns a list of active tables where the specified writer is assigned,
     /// along with metadata about each table including dataset information.
-    pub async fn get_tables_written_by_job(
+    pub async fn get_tables_by_writer(
         &self,
-        job_id: impl Into<metadata_db::jobs::JobId> + std::fmt::Debug,
-    ) -> Result<Vec<metadata_db::physical_table::JobTableInfo>, GetTablesWrittenByJobError> {
-        metadata_db::physical_table::get_tables_written_by_job(&self.metadata_db, job_id)
+        writer_id: impl Into<metadata_db::jobs::JobId> + std::fmt::Debug,
+    ) -> Result<Vec<metadata_db::physical_table::WriterTableInfo>, GetTablesByWriterError> {
+        metadata_db::physical_table::get_tables_by_writer(&self.metadata_db, writer_id)
             .await
-            .map_err(GetTablesWrittenByJobError)
+            .map_err(GetTablesByWriterError)
     }
 }
 
@@ -931,8 +931,8 @@ pub struct DeleteFilesStreamError(#[source] pub object_store::Error);
 /// - Network connectivity issues
 /// - Invalid job ID
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to get tables written by job from metadata database")]
-pub struct GetTablesWrittenByJobError(#[source] pub metadata_db::Error);
+#[error("failed to get tables by writer from metadata database")]
+pub struct GetTablesByWriterError(#[source] pub metadata_db::Error);
 
 /// Cached parquet data including metadata and computed statistics.
 #[derive(Clone)]

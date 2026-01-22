@@ -27,8 +27,8 @@ pub use self::{
     manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     physical_table::{
-        JobTableInfo, LocationId, LocationIdFromStrError, LocationIdI64ConvError,
-        LocationIdU64Error, LocationWithDetails, PhysicalTable, TableWriterInfo,
+        LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+        LocationWithDetails, PhysicalTable, TableWriterInfo, WriterTableInfo,
         events::{
             LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
             LocationNotification,

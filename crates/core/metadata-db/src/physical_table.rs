@@ -317,9 +317,9 @@ pub struct TableWriterInfo {
     pub job_status: Option<JobStatus>,
 }
 
-/// Info about a table written by a job
+/// Info about a table associated with a writer
 #[derive(Debug, Clone, sqlx::FromRow)]
-pub struct JobTableInfo {
+pub struct WriterTableInfo {
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,
     /// Manifest hash identifying the dataset version
@@ -328,7 +328,7 @@ pub struct JobTableInfo {
     pub dataset_namespace: DatasetNamespaceOwned,
     /// Dataset name
     pub dataset_name: DatasetNameOwned,
-    /// Status of the writer job
+    /// Status of the writer
     pub job_status: JobStatus,
 }
 
@@ -349,19 +349,19 @@ where
         .map_err(Error::Database)
 }
 
-/// Get tables written by a specific job
+/// Get tables associated with a specific writer
 ///
-/// Returns a list of active tables where the specified job is the writer,
+/// Returns a list of active tables where the specified writer is assigned,
 /// along with metadata about each table including dataset information.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_tables_written_by_job<'c, E>(
+pub async fn get_tables_by_writer<'c, E>(
     exe: E,
-    job_id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<Vec<JobTableInfo>, Error>
+    writer_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<Vec<WriterTableInfo>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_tables_written_by_job(exe, job_id.into())
+    sql::get_tables_by_writer(exe, writer_id.into())
         .await
         .map_err(Error::Database)
 }
