@@ -23,5 +23,10 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.47.0",
     "vitest": "^4.0.12"
+  },
+  "pnpm": {
+    "overrides": {
+      "seroval@<=1.4.1": "1.4.1"
+    }
   }
 }
