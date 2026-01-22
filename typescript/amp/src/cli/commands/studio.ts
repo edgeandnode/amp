@@ -238,6 +238,11 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                       Effect.map((buildResult) => {
                         const reference = `"${buildResult.metadata.namespace || "_"}/${buildResult.metadata.name}@dev"`
                         const tables = Object.entries(buildResult.manifest.tables)
+                        if (tables.length > 0) {
+                          if (!/^[a-zA-Z0-9_]+$/.test(tables[0][0])) {
+                            throw new Error('Invalid input')
+                          }
+                        }
                         return tables.length > 0
                           ? Option.some({
                             title: `SELECT ... ${tables[0][0]}`,
@@ -265,6 +270,9 @@ const AmpStudioApiLive = HttpApiBuilder.group(
                   Option.match({
                     onNone: () => Effect.fail("NoEvents" as const),
                     onSome: (firstEvent) => {
+                      if (!firstEvent.params.every((param) => /^[a-zA-Z0-9_]+$/.test(param.name))) {
+                        throw new Error('Invalid input')
+                      }
                       const selectFields = firstEvent.params
                         .map((param) => `event['${param.name}'] as ${param.name}`)
                         .join(", ")
@@ -300,14 +308,19 @@ FROM (
 
             // Strategy 3: Use the first dataset source
             const trySourceQuery = resolver.sources().pipe(
-              Effect.flatMap((sources) =>
-                sources.length > 0
+              Effect.flatMap((sources) => {
+                if (sources.length > 0) {
+                  if (!/^[a-zA-Z0-9_]+$/.test(sources[0].source)) {
+                    throw new Error('Invalid input')
+                  }
+                }
+                return sources.length > 0
                   ? Effect.succeed({
                     title: `SELECT ... ${sources[0].source}`,
                     query: `SELECT * FROM ${sources[0].source} LIMIT 100`,
                   })
                   : Effect.fail("NoSources" as const)
-              ),
+              }),
             )
 
             // Fallback if nothing is available
