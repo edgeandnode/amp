@@ -14,7 +14,6 @@ pub mod jobs;
 pub mod manifests;
 pub mod notification_multiplexer;
 pub mod physical_table;
-pub mod progress;
 pub mod workers;
 
 pub use self::{
@@ -28,14 +27,13 @@ pub use self::{
     manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     physical_table::{
-        LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
-        LocationWithDetails, PhysicalTable,
+        JobTableInfo, LocationId, LocationIdFromStrError, LocationIdI64ConvError,
+        LocationIdU64Error, LocationWithDetails, PhysicalTable, TableWriterInfo,
         events::{
             LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
             LocationNotification,
         },
     },
-    progress::TableWriterInfo,
     workers::{
         Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},

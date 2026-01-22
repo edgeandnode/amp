@@ -536,8 +536,8 @@ impl DataStore {
     pub async fn get_tables_written_by_job(
         &self,
         job_id: impl Into<metadata_db::jobs::JobId> + std::fmt::Debug,
-    ) -> Result<Vec<metadata_db::progress::JobTableInfo>, GetTablesWrittenByJobError> {
-        metadata_db::progress::get_tables_written_by_job(&self.metadata_db, job_id)
+    ) -> Result<Vec<metadata_db::physical_table::JobTableInfo>, GetTablesWrittenByJobError> {
+        metadata_db::physical_table::get_tables_written_by_job(&self.metadata_db, job_id)
             .await
             .map_err(GetTablesWrittenByJobError)
     }

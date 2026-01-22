@@ -103,35 +103,45 @@ pub async fn handler(
             Error::GetTables(err)
         })?;
 
+    // A job is associated with exactly one dataset, so we can get the hash reference
+    // and dataset definition once from the first table
+    let Some(first_table) = job_tables.first() else {
+        // No tables written by this job yet
+        return Ok(Json(JobProgressResponse {
+            job_id: *job_id,
+            job_status: job.status.to_string(),
+            tables: HashMap::new(),
+        }));
+    };
+
+    let hash_ref = HashReference::new(
+        first_table.dataset_namespace.clone().into(),
+        first_table.dataset_name.clone().into(),
+        first_table.manifest_hash.clone().into(),
+    );
+
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(&hash_ref)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                dataset_reference = %hash_ref,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to get dataset definition"
+            );
+            Error::GetDataset(err)
+        })?;
+
+    let sql_table_ref_schema = hash_ref.to_reference().to_string();
+
     let mut tables = HashMap::new();
 
     // For each table, compute progress
     for job_table in job_tables {
-        // Construct hash reference from job table info
-        let hash_ref = HashReference::new(
-            job_table.dataset_namespace.clone().into(),
-            job_table.dataset_name.clone().into(),
-            job_table.manifest_hash.clone().into(),
-        );
-
         // Convert table name to datasets_common type
         let table_name: TableName = job_table.table_name.clone().into();
-
-        // Get the dataset definition to access table config
-        let dataset = ctx
-            .dataset_store
-            .get_dataset(&hash_ref)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    table = %table_name,
-                    dataset_reference = %hash_ref,
-                    error = %err,
-                    error_source = logging::error_source(&err),
-                    "failed to get dataset definition"
-                );
-                Error::GetDataset(err)
-            })?;
 
         // Find the table configuration
         let table_config = dataset
@@ -143,7 +153,7 @@ pub async fn handler(
             Some(config) => config,
             None => {
                 // Table not in dataset definition, skip (shouldn't happen normally)
-                tracing::warn!(
+                tracing::error!(
                     table = %table_name,
                     dataset_reference = %hash_ref,
                     "table not found in dataset definition, skipping"
@@ -151,8 +161,6 @@ pub async fn handler(
                 continue;
             }
         };
-
-        let sql_table_ref_schema = hash_ref.to_reference().to_string();
 
         // Get the active physical table revision
         let physical_table = ctx
@@ -216,14 +224,8 @@ pub async fn handler(
                 (None, None, 0, 0)
             };
 
-        // Use composite key: "{namespace}/{name}:{table}"
-        let table_key = format!(
-            "{}/{}:{}",
-            job_table.dataset_namespace, job_table.dataset_name, job_table.table_name
-        );
-
         tables.insert(
-            table_key,
+            job_table.table_name.to_string(),
             TableProgress {
                 current_block,
                 start_block,
@@ -248,7 +250,7 @@ pub struct JobProgressResponse {
     pub job_id: i64,
     /// Current job status
     pub job_status: String,
-    /// Progress for each table written by this job, keyed by "{namespace}/{name}:{table}"
+    /// Progress for each table written by this job, keyed by table name
     pub tables: HashMap<String, TableProgress>,
 }
 
