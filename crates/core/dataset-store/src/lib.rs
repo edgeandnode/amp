@@ -7,10 +7,7 @@ use std::{
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
-use common::{
-    BoxError,
-    evm::{self, udfs::EthCall},
-};
+use common::evm::udfs::EthCall;
 use datafusion::{
     common::HashMap,
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
@@ -20,9 +17,13 @@ use datasets_common::{
     reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
-use datasets_raw::client::{BlockStreamer, BlockStreamerExt};
+use datasets_raw::{
+    BoxError,
+    client::{BlockStreamer, BlockStreamerExt},
+};
 use evm_rpc_datasets::{
     EvmRpcDatasetKind, Manifest as EvmRpcManifest, ProviderConfig as EvmRpcProviderConfig,
+    provider as evm_provider,
 };
 use firehose_datasets::dataset::{
     Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig,
@@ -459,11 +460,11 @@ impl DatasetStore {
 
         // Cache the provider.
         let provider = if provider.url.scheme() == "ipc" {
-            evm::provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
+            evm_provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
                 .await
                 .map_err(EthCallForDatasetError::IpcConnection)?
         } else {
-            evm::provider::new(provider.url, provider.rate_limit_per_minute)
+            evm_provider::new(provider.url, provider.rate_limit_per_minute)
         };
 
         let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(sql_table_ref_schema, provider)))

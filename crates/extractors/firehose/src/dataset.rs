@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
-use common::BlockNum;
 // Reuse types from datasets-common for consistency
 pub use datasets_common::manifest::TableSchema;
 use datasets_common::{
-    dataset::Table as DatasetTable,
+    dataset::{BlockNum, Table as DatasetTable},
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
     raw_dataset_kind::RawDatasetKind,

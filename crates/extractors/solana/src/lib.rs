@@ -7,14 +7,14 @@
 //! block; some slots may be skipped due to various reasons such as network issues or validator
 //! performance. Therefore, the slot number does not always correspond directly to a block number.
 //!
-//! Since [`common::BlockStreamer`] and related infrastructure generally operate on the concept of block numbers,
+//! Since [`datasets_raw::client::BlockStreamer`] and related infrastructure generally operate on the concept of block numbers,
 //! this implementation treats Solana slots as block numbers for the most part. Skipped slots are handled
 //! by yielding empty rows for those slots, ensuring that the sequence of block numbers remains continuous.
 
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError};
-use datasets_common::{hash_reference::HashReference, manifest::TableSchema};
+use datasets_common::{dataset::BlockNum, hash_reference::HashReference, manifest::TableSchema};
+use datasets_raw::BoxError;
 use serde_with::serde_as;
 use url::Url;
 

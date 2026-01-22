@@ -1,5 +1,5 @@
-use common::{BlockRange, BoxResult};
-use datasets_raw::rows::Rows;
+use datasets_common::block_range::BlockRange;
+use datasets_raw::{BoxResult, rows::Rows};
 use solana_clock::Slot;
 
 use crate::rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage};

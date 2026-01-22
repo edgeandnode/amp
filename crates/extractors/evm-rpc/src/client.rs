@@ -22,17 +22,19 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 use async_stream::stream;
-use common::{
-    BlockNum, BlockRange, BoxError, BoxResult, EvmCurrency, Timestamp,
+use datasets_common::{block_range::BlockRange, dataset::BlockNum};
+use datasets_raw::{
+    BoxError, BoxResult, Timestamp,
+    client::BlockStreamer,
     evm::{
-        self,
+        EvmCurrency,
         tables::{
             blocks::{Block, BlockRowsBuilder},
-            logs::{self, LogRowsBuilder},
+            logs::{Log, LogRowsBuilder},
         },
     },
+    rows::Rows,
 };
-use datasets_raw::{client::BlockStreamer, rows::Rows};
 use futures::{Stream, future::try_join_all};
 use thiserror::Error;
 use tracing::{instrument, warn};
@@ -121,7 +123,7 @@ impl JsonRpcClient {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new(url, rate_limit);
+        let client = crate::provider::new(url, rate_limit);
         let client =
             RootProviderWithMetrics::new(client, meter, provider_name.clone(), network.clone());
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
@@ -147,7 +149,7 @@ impl JsonRpcClient {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new_ipc(path, rate_limit).await.map(|c| {
+        let client = crate::provider::new_ipc(path, rate_limit).await.map(|c| {
             RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
         })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
@@ -173,7 +175,7 @@ impl JsonRpcClient {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new_ws(url, rate_limit).await.map(|c| {
+        let client = crate::provider::new_ws(url, rate_limit).await.map(|c| {
             RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
         })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
@@ -688,8 +690,8 @@ fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
     })
 }
 
-fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<logs::Log, ToRowError> {
-    Ok(logs::Log {
+fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<Log, ToRowError> {
+    Ok(Log {
         block_hash: log
             .block_hash
             .ok_or(ToRowError::Missing("block_hash"))?

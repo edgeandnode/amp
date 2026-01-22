@@ -4,8 +4,8 @@ use std::{
 };
 
 use async_stream::stream;
-use common::{BlockNum, BoxError};
-use datasets_raw::{client::BlockStreamer, rows::Rows};
+use datasets_common::dataset::BlockNum;
+use datasets_raw::{BoxError, client::BlockStreamer, rows::Rows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use monitoring::telemetry;
 use pbfirehose::{Response as StreamResponse, stream_client::StreamClient};

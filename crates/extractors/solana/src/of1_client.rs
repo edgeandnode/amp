@@ -6,7 +6,7 @@ use std::{
 };
 
 use backon::{ExponentialBuilder, Retryable};
-use common::BoxResult;
+use datasets_raw::BoxResult;
 use futures::{Stream, StreamExt};
 use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;

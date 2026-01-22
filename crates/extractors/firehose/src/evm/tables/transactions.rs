@@ -1,19 +1,23 @@
 use std::sync::{Arc, LazyLock};
 
-use common::{
-    BYTES32_TYPE, BlockRange, BoxError, Bytes32, Bytes32ArrayBuilder,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, SPECIAL_BLOCK_NUM, Timestamp,
-    TimestampArrayBuilder,
-    arrow::{
-        array::{
-            ArrayRef, BinaryBuilder, Int32Builder, StringBuilder, UInt32Builder, UInt64Builder,
-        },
-        datatypes::{DataType, Field, Schema, SchemaRef},
-    },
+use datasets_common::{
+    block_range::BlockRange,
+    dataset::{SPECIAL_BLOCK_NUM, Table},
 };
-use datasets_common::dataset::Table;
-use datasets_raw::rows::TableRows;
+use datasets_raw::{
+    BoxError, Timestamp,
+    arrow::{
+        ArrayRef, BinaryBuilder, DataType, Field, Int32Builder, Schema, SchemaRef, StringBuilder,
+        UInt32Builder, UInt64Builder, arrow_helpers::TimestampArrayBuilder,
+    },
+    evm::{
+        BYTES32_TYPE, Bytes32, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+        EvmAddress as Address, EvmCurrency,
+        helpers::{Bytes32ArrayBuilder, EvmAddressArrayBuilder, EvmCurrencyArrayBuilder},
+    },
+    rows::TableRows,
+    timestamp_type,
+};
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
@@ -34,7 +38,7 @@ fn schema() -> Schema {
     let special_block_num = Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false);
     let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
     let block_num = Field::new("block_num", DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", common::timestamp_type(), false);
+    let timestamp = Field::new("timestamp", timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
     let to = Field::new("to", ADDRESS_TYPE, true);

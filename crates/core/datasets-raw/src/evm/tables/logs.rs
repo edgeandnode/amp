@@ -4,13 +4,20 @@ use arrow::{
     array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder},
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
-use datasets_common::dataset::Table;
-use datasets_raw::rows::TableRows;
+use datasets_common::{
+    block_range::BlockRange,
+    dataset::{SPECIAL_BLOCK_NUM, Table},
+};
 
 use crate::{
-    BYTES32_TYPE, BlockRange, BoxError, Bytes32, Bytes32ArrayBuilder,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EvmAddress as Address, EvmAddressArrayBuilder,
-    SPECIAL_BLOCK_NUM, Timestamp, TimestampArrayBuilder, arrow, timestamp_type,
+    BoxError, Timestamp,
+    arrow::arrow_helpers::TimestampArrayBuilder,
+    evm::{
+        BYTES32_TYPE, Bytes32, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EvmAddress as Address,
+        helpers::{Bytes32ArrayBuilder, EvmAddressArrayBuilder},
+    },
+    rows::TableRows,
+    timestamp_type,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));

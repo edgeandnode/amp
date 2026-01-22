@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError};
-use datasets_common::hash_reference::HashReference;
+use datasets_common::{dataset::BlockNum, hash_reference::HashReference};
+use datasets_raw::BoxError;
 use serde_with::serde_as;
 use url::Url;
 
@@ -9,6 +9,7 @@ mod client;
 mod dataset;
 mod dataset_kind;
 pub mod metrics;
+pub mod provider;
 pub mod tables;
 
 // Reuse types from datasets-common for consistency

@@ -1,14 +1,18 @@
 use std::time::Duration;
 
 use alloy::primitives::U256;
-use common::{
-    BlockRange, BoxError, Bytes32, EvmCurrency, Timestamp,
-    evm::tables::{
-        blocks::{Block, BlockRowsBuilder},
-        logs::{Log, LogRowsBuilder},
+use datasets_common::block_range::BlockRange;
+use datasets_raw::{
+    BoxError, Timestamp,
+    evm::{
+        Bytes32, EvmCurrency,
+        tables::{
+            blocks::{Block, BlockRowsBuilder},
+            logs::{Log, LogRowsBuilder},
+        },
     },
+    rows::Rows,
 };
-use datasets_raw::rows::Rows;
 use thiserror::Error;
 
 use super::{

@@ -15,8 +15,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use common::{BlockNum, BoxError, BoxResult};
-use datasets_raw::{client::BlockStreamer, rows::Rows};
+use datasets_common::dataset::BlockNum;
+use datasets_raw::{BoxError, BoxResult, client::BlockStreamer, rows::Rows};
 use futures::{Stream, StreamExt};
 use url::Url;
 
