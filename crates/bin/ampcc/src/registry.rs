@@ -80,24 +80,22 @@ impl RegistryClient {
     /// 1. AMP_AUTH_TOKEN environment variable (highest priority)
     /// 2. Auth storage file (~/.amp/cache/amp_cli_auth)
     pub fn new(base_url: String) -> Self {
-        // Load from auth storage file, then pass to with_token which checks env var
-        let file_token = AuthStorage::load().map(|a| a.access_token);
-        Self::with_token(base_url, file_token)
+        // Load auth from AMP_AUTH_TOKEN env var. If not present, load from storage
+        let token =
+            Self::load_auth_from_env().or_else(|| AuthStorage::load().map(|a| a.access_token));
+        Self::with_token(base_url, token)
     }
 
     /// Create a new registry client with an explicit auth token.
     ///
-    /// If `token` is `None`, falls back to AMP_AUTH_TOKEN environment variable.
     /// Use this when the app's auth state changes (login, logout, refresh).
     pub fn with_token(base_url: String, token: Option<String>) -> Self {
-        // Use explicit token if provided, otherwise fall back to env var
-        let auth_token = token.or_else(Self::load_auth_from_env);
         let http = reqwest::Client::new();
 
         Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
-            auth_token,
+            auth_token: token,
         }
     }
 

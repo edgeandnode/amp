@@ -118,6 +118,10 @@ pub enum DeviceFlowStatus {
     WaitingForBrowser,
     /// Actively polling for token.
     Polling,
+    /// Error occurred while opening the user's browser.
+    ///
+    /// Print the Auth URL so they can open it manually.
+    OpenBrowserFailure(String),
     /// Error occurred during device flow.
     Error(String),
 }
@@ -137,6 +141,8 @@ pub struct DeviceFlowState {
     pub interval: i64,
     /// Current status.
     pub status: DeviceFlowStatus,
+    /// If copy-to-clipboard threw an error, display in auth_screen
+    pub copy_to_clipboard_failed: bool,
 }
 
 /// A version entry for a dataset.
@@ -1069,14 +1075,14 @@ impl App {
             Action::SwitchToLocal => {
                 if self.current_source != DataSource::Local {
                     self.start_loading("Switching source...");
-                    // Spawn task to switch source
+                    // Spawns async task handled by handle_async_action
                 }
             }
 
             Action::SwitchToRegistry => {
                 if self.current_source != DataSource::Registry {
                     self.start_loading("Switching source...");
-                    // Spawn task to switch source
+                    // Spawns async task handled by handle_async_action
                 }
             }
 
@@ -1134,7 +1140,7 @@ impl App {
             // Datasets
             Action::RefreshDatasets => {
                 self.start_loading("Refreshing datasets...");
-                // Spawn task to refresh datasets
+                // Spawns async task to refresh datasets handled by handle_async_action
             }
 
             Action::DatasetsLoaded(result) => {
@@ -1172,7 +1178,7 @@ impl App {
             // Manifest
             Action::LoadManifest => {
                 self.start_loading("Loading manifest...");
-                // Spawn task to load manifest
+                // Spawns async task to load manifest handled by handle_async_action
             }
 
             Action::ManifestLoaded(manifest) => {
@@ -1184,9 +1190,7 @@ impl App {
             }
 
             // Jobs
-            Action::RefreshJobs => {
-                // Spawn task to refresh jobs
-            }
+            Action::RefreshJobs => {}
 
             Action::JobsLoaded(jobs) => {
                 self.jobs = jobs;
@@ -1197,7 +1201,7 @@ impl App {
 
             Action::StopJob(_job_id) => {
                 self.start_loading("Stopping job...");
-                // Spawn task to stop job
+                // Spawns async task to stop job handled by handle_async_action
             }
 
             Action::JobStopped(result) => {
@@ -1210,7 +1214,7 @@ impl App {
 
             Action::DeleteJob(_job_id) => {
                 self.start_loading("Deleting job...");
-                // Spawn task to delete job
+                // Spawns async task to delete job handled by handle_async_action
             }
 
             Action::JobDeleted(result) => {
@@ -1222,9 +1226,7 @@ impl App {
             }
 
             // Workers
-            Action::RefreshWorkers => {
-                // Spawn task to refresh workers
-            }
+            Action::RefreshWorkers => {}
 
             Action::WorkersLoaded(workers) => {
                 self.workers = workers;
@@ -1235,7 +1237,7 @@ impl App {
 
             Action::LoadWorkerDetail(_node_id) => {
                 self.start_loading("Loading worker details...");
-                // Spawn task to load worker detail
+                // Spawns async task to load worker details handled by handle_async_action
             }
 
             Action::WorkerDetailLoaded(detail) => {
@@ -1247,9 +1249,7 @@ impl App {
             }
 
             // Auth
-            Action::AuthCheckOnStartup => {
-                // Spawn task to check auth
-            }
+            Action::AuthCheckOnStartup => {}
 
             Action::AuthStateLoaded(auth) => {
                 // Update registry client with the loaded auth token
@@ -1265,7 +1265,7 @@ impl App {
             Action::AuthLogin => {
                 if self.auth_state.is_none() && self.auth_device_flow.is_none() {
                     self.start_loading("Logging in...");
-                    // Spawn task to start device flow
+                    // Spawns async task to log user in with auth flow handled by handle_async_action
                 }
             }
 
@@ -1287,9 +1287,14 @@ impl App {
             } => {
                 self.stop_loading();
 
+                let mut copy_to_clipboard_failed = false;
                 // Copy user code to clipboard
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    let _ = clipboard.set_text(&user_code);
+                    if let Err(_) = clipboard.set_text(&user_code) {
+                        copy_to_clipboard_failed = true;
+                    }
+                } else {
+                    copy_to_clipboard_failed = true;
                 }
 
                 self.auth_device_flow = Some(DeviceFlowState {
@@ -1299,13 +1304,18 @@ impl App {
                     code_verifier,
                     interval,
                     status: DeviceFlowStatus::AwaitingConfirmation,
+                    copy_to_clipboard_failed,
                 });
             }
 
             Action::AuthDeviceFlowConfirm => {
                 if let Some(ref mut flow) = self.auth_device_flow {
-                    let _ = crate::auth::PkceDeviceFlowClient::open_browser(&flow.verification_uri);
-                    flow.status = DeviceFlowStatus::WaitingForBrowser;
+                    if let Err(_) = crate::auth::PkceDeviceFlowClient::open_browser(&flow.verification_uri) {
+                        // pass the auth URL to the error to print in the auth screen
+                        flow.status = DeviceFlowStatus::OpenBrowserFailure(self.config.auth_url.clone());
+                    } else {
+                        flow.status = DeviceFlowStatus::WaitingForBrowser;
+                    }
                     // Clone values before sending to avoid borrow conflict
                     let device_code = flow.device_code.clone();
                     let code_verifier = flow.code_verifier.clone();
@@ -1328,8 +1338,7 @@ impl App {
                 if let Some(ref mut flow) = self.auth_device_flow {
                     flow.status = DeviceFlowStatus::Polling;
                 }
-                // Spawn task to poll for token
-                let _ = (device_code, code_verifier, interval, is_first_poll); // Will be used by spawn
+                let _ = (device_code, code_verifier, interval, is_first_poll);
             }
 
             Action::AuthDeviceFlowComplete(auth) => {

@@ -1,5 +1,7 @@
 //! Auth screen component for device flow authentication.
 
+use std::borrow::Cow;
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -47,7 +49,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_logo(f, chunks[1]);
 
     // Render code label
-    render_code_label(f, chunks[3]);
+    render_code_label(f, chunks[3], flow.copy_to_clipboard_failed);
 
     // Render user code
     render_user_code(f, chunks[5], &flow.user_code);
@@ -74,12 +76,14 @@ fn render_logo(f: &mut Frame, area: Rect) {
 }
 
 /// Render the code label.
-fn render_code_label(f: &mut Frame, area: Rect) {
-    let text = Line::from(Span::styled(
-        "Enter this code in your browser (copied to clipboard):",
-        Theme::text_secondary(),
-    ));
-    let paragraph = Paragraph::new(text).alignment(Alignment::Center);
+fn render_code_label(f: &mut Frame, area: Rect, copy_failed: bool) {
+    let text = if copy_failed {
+        "Enter this code in your browser:"
+    } else {
+        "Enter this code in your browser (copied to clipboard):"
+    };
+    let line = Line::from(Span::styled(text, Theme::text_secondary()));
+    let paragraph = Paragraph::new(line).alignment(Alignment::Center);
     f.render_widget(paragraph, area);
 }
 
@@ -97,17 +101,23 @@ fn render_user_code(f: &mut Frame, area: Rect, user_code: &str) {
 
 /// Render the auth status message.
 fn render_status(f: &mut Frame, area: Rect, status: &DeviceFlowStatus) {
-    let (message, style) = match status {
+    let (message, style): (Cow<'_, str>, Style) = match status {
         DeviceFlowStatus::AwaitingConfirmation => (
-            "Press Enter to open browser, Esc to cancel",
+            "Press Enter to open browser, Esc to cancel".into(),
             Theme::version_tag(),
         ),
         DeviceFlowStatus::WaitingForBrowser => (
-            "Opening browser... Complete authentication to continue.",
+            "Opening browser... Complete authentication to continue.".into(),
             Theme::status_warning(),
         ),
-        DeviceFlowStatus::Polling => ("Waiting for authentication...", Theme::status_warning()),
-        DeviceFlowStatus::Error(err) => (err.as_str(), Theme::status_error()),
+        DeviceFlowStatus::Polling => {
+            ("Waiting for authentication...".into(), Theme::status_warning())
+        }
+        DeviceFlowStatus::OpenBrowserFailure(url) => (
+            format!("Failed to open browser. Go to: {url} to authenticate").into(),
+            Theme::status_warning(),
+        ),
+        DeviceFlowStatus::Error(err) => (err.as_str().into(), Theme::status_error()),
     };
 
     let text = Line::from(Span::styled(message, style));
