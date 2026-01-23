@@ -42,7 +42,7 @@ A **Push Model** (event-driven) may be implemented in a future PR for real-time 
 
 | Component       | Responsibility                                                         |
 | --------------- | ---------------------------------------------------------------------- |
-| **`DataStore`** | `get_tables_written_by_job()` - finds tables written by a specific job |
+| **`DataStore`** | `get_tables_by_writer()` - finds tables written by a specific job       |
 | **`DataStore`** | Computes sync stats from table snapshots                               |
 | **Admin API**   | Orchestration - resolves job, iterates tables, combines results        |
 | **Admin API**   | Presentation - formats JSON response for REST clients                  |
@@ -55,7 +55,7 @@ A **Push Model** (event-driven) may be implemented in a future PR for real-time 
 ```
 1. Extract job ID from path
 2. Verify job exists via Scheduler
-3. Call DataStore::get_tables_written_by_job() to find tables
+3. Call DataStore::get_tables_by_writer() to find tables
 4. For each table:
    a. Resolve dataset reference
    b. Get table snapshot
@@ -93,13 +93,13 @@ jq '.paths["/jobs/{id}/progress"]' docs/openapi-specs/admin.spec.json
   "job_id": 42,
   "job_status": "RUNNING",
   "tables": {
-    "_/ethereum:blocks": {
+    "blocks": {
       "current_block": 21500000,
       "start_block": 0,
       "files_count": 1247,
       "total_size_bytes": 137970286592
     },
-    "_/ethereum:transactions": {
+    "transactions": {
       "current_block": 21499850,
       "start_block": 0,
       "files_count": 3891,
@@ -109,7 +109,7 @@ jq '.paths["/jobs/{id}/progress"]' docs/openapi-specs/admin.spec.json
 }
 ```
 
-The table keys use the format `{namespace}/{name}:{table}` to uniquely identify tables across datasets.
+The table keys are the table names. Since a job writes to exactly one dataset, table names are unique within the response.
 
 ## Usage
 
@@ -133,7 +133,7 @@ curl http://localhost:1610/jobs/42/progress
 #   "job_id": 42,
 #   "job_status": "RUNNING",
 #   "tables": {
-#     "_/mainnet:blocks": {
+#     "blocks": {
 #       "current_block": 21500000,
 #       "start_block": 0,
 #       "files_count": 1247,
@@ -150,7 +150,7 @@ Use JSON format to pipe output to jq or other tools for automated processing and
 
 ```bash
 # Get progress and extract current block for a table with jq
-curl http://localhost:1610/jobs/42/progress | jq '.tables["_/mainnet:blocks"].current_block'
+curl http://localhost:1610/jobs/42/progress | jq '.tables["blocks"].current_block'
 ```
 
 ## Implementation
@@ -170,7 +170,7 @@ This approach provides a reliable "ground truth" for sync progress, unaffected b
 ### Source Files
 
 - `crates/services/admin-api/src/handlers/jobs/progress.rs` - API endpoint handler
-- `crates/core/metadata-db/src/progress.rs` - Database operations for job table info
+- `crates/core/metadata-db/src/physical_table.rs` - Database operations for writer table info
 - `crates/core/data-store/src/lib.rs` - DataStore wrapper methods
 
 ## References
