@@ -120,6 +120,24 @@ impl PartialEq<SolanaDatasetKind> for String {
     }
 }
 
+impl PartialEq<RawDatasetKind> for SolanaDatasetKind {
+    fn eq(&self, other: &RawDatasetKind) -> bool {
+        DATASET_KIND == other.as_str()
+    }
+}
+
+impl PartialEq<SolanaDatasetKind> for RawDatasetKind {
+    fn eq(&self, _other: &SolanaDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
+    }
+}
+
+impl PartialEq<SolanaDatasetKind> for &RawDatasetKind {
+    fn eq(&self, _other: &SolanaDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
+    }
+}
+
 /// Error returned when parsing an invalid Solana dataset kind string.
 ///
 /// This error is returned when attempting to parse a string that does not

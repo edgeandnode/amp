@@ -28,6 +28,14 @@ impl std::fmt::Display for RawDatasetKind {
     }
 }
 
+impl std::str::FromStr for RawDatasetKind {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
 impl PartialEq<&str> for RawDatasetKind {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other

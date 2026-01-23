@@ -1,6 +1,7 @@
-use amp_dataset_store::DatasetKind;
 use chrono::{DateTime, Utc};
-use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
+use datasets_common::{
+    hash::Hash, name::Name, namespace::Namespace, raw_dataset_kind::RawDatasetKind,
+};
 pub use dump::Ctx;
 use dump::EndBlock;
 use serde_json::Value as JsonValue;
@@ -19,7 +20,7 @@ pub use self::{
 
 /// The logical descriptor of a job, as stored in the `descriptor` column of the `jobs`
 /// metadata DB table.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum JobDescriptor {
     Dump {
         end_block: EndBlock,
@@ -29,7 +30,7 @@ pub enum JobDescriptor {
         dataset_namespace: Namespace,
         dataset_name: Name,
         manifest_hash: Hash,
-        dataset_kind: DatasetKind,
+        dataset_kind: RawDatasetKind,
     },
 }
 
@@ -62,9 +63,9 @@ impl JobDescriptor {
     }
 
     /// Get the dataset kind from the job descriptor
-    pub fn dataset_kind(&self) -> DatasetKind {
+    pub fn dataset_kind(&self) -> &RawDatasetKind {
         match self {
-            JobDescriptor::Dump { dataset_kind, .. } => *dataset_kind,
+            JobDescriptor::Dump { dataset_kind, .. } => dataset_kind,
         }
     }
 }

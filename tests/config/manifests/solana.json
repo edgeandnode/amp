@@ -9,6 +9,11 @@
         "arrow": {
           "fields": [
             {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
               "name": "slot",
               "type": "UInt64",
               "nullable": false
@@ -47,6 +52,11 @@
       "schema": {
         "arrow": {
           "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
             {
               "name": "slot",
               "type": "UInt64",
@@ -109,6 +119,11 @@
       "schema": {
         "arrow": {
           "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
             {
               "name": "slot",
               "type": "UInt64",
@@ -238,6 +253,11 @@
       "schema": {
         "arrow": {
           "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
             {
               "name": "slot",
               "type": "UInt64",
@@ -619,4 +639,3 @@
     }
   }
 }
-

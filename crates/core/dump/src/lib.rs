@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetKind, DatasetStore};
+use amp_dataset_store::DatasetStore;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use datasets_common::hash_reference::HashReference;
+use datasets_common::{hash_reference::HashReference, raw_dataset_kind::RawDatasetKind};
+use datasets_derived::DerivedDatasetKind;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
 mod block_ranges;
@@ -39,22 +40,22 @@ use crate::{
 pub async fn dump_tables(
     ctx: Ctx,
     dataset: &HashReference,
-    kind: DatasetKind,
+    kind: RawDatasetKind,
     max_writers: u16,
     microbatch_max_interval: u64,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
 ) -> Result<(), Error> {
-    if kind.is_raw() {
-        // Raw datasets (EvmRpc, EthBeacon, Firehose)
-        raw_dataset::dump(ctx, dataset, max_writers, end, writer)
-            .await
-            .map_err(Error::RawDatasetDump)?;
-    } else {
+    if kind == DerivedDatasetKind {
         // Derived datasets
         derived_dataset::dump(ctx, dataset, microbatch_max_interval, end, writer)
             .await
             .map_err(Error::DerivedDatasetDump)?;
+    } else {
+        // Raw datasets (EvmRpc, Firehose, Solana, etc.)
+        raw_dataset::dump(ctx, dataset, max_writers, end, writer)
+            .await
+            .map_err(Error::RawDatasetDump)?;
     }
 
     Ok(())

@@ -1,9 +1,10 @@
 use amp_datasets_registry::{error::ResolveRevisionError, manifests::ManifestParseError};
 use amp_providers_registry::ParseConfigError;
-use datasets_common::{hash::Hash, hash_reference::HashReference, reference::Reference};
+use datasets_common::{
+    hash::Hash, hash_reference::HashReference, raw_dataset_kind::RawDatasetKind,
+    reference::Reference,
+};
 use evm_rpc_datasets::error::ProviderError;
-
-use crate::dataset_kind::DatasetKind;
 
 /// Errors specific to getting dataset operations
 #[derive(Debug, thiserror::Error)]
@@ -65,7 +66,7 @@ pub enum GetDatasetError {
     #[error("Failed to parse {kind} manifest for dataset '{reference}'")]
     ParseManifest {
         reference: HashReference,
-        kind: DatasetKind,
+        kind: RawDatasetKind,
         #[source]
         source: ManifestParseError,
     },
@@ -203,7 +204,7 @@ pub enum GetClientError {
     /// - Provider configuration files are missing or invalid
     #[error("No provider found with kind '{dataset_kind}' and network '{network}'")]
     ProviderNotFound {
-        dataset_kind: DatasetKind,
+        dataset_kind: RawDatasetKind,
         network: String,
     },
 
@@ -275,7 +276,7 @@ pub enum EthCallForDatasetError {
     /// - Provider configuration files are missing or invalid
     #[error("No provider found for dataset kind '{dataset_kind}' and network '{network}'")]
     ProviderNotFound {
-        dataset_kind: DatasetKind,
+        dataset_kind: RawDatasetKind,
         network: String,
     },
 

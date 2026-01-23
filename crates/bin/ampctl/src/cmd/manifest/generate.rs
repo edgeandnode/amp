@@ -24,16 +24,23 @@
 
 use std::path::PathBuf;
 
-use amp_dataset_store::DatasetKind;
-use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
+use datasets_common::{
+    dataset::Table,
+    manifest::{ArrowSchema, Field, TableSchema},
+    raw_dataset_kind::RawDatasetKind,
+};
+use datasets_derived::DerivedDatasetKind;
+use evm_rpc_datasets::EvmRpcDatasetKind;
+use firehose_datasets::FirehoseDatasetKind;
 use monitoring::logging;
+use solana_datasets::SolanaDatasetKind;
 
 /// Command-line arguments for the `manifest generate` command.
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// Kind of the dataset (evm-rpc, firehose, solana).
-    #[arg(long, required = true, env = "GM_KIND", value_parser = clap::value_parser!(DatasetKind))]
-    pub kind: DatasetKind,
+    #[arg(long, required = true, env = "GM_KIND")]
+    pub kind: RawDatasetKind,
 
     /// The name of the network.
     #[arg(long, required = true, env = "GM_NETWORK")]
@@ -53,114 +60,6 @@ pub struct Args {
     /// Only include finalized block data.
     #[arg(long, env = "GM_FINALIZED_BLOCKS_ONLY")]
     pub finalized_blocks_only: bool,
-}
-
-/// Create a TableSchema from a logical table
-fn table_schema_from_logical_table(table: &datasets_common::dataset::Table) -> TableSchema {
-    let fields: Vec<Field> = table
-        .schema()
-        .fields()
-        .iter()
-        .map(|field| Field {
-            name: field.name().clone(),
-            type_: field.data_type().clone().into(),
-            nullable: field.is_nullable(),
-        })
-        .collect();
-
-    TableSchema {
-        arrow: ArrowSchema { fields },
-    }
-}
-
-/// Generate a dataset manifest and write to the specified output.
-///
-/// Creates a manifest appropriate for the dataset kind and writes it as JSON.
-/// This is the core business logic function used by the CLI and tests.
-///
-/// # Errors
-///
-/// Returns [`Error`] for unsupported dataset kinds, serialization failures,
-/// or write errors.
-#[tracing::instrument(skip(writer))]
-pub async fn generate_manifest<W>(
-    kind: impl Into<DatasetKind> + std::fmt::Debug,
-    network: String,
-    start_block: Option<u64>,
-    finalized_blocks_only: bool,
-    writer: &mut W,
-) -> Result<(), Error>
-where
-    W: std::io::Write + ?Sized,
-{
-    let kind = kind.into();
-
-    let dataset_bytes = match kind {
-        DatasetKind::EvmRpc => {
-            let tables = evm_rpc_datasets::tables::all(&network)
-                .iter()
-                .map(|table| {
-                    let schema = table_schema_from_logical_table(table);
-                    let manifest_table = evm_rpc_datasets::Table::new(schema, network.clone());
-                    (table.name().to_string(), manifest_table)
-                })
-                .collect();
-            let manifest = evm_rpc_datasets::Manifest {
-                kind: kind.as_str().parse().expect("kind is valid"),
-                network: network.clone(),
-                start_block: start_block.unwrap_or(0),
-                finalized_blocks_only,
-                tables,
-            };
-            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
-        }
-        DatasetKind::Solana => {
-            let tables = solana_datasets::tables::all(&network)
-                .iter()
-                .map(|table| {
-                    let schema = table_schema_from_logical_table(table);
-                    let manifest_table = solana_datasets::Table::new(schema, network.clone());
-                    (table.name().to_string(), manifest_table)
-                })
-                .collect();
-            let manifest = solana_datasets::Manifest {
-                kind: kind.as_str().parse().expect("kind is valid"),
-                network: network.clone(),
-                start_block: start_block.unwrap_or(0),
-                finalized_blocks_only,
-                tables,
-            };
-            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
-        }
-        DatasetKind::Firehose => {
-            let tables = firehose_datasets::evm::tables::all(&network)
-                .iter()
-                .map(|table| {
-                    let schema = table_schema_from_logical_table(table);
-                    let manifest_table =
-                        firehose_datasets::dataset::Table::new(schema, network.clone());
-                    (table.name().to_string(), manifest_table)
-                })
-                .collect();
-            let manifest = firehose_datasets::dataset::Manifest {
-                kind: kind.as_str().parse().expect("kind is valid"),
-                network: network.clone(),
-                start_block: start_block.unwrap_or(0),
-                finalized_blocks_only,
-                tables,
-            };
-            serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)?
-        }
-        DatasetKind::Derived => {
-            return Err(Error::DerivedNotSupported);
-        }
-    };
-
-    writer
-        .write_all(&dataset_bytes)
-        .map_err(Error::WriteOutput)?;
-
-    Ok(())
 }
 
 /// CLI command handler for generating dataset manifests.
@@ -203,13 +102,154 @@ pub async fn run(
     };
 
     generate_manifest(
-        kind,
+        &kind,
         network,
         start_block,
         finalized_blocks_only,
         &mut writer,
     )
     .await
+}
+
+/// Generate a dataset manifest and write to the specified output.
+///
+/// Creates a manifest appropriate for the dataset kind and writes it as JSON.
+/// This is the core business logic function used by the CLI and tests.
+///
+/// # Errors
+///
+/// Returns [`Error`] for unsupported dataset kinds, serialization failures,
+/// or write errors.
+#[tracing::instrument(skip(writer))]
+pub async fn generate_manifest<W>(
+    kind: &RawDatasetKind,
+    network: String,
+    start_block: Option<u64>,
+    finalized_blocks_only: bool,
+    writer: &mut W,
+) -> Result<(), Error>
+where
+    W: std::io::Write + ?Sized,
+{
+    let start_block = start_block.unwrap_or(0);
+
+    let dataset_bytes = if kind == DerivedDatasetKind {
+        return Err(Error::DerivedNotSupported);
+    } else if kind == EvmRpcDatasetKind {
+        generate_evm_rpc_manifest(&network, start_block, finalized_blocks_only)?
+    } else if kind == FirehoseDatasetKind {
+        generate_firehose_manifest(&network, start_block, finalized_blocks_only)?
+    } else if kind == SolanaDatasetKind {
+        generate_solana_manifest(&network, start_block, finalized_blocks_only)?
+    } else {
+        return Err(Error::UnsupportedKind(kind.clone()));
+    };
+
+    writer
+        .write_all(&dataset_bytes)
+        .map_err(Error::WriteOutput)?;
+
+    Ok(())
+}
+
+/// Generate an EVM RPC dataset manifest.
+#[inline]
+fn generate_evm_rpc_manifest(
+    network: &str,
+    start_block: u64,
+    finalized_blocks_only: bool,
+) -> Result<Vec<u8>, Error> {
+    let tables = evm_rpc_datasets::tables::all(network)
+        .iter()
+        .map(|table| {
+            let schema = table_schema_from_logical_table(table);
+            let manifest_table = evm_rpc_datasets::Table::new(schema, network.to_string());
+            (table.name().to_string(), manifest_table)
+        })
+        .collect();
+
+    let manifest = evm_rpc_datasets::Manifest {
+        kind: EvmRpcDatasetKind,
+        network: network.to_string(),
+        start_block,
+        finalized_blocks_only,
+        tables,
+    };
+
+    serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)
+}
+
+/// Generate a Solana dataset manifest.
+#[inline]
+fn generate_solana_manifest(
+    network: &str,
+    start_block: u64,
+    finalized_blocks_only: bool,
+) -> Result<Vec<u8>, Error> {
+    let tables = solana_datasets::tables::all(network)
+        .iter()
+        .map(|table| {
+            let schema = table_schema_from_logical_table(table);
+            let manifest_table = solana_datasets::Table::new(schema, network.to_string());
+            (table.name().to_string(), manifest_table)
+        })
+        .collect();
+
+    let manifest = solana_datasets::Manifest {
+        kind: SolanaDatasetKind,
+        network: network.to_string(),
+        start_block,
+        finalized_blocks_only,
+        tables,
+    };
+
+    serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)
+}
+
+/// Generate a Firehose dataset manifest.
+#[inline]
+fn generate_firehose_manifest(
+    network: &str,
+    start_block: u64,
+    finalized_blocks_only: bool,
+) -> Result<Vec<u8>, Error> {
+    let tables = firehose_datasets::evm::tables::all(network)
+        .iter()
+        .map(|table| {
+            let schema = table_schema_from_logical_table(table);
+            let manifest_table =
+                firehose_datasets::dataset::Table::new(schema, network.to_string());
+            (table.name().to_string(), manifest_table)
+        })
+        .collect();
+
+    let manifest = firehose_datasets::dataset::Manifest {
+        kind: FirehoseDatasetKind,
+        network: network.to_string(),
+        start_block,
+        finalized_blocks_only,
+        tables,
+    };
+
+    serde_json::to_vec_pretty(&manifest).map_err(Error::Serialization)
+}
+
+/// Create a TableSchema from a logical table
+fn table_schema_from_logical_table(table: &Table) -> TableSchema {
+    let fields: Vec<Field> = table
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| Field {
+            name: field.name().clone(),
+            type_: field.data_type().clone().into(),
+            nullable: field.is_nullable(),
+        })
+        .collect();
+
+    TableSchema {
+        arrow: ArrowSchema { fields },
+    }
 }
 
 /// Errors specific to generate manifest operations
@@ -220,8 +260,15 @@ pub enum Error {
     /// This occurs when attempting to generate a manifest for a Derived dataset type.
     /// Derived datasets are defined through SQL transformations and must be created
     /// manually as they require custom query definitions that cannot be auto-generated.
-    #[error("`DatasetKind::Derived` doesn't support dataset generation")]
+    #[error("Derived datasets don't support dataset generation")]
     DerivedNotSupported,
+
+    /// Unsupported dataset kind.
+    ///
+    /// This occurs when the provided dataset kind is not recognized by the manifest generator.
+    /// Supported kinds are: evm-rpc, firehose, solana.
+    #[error("Unsupported dataset kind '{0}'")]
+    UnsupportedKind(RawDatasetKind),
 
     /// Failed to serialize the manifest to JSON format.
     ///

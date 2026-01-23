@@ -132,6 +132,12 @@ impl PartialEq<DerivedDatasetKind> for RawDatasetKind {
     }
 }
 
+impl PartialEq<DerivedDatasetKind> for &RawDatasetKind {
+    fn eq(&self, _other: &DerivedDatasetKind) -> bool {
+        self.as_str() == DATASET_KIND
+    }
+}
+
 /// Error returned when parsing an invalid derived dataset kind string.
 ///
 /// This error is returned when attempting to parse a string that does not

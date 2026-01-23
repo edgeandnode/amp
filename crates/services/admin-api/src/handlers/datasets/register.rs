@@ -1,11 +1,9 @@
-use amp_dataset_store::DatasetKind;
 use amp_datasets_registry::error::{LinkManifestError, RegisterManifestError, SetVersionTagError};
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use common::BoxError;
 use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
@@ -13,11 +11,12 @@ use datasets_common::{
     namespace::Namespace,
     version::Version,
 };
-use evm_rpc_datasets::Manifest as EvmRpcManifest;
-use firehose_datasets::dataset::Manifest as FirehoseManifest;
+use datasets_derived::DerivedDatasetKind;
+use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
+use firehose_datasets::{FirehoseDatasetKind, dataset::Manifest as FirehoseManifest};
 use monitoring::logging;
 use serde_json::value::RawValue;
-use solana_datasets::Manifest as SolanaManifest;
+use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
 
 use crate::{
     ctx::Ctx,
@@ -55,13 +54,12 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
-/// - `DEPENDENCY_VALIDATION_ERROR`: SQL queries are invalid or reference undeclared dependencies
+/// - `MANIFEST_VALIDATION_ERROR`: Manifest validation failed (SQL queries invalid, undeclared dependencies, etc.)
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
 /// - `MANIFEST_LINKING_ERROR`: Failed to link manifest to dataset
 /// - `MANIFEST_NOT_FOUND`: Manifest hash provided but manifest doesn't exist
 /// - `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version
 /// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported
-/// - `STORE_ERROR`: Failed to load or access dataset store
 ///
 /// ## Behavior
 /// This handler supports multiple dataset kinds for registration:
@@ -133,8 +131,8 @@ pub async fn handler(
     } = match payload {
         Ok(Json(payload)) => payload,
         Err(err) => {
-            tracing::error!("Failed to parse request JSON: {}", err);
-            return Err(Error::InvalidPayloadFormat.into());
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "invalid request body");
+            return Err(Error::InvalidPayloadFormat(err).into());
         }
     };
 
@@ -174,33 +172,32 @@ pub async fn handler(
                     Error::InvalidManifest(err)
                 })?;
 
-            let dataset_kind = manifest
-                .kind
-                .parse()
-                .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
-
             // Validate and serialize manifest based on dataset kind
-            let manifest_canonical =
-                match dataset_kind {
-                    DatasetKind::Derived => parse_and_canonicalize_derived_dataset_manifest(
-                        manifest_content.get(),
-                        &ctx.dataset_store,
-                    )
-                    .await
-                    .map_err(Error::from)?,
-                    DatasetKind::EvmRpc => parse_and_canonicalize_raw_dataset_manifest::<
-                        EvmRpcManifest,
-                    >(manifest_content.get())
-                    .map_err(Error::from)?,
-                    DatasetKind::Solana => parse_and_canonicalize_raw_dataset_manifest::<
-                        SolanaManifest,
-                    >(manifest_content.get())
-                    .map_err(Error::from)?,
-                    DatasetKind::Firehose => parse_and_canonicalize_raw_dataset_manifest::<
-                        FirehoseManifest,
-                    >(manifest_content.get())
-                    .map_err(Error::from)?,
-                };
+            let manifest_canonical = if manifest.kind == DerivedDatasetKind {
+                parse_and_canonicalize_derived_dataset_manifest(
+                    manifest_content.get(),
+                    &ctx.dataset_store,
+                )
+                .await
+                .map_err(Error::from)?
+            } else if manifest.kind == EvmRpcDatasetKind {
+                parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(
+                    manifest_content.get(),
+                )
+                .map_err(Error::from)?
+            } else if manifest.kind == FirehoseDatasetKind {
+                parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(
+                    manifest_content.get(),
+                )
+                .map_err(Error::from)?
+            } else if manifest.kind == SolanaDatasetKind {
+                parse_and_canonicalize_raw_dataset_manifest::<SolanaManifest>(
+                    manifest_content.get(),
+                )
+                .map_err(Error::from)?
+            } else {
+                return Err(Error::UnsupportedDatasetKind(manifest.kind.clone()).into());
+            };
 
             // Compute manifest hash from canonical serialization
             let manifest_hash = hash(&manifest_canonical);
@@ -214,7 +211,7 @@ pub async fn handler(
                         namespace = %namespace,
                         name = %name,
                         manifest_hash = %manifest_hash,
-                        kind = %dataset_kind,
+                        kind = %manifest.kind,
                         error = %err, error_source = logging::error_source(&err),
                         "Failed to register manifest"
                     );
@@ -225,7 +222,7 @@ pub async fn handler(
                 namespace = %namespace,
                 name = %name,
                 manifest_hash = %manifest_hash,
-                kind = %dataset_kind,
+                kind = %manifest.kind,
                 "Manifest registered, will link to dataset"
             );
 
@@ -408,8 +405,8 @@ pub enum Error {
     /// - Request JSON is malformed or invalid
     /// - Required fields are missing or have wrong types
     /// - Dataset name or version format is invalid
-    #[error("invalid request format")]
-    InvalidPayloadFormat,
+    #[error("invalid request body: {0}")]
+    InvalidPayloadFormat(#[source] JsonRejection),
 
     /// Invalid derived dataset manifest content or structure
     ///
@@ -466,27 +463,17 @@ pub enum Error {
     /// - The hash is valid format but no manifest is stored with that hash
     #[error("manifest with hash '{0}' not found")]
     ManifestNotFound(Hash),
-
-    /// Dataset store error
-    ///
-    /// This occurs when:
-    /// - Failed to load dataset from store
-    /// - Dataset store configuration errors
-    /// - Dataset store connectivity issues
-    #[error("dataset store error: {0}")]
-    StoreError(#[source] BoxError),
 }
 
 impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
-            Error::InvalidPayloadFormat => "INVALID_PAYLOAD_FORMAT",
+            Error::InvalidPayloadFormat(_) => "INVALID_PAYLOAD_FORMAT",
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
             Error::ManifestValidationError(_) => "MANIFEST_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
             Error::ManifestLinkingError(_) => "MANIFEST_LINKING_ERROR",
             Error::VersionTaggingError(_) => "VERSION_TAGGING_ERROR",
-            Error::StoreError(_) => "STORE_ERROR",
             Error::UnsupportedDatasetKind(_) => "UNSUPPORTED_DATASET_KIND",
             Error::ManifestNotFound(_) => "MANIFEST_NOT_FOUND",
         }
@@ -494,13 +481,12 @@ impl IntoErrorResponse for Error {
 
     fn status_code(&self) -> StatusCode {
         match self {
-            Error::InvalidPayloadFormat => StatusCode::BAD_REQUEST,
+            Error::InvalidPayloadFormat(_) => StatusCode::BAD_REQUEST,
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
             Error::ManifestValidationError(_) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ManifestLinkingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::VersionTaggingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
             Error::ManifestNotFound(_) => StatusCode::NOT_FOUND,
         }

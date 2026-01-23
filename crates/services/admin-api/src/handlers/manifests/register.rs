@@ -1,6 +1,5 @@
 //! Manifests register handler
 
-use amp_dataset_store::DatasetKind;
 use amp_datasets_registry::{error::RegisterManifestError, manifests::StoreError};
 use axum::{
     Json,
@@ -11,10 +10,11 @@ use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
 };
-use evm_rpc_datasets::Manifest as EvmRpcManifest;
-use firehose_datasets::dataset::Manifest as FirehoseManifest;
+use datasets_derived::DerivedDatasetKind;
+use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
+use firehose_datasets::{FirehoseDatasetKind, dataset::Manifest as FirehoseManifest};
 use monitoring::logging;
-use solana_datasets::Manifest as SolanaManifest;
+use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
 
 use crate::{
     ctx::Ctx,
@@ -103,30 +103,22 @@ pub async fn handler(
         Error::InvalidManifest(err)
     })?;
 
-    let dataset_kind = manifest
-        .kind
-        .parse()
-        .map_err(|_| Error::UnsupportedDatasetKind(manifest.kind.clone()))?;
-
     // Validate and serialize manifest based on dataset kind
-    let canonical_manifest_str = match dataset_kind {
-        DatasetKind::Derived => {
-            parse_and_canonicalize_derived_dataset_manifest(&manifest_str, &ctx.dataset_store)
-                .await
-                .map_err(Error::from)?
-        }
-        DatasetKind::EvmRpc => {
-            parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&manifest_str)
-                .map_err(Error::from)?
-        }
-        DatasetKind::Solana => {
-            parse_and_canonicalize_raw_dataset_manifest::<SolanaManifest>(&manifest_str)
-                .map_err(Error::from)?
-        }
-        DatasetKind::Firehose => {
-            parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&manifest_str)
-                .map_err(Error::from)?
-        }
+    let canonical_manifest_str = if manifest.kind == DerivedDatasetKind {
+        parse_and_canonicalize_derived_dataset_manifest(&manifest_str, &ctx.dataset_store)
+            .await
+            .map_err(Error::from)?
+    } else if manifest.kind == EvmRpcDatasetKind {
+        parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(&manifest_str)
+            .map_err(Error::from)?
+    } else if manifest.kind == SolanaDatasetKind {
+        parse_and_canonicalize_raw_dataset_manifest::<SolanaManifest>(&manifest_str)
+            .map_err(Error::from)?
+    } else if manifest.kind == FirehoseDatasetKind {
+        parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&manifest_str)
+            .map_err(Error::from)?
+    } else {
+        return Err(Error::UnsupportedDatasetKind(manifest.kind.clone()).into());
     };
 
     // Compute manifest hash from canonical serialization
@@ -141,7 +133,7 @@ pub async fn handler(
     {
         tracing::error!(
             manifest_hash = %hash,
-            kind = %dataset_kind,
+            kind = %manifest.kind,
             error = %err, error_source = logging::error_source(&err),
             "failed to register manifest"
         );
@@ -154,7 +146,7 @@ pub async fn handler(
 
     tracing::info!(
         manifest_hash = %hash,
-        kind = %dataset_kind,
+        kind = %manifest.kind,
         "manifest registered successfully"
     );
 

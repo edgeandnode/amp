@@ -1,6 +1,6 @@
 //! Provider information types for API requests and responses
 
-use amp_dataset_store::DatasetKind;
+use datasets_common::raw_dataset_kind::RawDatasetKind;
 
 use super::convert;
 use crate::handlers::common::NonEmptyString;
@@ -16,7 +16,6 @@ use crate::handlers::common::NonEmptyString;
 /// The `rest` field contains the full provider configuration. Ensure that
 /// sensitive information like API keys and tokens are not stored in the
 /// provider configuration if this data will be exposed through APIs.
-#[serde_with::serde_as]
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ProviderInfo {
@@ -24,9 +23,8 @@ pub struct ProviderInfo {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: NonEmptyString,
     /// The type of provider (e.g., "evm-rpc", "firehose")
-    #[serde_as(as = "serde_with::DisplayFromStr")]
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub kind: DatasetKind,
+    pub kind: RawDatasetKind,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub network: NonEmptyString,
@@ -52,7 +50,7 @@ impl TryFrom<(String, amp_providers_registry::ProviderConfig)> for ProviderInfo 
 
         Ok(Self {
             name,
-            kind: config.kind.try_into().map_err(serde::de::Error::custom)?,
+            kind: config.kind,
             network,
             rest,
         })

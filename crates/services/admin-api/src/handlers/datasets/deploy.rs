@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use amp_dataset_store::{DatasetKind, GetDatasetError};
+use amp_dataset_store::GetDatasetError;
 use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
 use axum::{
     Json,
@@ -133,18 +133,12 @@ pub async fn handler(
         .await
         .map_err(Error::GetDataset)?;
 
-    // Parse dataset kind (must always succeed - panic if DB is in bad state)
-    let dataset_kind: DatasetKind = dataset
-        .kind()
-        .try_into()
-        .expect("dataset kind in database must be valid");
-
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
         .schedule_dataset_sync_job(
             reference.clone(),
-            dataset_kind,
+            dataset.kind().clone(),
             end_block.into(),
             parallelism,
             worker_id,
