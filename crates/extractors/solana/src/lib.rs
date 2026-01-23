@@ -58,9 +58,9 @@ impl Table {
 #[serde(rename_all = "snake_case")]
 pub enum UseArchive {
     /// Smart selection: use RPC for recent slots (last 10k), archive for historical data.
-    #[default]
     Auto,
     /// Always use archive (CAR files), even for recent data.
+    #[default]
     Always,
     /// Never use archive, RPC-only mode.
     Never,
