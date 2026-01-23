@@ -382,15 +382,13 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            pt.table_name,
-            pt.manifest_hash,
-            pt.dataset_namespace,
-            pt.dataset_name,
-            j.status AS job_status
-        FROM physical_tables pt
-        INNER JOIN jobs j ON pt.writer = j.id
-        WHERE pt.writer = $1 AND pt.active = true
-        ORDER BY pt.table_name
+            table_name,
+            manifest_hash,
+            dataset_namespace,
+            dataset_name
+        FROM physical_tables
+        WHERE writer = $1 AND active = true
+        ORDER BY table_name
     "#};
 
     sqlx::query_as(query).bind(writer_id).fetch_all(exe).await

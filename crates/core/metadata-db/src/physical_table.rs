@@ -328,8 +328,6 @@ pub struct WriterTableInfo {
     pub dataset_namespace: DatasetNamespaceOwned,
     /// Dataset name
     pub dataset_name: DatasetNameOwned,
-    /// Status of the writer
-    pub job_status: JobStatus,
 }
 
 /// Get active tables with writer info for a dataset
