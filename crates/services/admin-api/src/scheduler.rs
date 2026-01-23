@@ -23,10 +23,10 @@
 //! - Worker information queries
 //! - Worker status retrieval
 
-use amp_dataset_store::DatasetKind;
 use async_trait::async_trait;
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
+    raw_dataset_kind::RawDatasetKind,
 };
 use dump::EndBlock;
 use metadata_db::Worker;
@@ -55,7 +55,7 @@ pub trait SchedulerJobs: Send + Sync {
     async fn schedule_dataset_sync_job(
         &self,
         dataset_reference: HashReference,
-        dataset_kind: DatasetKind,
+        dataset_kind: RawDatasetKind,
         end_block: EndBlock,
         max_writers: u16,
         worker_id: Option<NodeSelector>,

@@ -45,14 +45,14 @@ mod env_substitute;
 mod error;
 
 use self::client::BlockStreamClient;
-pub use self::{
-    dataset_kind::DatasetKind,
-    error::{
-        EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
-        GetDerivedManifestError,
-    },
+pub use self::error::{
+    EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
+    GetDerivedManifestError,
 };
-use crate::{dataset_kind::UnsupportedKindError, error::DatasetDependencyError};
+use crate::{
+    dataset_kind::{DatasetKind, UnsupportedKindError},
+    error::DatasetDependencyError,
+};
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -160,7 +160,7 @@ impl DatasetStore {
                     .try_into_manifest::<EvmRpcManifest>()
                     .map_err(|source| GetDatasetError::ParseManifest {
                         reference: reference.clone(),
-                        kind,
+                        kind: kind.into(),
                         source,
                     })?;
                 Arc::new(evm_rpc_datasets::dataset(reference.clone(), manifest))
@@ -170,7 +170,7 @@ impl DatasetStore {
                     .try_into_manifest::<SolanaManifest>()
                     .map_err(|source| GetDatasetError::ParseManifest {
                         reference: reference.clone(),
-                        kind,
+                        kind: kind.into(),
                         source,
                     })?;
                 Arc::new(solana_datasets::dataset(reference.clone(), manifest))
@@ -180,7 +180,7 @@ impl DatasetStore {
                     .try_into_manifest::<FirehoseManifest>()
                     .map_err(|source| GetDatasetError::ParseManifest {
                         reference: reference.clone(),
-                        kind,
+                        kind: kind.into(),
                         source,
                     })?;
                 Arc::new(firehose_datasets::evm::dataset(reference.clone(), manifest))
@@ -190,7 +190,7 @@ impl DatasetStore {
                     .try_into_manifest::<DerivedManifest>()
                     .map_err(|source| GetDatasetError::ParseManifest {
                         reference: reference.clone(),
-                        kind,
+                        kind: kind.into(),
                         source,
                     })?;
                 datasets_derived::dataset(reference.clone(), manifest)
@@ -296,7 +296,7 @@ impl DatasetStore {
             );
 
             return Err(GetClientError::ProviderNotFound {
-                dataset_kind: kind,
+                dataset_kind: kind.into(),
                 network,
             });
         };
@@ -446,7 +446,7 @@ impl DatasetStore {
                 "no providers available for the requested kind-network configuration"
             );
             return Err(EthCallForDatasetError::ProviderNotFound {
-                dataset_kind: DatasetKind::EvmRpc,
+                dataset_kind: DatasetKind::EvmRpc.into(),
                 network: network.clone(),
             });
         };
