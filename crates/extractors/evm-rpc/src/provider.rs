@@ -12,10 +12,11 @@ use alloy::{
     providers::{ProviderBuilder, RootProvider, WsConnect},
     rpc::client::ClientBuilder,
 };
-use datasets_raw::BoxError;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use tower::{Layer, Service};
 use url::Url;
+
+use crate::error::ProviderError;
 
 pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork> {
     let client_builder = ClientBuilder::default();
@@ -36,21 +37,19 @@ pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork>
 pub async fn new_ipc<P: AsRef<Path>>(
     path: P,
     rate_limit: Option<NonZeroU32>,
-) -> Result<RootProvider<AnyNetwork>, BoxError> {
+) -> Result<RootProvider<AnyNetwork>, ProviderError> {
     let client_builder = ClientBuilder::default();
 
     let client = match rate_limit {
-        Some(rate_limit) => {
-            client_builder
-                .layer(RateLimitLayer::new(rate_limit))
-                .ipc(path.as_ref().to_path_buf().into())
-                .await?
-        }
-        None => {
-            client_builder
-                .ipc(path.as_ref().to_path_buf().into())
-                .await?
-        }
+        Some(rate_limit) => client_builder
+            .layer(RateLimitLayer::new(rate_limit))
+            .ipc(path.as_ref().to_path_buf().into())
+            .await
+            .map_err(ProviderError)?,
+        None => client_builder
+            .ipc(path.as_ref().to_path_buf().into())
+            .await
+            .map_err(ProviderError)?,
     };
 
     Ok(ProviderBuilder::new()
@@ -62,7 +61,7 @@ pub async fn new_ipc<P: AsRef<Path>>(
 pub async fn new_ws(
     url: Url,
     rate_limit: Option<NonZeroU32>,
-) -> Result<RootProvider<AnyNetwork>, BoxError> {
+) -> Result<RootProvider<AnyNetwork>, ProviderError> {
     let ws_connect = WsConnect::new(url);
 
     let provider = match rate_limit {
@@ -71,20 +70,20 @@ pub async fn new_ws(
             let client = client_builder
                 .layer(RateLimitLayer::new(rate_limit))
                 .ws(ws_connect)
-                .await?;
+                .await
+                .map_err(ProviderError)?;
 
             ProviderBuilder::new()
                 .disable_recommended_fillers()
                 .network::<AnyNetwork>()
                 .connect_client(client)
         }
-        None => {
-            ProviderBuilder::new()
-                .disable_recommended_fillers()
-                .network::<AnyNetwork>()
-                .connect_ws(ws_connect)
-                .await?
-        }
+        None => ProviderBuilder::new()
+            .disable_recommended_fillers()
+            .network::<AnyNetwork>()
+            .connect_ws(ws_connect)
+            .await
+            .map_err(ProviderError)?,
     };
 
     Ok(provider)

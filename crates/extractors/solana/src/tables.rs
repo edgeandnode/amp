@@ -1,8 +1,11 @@
 use datasets_common::block_range::BlockRange;
-use datasets_raw::{BoxResult, rows::Rows};
+use datasets_raw::rows::Rows;
 use solana_clock::Slot;
 
-use crate::rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage};
+use crate::{
+    error::RowConversionError,
+    rpc_client::{EncodedTransaction, UiConfirmedBlock, UiMessage},
+};
 
 pub mod block_headers;
 pub mod instructions;
@@ -24,7 +27,7 @@ pub fn all(network: &str) -> Vec<datasets_common::dataset::Table> {
 pub(crate) fn convert_of_data_to_db_rows(
     mut block: crate::of1_client::DecodedBlock,
     network: &str,
-) -> BoxResult<Rows> {
+) -> Result<Rows, RowConversionError> {
     let of_transactions = std::mem::take(&mut block.transactions);
     let of_transactions_meta = std::mem::take(&mut block.transaction_metas);
     let mut db_transactions = Vec::new();
@@ -69,7 +72,9 @@ pub(crate) fn convert_of_data_to_db_rows(
         let mut builder = block_headers::BlockHeaderRowsBuilder::new();
         let header = block_headers::BlockHeader::from_of1_block(block);
         builder.append(&header);
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
     let transactions_row = {
         let mut builder =
@@ -77,7 +82,9 @@ pub(crate) fn convert_of_data_to_db_rows(
         for tx in db_transactions {
             builder.append(&tx);
         }
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
     let messages_row = {
         let mut builder =
@@ -85,7 +92,9 @@ pub(crate) fn convert_of_data_to_db_rows(
         for message in db_messages {
             builder.append(&message);
         }
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
     let instructions_row = {
         let mut builder = crate::tables::instructions::InstructionRowsBuilder::with_capacity(
@@ -94,7 +103,9 @@ pub(crate) fn convert_of_data_to_db_rows(
         for instruction in db_instructions {
             builder.append(&instruction);
         }
-        builder.build(range)?
+        builder
+            .build(range)
+            .map_err(RowConversionError::TableBuild)?
     };
 
     Ok(Rows::new(vec![
@@ -109,7 +120,7 @@ pub(crate) fn convert_rpc_block_to_db_rows(
     slot: Slot,
     mut block: UiConfirmedBlock,
     network: &str,
-) -> BoxResult<Rows> {
+) -> Result<Rows, RowConversionError> {
     let rpc_transactions = std::mem::take(&mut block.transactions).unwrap_or_default();
     let mut db_transactions = Vec::new();
     let mut db_messages = Vec::new();
@@ -117,12 +128,10 @@ pub(crate) fn convert_rpc_block_to_db_rows(
     for (tx_idx, tx_with_meta) in rpc_transactions.into_iter().enumerate() {
         // These should be set when requesting a block.
         let EncodedTransaction::Json(ref tx) = tx_with_meta.transaction else {
-            let err = format!("unexpected transaction encoding at slot {slot}, tx index {tx_idx}",);
-            return Err(err.into());
+            return Err(RowConversionError::UnexpectedTransactionEncoding { slot, tx_idx });
         };
         let UiMessage::Raw(ref message) = tx.message else {
-            let err = format!("unexpected message format at slot {slot}, tx index {tx_idx}",);
-            return Err(err.into());
+            return Err(RowConversionError::UnexpectedMessageFormat { slot, tx_idx });
         };
 
         let found_parsed_instruction = tx_with_meta.meta.as_ref().is_some_and(|meta| {
@@ -140,10 +149,7 @@ pub(crate) fn convert_rpc_block_to_db_rows(
         });
 
         if found_parsed_instruction {
-            let err = format!(
-                "found parsed inner instruction at slot {slot}, tx index {tx_idx}, which is not supported"
-            );
-            return Err(err.into());
+            return Err(RowConversionError::ParsedInnerInstructionNotSupported { slot, tx_idx });
         }
 
         let tx_idx: u32 = tx_idx.try_into().expect("conversion error");
@@ -178,7 +184,9 @@ pub(crate) fn convert_rpc_block_to_db_rows(
         let mut builder = block_headers::BlockHeaderRowsBuilder::new();
         let header = block_headers::BlockHeader::from_rpc_block(slot, &block);
         builder.append(&header);
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
     let transactions_row = {
         let mut builder =
@@ -186,7 +194,9 @@ pub(crate) fn convert_rpc_block_to_db_rows(
         for tx in db_transactions {
             builder.append(&tx);
         }
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
     let messages_row = {
         let mut builder =
@@ -194,7 +204,9 @@ pub(crate) fn convert_rpc_block_to_db_rows(
         for message in db_messages {
             builder.append(&message);
         }
-        builder.build(range)?
+        builder
+            .build(range)
+            .map_err(RowConversionError::TableBuild)?
     };
 
     Ok(Rows::new(vec![
@@ -204,7 +216,7 @@ pub(crate) fn convert_rpc_block_to_db_rows(
     ]))
 }
 
-pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<Rows> {
+pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> Result<Rows, RowConversionError> {
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.
         numbers: slot..=slot,
@@ -219,22 +231,30 @@ pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> BoxResult<Rows> {
     let block_headers_row = {
         let mut builder = block_headers::BlockHeaderRowsBuilder::new();
         builder.append(&header);
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
 
     let transactions_row = {
         let builder = transactions::TransactionRowsBuilder::with_capacity(0);
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
 
     let messages_row = {
         let builder = crate::tables::messages::MessageRowsBuilder::with_capacity(0);
-        builder.build(range.clone())?
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
     };
 
     let instructions_row = {
         let builder = crate::tables::instructions::InstructionRowsBuilder::with_capacity(0);
-        builder.build(range)?
+        builder
+            .build(range)
+            .map_err(RowConversionError::TableBuild)?
     };
 
     Ok(Rows::new(vec![

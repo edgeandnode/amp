@@ -6,13 +6,12 @@ use datasets_common::{
     dataset::{SPECIAL_BLOCK_NUM, Table},
 };
 use datasets_raw::{
-    BoxResult,
     arrow::{
         ArrayRef, BooleanBuilder, DataType, Field, Fields, Float64Builder, Int64Builder,
         ListBuilder, Schema, SchemaRef, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
         UInt64Builder,
     },
-    rows::TableRows,
+    rows::{TableRowError, TableRows},
 };
 use serde::Deserialize;
 use solana_clock::Slot;
@@ -936,7 +935,7 @@ impl TransactionRowsBuilder {
         self.slot.append_value(*slot);
     }
 
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             mut tx_index,
@@ -979,6 +978,6 @@ impl TransactionRowsBuilder {
             Arc::new(cost_units.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }

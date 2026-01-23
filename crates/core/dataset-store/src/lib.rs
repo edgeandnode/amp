@@ -7,7 +7,14 @@ use std::{
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
-use common::evm::udfs::EthCall;
+use common::{
+    catalog::dataset_access::{
+        EthCallForDatasetError as DatasetAccessEthCallForDatasetError,
+        GetDatasetError as DatasetAccessGetDatasetError,
+        ResolveRevisionError as DatasetAccessResolveRevisionError,
+    },
+    evm::udfs::EthCall,
+};
 use datafusion::{
     common::HashMap,
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
@@ -17,10 +24,7 @@ use datasets_common::{
     reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
-use datasets_raw::{
-    BoxError,
-    client::{BlockStreamer, BlockStreamerExt},
-};
+use datasets_raw::client::{BlockStreamer, BlockStreamerExt};
 use evm_rpc_datasets::{
     EvmRpcDatasetKind, Manifest as EvmRpcManifest, ProviderConfig as EvmRpcProviderConfig,
     provider as evm_provider,
@@ -48,7 +52,7 @@ pub use self::{
         GetDerivedManifestError,
     },
 };
-use crate::dataset_kind::UnsupportedKindError;
+use crate::{dataset_kind::UnsupportedKindError, error::DatasetDependencyError};
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -484,7 +488,7 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
     async fn resolve_revision(
         &self,
         reference: impl AsRef<Reference> + Send,
-    ) -> Result<Option<HashReference>, BoxError> {
+    ) -> Result<Option<HashReference>, DatasetAccessResolveRevisionError> {
         let reference_value = reference.as_ref();
         self.resolve_revision(reference_value)
             .await
@@ -494,7 +498,7 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
     async fn get_dataset(
         &self,
         reference: &HashReference,
-    ) -> Result<Arc<dyn datasets_common::dataset::Dataset>, BoxError> {
+    ) -> Result<Arc<dyn datasets_common::dataset::Dataset>, DatasetAccessGetDatasetError> {
         self.get_dataset(reference).await.map_err(Into::into)
     }
 
@@ -502,7 +506,7 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
         &self,
         sql_table_ref_schema: &str,
         dataset: &dyn datasets_common::dataset::Dataset,
-    ) -> Result<Option<ScalarUDF>, BoxError> {
+    ) -> Result<Option<ScalarUDF>, DatasetAccessEthCallForDatasetError> {
         self.eth_call_for_dataset(sql_table_ref_schema, dataset)
             .await
             .map_err(Into::into)
@@ -514,16 +518,20 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
 pub async fn dataset_and_dependencies(
     store: &DatasetStore,
     dataset: Reference,
-) -> Result<Vec<Reference>, BoxError> {
+) -> Result<Vec<Reference>, DatasetDependencyError> {
     let mut datasets = vec![dataset];
     let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
     while let Some(dataset_ref) = datasets.pop() {
         // Resolve the reference to a hash reference first
         let hash_ref = store
             .resolve_revision(&dataset_ref)
-            .await?
-            .ok_or_else(|| BoxError::from(format!("dataset '{}' not found", dataset_ref)))?;
-        let dataset = store.get_dataset(&hash_ref).await?;
+            .await
+            .map_err(DatasetDependencyError::ResolveRevision)?
+            .ok_or_else(|| DatasetDependencyError::DatasetNotFound(dataset_ref.clone()))?;
+        let dataset = store
+            .get_dataset(&hash_ref)
+            .await
+            .map_err(DatasetDependencyError::GetDataset)?;
 
         if dataset.kind() != DerivedDatasetKind {
             deps.insert(dataset_ref, vec![]);
@@ -544,12 +552,14 @@ pub async fn dataset_and_dependencies(
         deps.insert(dataset_ref, refs);
     }
 
-    dependency_sort(deps)
+    dependency_sort(deps).map_err(DatasetDependencyError::CycleDetected)
 }
 
 /// Given a map of values to their dependencies, return a set where each value is ordered after
 /// all of its dependencies. An error is returned if a cycle is detected.
-fn dependency_sort(deps: BTreeMap<Reference, Vec<Reference>>) -> Result<Vec<Reference>, BoxError> {
+fn dependency_sort(
+    deps: BTreeMap<Reference, Vec<Reference>>,
+) -> Result<Vec<Reference>, common::utils::DfsError<Reference>> {
     let nodes: BTreeSet<&Reference> = deps
         .iter()
         .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))

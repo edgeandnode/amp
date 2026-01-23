@@ -5,17 +5,17 @@ use datasets_common::{
     dataset::{SPECIAL_BLOCK_NUM, Table},
 };
 use datasets_raw::{
-    BoxError, Timestamp,
+    Timestamp,
     arrow::{
         ArrayRef, BinaryBuilder, DataType, Field, Int32Builder, Schema, SchemaRef, StringBuilder,
-        UInt32Builder, UInt64Builder, arrow_helpers::TimestampArrayBuilder,
+        TimestampArrayBuilder, UInt32Builder, UInt64Builder,
     },
     evm::{
         BYTES32_TYPE, Bytes32, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
         EvmAddress as Address, EvmCurrency,
         helpers::{Bytes32ArrayBuilder, EvmAddressArrayBuilder, EvmCurrencyArrayBuilder},
     },
-    rows::TableRows,
+    rows::{TableRowError, TableRows},
     timestamp_type,
 };
 
@@ -257,7 +257,7 @@ impl TransactionRowsBuilder {
         self.end_ordinal.append_value(*end_ordinal);
     }
 
-    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, BoxError> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             block_hash,
@@ -314,7 +314,7 @@ impl TransactionRowsBuilder {
             Arc::new(end_ordinal.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }
 

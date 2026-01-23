@@ -14,12 +14,12 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
 use datasets_common::{dataset::BlockNum, hash_reference::HashReference, manifest::TableSchema};
-use datasets_raw::BoxError;
 use serde_with::serde_as;
 use url::Url;
 
 mod dataset;
 mod dataset_kind;
+pub mod error;
 mod extractor;
 mod metrics;
 mod of1_client;
@@ -31,10 +31,7 @@ pub use self::{
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
     extractor::SolanaExtractor,
 };
-
-#[derive(Debug, thiserror::Error)]
-#[error("RPC client error")]
-pub struct Error(#[source] pub BoxError);
+use crate::error::ExtractorError;
 
 /// Table definition for raw datasets.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -121,7 +118,7 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 pub fn extractor(
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<SolanaExtractor, Error> {
+) -> Result<SolanaExtractor, ExtractorError> {
     let client = match config.rpc_provider_url.scheme() {
         "http" | "https" => SolanaExtractor::new(
             config.rpc_provider_url,
@@ -135,7 +132,7 @@ pub fn extractor(
         ),
         scheme => {
             let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
-            return Err(Error(err.into()));
+            return Err(ExtractorError(err));
         }
     };
 

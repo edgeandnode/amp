@@ -24,8 +24,8 @@ use alloy::{
 use async_stream::stream;
 use datasets_common::{block_range::BlockRange, dataset::BlockNum};
 use datasets_raw::{
-    BoxError, BoxResult, Timestamp,
-    client::BlockStreamer,
+    Timestamp,
+    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     evm::{
         EvmCurrency,
         tables::{
@@ -36,21 +36,17 @@ use datasets_raw::{
     rows::Rows,
 };
 use futures::{Stream, future::try_join_all};
-use thiserror::Error;
 use tracing::{instrument, warn};
 
-use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
+use crate::{
+    error::{
+        BatchRequestError, BatchingError, OverflowSource, ProviderError, RpcToRowsError, ToRowError,
+    },
+    tables::transactions::{Transaction, TransactionRowsBuilder},
+};
 
 type AnyTxReceipt =
     alloy::serde::WithOtherFields<TransactionReceipt<AnyReceiptEnvelope<rpc::types::Log>>>;
-
-#[derive(Error, Debug)]
-pub enum ToRowError {
-    #[error("missing field: {0}")]
-    Missing(&'static str),
-    #[error("overflow in field {0}: {1}")]
-    Overflow(&'static str, BoxError),
-}
 
 struct BatchingRpcWrapper {
     client: RootProviderWithMetrics,
@@ -77,7 +73,7 @@ impl BatchingRpcWrapper {
     async fn execute<T: RpcRecv, Params: RpcSend>(
         &self,
         calls: Vec<(&'static str, Params)>,
-    ) -> Result<Vec<T>, BoxError> {
+    ) -> Result<Vec<T>, BatchingError> {
         if calls.is_empty() {
             warn!("No calls to execute, returning empty result");
             return Ok(Vec::new());
@@ -91,9 +87,17 @@ impl BatchingRpcWrapper {
                 .collect();
 
             // Acquire semaphore permit for the batch, which will be one request
-            let _permit = self.limiter.acquire().await?;
+            let _permit = self
+                .limiter
+                .acquire()
+                .await
+                .map_err(BatchingError::RateLimitAcquire)?;
 
-            let batch_responses = self.client.batch_request(&chunk).await?;
+            let batch_responses = self
+                .client
+                .batch_request(&chunk)
+                .await
+                .map_err(BatchingError::Request)?;
             results.extend(batch_responses);
         }
         Ok(results)
@@ -121,7 +125,7 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
         let client = crate::provider::new(url, rate_limit);
         let client =
@@ -147,7 +151,7 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
         let client = crate::provider::new_ipc(path, rate_limit).await.map(|c| {
             RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
@@ -173,7 +177,7 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
         let client = crate::provider::new_ws(url, rate_limit).await.map(|c| {
             RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
@@ -199,7 +203,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>> + Send {
         assert!(end_block >= start_block);
         let total_blocks_to_stream = end_block - start_block + 1;
 
@@ -250,7 +254,7 @@ impl JsonRpcClient {
 
                 if block.transactions.is_empty() {
                     // Avoid sending an RPC request just to get an empty vector.
-                    yield rpc_to_rows(block, Vec::new(), &self.network);
+                    yield rpc_to_rows(block, Vec::new(), &self.network).map_err(Into::into);
                     continue;
                 }
 
@@ -287,7 +291,7 @@ impl JsonRpcClient {
                             c.get_block_receipts(BlockId::Number(block_num)).await
                         })
                         .await
-                        .map_err(BoxError::from)
+                        .map_err(Into::<BlockStreamError>::into)
                         .and_then(|receipts| {
                             let mut receipts = receipts.ok_or_else(|| format!("no receipts for block {}", block.header.number))?;
                             receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
@@ -300,7 +304,7 @@ impl JsonRpcClient {
                     receipts
                 };
 
-                yield rpc_to_rows(block, receipts, &self.network);
+                yield rpc_to_rows(block, receipts, &self.network).map_err(Into::into);
             }
         }
     }
@@ -311,7 +315,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>> + Send {
         tracing::info!("Fetching blocks (batched) {} to {}", start_block, end_block);
         let batching_client =
             BatchingRpcWrapper::new(self.client.clone(), self.batch_size, self.limiter.clone());
@@ -333,11 +337,11 @@ impl JsonRpcClient {
 
             for batch_calls in block_calls {
                 let start = Instant::now();
-                let blocks_result: Result<Vec<AnyRpcBlock>, BoxError> = batching_client.execute(batch_calls).await;
+                let blocks_result: Result<Vec<AnyRpcBlock>, BatchingError> = batching_client.execute(batch_calls).await;
                 let blocks = match blocks_result {
                     Ok(blocks) => blocks,
                     Err(err) => {
-                        yield Err(err);
+                        yield Err(err.into());
                         return;
                     }
                 };
@@ -348,10 +352,10 @@ impl JsonRpcClient {
                     // No transactions in any block, just yield the block rows
                     for block in blocks.into_iter() {
                         blocks_completed += 1;
-                        yield rpc_to_rows(block, Vec::new(), &self.network);
+                        yield rpc_to_rows(block, Vec::new(), &self.network).map_err(Into::into);
                     }
                 } else {
-                    let all_receipts_result: Result<Vec<_>, _> = if self.fetch_receipts_per_tx {
+                    let all_receipts_result: Result<Vec<_>, BatchingError> = if self.fetch_receipts_per_tx {
                         let receipt_calls: Vec<_> = blocks
                             .iter()
                             .flat_map(|block| {
@@ -370,7 +374,7 @@ impl JsonRpcClient {
                                 [BlockNumberOrTag::Number(block.header.number)]
                             ))
                             .collect();
-                        let receipts_result: Result<Vec<Vec<AnyTxReceipt>>, _> =
+                        let receipts_result: Result<Vec<Vec<AnyTxReceipt>>, BatchingError> =
                             batching_client.execute(receipt_calls).await;
                         receipts_result.map(|receipts| receipts.into_iter().flatten().collect())
                     };
@@ -378,7 +382,7 @@ impl JsonRpcClient {
                     let all_receipts = match all_receipts_result {
                         Ok(receipts) => receipts,
                         Err(err) => {
-                            yield Err(err);
+                            yield Err(err.into());
                             return;
                         }
                     };
@@ -401,7 +405,7 @@ impl JsonRpcClient {
                         block_receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
                         blocks_completed += 1;
                         txns_completed += block.transactions.len();
-                        yield rpc_to_rows(block, block_receipts, &self.network);
+                        yield rpc_to_rows(block, block_receipts, &self.network).map_err(Into::into);
                     }
                 }
 
@@ -437,7 +441,7 @@ impl BlockStreamer for JsonRpcClient {
         self,
         start: BlockNum,
         end: BlockNum,
-    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>> + Send {
         // Each function returns a different concrete stream type, so we
         // use `stream!` to unify them into a wrapper stream
         stream! {
@@ -454,7 +458,10 @@ impl BlockStreamer for JsonRpcClient {
     }
 
     #[instrument(skip(self), err)]
-    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
+    async fn latest_block(
+        &mut self,
+        finalized: bool,
+    ) -> Result<Option<BlockNum>, LatestBlockError> {
         let number = match finalized {
             true => BlockNumberOrTag::Finalized,
             false => BlockNumberOrTag::Latest,
@@ -469,7 +476,7 @@ impl BlockStreamer for JsonRpcClient {
         Ok(block.map(|b| b.header.number))
     }
 
-    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
         Ok(())
     }
 
@@ -530,7 +537,7 @@ impl RootProviderWithMetrics {
     async fn batch_request<Params, Resp>(
         &self,
         requests: &[(&'static str, Params)],
-    ) -> BoxResult<Vec<Resp>>
+    ) -> Result<Vec<Resp>, BatchRequestError>
     where
         Params: RpcSend,
         Resp: RpcRecv,
@@ -539,29 +546,37 @@ impl RootProviderWithMetrics {
         let mut waiters = Vec::new();
 
         for (method, params) in requests.iter() {
-            waiters.push(batch.add_call(*method, &params)?);
+            waiters.push(
+                batch
+                    .add_call(*method, &params)
+                    .map_err(BatchRequestError)?,
+            );
         }
 
         let Some(metrics) = self.metrics.as_ref() else {
             // Send batch request without recording metrics.
-            batch.send().await?;
-            let resp = try_join_all(waiters).await?;
+            batch.send().await.map_err(BatchRequestError)?;
+            let resp = try_join_all(waiters).await.map_err(BatchRequestError)?;
 
             return Ok(resp);
         };
 
         let start = Instant::now();
 
-        batch.send().await.inspect_err(|_| {
-            let duration = start.elapsed().as_millis() as f64;
-            metrics.record_batch_request(
-                duration,
-                requests.len() as u64,
-                &self.provider,
-                &self.network,
-            );
-            metrics.record_error(&self.provider, &self.network);
-        })?;
+        batch
+            .send()
+            .await
+            .inspect_err(|_| {
+                let duration = start.elapsed().as_millis() as f64;
+                metrics.record_batch_request(
+                    duration,
+                    requests.len() as u64,
+                    &self.provider,
+                    &self.network,
+                );
+                metrics.record_error(&self.provider, &self.network);
+            })
+            .map_err(BatchRequestError)?;
 
         let resp = try_join_all(waiters).await;
 
@@ -579,7 +594,7 @@ impl RootProviderWithMetrics {
             metrics.record_error(&self.provider, &self.network);
         }
 
-        let resp = resp?;
+        let resp = resp.map_err(BatchRequestError)?;
         Ok(resp)
     }
 }
@@ -588,38 +603,36 @@ fn rpc_to_rows(
     block: AnyRpcBlock,
     receipts: Vec<AnyTxReceipt>,
     network: &str,
-) -> Result<Rows, BoxError> {
+) -> Result<Rows, RpcToRowsError> {
     if block.transactions.len() != receipts.len() {
-        let err = format!(
-            "mismatched tx and receipt count for block {}: {} txs, {} receipts",
-            block.header.number,
-            block.transactions.len(),
-            receipts.len()
-        );
-        return Err(err.into());
+        return Err(RpcToRowsError::TxReceiptCountMismatch {
+            block_num: block.header.number,
+            tx_count: block.transactions.len(),
+            receipt_count: receipts.len(),
+        });
     }
     let tx_receipt_pairs = block.transactions.clone().into_transactions().zip(receipts);
 
-    let header = rpc_header_to_row(block.header.clone())?;
+    let header = rpc_header_to_row(block.header.clone()).map_err(RpcToRowsError::ToRow)?;
     let mut logs = Vec::new();
     let mut transactions = Vec::new();
 
     for (idx, (tx, mut receipt)) in tx_receipt_pairs.enumerate() {
         if tx.tx_hash() != receipt.transaction_hash {
-            let err = format!(
-                "mismatched tx and receipt hash for block {}: tx {}, receipt {}",
-                header.block_num,
-                tx.tx_hash().encode_hex(),
-                receipt.transaction_hash.encode_hex()
-            );
-            return Err(err.into());
+            return Err(RpcToRowsError::TxReceiptHashMismatch {
+                block_num: header.block_num,
+                tx_hash: tx.tx_hash().encode_hex(),
+                receipt_hash: receipt.transaction_hash.encode_hex(),
+            });
         }
         // Move the logs out of the nested structure.
         let receipt_logs = std::mem::take(&mut receipt.inner.inner.inner.receipt.logs);
         for log in receipt_logs {
-            logs.push(rpc_log_to_row(log, header.timestamp)?);
+            logs.push(rpc_log_to_row(log, header.timestamp).map_err(RpcToRowsError::ToRow)?);
         }
-        transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
+        transactions.push(
+            rpc_transaction_to_row(&header, tx, receipt, idx).map_err(RpcToRowsError::ToRow)?,
+        );
     }
 
     let block = BlockRange {
@@ -632,7 +645,9 @@ fn rpc_to_rows(
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity_for(&header);
         builder.append(&header);
-        builder.build(block.clone())?
+        builder
+            .build(block.clone())
+            .map_err(RpcToRowsError::TableRow)?
     };
 
     let logs_row = {
@@ -641,7 +656,9 @@ fn rpc_to_rows(
         for log in logs {
             builder.append(&log);
         }
-        builder.build(block.clone())?
+        builder
+            .build(block.clone())
+            .map_err(RpcToRowsError::TableRow)?
     };
 
     let transactions_row = {
@@ -651,7 +668,9 @@ fn rpc_to_rows(
         for tx in transactions {
             builder.append(&tx);
         }
-        builder.build(block.clone())?
+        builder
+            .build(block.clone())
+            .map_err(RpcToRowsError::TableRow)?
     };
 
     Ok(Rows::new(vec![header_row, logs_row, transactions_row]))
@@ -670,12 +689,12 @@ fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
         receipt_root: header.receipts_root.into(),
         logs_bloom: <[u8; 256]>::from(header.logs_bloom).into(),
         difficulty: EvmCurrency::try_from(header.difficulty)
-            .map_err(|e| ToRowError::Overflow("difficulty", e.into()))?,
+            .map_err(|err| ToRowError::Overflow("difficulty", OverflowSource::BigInt(err)))?,
         total_difficulty: header
             .total_difficulty
             .map(EvmCurrency::try_from)
             .transpose()
-            .map_err(|e| ToRowError::Overflow("total_difficulty", e.into()))?,
+            .map_err(|err| ToRowError::Overflow("total_difficulty", OverflowSource::BigInt(err)))?,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
         extra_data: header.extra_data.0.to_vec(),
@@ -704,13 +723,13 @@ fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<Log, ToRowError> 
             log.transaction_index
                 .ok_or(ToRowError::Missing("transaction_index"))?,
         )
-        .map_err(|e| ToRowError::Overflow("transaction_index", e.into()))?,
+        .map_err(|err| ToRowError::Overflow("transaction_index", OverflowSource::Int(err)))?,
         tx_hash: log
             .transaction_hash
             .ok_or(ToRowError::Missing("transaction_hash"))?
             .into(),
         log_index: u32::try_from(log.log_index.ok_or(ToRowError::Missing("log_index"))?)
-            .map_err(|e| ToRowError::Overflow("log_index", e.into()))?,
+            .map_err(|err| ToRowError::Overflow("log_index", OverflowSource::Int(err)))?,
         address: log.address().into(),
         topic0: log.topics().first().cloned().map(Into::into),
         topic1: log.topics().get(1).cloned().map(Into::into),
@@ -746,14 +765,14 @@ fn rpc_transaction_to_row(
         block_num: block.block_num,
         timestamp: block.timestamp,
         tx_index: u32::try_from(tx_index)
-            .map_err(|e| ToRowError::Overflow("tx_index", e.into()))?,
+            .map_err(|err| ToRowError::Overflow("tx_index", OverflowSource::Int(err)))?,
         tx_hash: tx.inner.tx_hash().0,
         to: tx.to().map(|addr| addr.0.0),
         nonce: tx.nonce(),
         gas_price: TransactionResponse::gas_price(&tx.0.inner)
             .map(i128::try_from)
             .transpose()
-            .map_err(|e| ToRowError::Overflow("gas_price", e.into()))?,
+            .map_err(|err| ToRowError::Overflow("gas_price", OverflowSource::Int(err)))?,
         gas_limit: tx.gas_limit(),
         value: tx.value().to_string(),
         input: tx.input().to_vec(),
@@ -764,17 +783,21 @@ fn rpc_transaction_to_row(
         receipt_cumulative_gas_used: receipt.inner.inner.cumulative_gas_used(),
         r#type: tx.ty().into(),
         max_fee_per_gas: i128::try_from(tx.inner().inner.max_fee_per_gas())
-            .map_err(|e| ToRowError::Overflow("max_fee_per_gas", e.into()))?,
+            .map_err(|err| ToRowError::Overflow("max_fee_per_gas", OverflowSource::Int(err)))?,
         max_priority_fee_per_gas: tx
             .max_priority_fee_per_gas()
             .map(i128::try_from)
             .transpose()
-            .map_err(|e| ToRowError::Overflow("max_priority_fee_per_gas", e.into()))?,
+            .map_err(|err| {
+                ToRowError::Overflow("max_priority_fee_per_gas", OverflowSource::Int(err))
+            })?,
         max_fee_per_blob_gas: tx
             .max_fee_per_blob_gas()
             .map(i128::try_from)
             .transpose()
-            .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
+            .map_err(|err| {
+                ToRowError::Overflow("max_fee_per_blob_gas", OverflowSource::Int(err))
+            })?,
         from: tx.as_recovered().signer().into(),
         status: receipt.inner.inner.status(),
         state_root: receipt.state_root().map(|root| root.0),

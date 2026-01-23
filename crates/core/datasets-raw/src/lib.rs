@@ -17,9 +17,6 @@ pub mod rows;
 #[cfg(feature = "gen-schema")]
 pub mod schema;
 
-pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
-pub type BoxResult<T> = Result<T, BoxError>;
-
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Timestamp(pub Duration);
 

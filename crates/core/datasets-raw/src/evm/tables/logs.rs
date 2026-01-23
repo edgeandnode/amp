@@ -10,13 +10,13 @@ use datasets_common::{
 };
 
 use crate::{
-    BoxError, Timestamp,
-    arrow::arrow_helpers::TimestampArrayBuilder,
+    Timestamp,
+    arrow::TimestampArrayBuilder,
     evm::{
         BYTES32_TYPE, Bytes32, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EvmAddress as Address,
         helpers::{Bytes32ArrayBuilder, EvmAddressArrayBuilder},
     },
-    rows::TableRows,
+    rows::{TableRowError, TableRows},
     timestamp_type,
 };
 
@@ -155,7 +155,7 @@ impl LogRowsBuilder {
         self.log_index.append_value(*log_index);
     }
 
-    pub fn build(self, range: BlockRange) -> Result<TableRows, BoxError> {
+    pub fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             block_hash,
@@ -188,7 +188,7 @@ impl LogRowsBuilder {
             Arc::new(data.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }
 

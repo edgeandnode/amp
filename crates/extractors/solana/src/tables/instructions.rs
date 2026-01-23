@@ -5,12 +5,11 @@ use datasets_common::{
     dataset::{SPECIAL_BLOCK_NUM, Table},
 };
 use datasets_raw::{
-    BoxResult,
     arrow::{
         ArrayRef, DataType, Field, ListBuilder, Schema, SchemaRef, UInt8Builder, UInt32Builder,
         UInt64Builder,
     },
-    rows::TableRows,
+    rows::{TableRowError, TableRows},
 };
 use serde::Deserialize;
 use solana_clock::Slot;
@@ -117,7 +116,7 @@ impl InstructionRowsBuilder {
         self.inner_stack_height.append_option(*inner_stack_height);
     }
 
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -140,6 +139,6 @@ impl InstructionRowsBuilder {
             Arc::new(inner_stack_height.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }

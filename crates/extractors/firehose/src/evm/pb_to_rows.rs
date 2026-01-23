@@ -3,7 +3,7 @@ use std::time::Duration;
 use alloy::primitives::U256;
 use datasets_common::block_range::BlockRange;
 use datasets_raw::{
-    BoxError, Timestamp,
+    Timestamp,
     evm::{
         Bytes32, EvmCurrency,
         tables::{
@@ -11,7 +11,7 @@ use datasets_raw::{
             logs::{Log, LogRowsBuilder},
         },
     },
-    rows::Rows,
+    rows::{Rows, TableRowError},
 };
 use thiserror::Error;
 
@@ -30,9 +30,9 @@ pub enum ProtobufToRowError {
     #[error("missing field: {0}")]
     Missing(&'static str),
     #[error("assertion failure: {0}")]
-    AssertFail(BoxError),
+    AssertFail(String),
     #[error("error serializing to arrow: {0}")]
-    ArrowError(BoxError),
+    ArrowError(TableRowError),
 }
 
 pub fn protobufs_to_rows(

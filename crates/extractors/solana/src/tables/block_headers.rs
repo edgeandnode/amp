@@ -5,11 +5,10 @@ use datasets_common::{
     dataset::{SPECIAL_BLOCK_NUM, Table},
 };
 use datasets_raw::{
-    BoxResult,
     arrow::{
         ArrayRef, DataType, Field, Int64Builder, Schema, SchemaRef, StringBuilder, UInt64Builder,
     },
-    rows::TableRows,
+    rows::{TableRowError, TableRows},
 };
 use solana_clock::Slot;
 
@@ -129,7 +128,7 @@ impl BlockHeaderRowsBuilder {
     }
 
     /// Builds the [TableRows] from the appended data.
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -150,6 +149,6 @@ impl BlockHeaderRowsBuilder {
             Arc::new(block_time.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }

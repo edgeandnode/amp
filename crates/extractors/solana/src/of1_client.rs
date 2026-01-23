@@ -6,13 +6,12 @@ use std::{
 };
 
 use backon::{ExponentialBuilder, Retryable};
-use datasets_raw::BoxResult;
 use futures::{Stream, StreamExt};
 use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;
 pub use yellowstone_faithful_car_parser as car_parser;
 
-use crate::{metrics, rpc_client, tables};
+use crate::{error::Of1StreamError, metrics, rpc_client, tables};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
 
@@ -208,7 +207,7 @@ pub(crate) fn stream(
     solana_rpc_client: Arc<rpc_client::SolanaRpcClient>,
     get_block_config: rpc_client::rpc_config::RpcBlockConfig,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> impl Stream<Item = BoxResult<DecodedBlock>> {
+) -> impl Stream<Item = Result<DecodedBlock, Of1StreamError>> {
     async_stream::stream! {
         let mut epoch = start / solana_clock::DEFAULT_SLOTS_PER_EPOCH;
 
@@ -238,15 +237,14 @@ pub(crate) fn stream(
                     },
                     Err(e) if rpc_client::is_block_missing_err(&e) => {
                         if slot == 0 {
-                            let err = format!("could not find previous blockhash for slot {start}");
-                            yield Err(err.into());
+                            yield Err(Of1StreamError::PrevBlockhashNotFound(start));
                             return;
                         } else {
                             slot -= 1;
                         }
                 }
                     Err(e) => {
-                        yield Err(e.into());
+                        yield Err(Of1StreamError::RpcClient(e));
                         return;
                     }
                 }
@@ -273,7 +271,7 @@ pub(crate) fn stream(
                         .send(CarManagerMessage::FileProcessed(epoch))
                         .await
                         .expect("receiver not dropped");
-                    yield Err(e.into());
+                    yield Err(Of1StreamError::ChannelClosed(e));
                     return;
                 }
                 _ => {}
@@ -287,7 +285,7 @@ pub(crate) fn stream(
                         .send(CarManagerMessage::FileProcessed(epoch))
                         .await
                         .expect("receiver not dropped");
-                    yield Err(e.into());
+                    yield Err(Of1StreamError::FileOpen(e));
                     return;
                 }
             };
@@ -299,7 +297,7 @@ pub(crate) fn stream(
                         .send(CarManagerMessage::FileProcessed(epoch))
                         .await
                         .expect("receiver not dropped");
-                    yield Err(e.into());
+                    yield Err(Of1StreamError::Mmap(e));
                     return;
                 }
             };
@@ -512,24 +510,24 @@ enum FileDownloadError {
 async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     node_reader: &mut car_parser::node::NodeReader<R>,
     prev_blockhash: [u8; 32],
-) -> BoxResult<Option<DecodedBlock>> {
+) -> Result<Option<DecodedBlock>, Of1StreamError> {
     // TODO: Could this be executed while downloading the block? As in, read from a stream and
     // attempt to decode until successful.
 
     // Once we reach `Node::Block`, the node map will contain all of the nodes needed to reassemble
     // that block.
-    let mut nodes = car_parser::node::Nodes::read_until_block(node_reader).await?;
+    let mut nodes = car_parser::node::Nodes::read_until_block(node_reader)
+        .await
+        .map_err(Of1StreamError::NodeParse)?;
 
     let block = match nodes.nodes.pop() {
         Some((_, car_parser::node::Node::Block(block))) => block,
         None | Some((_, car_parser::node::Node::Epoch(_))) => return Ok(None),
         Some((cid, node)) => {
-            let err = format!(
-                "unexpected node while reading block: kind={:?}, cid={}",
-                node.kind(),
-                cid
-            );
-            return Err(err.into());
+            return Err(Of1StreamError::UnexpectedNode {
+                kind: node.kind(),
+                cid: cid.into(),
+            });
         }
     };
 
@@ -538,19 +536,27 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
 
     for entry_cid in &block.entries {
         let Some(car_parser::node::Node::Entry(entry)) = nodes.nodes.get(entry_cid) else {
-            let err = format!("expected entry node for cid {entry_cid}");
-            return Err(err.into());
+            return Err(Of1StreamError::MissingNode {
+                expected: "entry",
+                cid: entry_cid.to_string(),
+            });
         };
         for (idx, tx_cid) in entry.transactions.iter().enumerate() {
             let Some(car_parser::node::Node::Transaction(tx)) = nodes.nodes.get(tx_cid) else {
-                let err = format!("expected transaction node for cid {tx_cid}");
-                return Err(err.into());
+                return Err(Of1StreamError::MissingNode {
+                    expected: "transaction",
+                    cid: tx_cid.to_string(),
+                });
             };
 
-            let tx_df = nodes.reassemble_dataframes(&tx.data)?;
-            let tx_meta_df = nodes.reassemble_dataframes(&tx.metadata)?;
+            let tx_df = nodes
+                .reassemble_dataframes(&tx.data)
+                .map_err(Of1StreamError::DataframeReassembly)?;
+            let tx_meta_df = nodes
+                .reassemble_dataframes(&tx.metadata)
+                .map_err(Of1StreamError::DataframeReassembly)?;
 
-            let tx = bincode::deserialize(&tx_df)?;
+            let tx = bincode::deserialize(&tx_df).map_err(Of1StreamError::Bincode)?;
             let tx_meta = if tx_meta_df.is_empty() {
                 // Empty dataframe, return default transaction metadata.
                 tables::transactions::TransactionStatusMeta::default()
@@ -581,11 +587,10 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
                             )
                         }
                         Err(bincode_err) => {
-                            let err = format!(
-                                "failed to decode transaction metadata: prost_err={:?}, bincode_err={:?}",
-                                prost_err, bincode_err
-                            );
-                            return Err(err.into());
+                            return Err(Of1StreamError::TransactionMetaDecode {
+                                prost_err: prost_err.to_string(),
+                                bincode_err: bincode_err.to_string(),
+                            });
                         }
                     },
                 }
@@ -602,8 +607,10 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
         let last_entry_cid = block.entries.last().expect("at least one entry");
         let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
         let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
-            let err = format!("expected entry node for cid {last_entry_cid}");
-            return Err(err.into());
+            return Err(Of1StreamError::MissingNode {
+                expected: "entry",
+                cid: last_entry_cid.to_string(),
+            });
         };
         last_entry
             .hash

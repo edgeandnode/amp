@@ -2,7 +2,6 @@
 //! multiple versions. There is no universal encoding, and we're not going to try to enforce one.
 //! Each extraction layer can have its own data format. This `firehose` crate defines Firehose
 //! data formats and provides a client to fetch them from a Firehose gRPC endpoint.
-use datasets_raw::BoxError;
 use tonic::{codegen::http::uri::InvalidUri, metadata::errors::InvalidMetadataValue};
 
 pub mod client;
@@ -34,7 +33,7 @@ pub enum Error {
     PbDecodeError(#[source] prost::DecodeError),
     /// Internal assertion failure
     #[error("Assertion failure")]
-    AssertFail(BoxError),
+    AssertFail(String),
     /// URI parsing error occurred while parsing Firehose endpoint URL
     #[error("URL parse error")]
     UriParse(#[source] InvalidUri),

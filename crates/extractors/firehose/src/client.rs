@@ -5,7 +5,10 @@ use std::{
 
 use async_stream::stream;
 use datasets_common::dataset::BlockNum;
-use datasets_raw::{BoxError, client::BlockStreamer, rows::Rows};
+use datasets_raw::{
+    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    rows::Rows,
+};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use monitoring::telemetry;
 use pbfirehose::{Response as StreamResponse, stream_client::StreamClient};
@@ -177,7 +180,7 @@ impl BlockStreamer for Client {
         mut self,
         start_block: u64,
         end_block: u64,
-    ) -> impl Stream<Item = Result<Rows, BoxError>> + Send {
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>> + Send {
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
         stream! {
@@ -254,12 +257,15 @@ impl BlockStreamer for Client {
         }
     }
 
-    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
         Ok(())
     }
 
     #[instrument(skip(self), err)]
-    async fn latest_block(&mut self, finalized: bool) -> Result<Option<BlockNum>, BoxError> {
+    async fn latest_block(
+        &mut self,
+        finalized: bool,
+    ) -> Result<Option<BlockNum>, LatestBlockError> {
         let stream = self.blocks(-1, 0, finalized).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;
