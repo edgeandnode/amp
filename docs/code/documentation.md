@@ -1,3 +1,10 @@
+---
+name: "documentation"
+description: "Rustdoc patterns, safety documentation, function docs. Load when documenting code or writing docs"
+type: core
+scope: "global"
+---
+
 # Documentation Patterns
 
 **🚨 MANDATORY for ALL documentation in the Amp project**

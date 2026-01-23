@@ -1,3 +1,10 @@
+---
+name: "udf-documentation"
+description: "UDF documentation patterns for common crate. Load when documenting UDFs in common crate"
+type: crate
+scope: "crate:common"
+---
+
 📐 UDF Documentation Guidelines
 ================================
 

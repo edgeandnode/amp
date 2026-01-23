@@ -1,103 +1,21 @@
-# Idiomatic Rust Patterns
+---
+name: "rust-error-handling"
+description: "Error handling patterns, unwrap/expect prohibition, pattern matching. Load when handling errors or dealing with Result/Option types"
+type: core
+scope: "global"
+---
+
+# Rust Error Handling Patterns
 
 **🚨 MANDATORY for ALL Rust code in the Amp project**
 
 ## 🎯 PURPOSE
 
-This document establishes idiomatic Rust coding standards across the entire Amp codebase. These patterns ensure:
+This document establishes critical error handling standards for the Amp codebase, ensuring:
 
-- **Modern module organization** - Clear, maintainable file structure
 - **Safe error handling** - Explicit error paths without panics
-- **Type-driven design** - Leveraging Rust's type system for correctness
-- **Code reliability** - Provable correctness and defensive programming
-
-## 📑 TABLE OF CONTENTS
-
-1. [Purpose](#-purpose)
-2. [Module Organization](#-module-organization)
-   - [1. Never Use `mod.rs`](#1-never-use-modrs)
-   - [2. Module File Structure Pattern](#2-module-file-structure-pattern)
-3. [Error Handling - CRITICAL](#-error-handling---critical)
-   - [1. 🔥 NEVER Use `.unwrap()` or `.expect()` in Production](#1--never-use-unwrap-or-expect-in-production)
-   - [2. Prefer Pattern Matching](#2-prefer-pattern-matching)
-   - [3. Test Code Exception](#3-test-code-exception)
-   - [4. Leverage the Type System](#4-leverage-the-type-system)
-4. [Checklist](#-checklist)
-
-## 📁 MODULE ORGANIZATION
-
-### 1. Never Use `mod.rs`
-
-**DO NOT** use `mod.rs` files for module organization. Use named module files next to directories instead.
-
-**Why?** Modern Rust (Edition 2018+) provides a clearer module system where the module name matches the file/directory name, improving navigation and reducing ambiguity.
-
-```rust
-// ❌ WRONG - Old-style mod.rs pattern
-src/
-  workers/
-    mod.rs         // Contains worker module code and sub-module declarations
-    node_id.rs
-    heartbeat.rs
-
-// ✅ CORRECT - Modern named module pattern
-src/
-  workers.rs       // Contains worker module code and sub-module declarations
-  workers/
-    node_id.rs
-    heartbeat.rs
-```
-
-### 2. Module File Structure Pattern
-
-**ALWAYS** use this structure for modules with sub-modules:
-
-```
-src/
-  module_name.rs          # Main module file with pub use exports and mod declarations
-  module_name/            # Directory containing sub-modules
-    submodule_a.rs
-    submodule_b.rs
-```
-
-**Main module file pattern:**
-
-```rust
-// In src/workers.rs
-
-// Declare sub-modules
-mod node_id;
-mod heartbeat;
-
-// Re-export public types for convenience
-pub use node_id::{NodeId, NodeIdOwned};
-pub use heartbeat::Heartbeat;
-
-// Main module functionality
-pub struct Worker {
-    // ...
-}
-
-impl Worker {
-    // ...
-}
-```
-
-**Sub-module files:**
-
-```rust
-// In src/workers/node_id.rs
-
-/// Worker node identifier
-#[derive(Debug, Clone)]
-pub struct NodeId(String);
-
-impl NodeId {
-    pub fn new(id: String) -> Self {
-        Self(id)
-    }
-}
-```
+- **Production reliability** - No unexpected crashes
+- **Clear error flows** - Explicit handling of all failure cases
 
 ## 🔥 ERROR HANDLING - CRITICAL
 
@@ -294,118 +212,9 @@ async fn test_job_creation() {
 - ✅ Helps identify which precondition failed when tests break
 - ❌ Never use `.unwrap()` even in tests - always prefer `.expect()` with context
 
-### 4. Leverage the Type System
-
-**ALWAYS** design APIs that make invalid states unrepresentable. Use the type system to enforce invariants rather than runtime checks.
-
-#### Type-Driven Design Patterns
-
-**Pattern 1: Newtype Wrappers for Validated Data**
-
-```rust
-// ❌ WRONG - Passing unvalidated strings everywhere
-pub fn register_worker(node_id: String) -> Result<(), Error> {
-    if !is_valid_node_id(&node_id) {
-        return Err(Error::InvalidNodeId);
-    }
-    // ... use node_id (but could be called with invalid data)
-}
-
-// ✅ CORRECT - Type enforces validity
-pub struct NodeId(String);
-
-impl NodeId {
-    /// Create a validated NodeId
-    pub fn new(id: String) -> Result<Self, ValidationError> {
-        if !is_valid_node_id(&id) {
-            return Err(ValidationError::InvalidNodeId);
-        }
-        Ok(Self(id))
-    }
-}
-
-pub fn register_worker(node_id: NodeId) -> Result<(), Error> {
-    // Type system guarantees node_id is valid - no runtime checks needed
-    // ...
-}
-```
-
-**Pattern 2: State Machines with Types**
-
-Use distinct types for each state to prevent invalid transitions at compile time.
-
-```rust
-// ❌ WRONG - Runtime state checking
-pub struct Job {
-    status: JobStatus,
-}
-
-impl Job {
-    pub fn start(&mut self) {
-        assert_eq!(self.status, JobStatus::Scheduled);  // Runtime panic!
-        self.status = JobStatus::Running;
-    }
-}
-
-// ✅ CORRECT - Type system enforces valid state transitions
-pub struct ScheduledJob { /* ... */ }
-pub struct RunningJob { /* ... */ }
-
-impl ScheduledJob {
-    pub fn start(self) -> RunningJob {
-        RunningJob { /* ... */ }  // Type transition - cannot call on wrong state
-    }
-}
-
-// Usage
-let job = ScheduledJob::new();
-let job = job.start();  // ✅ Can only call start() on ScheduledJob
-// job.start();  // ❌ Compile error - already consumed
-```
-
-**Pattern 3: Builder Pattern for Required Fields**
-
-Use builder pattern when construction has multiple required fields.
-
-```rust
-// ❌ WRONG - Easy to forget required fields
-pub struct Config {
-    pub database_url: Option<String>,
-    pub port: Option<u16>,
-}
-
-// ✅ CORRECT - Builder enforces completeness
-pub struct Config {
-    database_url: String,  // No Option - guaranteed to exist
-    port: u16,
-}
-
-impl ConfigBuilder {
-    pub fn database_url(mut self, url: String) -> Self { /* ... */ }
-    pub fn port(mut self, port: u16) -> Self { /* ... */ }
-
-    pub fn build(self) -> Result<Config, BuildError> {
-        Ok(Config {
-            database_url: self.database_url.ok_or(BuildError::MissingDatabaseUrl)?,
-            port: self.port.ok_or(BuildError::MissingPort)?,
-        })
-    }
-}
-
-// config.database_url is String, not Option<String> - no unwrapping needed!
-```
-
 ## 🚨 CHECKLIST
 
 Before committing Rust code, verify:
-
-### Module Organization
-
-- [ ] No `mod.rs` files exist in the module structure
-- [ ] Named module files (e.g., `workers.rs`) used next to directories
-- [ ] Sub-modules declared with `mod` in parent module file
-- [ ] Public types re-exported with `pub use` for convenience
-- [ ] Directory structure matches module hierarchy
 
 ### Error Handling - CRITICAL
 
@@ -422,30 +231,19 @@ Before committing Rust code, verify:
   - [ ] `// SAFETY:` comment explaining why it's safe
   - [ ] Logical analysis or type-system proof of safety
 
-### Type-Driven Design
-
-- [ ] Newtypes used for validated data (no bare primitives for domain concepts)
-- [ ] Invalid states made unrepresentable through types
-- [ ] Type system used to enforce invariants (not runtime checks)
-- [ ] Builder pattern used for complex object construction
-- [ ] State machines modeled with distinct types (not enums with runtime checks)
-
 ### Code Quality
 
 - [ ] Functions return `Result<T, E>` for all fallible operations
-- [ ] Error types provide rich context (see error-reporting.md)
+- [ ] Error types provide rich context (see `error-reporting.md`)
 - [ ] No panic-inducing code without documentation and proof
-- [ ] Types encode business logic and invariants
 
 ## 🎓 RATIONALE
 
 These patterns prioritize:
 
 1. **Safety First** - Production code must never panic unexpectedly
-2. **Type-Driven Design** - Use the type system to prevent entire classes of errors at compile time
-3. **Clarity** - Explicit error handling makes code paths visible and maintainable
-4. **Rust Idioms** - Following Rust 2018+ conventions and ecosystem best practices
-5. **Production Quality** - Code that handles errors gracefully and provides rich debugging context
-6. **Compile-Time Guarantees** - Leverage Rust's type system to catch bugs before runtime
+2. **Clarity** - Explicit error handling makes code paths visible and maintainable
+3. **Production Quality** - Code that handles errors gracefully and provides rich debugging context
+4. **Test Clarity** - Tests that fail clearly with descriptive messages
 
-**Remember**: Every `.unwrap()` or `.expect()` in production code is a potential crash waiting to happen. Design your types and APIs to make unwrapping unnecessary.
+**Remember**: Every `.unwrap()` or `.expect()` in production code is a potential crash waiting to happen.

@@ -1,3 +1,10 @@
+---
+name: "error-reporting"
+description: "Error handling patterns, thiserror usage, error context. Load when defining errors or handling error types"
+type: core
+scope: "global"
+---
+
 # Error Reporting Patterns
 
 **🚨 MANDATORY for ALL error handling in the Amp project**

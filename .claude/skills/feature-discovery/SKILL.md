@@ -1,6 +1,6 @@
 ---
 name: feature-discovery
-description: List all feature docs and based on user query + feature descriptions, load appropriate docs. Use when user asks about features, functionality, or how things work in the project.
+description: Load relevant feature docs based on user query. Use when user asks about features, functionality, or how things work in the project.
 ---
 
 # Feature Discovery Skill
@@ -112,10 +112,10 @@ Load multiple feature docs when:
 
 ### When NOT to Use This Skill
 
-- User asks about code patterns -> Use `.patterns/` directly
+- User asks about code patterns -> Use `/code-pattern-discovery` skill
 - User needs to run commands -> Use appropriate `/code-*` skill
 - User is doing simple file edits -> No discovery needed
-- User asks about implementation details -> Use `.patterns/` files
+- User asks about implementation details -> Use `/code-pattern-discovery` skill
 - User asks if implementation matches docs -> Use `/feature-validate`
 
 ## Example Workflows
@@ -155,7 +155,7 @@ Load multiple feature docs when:
 1. Run the discovery command to extract feature metadata
 2. No matches found in frontmatter
 3. Inform user no feature doc exists for X
-4. Suggest checking `.patterns/` or asking for clarification
+4. Suggest using `/code-pattern-discovery` or asking for clarification
 
 ## Common Mistakes to Avoid
 
@@ -181,6 +181,6 @@ Load multiple feature docs when:
 After discovering relevant features:
 
 1. **Understand context** - Read loaded feature docs thoroughly
-2. **Check patterns** - Review `.patterns/` for implementation details
+2. **Check patterns** - Use `/code-pattern-discovery` for implementation details
 3. **Identify related features** - Follow cross-references in Related Features
 4. **Begin implementation** - Use appropriate `/code-*` skills for development

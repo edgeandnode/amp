@@ -1,3 +1,10 @@
+---
+name: "cargo-workspace-patterns"
+description: "Cargo workspace structure, crate creation, dependency management. Load when creating crates or managing workspace"
+type: arch
+scope: "global"
+---
+
 📦 Cargo Workspace Patterns (Rust)
 ==================================
 

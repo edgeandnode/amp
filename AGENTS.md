@@ -12,15 +12,17 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 2. **Skills wrap justfile tasks** → Skills provide the interface to `just` commands with proper guidance
 3. **Follow the workflow** → Format → Check → Clippy → Test (in that order)
 4. **Fix ALL warnings** → Zero tolerance for clippy warnings
-5. **Check patterns** → Review `.patterns/` before implementing code
+5. **Check patterns** → Use `/code-pattern-discovery` before implementing code
 
-**Your first action**: If you need to run a command, invoke the relevant Skill!
+**Your first action**: If you need to run a command, invoke the relevant Skill! If you need to implement code, invoke
+`/code-pattern-discovery` to load relevant patterns!
 
 ## Table of Contents
 
 1. [Feature Discovery](#1-feature-discovery) - Understanding project features via `/feature-discovery` skill
-2. [Development Workflow](#2-development-workflow) - How to develop with this codebase
-3. [Additional Resources](#3-additional-resources) - Links to documentation
+2. [Coding Patterns](#2-coding-patterns) - Understanding coding standards via `/code-pattern-discovery` skill
+3. [Development Workflow](#3-development-workflow) - How to develop with this codebase
+4. [Additional Resources](#4-additional-resources) - Links to documentation
 
 ## 1. Feature Discovery
 
@@ -28,27 +30,59 @@ Feature documentation lives in `docs/features/` with YAML frontmatter for dynami
 
 **Feature docs are authoritative**: If a feature doc exists, it is the ground truth. Implementation MUST align with documentation. If there's a mismatch, either fix the code or update the doc to reflect the correct state.
 
-| When User Asks | Invoke This Skill |
-|----------------|-------------------|
-| "What is X?", "How does X work?", "Explain the Y feature" | `/feature-discovery` |
+| When User Asks                                              | Invoke This Skill    |
+|-------------------------------------------------------------|----------------------|
+| "What is X?", "How does X work?", "Explain the Y feature"   | `/feature-discovery` |
 | "What features does Amp have?", "What can this project do?" | `/feature-discovery` |
-| Questions about project functionality or capabilities | `/feature-discovery` |
-| Need context before implementing a feature | `/feature-discovery` |
-| Creating or editing files in `docs/features/` | `/feature-fmt-check` |
-| Reviewing PRs that modify feature docs (format check) | `/feature-fmt-check` |
-| "What's the status of feature X implementation?" | `/feature-validate` |
-| Verify feature doc matches implementation | `/feature-validate` |
-| Check if documented functionality exists in code | `/feature-validate` |
-| Audit feature docs for accuracy and test coverage | `/feature-validate` |
+| Questions about project functionality or capabilities       | `/feature-discovery` |
+| Need context before implementing a feature                  | `/feature-discovery` |
+| Creating or editing files in `docs/features/`               | `/feature-fmt-check` |
+| Reviewing PRs that modify feature docs (format check)       | `/feature-fmt-check` |
+| "What's the status of feature X implementation?"            | `/feature-validate`  |
+| Verify feature doc matches implementation                   | `/feature-validate`  |
+| Check if documented functionality exists in code            | `/feature-validate`  |
+| Audit feature docs for accuracy and test coverage           | `/feature-validate`  |
 
 **Navigation:**
 
 - Need to understand a feature? → `/feature-discovery`
-- Writing feature docs? → `/feature-fmt-check` + [.patterns/feature-docs.md](.patterns/feature-docs.md)
+- Writing feature docs? → `/feature-fmt-check` + [docs/code/feature-docs.md](docs/code/feature-docs.md)
 - Validate implementation aligns with feature claims? → `/feature-validate`
 
 
-## 2. Development Workflow
+## 2. Coding Patterns
+
+Coding pattern documentation lives in `docs/code/` with YAML frontmatter for dynamic discovery.
+
+**Pattern docs are authoritative**: Pattern docs define how code should be written. All implementations MUST follow the patterns. If code doesn't follow a pattern, either fix the code or update the pattern (with team approval).
+
+### Pattern Types
+
+| Type               | Scope          | Purpose                                                       |
+|--------------------|----------------|---------------------------------------------------------------|
+| **Core**           | `global`       | Fundamental coding standards (error handling, modules, types) |
+| **Architectural**  | `global`       | High-level patterns (services, workspace structure)           |
+| **Crate-specific** | `crate:<name>` | Patterns for specific crates (admin-api, metadata-db)         |
+| **Meta**           | `global`       | Documentation format specifications                           |
+
+### Skill Invocation
+
+| When You Need To                                              | Invoke This Skill         |
+|---------------------------------------------------------------|---------------------------|
+| Understand coding patterns before implementing                | `/code-pattern-discovery` |
+| "How should I handle errors?", "What's the pattern for X?"    | `/code-pattern-discovery` |
+| Load crate-specific patterns for admin-api, metadata-db, etc. | `/code-pattern-discovery` |
+| Creating or editing files in `docs/code/`                     | `/code-pattern-fmt-check` |
+| Reviewing PRs that modify pattern docs                        | `/code-pattern-fmt-check` |
+
+**Navigation:**
+
+- Need to understand patterns? → `/code-pattern-discovery`
+- Writing pattern docs? → `/code-pattern-fmt-check` + [docs/code/code-pattern-docs.md](docs/code/code-pattern-docs.md)
+- All patterns located in `docs/code/`
+
+
+## 3. Development Workflow
 
 **This section provides guidance for AI agents on how to develop with this codebase.**
 
@@ -56,17 +90,17 @@ Feature documentation lives in `docs/features/` with YAML frontmatter for dynami
 
 This project uses three complementary documentation systems. Understanding their roles helps AI agents navigate efficiently:
 
-| Documentation                  | Purpose                  | Content Focus                                                                                                                    |
-| ------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| **AGENTS.md** (this file)      | **WHY** and **WHAT**     | Project architecture, policies, goals, and principles. Answers "What is this project?" and "Why do we do things this way?"       |
-| **Skills** (`.claude/skills/`) | **HOW** and **WHEN**     | Command-line operations and justfile usage. Answers "How do I run commands?" and "When should I use each command?"               |
-| **Patterns** (`.patterns/`)    | **HOW** (implementation) | Code implementation patterns, standards, and guidelines. Answers "How do I write quality code that follows project conventions?" |
+| Documentation                  | Purpose                  | Content Focus                                                                                                                                                                |
+|--------------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **AGENTS.md** (this file)      | **WHY** and **WHAT**     | Project architecture, policies, goals, and principles. Answers "What is this project?" and "Why do we do things this way?"                                                   |
+| **Skills** (`.claude/skills/`) | **HOW** and **WHEN**     | Command-line operations and justfile usage. Answers "How do I run commands?" and "When should I use each command?"                                                           |
+| **Patterns** (`docs/code/`)    | **HOW** (implementation) | Code implementation patterns, standards, and guidelines (see [Coding Patterns](#2-coding-patterns)). Answers "How do I write quality code that follows project conventions?" |
 
 **Navigation Guide for AI Agents:**
 
 - Need to understand the project? → Read this file (AGENTS.md)
 - Need to run a command? → Invoke the appropriate Skill (`/code-format`, `/code-check`, `/code-test`, `/code-gen`)
-- Need to write code? → Consult Patterns ([`.patterns/README.md`](.patterns/README.md))
+- Need to write code? → Use `/code-pattern-discovery` skill to load relevant patterns
 
 ### Core Operating Principle
 
@@ -155,9 +189,8 @@ Each Skill provides:
 **BEFORE writing ANY code, you MUST:**
 
 1. **Understand the task** - Research the codebase and identify affected crate(s)
-2. **Read implementation patterns** - Review [.patterns/README.md](.patterns/README.md)
-3. **Check crate-specific guidelines** - If modifying a specific crate, read `.patterns/<crate>/crate.md`
-4. **Review security requirements** - If the crate has security guidelines, read `.patterns/<crate>/security.md`
+2. **Load implementation patterns** - Use `/code-pattern-discovery` skill (see [Coding Patterns](#2-coding-patterns))
+3. **Follow crate-specific patterns** - Pattern discovery loads crate-specific and security patterns automatically
 
 ### Typical Development Workflow
 
@@ -168,13 +201,14 @@ Each Skill provides:
 - Understand the codebase and existing patterns
 - Identify related modules and dependencies
 - Review test files and usage examples
-- Consult `.patterns/` for relevant implementation patterns
+- Use `/code-pattern-discovery` to load relevant implementation patterns
 
 #### 2. Planning Phase
 
-- Create detailed implementation plan
+- Create detailed implementation plan based on [Coding Patterns](#2-coding-patterns)
+- Ensure plan follows required patterns (error handling, type design, module structure, etc.)
 - Identify validation checkpoints
-- Consider edge cases and error handling
+- Consider edge cases and error handling according to pattern guidelines
 - Ask user questions if requirements are unclear
 
 #### 3. Implementation Phase
@@ -185,7 +219,7 @@ Each Skill provides:
 
 ```
 Development Progress:
-- [ ] Step 1: Write code following patterns from .patterns/
+- [ ] Step 1: Write code following patterns from Coding Patterns section (use /code-pattern-discovery)
 - [ ] Step 2: Format code (use /code-format skill)
 - [ ] Step 3: Check compilation (use /code-check skill)
 - [ ] Step 4: Fix all compilation errors
@@ -198,7 +232,7 @@ Development Progress:
 
 **Detailed workflow for EVERY code change:**
 
-1. **Write code** following patterns from `.patterns/`
+1. **Write code** following patterns from [Coding Patterns](#2-coding-patterns) (loaded via `/code-pattern-discovery`)
 
 2. **Format immediately** (MANDATORY after EVERY edit):
    - **Use**: `/code-format` skill after editing ANY Rust or TypeScript file
@@ -243,30 +277,12 @@ Edit File → /code-format skill
 - Review changes against patterns and security guidelines
 - Document any warnings you couldn't fix and why
 
-### Code Implementation Patterns Reference
-
-**AI agents should consult patterns when writing code:**
-
-- **General patterns**: [.patterns/README.md](.patterns/README.md)
-  - Cargo workspace patterns (crate creation, dependency management)
-  - Testing patterns (test structure, naming conventions)
-- **Service patterns**: [.patterns/services-pattern.md](.patterns/services-pattern.md)
-  - Two-phase service creation pattern for `crates/services/*`
-  - Service initialization and lifecycle management
-- **Crate-specific patterns**: `.patterns/<crate>/crate.md`
-  - admin-api: HTTP handler patterns, error handling, documentation
-  - metadata-db: Database design patterns, API conventions
-  - ampsync: Crate-specific development guidelines
-- **Security guidelines**: `.patterns/<crate>/security.md`
-  - Security checklists and threat mitigation
-  - Input validation and injection prevention
-
 ### Core Development Principles
 
 **ALL AI agents MUST follow these principles:**
 
 - **Research → Plan → Implement**: Never jump straight to coding
-- **Pattern compliance**: Always follow established patterns from `.patterns/`
+- **Pattern compliance**: Follow patterns from [Coding Patterns](#2-coding-patterns)
 - **Zero tolerance for errors**: All automated checks must pass
 - **Clarity over cleverness**: Choose clear, maintainable solutions
 - **Security first**: Never skip security guidelines for security-sensitive crates
@@ -284,14 +300,14 @@ Edit File → /code-format skill
 
 **You've learned the complete workflow. Here's what to remember:**
 
-| What             | Where             | When                               |
-| ---------------- | ----------------- | ---------------------------------- |
-| **Run commands** | `.claude/skills/` | Check Skills BEFORE any command    |
-| **Write code**   | `.patterns/`      | Follow patterns for implementation |
-| **Format**       | `/code-format`    | IMMEDIATELY after each edit        |
-| **Check**        | `/code-check`     | After formatting                   |
-| **Lint**         | `/code-check`     | Fix ALL warnings                   |
-| **Test**         | `/code-test`      | Validate all changes               |
+| What             | Where                                 | When                                |
+|------------------|---------------------------------------|-------------------------------------|
+| **Run commands** | `.claude/skills/`                     | Check Skills BEFORE any command     |
+| **Write code**   | [Coding Patterns](#2-coding-patterns) | Load patterns before implementation |
+| **Format**       | `/code-format`                        | IMMEDIATELY after each edit         |
+| **Check**        | `/code-check`                         | After formatting                    |
+| **Lint**         | `/code-check`                         | Fix ALL warnings                    |
+| **Test**         | `/code-test`                          | Validate all changes                |
 
 **Golden Rules:**
 
@@ -303,7 +319,7 @@ Edit File → /code-format skill
 
 **Remember**: When in doubt, invoke the appropriate Skill!
 
-## 3. Additional Resources
+## 4. Additional Resources
 
 For more detailed information about the project:
 
