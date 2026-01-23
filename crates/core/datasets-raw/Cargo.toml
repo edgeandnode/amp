@@ -12,13 +12,11 @@ gen-schema = ["dep:datafusion"]
 datasets-common = { path = "../datasets-common" }
 
 # For BlockStreamer and RawBlockRange
-alloy = { workspace = true }
 arrow = { workspace = true }
 async-stream = { workspace = true }
 backon = { workspace = true }
 futures = { workspace = true }
 monitoring = { path = "../monitoring" }
-serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

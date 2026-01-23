@@ -1,11 +1,6 @@
-use datafusion::arrow::array::{
-    Decimal128Array, Decimal128Builder, FixedSizeBinaryBuilder, TimestampNanosecondBuilder,
-};
+use arrow::array::{Decimal128Array, Decimal128Builder, FixedSizeBinaryBuilder};
 
-use crate::{
-    Bytes32ArrayType, EVM_CURRENCY_TYPE, EvmAddressArrayType, Timestamp, TimestampArrayType,
-    timestamp_type,
-};
+use crate::evm::{Bytes32ArrayType, EVM_CURRENCY_TYPE, EvmAddressArrayType};
 
 #[derive(Debug)]
 pub struct Bytes32ArrayBuilder(FixedSizeBinaryBuilder);
@@ -78,24 +73,6 @@ impl EvmCurrencyArrayBuilder {
     }
 
     pub fn finish(mut self) -> Decimal128Array {
-        self.0.finish()
-    }
-}
-
-#[derive(Debug)]
-pub struct TimestampArrayBuilder(TimestampNanosecondBuilder);
-
-impl TimestampArrayBuilder {
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self(TimestampNanosecondBuilder::with_capacity(capacity).with_data_type(timestamp_type()))
-    }
-
-    pub fn append_value(&mut self, value: Timestamp) {
-        // i64::MAX in nanoseconds is almost 300 years, so we're safe to cast.
-        self.0.append_value(value.0.as_nanos() as i64)
-    }
-
-    pub fn finish(&mut self) -> TimestampArrayType {
         self.0.finish()
     }
 }

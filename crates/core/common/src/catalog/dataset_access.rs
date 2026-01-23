@@ -3,7 +3,14 @@ use std::{future::Future, sync::Arc};
 use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{hash_reference::HashReference, reference::Reference};
 
-use crate::BoxError;
+/// Error type for [`DatasetAccess::resolve_revision`].
+pub type ResolveRevisionError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Error type for [`DatasetAccess::get_dataset`].
+pub type GetDatasetError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Error type for [`DatasetAccess::eth_call_for_dataset`].
+pub type EthCallForDatasetError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Minimal trait for accessing datasets and provider configuration.
 ///
@@ -19,7 +26,7 @@ pub trait DatasetAccess {
     fn resolve_revision(
         &self,
         reference: impl AsRef<Reference> + Send,
-    ) -> impl Future<Output = Result<Option<HashReference>, BoxError>> + Send;
+    ) -> impl Future<Output = Result<Option<HashReference>, ResolveRevisionError>> + Send;
 
     /// Get a dataset by hash reference.
     ///
@@ -29,7 +36,7 @@ pub trait DatasetAccess {
     fn get_dataset(
         &self,
         reference: &HashReference,
-    ) -> impl Future<Output = Result<Arc<dyn datasets_common::dataset::Dataset>, BoxError>> + Send;
+    ) -> impl Future<Output = Result<Arc<dyn datasets_common::dataset::Dataset>, GetDatasetError>> + Send;
 
     /// Create an eth_call UDF for the given dataset if applicable.
     ///
@@ -38,5 +45,5 @@ pub trait DatasetAccess {
         &self,
         sql_table_ref_schema: &str,
         dataset: &dyn datasets_common::dataset::Dataset,
-    ) -> impl Future<Output = Result<Option<ScalarUDF>, BoxError>> + Send;
+    ) -> impl Future<Output = Result<Option<ScalarUDF>, EthCallForDatasetError>> + Send;
 }

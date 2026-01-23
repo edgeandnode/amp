@@ -1,14 +1,15 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError};
-use datasets_common::hash_reference::HashReference;
+use datasets_common::{dataset::BlockNum, hash_reference::HashReference};
 use serde_with::serde_as;
 use url::Url;
 
 mod client;
 mod dataset;
 mod dataset_kind;
+pub mod error;
 pub mod metrics;
+pub mod provider;
 pub mod tables;
 
 // Reuse types from datasets-common for consistency
@@ -19,6 +20,7 @@ pub use self::{
     dataset::Dataset,
     dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
 };
+use crate::error::ProviderError;
 
 /// Table definition for raw datasets
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -36,11 +38,6 @@ impl Table {
         Self { schema, network }
     }
 }
-
-/// RPC client error.
-#[derive(Debug, thiserror::Error)]
-#[error("RPC client error")]
-pub struct Error(#[source] pub BoxError);
 
 /// EVM RPC dataset manifest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -101,7 +98,7 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 pub async fn client(
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<JsonRpcClient, Error> {
+) -> Result<JsonRpcClient, ProviderError> {
     let request_limit = u16::max(1, config.concurrent_request_limit.unwrap_or(1024));
     let client = match config.url.scheme() {
         "ipc" => {
@@ -116,21 +113,21 @@ pub async fn client(
                 config.fetch_receipts_per_tx,
                 meter,
             )
-            .await
-            .map_err(Error)?
+            .await?
         }
-        "ws" | "wss" => JsonRpcClient::new_ws(
-            config.url,
-            config.network,
-            config.name,
-            request_limit,
-            config.rpc_batch_size,
-            config.rate_limit_per_minute,
-            config.fetch_receipts_per_tx,
-            meter,
-        )
-        .await
-        .map_err(Error)?,
+        "ws" | "wss" => {
+            JsonRpcClient::new_ws(
+                config.url,
+                config.network,
+                config.name,
+                request_limit,
+                config.rpc_batch_size,
+                config.rate_limit_per_minute,
+                config.fetch_receipts_per_tx,
+                meter,
+            )
+            .await?
+        }
         _ => JsonRpcClient::new(
             config.url,
             config.network,
@@ -140,8 +137,7 @@ pub async fn client(
             config.rate_limit_per_minute,
             config.fetch_receipts_per_tx,
             meter,
-        )
-        .map_err(Error)?,
+        )?,
     };
 
     Ok(client)

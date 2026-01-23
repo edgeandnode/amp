@@ -1,14 +1,16 @@
 use std::sync::{Arc, LazyLock};
 
-use common::{
-    BlockRange, BoxResult, SPECIAL_BLOCK_NUM,
-    arrow::{
-        array::{ArrayRef, ListBuilder, UInt8Builder, UInt32Builder, UInt64Builder},
-        datatypes::{DataType, Field, Schema, SchemaRef},
-    },
+use datasets_common::{
+    block_range::BlockRange,
+    dataset::{SPECIAL_BLOCK_NUM, Table},
 };
-use datasets_common::dataset::Table;
-use datasets_raw::rows::TableRows;
+use datasets_raw::{
+    arrow::{
+        ArrayRef, DataType, Field, ListBuilder, Schema, SchemaRef, UInt8Builder, UInt32Builder,
+        UInt64Builder,
+    },
+    rows::{TableRowError, TableRows},
+};
 use serde::Deserialize;
 use solana_clock::Slot;
 
@@ -114,7 +116,7 @@ impl InstructionRowsBuilder {
         self.inner_stack_height.append_option(*inner_stack_height);
     }
 
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -137,6 +139,6 @@ impl InstructionRowsBuilder {
             Arc::new(inner_stack_height.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }

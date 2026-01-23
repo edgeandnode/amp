@@ -1,14 +1,15 @@
 use std::sync::{Arc, LazyLock};
 
-use common::{
-    BlockRange, BoxResult, SPECIAL_BLOCK_NUM,
-    arrow::{
-        array::{ArrayRef, Int64Builder, StringBuilder, UInt64Builder},
-        datatypes::{DataType, Field, Schema, SchemaRef},
-    },
+use datasets_common::{
+    block_range::BlockRange,
+    dataset::{SPECIAL_BLOCK_NUM, Table},
 };
-use datasets_common::dataset::Table;
-use datasets_raw::rows::TableRows;
+use datasets_raw::{
+    arrow::{
+        ArrayRef, DataType, Field, Int64Builder, Schema, SchemaRef, StringBuilder, UInt64Builder,
+    },
+    rows::{TableRowError, TableRows},
+};
 use solana_clock::Slot;
 
 use crate::{rpc_client::UiConfirmedBlock, tables::BASE58_ENCODED_HASH_LEN};
@@ -127,7 +128,7 @@ impl BlockHeaderRowsBuilder {
     }
 
     /// Builds the [TableRows] from the appended data.
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             mut slot,
@@ -148,6 +149,6 @@ impl BlockHeaderRowsBuilder {
             Arc::new(block_time.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }

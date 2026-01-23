@@ -1,18 +1,18 @@
 use std::sync::{Arc, LazyLock};
 
 use base64::Engine;
-use common::{
-    BlockRange, BoxResult, SPECIAL_BLOCK_NUM,
-    arrow::{
-        array::{
-            ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, ListBuilder, StringBuilder,
-            StructBuilder, UInt8Builder, UInt32Builder, UInt64Builder,
-        },
-        datatypes::{DataType, Field, Fields, Schema, SchemaRef},
-    },
+use datasets_common::{
+    block_range::BlockRange,
+    dataset::{SPECIAL_BLOCK_NUM, Table},
 };
-use datasets_common::dataset::Table;
-use datasets_raw::rows::TableRows;
+use datasets_raw::{
+    arrow::{
+        ArrayRef, BooleanBuilder, DataType, Field, Fields, Float64Builder, Int64Builder,
+        ListBuilder, Schema, SchemaRef, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
+        UInt64Builder,
+    },
+    rows::{TableRowError, TableRows},
+};
 use serde::Deserialize;
 use solana_clock::Slot;
 
@@ -935,7 +935,7 @@ impl TransactionRowsBuilder {
         self.slot.append_value(*slot);
     }
 
-    pub(crate) fn build(self, range: BlockRange) -> BoxResult<TableRows> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
             mut tx_index,
@@ -978,6 +978,6 @@ impl TransactionRowsBuilder {
             Arc::new(cost_units.finish()),
         ];
 
-        TableRows::new(table(range.network.clone()), range, columns).map_err(Into::into)
+        TableRows::new(table(range.network.clone()), range, columns)
     }
 }

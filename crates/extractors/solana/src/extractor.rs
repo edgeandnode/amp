@@ -15,12 +15,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use common::{BlockNum, BoxError, BoxResult};
-use datasets_raw::{client::BlockStreamer, rows::Rows};
-use futures::{Stream, StreamExt};
+use datasets_common::dataset::BlockNum;
+use datasets_raw::{
+    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    rows::Rows,
+};
+use futures::{Stream, StreamExt, TryStreamExt};
 use url::Url;
 
-use crate::{metrics, of1_client, rpc_client, tables};
+use crate::{
+    metrics, of1_client, rpc_client,
+    tables::{self},
+};
 
 /// Handles related to the OF1 CAR manager task, stored in the extractor for cleanup.
 struct Of1CarManagerHandles {
@@ -91,9 +97,9 @@ impl SolanaExtractor {
         end: BlockNum,
         historical_block_stream: T,
         get_block_config: rpc_client::rpc_config::RpcBlockConfig,
-    ) -> impl Stream<Item = BoxResult<Rows>>
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>>
     where
-        T: Stream<Item = BoxResult<of1_client::DecodedBlock>>,
+        T: Stream<Item = Result<of1_client::DecodedBlock, BlockStreamError>>,
     {
         async_stream::stream! {
             // Slots can be skipped, so we'll track the next expected slot and in the case of a
@@ -117,11 +123,11 @@ impl SolanaExtractor {
 
                     // Yield empty rows for skipped slots.
                     for skipped_slot in expected_next_slot..end {
-                        yield tables::empty_db_rows(skipped_slot, &self.network);
+                        yield tables::empty_db_rows(skipped_slot, &self.network).map_err(Into::into);
                     }
                 }
 
-                yield tables::convert_of_data_to_db_rows(block, &self.network);
+                yield tables::convert_of_data_to_db_rows(block, &self.network).map_err(Into::into);
 
                 if current_slot == end {
                     // Reached the end of the requested range.
@@ -151,7 +157,7 @@ impl SolanaExtractor {
                     Ok(block) => block,
                     Err(e) => {
                         if rpc_client::is_block_missing_err(&e) {
-                            yield tables::empty_db_rows(block_num, &self.network);
+                            yield tables::empty_db_rows(block_num, &self.network).map_err(Into::into);
                         } else {
                             yield Err(e.into());
                         }
@@ -160,7 +166,7 @@ impl SolanaExtractor {
                     }
                 };
 
-                yield tables::convert_rpc_block_to_db_rows(block_num, block, &self.network);
+                yield tables::convert_rpc_block_to_db_rows(block_num, block, &self.network).map_err(Into::into);
             }
         }
     }
@@ -190,7 +196,7 @@ impl BlockStreamer for SolanaExtractor {
         self,
         start: BlockNum,
         end: BlockNum,
-    ) -> impl Stream<Item = BoxResult<Rows>> {
+    ) -> impl Stream<Item = Result<Rows, BlockStreamError>> {
         let get_block_config = rpc_client::rpc_config::RpcBlockConfig {
             encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
             transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
@@ -267,13 +273,17 @@ impl BlockStreamer for SolanaExtractor {
                 get_block_config,
                 self.metrics.clone(),
             )
+            .map_err(Into::into)
             .boxed()
         };
 
         self.block_stream_impl(start, end, historical_block_stream, get_block_config)
     }
 
-    async fn latest_block(&mut self, _finalized: bool) -> BoxResult<Option<BlockNum>> {
+    async fn latest_block(
+        &mut self,
+        _finalized: bool,
+    ) -> Result<Option<BlockNum>, LatestBlockError> {
         let get_block_height_resp = self.rpc_client.get_block_height(self.metrics.clone()).await;
 
         match get_block_height_resp {
@@ -283,7 +293,7 @@ impl BlockStreamer for SolanaExtractor {
         }
     }
 
-    async fn wait_for_cleanup(self) -> Result<(), BoxError> {
+    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
         let Self {
             of1_car_manager_handles,
             ..

@@ -7,19 +7,19 @@
 //! block; some slots may be skipped due to various reasons such as network issues or validator
 //! performance. Therefore, the slot number does not always correspond directly to a block number.
 //!
-//! Since [`common::BlockStreamer`] and related infrastructure generally operate on the concept of block numbers,
+//! Since [`datasets_raw::client::BlockStreamer`] and related infrastructure generally operate on the concept of block numbers,
 //! this implementation treats Solana slots as block numbers for the most part. Skipped slots are handled
 //! by yielding empty rows for those slots, ensuring that the sequence of block numbers remains continuous.
 
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use common::{BlockNum, BoxError};
-use datasets_common::{hash_reference::HashReference, manifest::TableSchema};
+use datasets_common::{dataset::BlockNum, hash_reference::HashReference, manifest::TableSchema};
 use serde_with::serde_as;
 use url::Url;
 
 mod dataset;
 mod dataset_kind;
+pub mod error;
 mod extractor;
 mod metrics;
 mod of1_client;
@@ -31,10 +31,7 @@ pub use self::{
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
     extractor::SolanaExtractor,
 };
-
-#[derive(Debug, thiserror::Error)]
-#[error("RPC client error")]
-pub struct Error(#[source] pub BoxError);
+use crate::error::ExtractorError;
 
 /// Table definition for raw datasets.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -121,7 +118,7 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 pub fn extractor(
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<SolanaExtractor, Error> {
+) -> Result<SolanaExtractor, ExtractorError> {
     let client = match config.rpc_provider_url.scheme() {
         "http" | "https" => SolanaExtractor::new(
             config.rpc_provider_url,
@@ -135,7 +132,7 @@ pub fn extractor(
         ),
         scheme => {
             let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
-            return Err(Error(err.into()));
+            return Err(ExtractorError(err));
         }
     };
 

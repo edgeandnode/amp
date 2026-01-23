@@ -7,10 +7,8 @@ license-file.workspace = true
 [dependencies]
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
-async-stream.workspace = true
 async-trait.workspace = true
 axum.workspace = true
-backon.workspace = true
 bigdecimal = "0.4"
 bytes.workspace = true
 chrono.workspace = true
@@ -18,12 +16,9 @@ datafusion.workspace = true
 datafusion-datasource.workspace = true
 datafusion-tracing.workspace = true
 datasets-common = { path = "../datasets-common" }
-datasets-raw = { path = "../datasets-raw" }
 futures.workspace = true
-governor.workspace = true
 itertools.workspace = true
 metadata-db = { path = "../metadata-db" }
-monitoring = { path = "../monitoring" }
 object_store.workspace = true
 rand.workspace = true
 regex.workspace = true
@@ -32,10 +27,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tower.workspace = true
 tracing.workspace = true
 url.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
