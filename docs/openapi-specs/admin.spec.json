@@ -2001,7 +2001,7 @@
           },
           "tables": {
             "type": "object",
-            "description": "Progress for each table written by this job, keyed by \"{namespace}/{name}:{table}\"",
+            "description": "Progress for each table written by this job, keyed by table name",
             "additionalProperties": {
               "$ref": "#/components/schemas/TableProgress"
             },
