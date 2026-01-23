@@ -36,7 +36,7 @@ The Solana provider enables data extraction from the Solana blockchain using a t
 | `network` | string | Yes | Network identifier (mainnet, devnet) |
 | `rpc_provider_url` | string | Yes | Solana RPC HTTP endpoint |
 | `of1_car_directory` | string | Yes | Local directory for CAR file cache |
-| `use_archive` | string | No | Archive usage mode: `"auto"`, `"always"`, or `"never"` (default: `"auto"`) |
+| `use_archive` | string | No | Archive usage mode: `"auto"`, `"always"`, or `"never"` (default: `"always"`) |
 | `max_rpc_calls_per_second` | number | No | Rate limit for RPC calls |
 | `keep_of1_car_files` | boolean | No | Retain CAR files after processing (default: false) |
 
@@ -48,11 +48,11 @@ network = "mainnet"
 rpc_provider_url = "${SOLANA_MAINNET_HTTP_URL}"
 of1_car_directory = "${SOLANA_OF1_CAR_DIRECTORY}"
 
-# Archive mode: "auto" (default), "always", or "never"
-# - "auto": RPC for recent slots (last 10k), archive for historical
+# Archive mode: "always" (default), "auto", or "never"
 # - "always": Always use archive, even for recent data
+# - "auto": RPC for recent slots (last 10k), archive for historical
 # - "never": Never use archive, RPC-only mode
-use_archive = "auto"
+use_archive = "always"
 
 max_rpc_calls_per_second = 50
 keep_of1_car_files = false
@@ -64,9 +64,9 @@ keep_of1_car_files = false
 
 The extractor supports three archive modes controlled by the `use_archive` configuration:
 
-- **`"auto"`** (default): Smart selection based on slot age. Uses RPC-only mode when `start_slot > current_slot - 10,000` (recent slots within ~83 minutes on mainnet), and archive mode for historical data.
+- **`"always"`** (default): Always use archive mode, even for recent slots. Downloads epoch CAR files (~745GB each).
+- **`"auto"`**: Smart selection based on slot age. Uses RPC-only mode when `start_slot > current_slot - 10,000` (recent slots within ~83 minutes on mainnet), and archive mode for historical data.
 - **`"never"`**: Always use RPC-only mode. Best for demos and recent data extraction.
-- **`"always"`**: Always use archive mode, even for recent slots. Downloads epoch CAR files (~745GB each).
 
 ```
 Historical Data                    Real-time Data
