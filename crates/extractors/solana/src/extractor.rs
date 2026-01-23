@@ -36,6 +36,7 @@ pub struct SolanaExtractor {
     network: String,
     provider_name: String,
     of1_car_directory: PathBuf,
+    use_archive: crate::UseArchive,
 }
 
 impl SolanaExtractor {
@@ -46,6 +47,7 @@ impl SolanaExtractor {
         provider_name: String,
         of1_car_directory: PathBuf,
         keep_of1_car_files: bool,
+        use_archive: crate::UseArchive,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         let rpc_client = rpc_client::SolanaRpcClient::new(
@@ -78,6 +80,7 @@ impl SolanaExtractor {
             network,
             provider_name,
             of1_car_directory,
+            use_archive,
         }
     }
 
@@ -176,6 +179,7 @@ impl Clone for SolanaExtractor {
             network: self.network.clone(),
             provider_name: self.provider_name.clone(),
             of1_car_directory: self.of1_car_directory.clone(),
+            use_archive: self.use_archive,
         }
     }
 }
@@ -195,6 +199,51 @@ impl BlockStreamer for SolanaExtractor {
             commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
         };
 
+        // Determine archive usage based on configuration
+        let use_rpc_only = match self.use_archive {
+            crate::UseArchive::Never => {
+                tracing::info!("Using RPC-only mode (use_archive = never)");
+                true
+            }
+            crate::UseArchive::Always => {
+                tracing::info!("Using archive mode (use_archive = always)");
+                false
+            }
+            crate::UseArchive::Auto => {
+                // Auto mode: skip archive for recent slots, use it for historical data
+                match self.rpc_client.get_slot(self.metrics.clone()).await {
+                    Ok(current_slot) => {
+                        let threshold = current_slot.saturating_sub(10_000);
+                        let skip_archive = start > threshold;
+
+                        if skip_archive {
+                            tracing::info!(
+                                start_slot = start,
+                                current_slot = current_slot,
+                                "Using RPC-only mode (recent slots, use_archive = auto)"
+                            );
+                        } else {
+                            tracing::info!(
+                                start_slot = start,
+                                current_slot = current_slot,
+                                threshold,
+                                "Using archive mode (historical slots, use_archive = auto)"
+                            );
+                        }
+
+                        skip_archive
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Failed to get current slot for auto mode, falling back to archive"
+                        );
+                        false
+                    }
+                }
+            }
+        };
+
         let of1_car_manager_tx = {
             let guard = self.of1_car_manager_handles.lock().unwrap();
             guard
@@ -204,15 +253,21 @@ impl BlockStreamer for SolanaExtractor {
                 .clone()
         };
 
-        let historical_block_stream = of1_client::stream(
-            start,
-            end,
-            self.of1_car_directory.clone(),
-            of1_car_manager_tx,
-            self.rpc_client.clone(),
-            get_block_config,
-            self.metrics.clone(),
-        );
+        let historical_block_stream = if use_rpc_only {
+            // Return empty stream to skip Old Faithful entirely
+            futures::stream::empty().boxed()
+        } else {
+            of1_client::stream(
+                start,
+                end,
+                self.of1_car_directory.clone(),
+                of1_car_manager_tx,
+                self.rpc_client.clone(),
+                get_block_config,
+                self.metrics.clone(),
+            )
+            .boxed()
+        };
 
         self.block_stream_impl(start, end, historical_block_stream, get_block_config)
     }
@@ -285,6 +340,7 @@ mod tests {
             String::new(),
             PathBuf::new(),
             false,
+            crate::UseArchive::Auto,
             None,
         );
 
@@ -331,6 +387,7 @@ mod tests {
             String::new(),
             PathBuf::new(),
             false,
+            crate::UseArchive::Auto,
             None,
         );
 

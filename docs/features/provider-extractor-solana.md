@@ -36,6 +36,7 @@ The Solana provider enables data extraction from the Solana blockchain using a t
 | `network` | string | Yes | Network identifier (mainnet, devnet) |
 | `rpc_provider_url` | string | Yes | Solana RPC HTTP endpoint |
 | `of1_car_directory` | string | Yes | Local directory for CAR file cache |
+| `use_archive` | string | No | Archive usage mode: `"auto"`, `"always"`, or `"never"` (default: `"auto"`) |
 | `max_rpc_calls_per_second` | number | No | Rate limit for RPC calls |
 | `keep_of1_car_files` | boolean | No | Retain CAR files after processing (default: false) |
 
@@ -46,6 +47,13 @@ kind = "solana"
 network = "mainnet"
 rpc_provider_url = "${SOLANA_MAINNET_HTTP_URL}"
 of1_car_directory = "${SOLANA_OF1_CAR_DIRECTORY}"
+
+# Archive mode: "auto" (default), "always", or "never"
+# - "auto": RPC for recent slots (last 10k), archive for historical
+# - "always": Always use archive, even for recent data
+# - "never": Never use archive, RPC-only mode
+use_archive = "auto"
+
 max_rpc_calls_per_second = 50
 keep_of1_car_files = false
 ```
@@ -53,6 +61,12 @@ keep_of1_car_files = false
 ## Architecture
 
 ### Two-Stage Data Extraction
+
+The extractor supports three archive modes controlled by the `use_archive` configuration:
+
+- **`"auto"`** (default): Smart selection based on slot age. Uses RPC-only mode when `start_slot > current_slot - 10,000` (recent slots within ~83 minutes on mainnet), and archive mode for historical data.
+- **`"never"`**: Always use RPC-only mode. Best for demos and recent data extraction.
+- **`"always"`**: Always use archive mode, even for recent slots. Downloads epoch CAR files (~745GB each).
 
 ```
 Historical Data                    Real-time Data
@@ -70,7 +84,7 @@ Old Faithful Archive → CAR files → RPC endpoint
 
 | Stage | Source | Data |
 |-------|--------|------|
-| Historical | Old Faithful (`files.old-faithful.net`) | Archived epoch CAR files |
+| Historical | Old Faithful (`files.old-faithful.net`) | Archived epoch CAR files (~745GB) |
 | Real-time | Solana RPC | Live blocks via JSON-RPC |
 
 ## Usage
@@ -129,7 +143,8 @@ max_rpc_calls_per_second = 50
 
 ## Limitations
 
-- CAR files can be very large; ensure sufficient disk space
+- CAR files are ~745GB per epoch; download takes 10+ hours on typical connections
+- Archive mode can be controlled via `use_archive` config (`"auto"`, `"always"`, `"never"`)
 - Only HTTP/HTTPS RPC URLs supported (no WebSocket)
 - Uses finalized commitment level (not configurable)
 - Missing blocks yield empty rows, not errors

@@ -45,6 +45,22 @@ impl SolanaRpcClient {
         }
     }
 
+    /// Get the current slot.
+    ///
+    /// ### RPC Reference
+    ///
+    /// [getSlot](https://solana.com/docs/rpc/http/getslot)
+    pub(crate) async fn get_slot(
+        &self,
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
+    ) -> solana_rpc_client_api::client_error::Result<Slot> {
+        let slot = self
+            .rpc_call("getSlot", metrics, self.inner.get_slot())
+            .await?;
+
+        Ok(slot)
+    }
+
     /// Get the current block height (latest slot).
     ///
     /// ### RPC Reference

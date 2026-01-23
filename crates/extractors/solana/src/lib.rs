@@ -53,6 +53,19 @@ impl Table {
     }
 }
 
+/// Archive usage mode for historical data extraction.
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UseArchive {
+    /// Smart selection: use RPC for recent slots (last 10k), archive for historical data.
+    #[default]
+    Auto,
+    /// Always use archive (CAR files), even for recent data.
+    Always,
+    /// Never use archive, RPC-only mode.
+    Never,
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
@@ -84,6 +97,8 @@ pub struct ProviderConfig {
     pub of1_car_directory: PathBuf,
     #[serde(default)]
     pub keep_of1_car_files: bool,
+    #[serde(default)]
+    pub use_archive: UseArchive,
 }
 
 /// Convert a Solana manifest into a logical dataset representation.
@@ -115,6 +130,7 @@ pub fn extractor(
             config.name,
             config.of1_car_directory,
             config.keep_of1_car_files,
+            config.use_archive,
             meter,
         ),
         scheme => {
