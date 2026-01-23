@@ -40,6 +40,7 @@ pub struct SolanaExtractor {
 }
 
 impl SolanaExtractor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rpc_provider_url: Url,
         max_rpc_calls_per_second: Option<NonZeroU32>,
