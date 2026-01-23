@@ -2,6 +2,8 @@
 //!
 //! This module uses The Graph's official color palette for consistent branding.
 
+mod components;
+
 use admin_client::{jobs::JobInfo, workers::WorkerDetailResponse};
 use ratatui::{
     Frame,
@@ -13,7 +15,10 @@ use ratatui::{
     },
 };
 
-use crate::app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult};
+use crate::{
+    app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult},
+    util::get_account_display,
+};
 
 // ============================================================================
 // The Graph Color Palette
@@ -177,7 +182,7 @@ impl Theme {
 }
 
 /// ASCII art logo for splash screen (displayed when Header pane is focused).
-const AMP_LOGO: &str = r#"
+pub const AMP_LOGO: &str = r#"
                     ▒█░                     
                    ▒███░                    
                   ▒█████░                   
@@ -203,6 +208,12 @@ The Graph
 
 /// Main draw function.
 pub fn draw(f: &mut Frame, app: &mut App) {
+    // If device flow is active, render full screen auth
+    if app.auth_device_flow.is_some() {
+        components::auth_screen::render(f, app);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -224,16 +235,35 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         DataSource::Registry => Theme::source_registry(),
     };
 
-    let text = vec![Line::from(vec![
+    // Build auth status spans
+    let auth_spans = if let Some(ref auth) = app.auth_state {
+        let account_display = get_account_display(auth);
+        vec![
+            Span::raw(" | "),
+            Span::styled(account_display, Theme::status_success()),
+            Span::styled(" [Ctrl+L logout]", Theme::text_secondary()),
+        ]
+    } else {
+        vec![
+            Span::raw(" | "),
+            Span::styled("Not logged in ", Theme::text_secondary()),
+            Span::styled("[Ctrl+L login]", Theme::text_secondary()),
+        ]
+    };
+
+    let mut spans = vec![
         Span::styled("Amp CC", Theme::accent().add_modifier(Modifier::BOLD)),
         Span::raw(" | Source: "),
         Span::styled(app.current_source.as_str(), source_style),
         Span::raw(" | "),
         Span::styled(
-            truncate_url(app.current_source_url(), 50),
+            truncate_url(app.current_source_url(), 40),
             Theme::text_secondary(),
         ),
-    ])];
+    ];
+    spans.extend(auth_spans);
+
+    let text = vec![Line::from(spans)];
 
     let border_style = if app.active_pane == ActivePane::Header {
         Theme::border_focused()

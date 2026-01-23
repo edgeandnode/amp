@@ -9,9 +9,11 @@ use admin_client::{
 };
 use anyhow::{Context, Result};
 use ratatui::widgets::ScrollbarState;
+use reqwest::Client as HttpClient;
+use tokio::sync::mpsc::UnboundedSender;
 use url::Url;
 
-use crate::{config::Config, registry::RegistryClient};
+use crate::{action::Action, auth::AuthStorage, config::Config, registry::RegistryClient};
 
 /// Input mode for the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +107,42 @@ impl DataSource {
             DataSource::Registry => "Registry",
         }
     }
+}
+
+/// Status of the device flow authentication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceFlowStatus {
+    /// Waiting for user to confirm (press Enter to open browser).
+    AwaitingConfirmation,
+    /// Browser opened, waiting for user to complete auth.
+    WaitingForBrowser,
+    /// Actively polling for token.
+    Polling,
+    /// Error occurred while opening the user's browser.
+    ///
+    /// Print the Auth URL so they can open it manually.
+    OpenBrowserFailure(String),
+    /// Error occurred during device flow.
+    Error(String),
+}
+
+/// State for the device flow authentication process.
+#[derive(Debug, Clone)]
+pub struct DeviceFlowState {
+    /// User code to display/copy.
+    pub user_code: String,
+    /// URL where user authenticates.
+    pub verification_uri: String,
+    /// Device code for polling.
+    pub device_code: String,
+    /// PKCE code verifier.
+    pub code_verifier: String,
+    /// Polling interval in seconds.
+    pub interval: i64,
+    /// Current status.
+    pub status: DeviceFlowStatus,
+    /// If copy-to-clipboard threw an error, display in auth_screen
+    pub copy_to_clipboard_failed: bool,
 }
 
 /// A version entry for a dataset.
@@ -335,9 +373,19 @@ fn format_complex_type(type_name: &str, params: &serde_json::Value) -> String {
 pub struct App {
     pub config: Config,
 
+    // Action channel for async task communication
+    pub action_tx: UnboundedSender<Action>,
+
+    // HTTP client (shared with auth clients)
+    pub http_client: HttpClient,
+
     // Clients
     pub local_client: Arc<Client>,
     pub registry_client: RegistryClient,
+
+    // Auth state
+    pub auth_state: Option<AuthStorage>,
+    pub auth_device_flow: Option<DeviceFlowState>,
 
     // Data source
     pub current_source: DataSource,
@@ -402,7 +450,11 @@ pub struct App {
 
 impl App {
     /// Create a new application instance.
-    pub fn new(config: Config) -> Result<Self> {
+    pub fn new(
+        config: Config,
+        action_tx: UnboundedSender<Action>,
+        http_client: HttpClient,
+    ) -> Result<Self> {
         let admin_url = Url::parse(&config.local_admin_url).context("invalid admin URL")?;
         let local_client = Arc::new(Client::new(admin_url));
 
@@ -416,8 +468,12 @@ impl App {
 
         Ok(Self {
             config,
+            action_tx,
+            http_client,
             local_client,
             registry_client,
+            auth_state: None,
+            auth_device_flow: None,
             current_source: default_source,
             should_quit: false,
             input_mode: InputMode::Normal,
@@ -454,11 +510,6 @@ impl App {
 
     /// Spinner frames for loading animation (braille pattern).
     pub const SPINNER_FRAMES: &'static [char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-    /// Quit the application.
-    pub fn quit(&mut self) {
-        self.should_quit = true;
-    }
 
     /// Advance the spinner animation frame.
     pub fn tick_spinner(&mut self) {
@@ -621,33 +672,11 @@ impl App {
         }
     }
 
-    /// Fetch datasets from the current source.
-    pub async fn fetch_datasets(&mut self) -> Result<()> {
-        self.start_loading("Fetching datasets...");
-
-        let result = match self.current_source {
-            DataSource::Local => self.fetch_local_datasets().await,
-            DataSource::Registry => self.fetch_registry_datasets().await,
-        };
-
-        self.stop_loading();
-
-        match result {
-            Ok(datasets) => {
-                self.datasets = datasets;
-                self.update_search();
-                Ok(())
-            }
-            Err(e) => {
-                self.error_message = Some(e.to_string());
-                Err(e)
-            }
-        }
-    }
-
     /// Fetch datasets from local admin API.
-    async fn fetch_local_datasets(&self) -> Result<Vec<DatasetEntry>> {
-        let response = self.local_client.datasets().list_all().await?;
+    ///
+    /// This is an associated function that can be called from spawn tasks.
+    pub async fn fetch_local_datasets(client: &admin_client::Client) -> Result<Vec<DatasetEntry>> {
+        let response = client.datasets().list_all().await?;
         Ok(response
             .datasets
             .into_iter()
@@ -663,12 +692,16 @@ impl App {
     }
 
     /// Fetch datasets from the registry.
-    async fn fetch_registry_datasets(&self) -> Result<Vec<DatasetEntry>> {
+    ///
+    /// This is an associated function that can be called from spawn tasks.
+    pub async fn fetch_registry_datasets(
+        client: &crate::registry::RegistryClient,
+    ) -> Result<Vec<DatasetEntry>> {
         let mut all_datasets = Vec::new();
         let mut page = 1;
 
         loop {
-            let response = self.registry_client.list_datasets(page).await?;
+            let response = client.list_datasets(page).await?;
             for d in response.datasets {
                 all_datasets.push(DatasetEntry {
                     namespace: d.namespace,
@@ -689,32 +722,25 @@ impl App {
         Ok(all_datasets)
     }
 
-    /// Switch to a different data source.
-    pub async fn switch_source(&mut self, source: DataSource) -> Result<()> {
-        if self.current_source == source {
-            return Ok(());
-        }
-
-        self.current_source = source;
-        self.search_query.clear();
-        self.selected_index = 0;
-        self.selected_version_indices.clear();
-        self.current_manifest = None;
-
-        // Clear jobs/workers when switching away from Local
-        if source == DataSource::Registry {
-            self.jobs.clear();
-            self.workers.clear();
-            self.selected_job_index = 0;
-            self.selected_worker_index = 0;
-            self.content_view = ContentView::None;
-            // If currently on Jobs or Workers pane, switch to Datasets
-            if matches!(self.active_pane, ActivePane::Jobs | ActivePane::Workers) {
-                self.active_pane = ActivePane::Datasets;
-            }
-        }
-
-        self.fetch_datasets().await
+    /// Fetch versions for a dataset from the registry.
+    ///
+    /// This is an associated function that can be called from spawn tasks.
+    pub async fn fetch_registry_versions(
+        client: &crate::registry::RegistryClient,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Vec<VersionEntry>> {
+        let versions = client.get_versions(namespace, name).await?;
+        Ok(versions
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| VersionEntry {
+                version_tag: v.version_tag,
+                status: v.status,
+                created_at: v.created_at,
+                is_latest: i == 0,
+            })
+            .collect())
     }
 
     /// Check if the current source is Local.
@@ -851,26 +877,6 @@ impl App {
         None
     }
 
-    /// Convert (dataset_index, version_index) to flat index.
-    fn position_to_index(&self, dataset_idx: usize, version_idx: Option<usize>) -> usize {
-        let mut index = 0;
-        for (i, dataset) in self.filtered_datasets.iter().enumerate() {
-            if i == dataset_idx {
-                if let Some(v_idx) = version_idx {
-                    return index + 1 + v_idx;
-                }
-                return index;
-            }
-            index += 1;
-            if dataset.expanded
-                && let Some(versions) = &dataset.versions
-            {
-                index += versions.len();
-            }
-        }
-        index
-    }
-
     /// Select the next item.
     pub fn select_next(&mut self) {
         let total = self.total_items();
@@ -938,69 +944,6 @@ impl App {
         }
     }
 
-    /// Toggle expansion of the currently selected dataset.
-    pub async fn toggle_expand(&mut self) -> Result<()> {
-        let Some((dataset_idx, version_idx)) = self.index_to_position(self.selected_index) else {
-            return Ok(());
-        };
-
-        // Only toggle if we're on a dataset, not a version
-        if version_idx.is_some() {
-            return Ok(());
-        }
-
-        let dataset = match self.filtered_datasets.get_mut(dataset_idx) {
-            Some(d) => d,
-            None => return Ok(()),
-        };
-
-        if dataset.expanded {
-            // Collapse
-            dataset.expanded = false;
-            // Recalculate selected_index to stay on this dataset
-            self.selected_index = self.position_to_index(dataset_idx, None);
-        } else {
-            // Expand - fetch versions if not already loaded
-            let needs_fetch = dataset.versions.is_none();
-            let namespace = dataset.namespace.clone();
-            let name = dataset.name.clone();
-
-            if needs_fetch {
-                let versions = self.fetch_versions(&namespace, &name).await?;
-                let dataset = self.filtered_datasets.get_mut(dataset_idx).unwrap();
-                dataset.versions = Some(versions);
-            }
-            let dataset = self.filtered_datasets.get_mut(dataset_idx).unwrap();
-            dataset.expanded = true;
-        }
-
-        Ok(())
-    }
-
-    /// Fetch versions for a dataset.
-    async fn fetch_versions(&self, namespace: &str, name: &str) -> Result<Vec<VersionEntry>> {
-        match self.current_source {
-            DataSource::Local => {
-                // Local doesn't have version listing in admin-client currently
-                // Return just the latest version if available
-                Ok(Vec::new())
-            }
-            DataSource::Registry => {
-                let versions = self.registry_client.get_versions(namespace, name).await?;
-                Ok(versions
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, v)| VersionEntry {
-                        version_tag: v.version_tag,
-                        status: v.status,
-                        created_at: v.created_at,
-                        is_latest: i == 0,
-                    })
-                    .collect())
-            }
-        }
-    }
-
     /// Fetch manifest for a specific dataset version.
     #[allow(dead_code)]
     pub async fn fetch_manifest(
@@ -1031,5 +974,427 @@ impl App {
                 Ok(Some(manifest))
             }
         }
+    }
+
+    /// Check if the application is still running.
+    pub fn is_running(&self) -> bool {
+        !self.should_quit
+    }
+
+    /// Send an action to the action channel.
+    pub fn send_action(&self, action: Action) {
+        let _ = self.action_tx.send(action);
+    }
+
+    /// Handle an action and mutate state accordingly.
+    pub fn handle_action(&mut self, action: Action) {
+        match action {
+            Action::None => {}
+
+            Action::Quit => self.should_quit = true,
+
+            // Navigation
+            Action::NavigateDown => match self.active_pane {
+                ActivePane::Datasets => {
+                    self.select_next();
+                    self.send_action(Action::LoadManifest);
+                }
+                ActivePane::Jobs => {
+                    self.select_next_job();
+                    if let Some(job) = self.get_selected_job().cloned() {
+                        self.content_view = ContentView::Job(job);
+                        self.reset_scroll();
+                    }
+                }
+                ActivePane::Workers => {
+                    self.select_next_worker();
+                    if let Some(node_id) = self.get_selected_worker().map(|w| w.node_id.clone()) {
+                        self.send_action(Action::LoadWorkerDetail(node_id));
+                    }
+                }
+                _ => self.scroll_down(),
+            },
+
+            Action::NavigateUp => match self.active_pane {
+                ActivePane::Datasets => {
+                    self.select_previous();
+                    self.send_action(Action::LoadManifest);
+                }
+                ActivePane::Jobs => {
+                    self.select_previous_job();
+                    if let Some(job) = self.get_selected_job().cloned() {
+                        self.content_view = ContentView::Job(job);
+                        self.reset_scroll();
+                    }
+                }
+                ActivePane::Workers => {
+                    self.select_previous_worker();
+                    if let Some(node_id) = self.get_selected_worker().map(|w| w.node_id.clone()) {
+                        self.send_action(Action::LoadWorkerDetail(node_id));
+                    }
+                }
+                _ => self.scroll_up(),
+            },
+
+            Action::PageDown(size) => self.page_down(size),
+            Action::PageUp(size) => self.page_up(size),
+
+            Action::NextPane => {
+                let is_local = self.is_local();
+                self.active_pane = self.active_pane.next(is_local);
+            }
+
+            Action::PrevPane => {
+                let is_local = self.is_local();
+                self.active_pane = self.active_pane.prev(is_local);
+            }
+
+            Action::ToggleExpand => {
+                // This needs async - will be handled by spawning a task
+                // For now, mark as needing implementation
+            }
+
+            Action::EnterDetail => match self.active_pane {
+                ActivePane::Jobs => {
+                    if let Some(job) = self.get_selected_job().cloned() {
+                        self.content_view = ContentView::Job(job);
+                        self.reset_scroll();
+                        self.active_pane = ActivePane::Detail;
+                    }
+                }
+                ActivePane::Workers => {
+                    if let Some(node_id) = self.get_selected_worker().map(|w| w.node_id.clone()) {
+                        self.send_action(Action::LoadWorkerDetail(node_id));
+                        self.active_pane = ActivePane::Detail;
+                    }
+                }
+                _ => {}
+            },
+
+            // Source switching
+            Action::SwitchToLocal => {
+                if self.current_source != DataSource::Local {
+                    self.start_loading("Switching source...");
+                    // Spawns async task handled by handle_async_action
+                }
+            }
+
+            Action::SwitchToRegistry => {
+                if self.current_source != DataSource::Registry {
+                    self.start_loading("Switching source...");
+                    // Spawns async task handled by handle_async_action
+                }
+            }
+
+            Action::SourceSwitched(result) => match result {
+                Ok(source) => {
+                    self.current_source = source;
+                    self.search_query.clear();
+                    self.selected_index = 0;
+                    self.selected_version_indices.clear();
+                    self.current_manifest = None;
+
+                    if source == DataSource::Registry {
+                        self.jobs.clear();
+                        self.workers.clear();
+                        self.selected_job_index = 0;
+                        self.selected_worker_index = 0;
+                        self.content_view = ContentView::None;
+                        if matches!(self.active_pane, ActivePane::Jobs | ActivePane::Workers) {
+                            self.active_pane = ActivePane::Datasets;
+                        }
+                    }
+
+                    self.send_action(Action::RefreshDatasets);
+                }
+                Err(e) => {
+                    self.error_message = Some(e);
+                    self.stop_loading();
+                }
+            },
+
+            // Search
+            Action::EnterSearchMode => {
+                self.input_mode = InputMode::Search;
+            }
+
+            Action::ExitSearchMode => {
+                self.input_mode = InputMode::Normal;
+            }
+
+            Action::SearchInput(c) => {
+                self.search_query.push(c);
+                self.update_search();
+            }
+
+            Action::SearchBackspace => {
+                self.search_query.pop();
+                self.update_search();
+            }
+
+            Action::SearchSubmit => {
+                self.input_mode = InputMode::Normal;
+                self.send_action(Action::LoadManifest);
+            }
+
+            // Datasets
+            Action::RefreshDatasets => {
+                self.start_loading("Refreshing datasets...");
+                // Spawns async task to refresh datasets handled by handle_async_action
+            }
+
+            Action::DatasetsLoaded(result) => {
+                match result {
+                    Ok(datasets) => {
+                        self.datasets = datasets;
+                        self.update_search();
+                        self.send_action(Action::LoadManifest);
+                    }
+                    Err(e) => {
+                        self.error_message = Some(e);
+                    }
+                }
+                self.stop_loading();
+            }
+
+            Action::VersionsLoaded {
+                dataset_index,
+                versions,
+            } => {
+                match versions {
+                    Ok(v) => {
+                        if let Some(dataset) = self.filtered_datasets.get_mut(dataset_index) {
+                            dataset.versions = Some(v);
+                            dataset.expanded = true;
+                        }
+                    }
+                    Err(e) => {
+                        self.error_message = Some(e);
+                    }
+                }
+                self.stop_loading();
+            }
+
+            // Manifest
+            Action::LoadManifest => {
+                self.start_loading("Loading manifest...");
+                // Spawns async task to load manifest handled by handle_async_action
+            }
+
+            Action::ManifestLoaded(manifest) => {
+                self.reset_scroll();
+                self.current_inspect = manifest.as_ref().and_then(InspectResult::from_manifest);
+                self.current_manifest = manifest;
+                self.content_view = ContentView::Dataset;
+                self.stop_loading();
+            }
+
+            // Jobs
+            Action::RefreshJobs => {}
+
+            Action::JobsLoaded(jobs) => {
+                self.jobs = jobs;
+                if self.selected_job_index >= self.jobs.len() && !self.jobs.is_empty() {
+                    self.selected_job_index = self.jobs.len() - 1;
+                }
+            }
+
+            Action::StopJob(_job_id) => {
+                self.start_loading("Stopping job...");
+                // Spawns async task to stop job handled by handle_async_action
+            }
+
+            Action::JobStopped(result) => {
+                match result {
+                    Ok(()) => self.send_action(Action::RefreshJobs),
+                    Err(e) => self.error_message = Some(e),
+                }
+                self.stop_loading();
+            }
+
+            Action::DeleteJob(_job_id) => {
+                self.start_loading("Deleting job...");
+                // Spawns async task to delete job handled by handle_async_action
+            }
+
+            Action::JobDeleted(result) => {
+                match result {
+                    Ok(()) => self.send_action(Action::RefreshJobs),
+                    Err(e) => self.error_message = Some(e),
+                }
+                self.stop_loading();
+            }
+
+            // Workers
+            Action::RefreshWorkers => {}
+
+            Action::WorkersLoaded(workers) => {
+                self.workers = workers;
+                if self.selected_worker_index >= self.workers.len() && !self.workers.is_empty() {
+                    self.selected_worker_index = self.workers.len() - 1;
+                }
+            }
+
+            Action::LoadWorkerDetail(_node_id) => {
+                self.start_loading("Loading worker details...");
+                // Spawns async task to load worker details handled by handle_async_action
+            }
+
+            Action::WorkerDetailLoaded(detail) => {
+                if let Some(worker_detail) = detail {
+                    self.content_view = ContentView::Worker(worker_detail);
+                    self.reset_scroll();
+                }
+                self.stop_loading();
+            }
+
+            // Auth
+            Action::AuthCheckOnStartup => {}
+
+            Action::AuthStateLoaded(auth) => {
+                // Update registry client with the loaded auth token
+                if let Some(ref a) = auth {
+                    self.registry_client = RegistryClient::with_token(
+                        self.config.registry_url.clone(),
+                        Some(a.access_token.clone()),
+                    );
+                }
+                self.auth_state = auth;
+            }
+
+            Action::AuthLogin => {
+                if self.auth_state.is_none() && self.auth_device_flow.is_none() {
+                    self.start_loading("Logging in...");
+                    // Spawns async task to log user in with auth flow handled by handle_async_action
+                }
+            }
+
+            Action::AuthLogout => {
+                let _ = AuthStorage::clear();
+                self.auth_state = None;
+                self.auth_device_flow = None;
+                // Rebuild registry client without explicit token (falls back to env var)
+                self.registry_client =
+                    RegistryClient::with_token(self.config.registry_url.clone(), None);
+            }
+
+            Action::AuthDeviceFlowPending {
+                user_code,
+                verification_uri,
+                device_code,
+                code_verifier,
+                interval,
+            } => {
+                self.stop_loading();
+
+                let mut copy_to_clipboard_failed = false;
+                // Copy user code to clipboard
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if clipboard.set_text(&user_code).is_err() {
+                        copy_to_clipboard_failed = true;
+                    }
+                } else {
+                    copy_to_clipboard_failed = true;
+                }
+
+                self.auth_device_flow = Some(DeviceFlowState {
+                    user_code,
+                    verification_uri,
+                    device_code,
+                    code_verifier,
+                    interval,
+                    status: DeviceFlowStatus::AwaitingConfirmation,
+                    copy_to_clipboard_failed,
+                });
+            }
+
+            Action::AuthDeviceFlowConfirm => {
+                if let Some(ref mut flow) = self.auth_device_flow {
+                    if crate::auth::PkceDeviceFlowClient::open_browser(&flow.verification_uri)
+                        .is_err()
+                    {
+                        // pass the auth URL to the error to print in the auth screen
+                        flow.status =
+                            DeviceFlowStatus::OpenBrowserFailure(self.config.auth_url.clone());
+                    } else {
+                        flow.status = DeviceFlowStatus::WaitingForBrowser;
+                    }
+                    // Clone values before sending to avoid borrow conflict
+                    let device_code = flow.device_code.clone();
+                    let code_verifier = flow.code_verifier.clone();
+                    let interval = flow.interval;
+                    self.send_action(Action::AuthDeviceFlowPoll {
+                        device_code,
+                        code_verifier,
+                        interval,
+                        is_first_poll: true,
+                    });
+                }
+            }
+
+            Action::AuthDeviceFlowPoll {
+                device_code,
+                code_verifier,
+                interval,
+                is_first_poll,
+            } => {
+                if let Some(ref mut flow) = self.auth_device_flow {
+                    flow.status = DeviceFlowStatus::Polling;
+                }
+                let _ = (device_code, code_verifier, interval, is_first_poll);
+            }
+
+            Action::AuthDeviceFlowComplete(auth) => {
+                let _ = auth.save();
+                // Update registry client with new auth token
+                self.registry_client = RegistryClient::with_token(
+                    self.config.registry_url.clone(),
+                    Some(auth.access_token.clone()),
+                );
+                self.auth_state = Some(auth);
+                self.auth_device_flow = None;
+            }
+
+            Action::AuthDeviceFlowCancel => {
+                self.auth_device_flow = None;
+            }
+
+            Action::AuthError(error) => {
+                if let Some(ref mut flow) = self.auth_device_flow {
+                    flow.status = DeviceFlowStatus::Error(error);
+                } else {
+                    // Error during initial login request (before device flow started)
+                    self.stop_loading();
+                    self.error_message = Some(error);
+                }
+            }
+
+            Action::AuthRefreshComplete(result) => match result {
+                Ok(auth) => {
+                    let _ = auth.save();
+                    // Update registry client with refreshed token
+                    self.registry_client = RegistryClient::with_token(
+                        self.config.registry_url.clone(),
+                        Some(auth.access_token.clone()),
+                    );
+                    self.auth_state = Some(auth);
+                }
+                Err(_) => {
+                    let _ = AuthStorage::clear();
+                    self.auth_state = None;
+                    // Rebuild registry client without explicit token (falls back to env var)
+                    self.registry_client =
+                        RegistryClient::with_token(self.config.registry_url.clone(), None);
+                }
+            },
+
+            // Errors
+            Action::Error(msg) => {
+                self.error_message = Some(msg);
+                self.stop_loading();
+            }
+        }
+
+        self.needs_redraw = true;
     }
 }

@@ -16,6 +16,8 @@ pub struct Config {
     pub registry_url: String,
     #[serde(default = "default_source")]
     pub default_source: String,
+    #[serde(default = "default_auth_url")]
+    pub auth_url: String,
 }
 
 fn default_local_query_url() -> String {
@@ -29,6 +31,9 @@ fn default_registry_url() -> String {
 }
 fn default_source() -> String {
     "registry".into()
+}
+fn default_auth_url() -> String {
+    "https://auth.amp.thegraph.com".into()
 }
 
 impl Config {
