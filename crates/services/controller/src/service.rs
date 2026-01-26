@@ -11,7 +11,6 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::BoxError;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
@@ -42,7 +41,7 @@ pub async fn new(
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     at: SocketAddr,
-) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), Error> {
+) -> Result<(SocketAddr, impl Future<Output = Result<(), ServerError>>), Error> {
     let scheduler = Arc::new(Scheduler::new(metadata_db.clone()));
 
     let ctx = Ctx {
@@ -65,7 +64,7 @@ pub async fn new(
         let metrics_layer = HTTPMetricsLayerBuilder::builder()
             .with_meter(meter)
             .build()
-            .map_err(|err| Error::MetricsLayer(Box::new(err)))?;
+            .map_err(Error::MetricsLayer)?;
         app = app.layer(metrics_layer);
     }
 
@@ -97,10 +96,10 @@ pub async fn new(
 
         tokio::select! {
             result = server_future => {
-                result.map_err(Into::into)
+                result.map_err(ServerError::Serve)
             }
             _ = reconciliation_task => {
-                Err("Reconciliation task terminated".into())
+                Err(ServerError::ReconciliationTerminated)
             }
         }
     };
@@ -120,6 +119,7 @@ pub enum Error {
     #[error("failed to bind to {addr}: {source}")]
     TcpBind {
         addr: SocketAddr,
+        #[source]
         source: std::io::Error,
     },
 
@@ -138,7 +138,28 @@ pub enum Error {
     /// - Meter provider initialization fails
     /// - OpenTelemetry setup encounters an error
     #[error("failed to build metrics layer: {0}")]
-    MetricsLayer(#[source] BoxError),
+    MetricsLayer(#[source] opentelemetry_instrumentation_tower::Error),
+}
+
+/// Errors that can occur while running the controller server
+#[derive(Debug, thiserror::Error)]
+pub enum ServerError {
+    /// HTTP server encountered an I/O error
+    ///
+    /// This occurs when:
+    /// - TCP connection fails
+    /// - Socket operations fail
+    /// - Network interface becomes unavailable
+    #[error("HTTP server error")]
+    Serve(#[source] std::io::Error),
+
+    /// Background reconciliation task terminated unexpectedly
+    ///
+    /// This occurs when:
+    /// - Reconciliation task panics
+    /// - Task is cancelled externally
+    #[error("Reconciliation task terminated unexpectedly")]
+    ReconciliationTerminated,
 }
 
 /// Returns a future that completes when a shutdown signal is received.

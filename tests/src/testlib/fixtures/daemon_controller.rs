@@ -10,7 +10,7 @@ use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
-use common::{BoxError, BoxResult};
+use common::BoxError;
 use controller::config::Config;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
@@ -23,11 +23,11 @@ use tokio::task::JoinHandle;
 /// and cleanup by aborting the controller task when dropped.
 pub struct DaemonController {
     config: Arc<Config>,
-    metadata_db: metadata_db::MetadataDb,
-    dataset_store: amp_dataset_store::DatasetStore,
+    metadata_db: MetadataDb,
+    dataset_store: DatasetStore,
     admin_api_addr: SocketAddr,
 
-    _task: JoinHandle<BoxResult<()>>,
+    _task: JoinHandle<Result<(), controller::service::ServerError>>,
 }
 
 impl DaemonController {

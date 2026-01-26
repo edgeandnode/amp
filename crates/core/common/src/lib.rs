@@ -17,7 +17,6 @@ use std::{
 
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use catalog::logical::*;
-use datafusion::arrow::error::ArrowError;
 pub use datafusion::{arrow, parquet};
 pub use datasets_common::{BlockNum, SPECIAL_BLOCK_NUM, block_range::BlockRange};
 pub use metadata::segments::{ResumeWatermark, Watermark};

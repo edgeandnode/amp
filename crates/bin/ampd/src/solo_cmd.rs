@@ -192,7 +192,7 @@ pub enum Error {
     /// This occurs after the Admin API server has started successfully but
     /// encounters an error during operation.
     #[error("Controller runtime error: {0}")]
-    ControllerRuntime(#[source] BoxError),
+    ControllerRuntime(#[source] controller::service::ServerError),
 
     /// Query server encountered a runtime error.
     ///

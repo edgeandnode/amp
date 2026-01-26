@@ -4,7 +4,6 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
-use common::BoxError;
 use monitoring::logging;
 
 use crate::{
@@ -155,7 +154,7 @@ impl std::fmt::Display for JobStatusFilter {
 }
 
 impl std::str::FromStr for JobStatusFilter {
-    type Err = BoxError;
+    type Err = ParseJobStatusFilterError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -163,9 +162,18 @@ impl std::str::FromStr for JobStatusFilter {
             s if s.eq_ignore_ascii_case("completed") => Ok(JobStatusFilter::Completed),
             s if s.eq_ignore_ascii_case("stopped") => Ok(JobStatusFilter::Stopped),
             s if s.eq_ignore_ascii_case("error") => Ok(JobStatusFilter::Error),
-            _ => Err(format!("invalid status filter: {}", s).into()),
+            _ => Err(ParseJobStatusFilterError {
+                value: s.to_string(),
+            }),
         }
     }
+}
+
+/// Error when parsing job status filter from string
+#[derive(Debug, thiserror::Error)]
+#[error("invalid status filter: {value}, expected one of: terminal, completed, stopped, error")]
+pub struct ParseJobStatusFilterError {
+    pub value: String,
 }
 
 impl<'de> serde::Deserialize<'de> for JobStatusFilter {
