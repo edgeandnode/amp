@@ -48,7 +48,6 @@ use common::{
         resolve_table_references,
     },
     sql_str::SqlStr,
-    utils::error_with_causes,
 };
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
@@ -1104,4 +1103,23 @@ pub fn build_router(service: Service) -> Router {
     let mut grpc_builder = Routes::builder();
     grpc_builder.add_service(FlightServiceServer::new(service));
     grpc_builder.routes().into_axum_router()
+}
+
+/// Builds an error chain string from an error and its sources.
+///
+/// Walks through the error source chain and returns a formatted string
+/// containing the chain of error causes.
+fn error_with_causes(err: &dyn std::error::Error) -> String {
+    let mut error_chain = Vec::new();
+    let mut current = err;
+    while let Some(source) = current.source() {
+        error_chain.push(source.to_string());
+        current = source;
+    }
+
+    if error_chain.is_empty() {
+        err.to_string()
+    } else {
+        format!("{} | Caused by: {}", err, error_chain.join(" -> "))
+    }
 }

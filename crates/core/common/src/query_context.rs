@@ -6,7 +6,6 @@ use std::{
 
 use amp_data_store::DataStore;
 use arrow::{array::ArrayRef, compute::concat_batches};
-use axum::response::IntoResponse;
 use datafusion::{
     self,
     arrow::array::RecordBatch,
@@ -49,7 +48,6 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
     sql::TableReference,
-    utils::error_with_causes,
 };
 
 pub fn default_catalog_name() -> ScalarValue {
@@ -86,38 +84,6 @@ pub enum Error {
 
     #[error("table not found: {0}")]
     TableNotFoundError(TableReference),
-}
-
-impl IntoResponse for Error {
-    fn into_response(self) -> axum::response::Response {
-        let err = error_with_causes(&self);
-        let status = match self {
-            Error::SqlParseError(_) => axum::http::StatusCode::BAD_REQUEST,
-            Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,
-            Error::TableNotFoundError(_) => axum::http::StatusCode::NOT_FOUND,
-            Error::DatasetError(_) => axum::http::StatusCode::BAD_REQUEST,
-            Error::PlanningError(_) => axum::http::StatusCode::BAD_REQUEST,
-            Error::CatalogSnapshot(_)
-            | Error::ConfigError(_)
-            | Error::ExecutionError(_)
-            | Error::MetaTableError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        let body = serde_json::json!({
-            "error_code": match self {
-                Error::SqlParseError(_) => "SQL_PARSE_ERROR",
-                Error::InvalidPlan(_) => "INVALID_PLAN",
-                Error::DatasetError(_) => "DATASET_ERROR",
-                Error::CatalogSnapshot(_) => "CATALOG_SNAPSHOT_ERROR",
-                Error::ConfigError(_) => "CONFIG_ERROR",
-                Error::PlanningError(_) => "PLANNING_ERROR",
-                Error::ExecutionError(_) => "EXECUTION_ERROR",
-                Error::MetaTableError(_) => "META_TABLE_ERROR",
-                Error::TableNotFoundError(_) => "TABLE_NOT_FOUND_ERROR",
-            },
-            "error_message": err,
-        });
-        (status, axum::Json(body)).into_response()
-    }
 }
 
 /// Handle to the environment resources used by the query engine.

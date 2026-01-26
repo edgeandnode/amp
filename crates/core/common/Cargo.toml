@@ -8,7 +8,6 @@ license-file.workspace = true
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
 async-trait.workspace = true
-axum.workspace = true
 bigdecimal = "0.4"
 bytes.workspace = true
 chrono.workspace = true

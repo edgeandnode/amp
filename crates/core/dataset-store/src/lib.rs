@@ -559,7 +559,7 @@ pub async fn dataset_and_dependencies(
 /// all of its dependencies. An error is returned if a cycle is detected.
 fn dependency_sort(
     deps: BTreeMap<Reference, Vec<Reference>>,
-) -> Result<Vec<Reference>, common::utils::DfsError<Reference>> {
+) -> Result<Vec<Reference>, datasets_derived::deps::DfsError<Reference>> {
     let nodes: BTreeSet<&Reference> = deps
         .iter()
         .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
@@ -569,7 +569,13 @@ fn dependency_sort(
     let mut visited_cycle: BTreeSet<&Reference> = Default::default();
     for node in nodes {
         if !visited.contains(node) {
-            common::utils::dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
+            datasets_derived::deps::dfs(
+                node,
+                &deps,
+                &mut ordered,
+                &mut visited,
+                &mut visited_cycle,
+            )?;
         }
     }
     Ok(ordered)
