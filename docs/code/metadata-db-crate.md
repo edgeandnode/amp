@@ -1,3 +1,10 @@
+---
+name: "metadata-db-crate"
+description: "Database design patterns, API conventions for metadata-db. Load when working on metadata-db crate"
+type: crate
+scope: "crate:metadata-db"
+---
+
 🔧 `metadata-db` guidelines
 =========================
 

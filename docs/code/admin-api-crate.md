@@ -1,3 +1,10 @@
+---
+name: "admin-api-crate"
+description: "HTTP handler patterns using Axum and RequestError trait. Load when working on admin-api crate handlers or routes"
+type: crate
+scope: "crate:admin-api"
+---
+
 🔧 `admin-api` guidelines
 =========================
 

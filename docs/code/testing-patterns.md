@@ -1,3 +1,10 @@
+---
+name: "testing-patterns"
+description: "Three-tier testing strategy, test structure, Given-When-Then. Load when writing tests"
+type: core
+scope: "global"
+---
+
 # Testing Patterns - Rust
 
 ## 🎯 OVERVIEW

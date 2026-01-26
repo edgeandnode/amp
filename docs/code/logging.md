@@ -1,3 +1,10 @@
+---
+name: "logging"
+description: "Structured logging with tracing, error logging patterns. Load when adding logs or debugging"
+type: core
+scope: "global"
+---
+
 # Logging Patterns
 
 **🚨 MANDATORY for ALL logging in the Amp project**

@@ -33,16 +33,18 @@ jobs:
           prompt: |
             Repository: ${{ github.repository }} PR: ${{ github.event.pull_request.number }}
 
-            Review this PR following the guidance in `.claude/commands/code-review.md`.
-            Focus on providing specific, actionable feedback on the actual lines of code rather than general comments.
+            Use the `/code-review` skill to perform a code review of the changes in this pull request.
+            
+            Focus on providing specific, actionable feedback on the actual lines of code rather than general comments. 
+            Do not approve or praise the code; instead, aim to identify potential issues, improvements, or questions that can help enhance the quality of the code.
 
             Follow these steps:
 
-            1. **Start a review**: Use `mcp__github__create_pending_pull_request_review` to begin a pending review
-            2. **Get diff information**: Use `mcp__github__get_pull_request_diff` to understand the code changes and line numbers
-            3. **Add inline comments**: Use `mcp__github__add_comment_to_pending_review` for each specific piece of feedback on particular lines
-            4. **Submit the review**: Use `mcp__github__submit_pending_pull_request_review` with event type "COMMENT" (not "REQUEST_CHANGES")
-
+            1. **Start a review**: Use `mcp__github__create_pending_pull_request_review` to begin a pending review.
+            2. **Get diff information**: Use `mcp__github__get_pull_request_diff` to understand the code changes and line numbers.
+            3. **Analyze the changes**: Review the code changes carefully using the `/code-review` skill.
+            4. **Add inline comments**: Use `mcp__github__add_comment_to_pending_review` for each specific piece of feedback on particular lines.
+            5. **Submit the review**: Use `mcp__github__submit_pending_pull_request_review` with event type "COMMENT" (not "REQUEST_CHANGES").
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options

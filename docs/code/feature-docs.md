@@ -1,3 +1,10 @@
+---
+name: "feature-docs"
+description: "Feature documentation format specification. Load when creating or editing feature docs in docs/features/"
+type: meta
+scope: "global"
+---
+
 # Feature Documentation Patterns
 
 **MANDATORY for ALL feature documentation in `docs/features/`**
@@ -329,7 +336,7 @@ This keeps feature docs focused and ensures consistent terminology across all do
 ### DON'T
 
 - Duplicate content from pattern files (link instead)
-- Include implementation details (use `.patterns/` for that)
+- Include implementation details (use `docs/code/` for that)
 - Hardcode paths that may change frequently
 - Include verbose API documentation (use OpenAPI specs)
 - Add speculative or planned features
@@ -492,7 +499,7 @@ Before committing feature documentation:
 ### Quality
 
 - [ ] Discoverable via grep command
-- [ ] No duplicate content from `.patterns/` files
+- [ ] No duplicate content from `docs/code/` pattern files
 - [ ] References specific files/crates where relevant
 - [ ] Examples are accurate and tested
 - [ ] No hardcoded values that may change

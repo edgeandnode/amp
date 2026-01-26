@@ -1,3 +1,10 @@
+---
+name: "metadata-db-security"
+description: "Security patterns for database operations, SQL injection prevention. Load when modifying metadata-db crate code"
+type: crate
+scope: "crate:metadata-db"
+---
+
 # Security Guidelines for metadata-db
 
 **CRITICAL: This document contains mandatory security requirements for all code contributions to the `metadata-db` crate. These guidelines ensure secure database operations and prevent common security vulnerabilities.**

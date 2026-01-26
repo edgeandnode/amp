@@ -1,3 +1,10 @@
+---
+name: "services-pattern"
+description: "Two-phase service creation pattern for services/*. Load when creating or modifying service crates"
+type: arch
+scope: "global"
+---
+
 # Service Pattern: Two-Phase Service Creation
 
 **Applies to**: All crates under `crates/services/` **EXCEPT** `admin-api`
