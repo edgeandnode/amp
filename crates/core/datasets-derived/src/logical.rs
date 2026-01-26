@@ -31,7 +31,6 @@ use common::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, TableReference,
         resolve_function_references, resolve_table_references,
     },
-    utils::dfs,
 };
 use datafusion::sql::parser;
 use datasets_common::{
@@ -43,7 +42,7 @@ use datasets_common::{
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
-    DerivedDatasetKind, Manifest,
+    DerivedDatasetKind, Manifest, deps,
     manifest::{TableInput, View},
 };
 
@@ -256,7 +255,7 @@ fn table_dependency_sort(
 
     for node in nodes {
         if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visiting).map_err(|err| {
+            deps::dfs(node, &deps, &mut ordered, &mut visited, &mut visiting).map_err(|err| {
                 TableDependencySortError {
                     table_name: err.node,
                 }

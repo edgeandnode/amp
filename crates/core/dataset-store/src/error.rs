@@ -334,5 +334,5 @@ pub enum DatasetDependencyError {
     /// occurs when traversing the dependency graph reveals a cycle, which would
     /// cause infinite recursion during query execution.
     #[error("dependency cycle detected")]
-    CycleDetected(#[source] common::utils::DfsError<Reference>),
+    CycleDetected(#[source] datasets_derived::deps::DfsError<Reference>),
 }

@@ -1,3 +1,5 @@
+//! Dependency graph utilities.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn dfs<'a, N>(
@@ -47,23 +49,4 @@ where
 {
     /// The node where the cycle was detected
     pub node: N,
-}
-
-/// Builds an error chain string from an error and its sources.
-///
-/// Walks through the error source chain and returns a formatted string
-/// containing the chain of error causes.
-pub fn error_with_causes(err: &dyn std::error::Error) -> String {
-    let mut error_chain = Vec::new();
-    let mut current = err;
-    while let Some(source) = current.source() {
-        error_chain.push(source.to_string());
-        current = source;
-    }
-
-    if error_chain.is_empty() {
-        err.to_string()
-    } else {
-        format!("{} | Caused by: {}", err, error_chain.join(" -> "))
-    }
 }

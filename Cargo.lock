@@ -2751,7 +2751,6 @@ dependencies = [
  "alloy",
  "amp-data-store",
  "async-trait",
- "axum",
  "bigdecimal",
  "bytes",
  "chrono",

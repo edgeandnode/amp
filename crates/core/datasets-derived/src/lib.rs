@@ -14,6 +14,7 @@
 
 mod dataset;
 mod dataset_kind;
+pub mod deps;
 pub mod logical;
 pub mod manifest;
 
