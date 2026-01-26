@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use base64::Engine;
 use datasets_common::{
     block_range::BlockRange,
@@ -16,7 +17,7 @@ use datasets_raw::{
 use serde::Deserialize;
 use solana_clock::Slot;
 
-use crate::rpc_client;
+use crate::{of1_client, rpc_client};
 
 pub const TABLE_NAME: &str = "transactions";
 
@@ -121,145 +122,58 @@ fn reward_dtype() -> DataType {
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Transaction {
-    // Tx data.
-    pub(crate) tx_index: u32,
-    pub(crate) tx_signatures: Vec<String>,
+    pub(crate) slot: Slot,
+    pub(crate) index: u32,
 
-    pub(crate) tx_meta: Option<TransactionStatusMeta>,
-
-    // Block data.
-    pub(crate) slot: u64,
+    pub(crate) signatures: Vec<String>,
+    pub(crate) transaction_status_meta: Option<TransactionStatusMeta>,
 }
 
 impl Transaction {
     pub(crate) fn from_of1_transaction(
         slot: Slot,
         tx_index: u32,
-        tx_meta: TransactionStatusMeta,
-        of_tx: solana_sdk::transaction::VersionedTransaction,
+        of1_tx_signatures: Vec<solana_sdk::signature::Signature>,
+        of1_tx_meta: of1_client::DecodedTransactionStatusMeta,
     ) -> Self {
+        let signatures = of1_tx_signatures.iter().map(|s| s.to_string()).collect();
+        let transaction_status_meta = match of1_tx_meta {
+            of1_client::DecodedTransactionStatusMeta::Empty => None,
+            of1_client::DecodedTransactionStatusMeta::Proto(proto_meta) => {
+                let tx_meta = TransactionStatusMeta::from_proto_meta(slot, tx_index, proto_meta);
+                Some(tx_meta)
+            }
+
+            of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => {
+                let tx_meta = TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta);
+                Some(tx_meta)
+            }
+        };
+
         Self {
-            tx_index,
-            tx_signatures: of_tx.signatures.iter().map(|s| s.to_string()).collect(),
-            tx_meta: Some(tx_meta),
             slot,
+            index: tx_index,
+            signatures,
+            transaction_status_meta,
         }
     }
 
     pub(crate) fn from_rpc_transaction(
         slot: Slot,
         tx_index: u32,
-        rpc_tx: &rpc_client::UiTransaction,
-        rpc_tx_meta: Option<&rpc_client::UiTransactionStatusMeta>,
-    ) -> Self {
-        let tx_meta = rpc_tx_meta.map(|meta| {
-            let inner_instructions = meta.inner_instructions.as_ref().map(|inners| {
-                inners
-                    .iter()
-                    .map(|inner| {
-                        inner
-                            .instructions
-                            .iter()
-                            .cloned()
-                            .map(|inst| {
-                                let rpc_client::UiInstruction::Compiled(compiled) = inst else {
-                                    unreachable!(
-                                        "the format of inner instructions has already been verified"
-                                    )
-                                };
-                                let data = bs58::decode(&compiled.data)
-                                    .into_vec()
-                                    .expect("invalid base-58 string");
-                                super::instructions::Instruction {
-                                    slot,
-                                    tx_index,
-                                    program_id_index: compiled.program_id_index,
-                                    accounts: compiled.accounts,
-                                    data,
-                                    inner_index: Some(inner.index as u32),
-                                    inner_stack_height: compiled.stack_height,
-                                }
-                            })
-                            .collect()
-                    })
-                    .collect()
-            });
+        rpc_tx_signatures: Vec<String>,
+        rpc_tx_meta: Option<rpc_client::UiTransactionStatusMeta>,
+    ) -> anyhow::Result<Self> {
+        let transaction_status_meta = rpc_tx_meta
+            .map(|rpc_meta| TransactionStatusMeta::from_rpc_meta(slot, tx_index, rpc_meta))
+            .transpose()?;
 
-            let pre_token_balances = meta.pre_token_balances.as_ref().map(|pre_token_balances| {
-                pre_token_balances
-                    .iter()
-                    .cloned()
-                    .map(TransactionTokenBalance::from)
-                    .collect()
-            });
-            let post_token_balances =
-                meta.post_token_balances
-                    .as_ref()
-                    .map(|post_token_balances| {
-                        post_token_balances
-                            .iter()
-                            .cloned()
-                            .map(TransactionTokenBalance::from)
-                            .collect()
-                    });
-
-            let rewards = meta.rewards.as_ref().map(|rewards| {
-                rewards
-                    .iter()
-                    .map(|reward| Reward {
-                        pubkey: reward.pubkey.clone(),
-                        lamports: reward.lamports,
-                        post_balance: reward.post_balance,
-                        reward_type: reward.reward_type.map(Into::into),
-                        commission: reward.commission,
-                    })
-                    .collect()
-            });
-
-            let loaded_addresses =
-                meta.loaded_addresses
-                    .clone()
-                    .map(|loaded_addresses| LoadedAddresses {
-                        writable: loaded_addresses.writable.clone(),
-                        readonly: loaded_addresses.readonly.clone(),
-                    });
-
-            let return_data = meta.return_data.clone().map(|return_data| {
-                let (data, encoding) = return_data.data;
-                let data = match encoding {
-                    rpc_client::UiReturnDataEncoding::Base64 => base64::prelude::BASE64_STANDARD
-                        .decode(data)
-                        .expect("invalid base-64 string"),
-                };
-                TransactionReturnData {
-                    program_id: return_data.program_id,
-                    data,
-                }
-            });
-
-            TransactionStatusMeta {
-                status: meta.err.is_none(),
-                fee: meta.fee,
-                pre_balances: meta.pre_balances.clone(),
-                post_balances: meta.post_balances.clone(),
-                inner_instructions,
-                log_messages: meta.log_messages.clone().map(|log_messages| log_messages),
-                pre_token_balances,
-                post_token_balances,
-                rewards,
-                loaded_addresses,
-                return_data,
-                compute_units_consumed: meta.compute_units_consumed.clone().map(|cuc| cuc),
-                cost_units: meta.cost_units.clone().map(|cu| cu),
-            }
-        });
-
-        Self {
-            tx_index,
-            tx_signatures: rpc_tx.signatures.clone(),
-            tx_meta,
+        Ok(Self {
             slot,
-        }
+            index: tx_index,
+            signatures: rpc_tx_signatures,
+            transaction_status_meta,
+        })
     }
 }
 
@@ -292,12 +206,11 @@ impl TransactionStatusMeta {
             .inner_instructions
             .map(|inner_instructions_vec| {
                 inner_instructions_vec
-                    .iter()
+                    .into_iter()
                     .map(|inner_instructions| {
                         inner_instructions
                             .instructions
-                            .iter()
-                            .cloned()
+                            .into_iter()
                             .map(|inst| super::instructions::Instruction {
                                 slot,
                                 tx_index,
@@ -314,20 +227,16 @@ impl TransactionStatusMeta {
 
         let pre_token_balances = rpc_tx_meta
             .pre_token_balances
-            .map(|pre_token_balances| pre_token_balances.iter().cloned().map(From::from).collect());
-        let post_token_balances = rpc_tx_meta.post_token_balances.map(|post_token_balances| {
-            post_token_balances
-                .iter()
-                .cloned()
-                .map(From::from)
-                .collect()
-        });
+            .map(|pre_token_balances| pre_token_balances.into_iter().map(From::from).collect());
+        let post_token_balances = rpc_tx_meta
+            .post_token_balances
+            .map(|post_token_balances| post_token_balances.into_iter().map(From::from).collect());
 
         let rewards = rpc_tx_meta.rewards.map(|rewards| {
             rewards
-                .iter()
+                .into_iter()
                 .map(|reward| Reward {
-                    pubkey: reward.pubkey.clone(),
+                    pubkey: reward.pubkey,
                     lamports: reward.lamports,
                     post_balance: reward.post_balance,
                     reward_type: reward.reward_type.map(From::from),
@@ -376,18 +285,17 @@ impl TransactionStatusMeta {
     }
 
     pub(crate) fn from_proto_meta(
-        slot: u64,
+        slot: Slot,
         tx_index: u32,
         of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> Self {
         let inner_instructions = of_tx_meta
             .inner_instructions
-            .iter()
+            .into_iter()
             .map(|inner| {
                 inner
                     .instructions
-                    .iter()
-                    .cloned()
+                    .into_iter()
                     .map(|inst| super::instructions::Instruction {
                         slot,
                         tx_index,
@@ -403,22 +311,20 @@ impl TransactionStatusMeta {
 
         let pre_token_balances = of_tx_meta
             .pre_token_balances
-            .iter()
-            .cloned()
+            .into_iter()
             .map(TransactionTokenBalance::from)
             .collect();
         let post_token_balances = of_tx_meta
             .post_token_balances
-            .iter()
-            .cloned()
+            .into_iter()
             .map(TransactionTokenBalance::from)
             .collect();
 
         let rewards = of_tx_meta
             .rewards
-            .iter()
+            .into_iter()
             .map(|reward| Reward {
-                pubkey: reward.pubkey.clone(),
+                pubkey: reward.pubkey,
                 lamports: reward.lamports,
                 post_balance: reward.post_balance,
                 reward_type: Some(reward.reward_type.into()),
@@ -443,7 +349,7 @@ impl TransactionStatusMeta {
                 .collect(),
         };
 
-        let return_data = of_tx_meta.return_data.clone().map(|return_data| {
+        let return_data = of_tx_meta.return_data.map(|return_data| {
             let program_id = bs58::encode(&return_data.program_id).into_string();
             TransactionReturnData {
                 program_id,
@@ -466,6 +372,114 @@ impl TransactionStatusMeta {
             compute_units_consumed: of_tx_meta.compute_units_consumed,
             cost_units: of_tx_meta.cost_units,
         }
+    }
+
+    pub(crate) fn from_rpc_meta(
+        slot: Slot,
+        tx_index: u32,
+        rpc_meta: rpc_client::UiTransactionStatusMeta,
+    ) -> anyhow::Result<Self> {
+        let inner_instructions = rpc_meta
+            .inner_instructions
+            .map(|rpc_inner_instructions| {
+                let mut inner_instructions = Vec::with_capacity(rpc_inner_instructions.len());
+
+                for rpc_inner_instruction_array in rpc_inner_instructions {
+                    let mut inner_instruction_array =
+                        Vec::with_capacity(rpc_inner_instruction_array.instructions.len());
+
+                    for rpc_inner_instruction in rpc_inner_instruction_array.instructions {
+                        let rpc_client::UiInstruction::Compiled(compiled) = rpc_inner_instruction
+                        else {
+                            anyhow::bail!("unexpected inner instruction format; slot {slot}, transaction index {tx_index}");
+                        };
+                        let data = bs58::decode(&compiled.data)
+                            .into_vec()
+                            .context("decoding base58 inner instruction data")?;
+                        let instruction = super::instructions::Instruction {
+                            slot,
+                            tx_index,
+                            program_id_index: compiled.program_id_index,
+                            accounts: compiled.accounts,
+                            data,
+                            inner_index: Some(rpc_inner_instruction_array.index as u32),
+                            inner_stack_height: compiled.stack_height,
+                        };
+
+                        inner_instruction_array.push(instruction);
+                    }
+
+                    inner_instructions.push(inner_instruction_array);
+                }
+
+                Ok(inner_instructions)
+            })
+            .transpose()?;
+
+        let pre_token_balances = rpc_meta.pre_token_balances.map(|pre_token_balances| {
+            pre_token_balances
+                .into_iter()
+                .map(TransactionTokenBalance::from)
+                .collect()
+        });
+        let post_token_balances = rpc_meta.post_token_balances.map(|post_token_balances| {
+            post_token_balances
+                .into_iter()
+                .map(TransactionTokenBalance::from)
+                .collect()
+        });
+
+        let rewards = rpc_meta.rewards.map(|rewards| {
+            rewards
+                .into_iter()
+                .map(|reward| Reward {
+                    pubkey: reward.pubkey,
+                    lamports: reward.lamports,
+                    post_balance: reward.post_balance,
+                    reward_type: reward.reward_type.map(Into::into),
+                    commission: reward.commission,
+                })
+                .collect()
+        });
+
+        let loaded_addresses = rpc_meta
+            .loaded_addresses
+            .map(|loaded_addresses| LoadedAddresses {
+                writable: loaded_addresses.writable,
+                readonly: loaded_addresses.readonly,
+            });
+
+        let return_data = rpc_meta
+            .return_data
+            .map(|return_data| {
+                let (data, encoding) = return_data.data;
+                let data = match encoding {
+                    rpc_client::UiReturnDataEncoding::Base64 => base64::prelude::BASE64_STANDARD
+                        .decode(data)
+                        .context("decoding base64 return data")?,
+                };
+                anyhow::Ok(TransactionReturnData {
+                    program_id: return_data.program_id,
+                    data,
+                })
+            })
+            .transpose()?;
+
+        Ok(Self {
+            status: rpc_meta.err.is_none(),
+            fee: rpc_meta.fee,
+            pre_balances: rpc_meta.pre_balances,
+            post_balances: rpc_meta.post_balances,
+            inner_instructions,
+            log_messages: rpc_meta.log_messages.map(|log_messages| log_messages),
+            pre_token_balances,
+            post_token_balances,
+            rewards,
+            loaded_addresses,
+            return_data,
+            compute_units_consumed: rpc_meta.compute_units_consumed.map(|cuc| cuc),
+            cost_units: rpc_meta.cost_units.map(|cu| cu),
+        })
     }
 }
 
@@ -608,7 +622,6 @@ pub(crate) struct TransactionReturnData {
 
 pub(crate) struct TransactionRowsBuilder {
     special_block_num: UInt64Builder,
-
     slot: UInt64Builder,
     tx_index: UInt32Builder,
 
@@ -689,6 +702,7 @@ impl TransactionRowsBuilder {
 
         Self {
             special_block_num: UInt64Builder::with_capacity(count),
+            slot: UInt64Builder::with_capacity(count),
             tx_index: UInt32Builder::with_capacity(count),
             tx_signatures: ListBuilder::with_capacity(StringBuilder::new(), count),
             status: BooleanBuilder::with_capacity(count),
@@ -705,27 +719,20 @@ impl TransactionRowsBuilder {
             return_data_data: ListBuilder::with_capacity(UInt8Builder::new(), count),
             compute_units_consumed: UInt64Builder::with_capacity(count),
             cost_units: UInt64Builder::with_capacity(count),
-
-            slot: UInt64Builder::with_capacity(count),
         }
     }
 
     pub(crate) fn append(&mut self, tx: &Transaction) {
-        let Transaction {
-            tx_index,
-            tx_signatures,
-            tx_meta,
-            slot,
-        } = tx;
+        self.special_block_num.append_value(tx.slot);
+        self.slot.append_value(tx.slot);
+        self.tx_index.append_value(tx.index);
 
-        self.special_block_num.append_value(*slot);
-        self.tx_index.append_value(*tx_index);
-        for sig in tx_signatures {
+        for sig in &tx.signatures {
             self.tx_signatures.values().append_value(sig);
         }
         self.tx_signatures.append(true);
 
-        if let Some(meta) = tx_meta {
+        if let Some(meta) = tx.transaction_status_meta.as_ref() {
             self.status.append_value(meta.status);
             self.fee.append_value(meta.fee);
 
@@ -931,13 +938,12 @@ impl TransactionRowsBuilder {
             self.compute_units_consumed.append_null();
             self.cost_units.append_null();
         }
-
-        self.slot.append_value(*slot);
     }
 
     pub(crate) fn build(self, range: BlockRange) -> Result<TableRows, TableRowError> {
         let Self {
             mut special_block_num,
+            mut slot,
             mut tx_index,
             mut tx_signatures,
             mut status,
@@ -954,7 +960,6 @@ impl TransactionRowsBuilder {
             mut return_data_data,
             mut compute_units_consumed,
             mut cost_units,
-            mut slot,
         } = self;
 
         let columns = vec![

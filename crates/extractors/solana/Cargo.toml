@@ -8,6 +8,7 @@ license-file.workspace = true
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 
 [dependencies]
+anyhow.workspace = true
 async-stream.workspace = true
 backon.workspace = true
 bs58 = "0.5.1"

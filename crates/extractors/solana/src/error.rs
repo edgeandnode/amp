@@ -107,6 +107,14 @@ pub enum Of1StreamError {
     #[error("expected '{expected}' node for cid '{cid}'")]
     MissingNode { expected: &'static str, cid: String },
 
+    /// Failed to decompress data using Zstd.
+    ///
+    /// CAR files and Solana data structures may be compressed with Zstd
+    /// for storage efficiency. This error occurs when the decompression
+    /// process fails, indicating corrupted or invalid compressed data.
+    #[error("Zstd decompression failed {0}")]
+    Zstd(#[source] std::io::Error),
+
     /// Failed to deserialize data using bincode.
     ///
     /// Some Solana data structures in CAR files are serialized with bincode.
@@ -115,15 +123,15 @@ pub enum Of1StreamError {
     #[error("bincode deserialization failed")]
     Bincode(#[source] bincode::Error),
 
-    /// Failed to decode transaction metadata using both prost and bincode.
+    /// Failed to decode OF1 CAR file field using both prost and bincode.
     ///
-    /// Transaction metadata can be encoded in different formats. The extractor
-    /// attempts both prost (protobuf) and bincode deserialization. This error
-    /// occurs when both attempts fail, with error details from each attempt.
-    #[error(
-        "failed to decode transaction metadata: prost_err={prost_err}, bincode_err={bincode_err}"
-    )]
-    TransactionMetaDecode {
+    /// Some fields in CAR files can be encoded in different formats. The
+    /// extractor attempts both prost (protobuf) and bincode deserialization.
+    /// This error occurs when both attempts fail, with error details from
+    /// each attempt.
+    #[error("failed to decode {field_name}: prost_err={prost_err}, bincode_err={bincode_err}")]
+    DecodeField {
+        field_name: &'static str,
         prost_err: String,
         bincode_err: String,
     },

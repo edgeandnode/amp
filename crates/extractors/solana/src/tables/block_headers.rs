@@ -12,7 +12,7 @@ use datasets_raw::{
 };
 use solana_clock::Slot;
 
-use crate::{rpc_client::UiConfirmedBlock, tables::BASE58_ENCODED_HASH_LEN};
+use crate::tables::BASE58_ENCODED_HASH_LEN;
 
 pub const TABLE_NAME: &str = "block_headers";
 
@@ -43,43 +43,10 @@ fn schema() -> Schema {
 pub(crate) struct BlockHeader {
     pub(crate) slot: Slot,
     pub(crate) parent_slot: Slot,
-
     pub(crate) block_hash: String,
     pub(crate) previous_block_hash: String,
-
     pub(crate) block_height: Option<u64>,
     pub(crate) block_time: Option<i64>,
-}
-
-impl BlockHeader {
-    pub(crate) fn from_of1_block(block: crate::of1_client::DecodedBlock) -> Self {
-        Self {
-            slot: block.slot,
-            parent_slot: block.parent_slot,
-            block_hash: bs58::encode(block.blockhash).into_string(),
-            previous_block_hash: bs58::encode(block.prev_blockhash).into_string(),
-            block_height: block.block_height,
-            block_time: Some(block.blocktime as i64),
-        }
-    }
-
-    pub(crate) fn from_rpc_block(slot: Slot, block: &UiConfirmedBlock) -> Self {
-        Self {
-            slot,
-            parent_slot: block.parent_slot,
-            block_hash: block.blockhash.clone(),
-            previous_block_hash: block.previous_blockhash.clone(),
-            block_height: block.block_height,
-            block_time: block.block_time,
-        }
-    }
-
-    pub(crate) fn empty(slot: Slot) -> Self {
-        Self {
-            slot,
-            ..Default::default()
-        }
-    }
 }
 
 /// A builder for converting [BlockHeader]s into [TableRows].
