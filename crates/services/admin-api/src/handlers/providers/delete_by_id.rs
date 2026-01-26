@@ -69,32 +69,21 @@ pub async fn handler(
         }
     };
 
-    match ctx.providers_registry.delete(&name).await {
-        Ok(()) => {
-            tracing::info!(
-                provider_name = %name,
-                "successfully deleted provider configuration"
-            );
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Err(DeleteError::NotFound {
-            name: not_found_name,
-        }) => {
-            tracing::debug!(
-                provider_name = %not_found_name,
-                "provider not found for deletion, treating as success (idempotent)"
-            );
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Err(other) => {
-            tracing::error!(
-                provider_name = %name,
-                error = %other, error_source = logging::error_source(&other),
-                "failed to delete provider"
-            );
-            Err(Error::StoreError(other).into())
-        }
-    }
+    ctx.providers_registry.delete(&name).await.map_err(|err| {
+        tracing::error!(
+            provider_name = %name,
+            error = %err, error_source = logging::error_source(&err),
+            "failed to delete provider"
+        );
+        Error::StoreError(err)
+    })?;
+
+    tracing::info!(
+        provider_name = %name,
+        "successfully deleted provider configuration"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Errors that can occur during provider deletion
@@ -114,16 +103,6 @@ pub enum Error {
         err: PathRejection,
     },
 
-    /// The requested provider was not found in the store
-    ///
-    /// This occurs when the provider name is valid but no provider
-    /// configuration exists with that name in the dataset store.
-    #[error("provider '{name}' not found")]
-    NotFound {
-        /// The provider name that was not found
-        name: String,
-    },
-
     /// Failed to delete the provider configuration from the store
     ///
     /// This occurs when the underlying storage operation fails,
@@ -137,7 +116,6 @@ impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidName { .. } => "INVALID_PROVIDER_NAME",
-            Error::NotFound { .. } => "PROVIDER_NOT_FOUND",
             Error::StoreError(_) => "STORE_ERROR",
         }
     }
@@ -145,7 +123,6 @@ impl IntoErrorResponse for Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Error::InvalidName { .. } => StatusCode::BAD_REQUEST,
-            Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

@@ -1,6 +1,6 @@
 //! Provider create handler
 
-use amp_providers_registry::{ProviderConfig, RegisterError};
+use amp_providers_registry::ProviderConfig;
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -16,7 +16,7 @@ use crate::{
 
 /// Handler for the `POST /providers` endpoint
 ///
-/// Creates a new provider configuration and stores it in the dataset store.
+/// Creates or updates a provider configuration in the dataset store.
 ///
 /// ## Request Body
 /// - JSON object containing provider configuration with required fields:
@@ -26,21 +26,19 @@ use crate::{
 ///   - Additional provider-specific configuration fields as needed
 ///
 /// ## Response
-/// - **201 Created**: Provider created successfully
+/// - **201 Created**: Provider created or updated successfully
 /// - **400 Bad Request**: Invalid request body or provider configuration
-/// - **409 Conflict**: Provider with the same name already exists
 /// - **500 Internal Server Error**: Store error
 ///
 /// ## Error Codes
 /// - `INVALID_REQUEST_BODY`: Malformed JSON request body
 /// - `DATA_CONVERSION_ERROR`: Failed to convert JSON to TOML format
-/// - `PROVIDER_CONFLICT`: Provider name already exists
 /// - `STORE_ERROR`: Failed to save provider configuration
 ///
 /// This handler:
 /// - Validates and extracts the provider data from the JSON request body
 /// - Converts additional JSON configuration fields to TOML format
-/// - Registers the provider configuration in the dataset store
+/// - Registers the provider configuration in the dataset store (overwrites if exists)
 /// - Returns HTTP 201 on successful creation
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
@@ -52,9 +50,8 @@ use crate::{
         operation_id = "providers_create",
         request_body = ProviderInfo,
         responses(
-            (status = 201, description = "Provider created successfully"),
+            (status = 201, description = "Provider created or updated successfully"),
             (status = 400, description = "Invalid request body or provider configuration", body = crate::handlers::error::ErrorResponse),
-            (status = 409, description = "Provider with the same name already exists", body = crate::handlers::error::ErrorResponse),
             (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
     )
@@ -84,22 +81,13 @@ pub async fn handler(
     ctx.providers_registry
         .register(provider_config)
         .await
-        .map_err(|err| match err {
-            RegisterError::Conflict { name } => {
-                tracing::debug!(
-                    provider_name = %name,
-                    "provider already exists"
-                );
-                Error::Conflict { name }
-            }
-            other => {
-                tracing::error!(
-                    %provider_name,
-                    error = %other, error_source = logging::error_source(&other),
-                    "failed to register provider"
-                );
-                Error::StoreError(other)
-            }
+        .map_err(|err| {
+            tracing::error!(
+                %provider_name,
+                error = %err, error_source = logging::error_source(&err),
+                "failed to register provider"
+            );
+            Error::StoreError(err)
         })?;
 
     tracing::info!(
@@ -137,24 +125,13 @@ pub enum Error {
     #[error("failed to convert JSON map to TOML table: {0}")]
     ConversionError(serde_json::Error),
 
-    /// A provider with the same name already exists
-    ///
-    /// This occurs when attempting to create a provider configuration
-    /// with a name that is already in use. Provider names must be unique
-    /// within the system.
-    #[error("provider '{name}' already exists")]
-    Conflict {
-        /// The name of the conflicting provider
-        name: String,
-    },
-
     /// Failed to store the provider configuration
     ///
     /// This occurs when the underlying storage operation fails,
     /// such as filesystem errors, serialization failures, or
     /// other store-level issues.
     #[error("failed to store provider configuration: {0}")]
-    StoreError(#[source] RegisterError),
+    StoreError(#[source] amp_providers_registry::RegisterError),
 }
 
 impl IntoErrorResponse for Error {
@@ -162,7 +139,6 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidRequestBody { .. } => "INVALID_REQUEST_BODY",
             Error::ConversionError(_) => "DATA_CONVERSION_ERROR",
-            Error::Conflict { .. } => "PROVIDER_CONFLICT",
             Error::StoreError(_) => "STORE_ERROR",
         }
     }
@@ -171,7 +147,6 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidRequestBody { .. } => StatusCode::BAD_REQUEST,
             Error::ConversionError(_) => StatusCode::BAD_REQUEST,
-            Error::Conflict { .. } => StatusCode::CONFLICT,
             Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

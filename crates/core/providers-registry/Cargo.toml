@@ -5,13 +5,21 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+alloy.workspace = true
+async-stream.workspace = true
 datasets-common = { path = "../datasets-common" }
+datasets-raw = { path = "../datasets-raw" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
+firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 monitoring = { path = "../monitoring" }
 object_store.workspace = true
 parking_lot = "0.12.4"
+rand.workspace = true
+solana-datasets = { path = "../../extractors/solana" }
 tracing.workspace = true
 toml = { workspace = true, features = ["preserve_order"] }
+url.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
