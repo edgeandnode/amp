@@ -527,6 +527,22 @@ impl DataStore {
     }
 }
 
+/// Progress and status tracking
+impl DataStore {
+    /// Gets tables associated with a specific writer.
+    ///
+    /// Returns a list of active tables where the specified writer is assigned,
+    /// along with metadata about each table including dataset information.
+    pub async fn get_tables_by_writer(
+        &self,
+        writer_id: impl Into<metadata_db::jobs::JobId> + std::fmt::Debug,
+    ) -> Result<Vec<metadata_db::physical_table::WriterTableInfo>, GetTablesByWriterError> {
+        metadata_db::physical_table::get_tables_by_writer(&self.metadata_db, writer_id)
+            .await
+            .map_err(GetTablesByWriterError)
+    }
+}
+
 /// Object store file readers and writers
 impl DataStore {
     /// Creates a buffered writer for writing a file to a table revision.
@@ -902,6 +918,21 @@ pub struct DeleteFileInObjectStoreError(#[source] pub object_store::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to delete file during streaming deletion")]
 pub struct DeleteFilesStreamError(#[source] pub object_store::Error);
+
+/// Failed to get tables written by job from metadata database
+///
+/// This error occurs when querying the metadata database for tables
+/// written by a specific job fails. This typically happens during
+/// job progress reporting operations.
+///
+/// Common causes:
+/// - Database connection lost during query
+/// - Database server unreachable
+/// - Network connectivity issues
+/// - Invalid job ID
+#[derive(Debug, thiserror::Error)]
+#[error("failed to get tables by writer from metadata database")]
+pub struct GetTablesByWriterError(#[source] pub metadata_db::Error);
 
 /// Cached parquet data including metadata and computed statistics.
 #[derive(Clone)]
