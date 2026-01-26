@@ -20,7 +20,6 @@ futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }
 parking_lot = "0.12.4"
-rand.workspace = true
 serde.workspace = true
 solana-datasets = { path = "../../extractors/solana" }
 thiserror.workspace = true
