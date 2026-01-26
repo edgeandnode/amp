@@ -7,11 +7,11 @@ use axum::{
     http::StatusCode,
 };
 use common::{
-    BoxError,
     catalog::logical::for_admin_api::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
+    incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
     planning_context::PlanningContext,
     query_context::Error as QueryContextError,
@@ -156,10 +156,10 @@ pub async fn handler(
                         .datasets_registry
                         .is_manifest_linked(fqn.namespace(), fqn.name(), &hash)
                         .await
-                        .map_err(|err| Error::DependencyResolution {
+                        .map_err(|err| Error::DependencyManifestLinkCheck {
                             alias: alias.clone(),
                             reference: dep_ref.clone(),
-                            source: err.into(),
+                            source: err,
                         })?;
 
                     if !is_linked {
@@ -177,10 +177,10 @@ pub async fn handler(
                     ctx.datasets_registry
                         .resolve_version_hash(fqn.namespace(), fqn.name(), &version)
                         .await
-                        .map_err(|err| Error::DependencyResolution {
+                        .map_err(|err| Error::DependencyVersionResolution {
                             alias: alias.clone(),
                             reference: dep_ref.clone(),
-                            source: err.into(),
+                            source: err,
                         })?
                         .ok_or_else(|| Error::DependencyNotFound {
                             alias: alias.clone(),
@@ -469,7 +469,7 @@ enum Error {
     NonIncrementalQuery {
         table_name: TableName,
         #[source]
-        source: BoxError,
+        source: NonIncrementalQueryError,
     },
 
     /// Failed to resolve table references in SQL query
@@ -515,20 +515,34 @@ enum Error {
         reference: DepReference,
     },
 
-    /// Failed to resolve dependency
+    /// Failed to verify manifest link for dependency
     ///
-    /// This occurs when:
-    /// - Dependency resolution encounters an error
-    /// - Database query fails during resolution
-    #[error("Failed to resolve dependency '{alias}' ({reference}): {source}")]
-    DependencyResolution {
+    /// This occurs when checking if a manifest hash is linked to a dataset fails,
+    /// typically due to database connection issues or query failures.
+    #[error("Failed to verify manifest link for dependency '{alias}' ({reference})")]
+    DependencyManifestLinkCheck {
         /// The alias name used in the request
         alias: DepAlias,
         /// The dependency reference
         reference: DepReference,
-        /// The underlying resolution error
+        /// The underlying database error
         #[source]
-        source: BoxError,
+        source: amp_datasets_registry::error::IsManifestLinkedError,
+    },
+
+    /// Failed to resolve version for dependency
+    ///
+    /// This occurs when resolving a version tag to a manifest hash fails,
+    /// typically due to database connection issues or query failures.
+    #[error("Failed to resolve version for dependency '{alias}' ({reference})")]
+    DependencyVersionResolution {
+        /// The alias name used in the request
+        alias: DepAlias,
+        /// The dependency reference
+        reference: DepReference,
+        /// The underlying database error
+        #[source]
+        source: amp_datasets_registry::error::ResolveRevisionError,
     },
 
     /// Catalog-qualified table reference not supported
@@ -699,7 +713,8 @@ impl IntoErrorResponse for Error {
             Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
             Error::FunctionReferenceResolution { .. } => "FUNCTION_REFERENCE_RESOLUTION",
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
-            Error::DependencyResolution { .. } => "DEPENDENCY_RESOLUTION",
+            Error::DependencyManifestLinkCheck { .. } => "DEPENDENCY_MANIFEST_LINK_CHECK",
+            Error::DependencyVersionResolution { .. } => "DEPENDENCY_VERSION_RESOLUTION",
             Error::CatalogQualifiedTable { .. } => "CATALOG_QUALIFIED_TABLE",
             Error::UnqualifiedTable(_) => "UNQUALIFIED_TABLE",
             Error::InvalidTableName(_) => "INVALID_TABLE_NAME",
@@ -730,7 +745,8 @@ impl IntoErrorResponse for Error {
             Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::FunctionReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
-            Error::DependencyResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DependencyManifestLinkCheck { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DependencyVersionResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::CatalogQualifiedTable { .. } => StatusCode::BAD_REQUEST,
             Error::UnqualifiedTable(_) => StatusCode::BAD_REQUEST,
             Error::InvalidTableName(_) => StatusCode::BAD_REQUEST,

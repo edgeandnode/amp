@@ -659,7 +659,7 @@ pub enum ManifestValidationError {
         /// The table whose SQL query contains non-incremental operations
         table_name: TableName,
         #[source]
-        source: BoxError,
+        source: common::incrementalizer::NonIncrementalQueryError,
     },
 
     /// SQL query planning failed

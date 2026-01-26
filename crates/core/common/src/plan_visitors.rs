@@ -18,7 +18,7 @@ use datafusion::{
 
 use crate::{
     BoxError, SPECIAL_BLOCK_NUM,
-    incrementalizer::{NonIncrementalError, incremental_op_kind},
+    incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
 };
 
 /// Helper function to create a column reference to `_block_num`
@@ -316,8 +316,8 @@ impl fmt::Display for NonIncrementalOp {
 }
 
 /// Returns `Ok(())` if the given logical plan can be synced incrementally, `Err` otherwise.
-pub fn is_incremental(plan: &LogicalPlan) -> Result<(), BoxError> {
-    let mut err: Option<NonIncrementalError> = None;
+pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError> {
+    let mut err: Option<NonIncrementalQueryError> = None;
 
     // TODO: Detect unsupported join stacking, possibly by doing a dry run of the incrementalizer.
     plan.exists(|node| match incremental_op_kind(node) {
@@ -326,10 +326,11 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), BoxError> {
             err = Some(e);
             Ok(true)
         }
-    })?;
+    })
+    .map_err(|df_err| NonIncrementalQueryError::Invalid(df_err.to_string()))?;
 
     if let Some(err) = err {
-        return Err(err.into());
+        return Err(err);
     }
 
     Ok(())
