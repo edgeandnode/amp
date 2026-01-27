@@ -112,8 +112,11 @@ pub enum Of1StreamError {
     /// CAR files and Solana data structures may be compressed with Zstd
     /// for storage efficiency. This error occurs when the decompression
     /// process fails, indicating corrupted or invalid compressed data.
-    #[error("Zstd decompression failed {0}")]
-    Zstd(#[source] std::io::Error),
+    #[error("Zstd decompression failed for {field_name}: {error}")]
+    Zstd {
+        field_name: &'static str,
+        error: String,
+    },
 
     /// Failed to deserialize data using bincode.
     ///

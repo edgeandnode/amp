@@ -539,7 +539,10 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
             Ok(DecodedField::Empty)
         } else {
             // All fields that need to be decoded this way are ZSTD compressed in CAR files.
-            let decompressed = &*zstd::decode_all(data).map_err(Of1StreamError::Zstd)?;
+            let decompressed = &*zstd::decode_all(data).map_err(|e| Of1StreamError::Zstd {
+                field_name,
+                error: e.to_string(),
+            })?;
             match prost::Message::decode(decompressed).map(DecodedField::Proto) {
                 Ok(data_proto) => Ok(data_proto),
                 Err(prost_err) => {
