@@ -22,8 +22,8 @@ pub use self::{
     dataset::Dataset,
     dataset_kind::{DerivedDatasetKind, DerivedDatasetKindError},
     logical::{
-        DatasetError, ManifestValidationError, SortTablesByDependenciesError,
-        TableDependencySortError, dataset, sort_tables_by_dependencies, validate,
+        DatasetError, SortTablesByDependenciesError, TableDependencySortError, dataset,
+        sort_tables_by_dependencies,
     },
     manifest::Manifest,
 };
