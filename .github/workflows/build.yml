@@ -1,9 +1,16 @@
 name: Build
 on:
   workflow_dispatch:
+    inputs:
+      nightly:
+        description: "Create a nightly prerelease (date-suffixed tag)"
+        type: boolean
+        default: false
   push:
     branches: ["main"]
     tags: ["v*"]
+  schedule:
+    - cron: "0 0 * * *"
 
 permissions:
   contents: read
@@ -135,12 +142,53 @@ jobs:
     name: Release
     needs: [build, notarize]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_NAME: ${{ github.ref_name }}
+      RELEASE_BODY: ""
+      RELEASE_PRERELEASE: "false"
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set release metadata
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" -a "${{ inputs.nightly }}" = "true" ]; then
+            nightly_date="$(date -u +%Y-%m-%d)"
+            short_sha="${GITHUB_SHA::7}"
+            echo "RELEASE_TAG=nightly-${short_sha}" >> "$GITHUB_ENV"
+            echo "RELEASE_NAME=Nightly ${nightly_date}" >> "$GITHUB_ENV"
+            echo "RELEASE_PRERELEASE=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build changelog
+        if: env.RELEASE_PRERELEASE == 'true'
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@439f79b5b5428107c7688c1d2b0e8bacc9b8792c # v6
+        continue-on-error: true
+        with:
+          fromTag: nightly
+          toTag: ${{ env.RELEASE_TAG }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set release body
+        run: |
+          if [ "${{ env.RELEASE_PRERELEASE }}" = "true" ]; then
+            if [ -n "${{ steps.build_changelog.outputs.changelog }}" ]; then
+              {
+                echo "RELEASE_BODY<<'EOF'"
+                echo "${{ steps.build_changelog.outputs.changelog }}"
+                echo "EOF"
+              } >> "$GITHUB_ENV"
+            fi
+          fi
 
       - name: Download Linux artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -195,11 +243,55 @@ jobs:
           files: release/*
           fail_on_unmatched_files: true
           draft: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          body: ${{ env.RELEASE_BODY }}
 
       - name: Finalize release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           draft: false
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
+
+      - name: Move rolling nightly tag
+        if: env.RELEASE_PRERELEASE == 'true'
+        uses: actions/github-script@450193c5abd4cdb17ba9f3ffcfe8f635c4bb6c2a # v7
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const ref = 'tags/nightly'
+            try {
+              await github.rest.git.updateRef({
+                owner,
+                repo,
+                ref,
+                sha: context.sha,
+                force: true,
+              })
+            } catch (error) {
+              if (error.status !== 422) {
+                throw error
+              }
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/${ref}`,
+                sha: context.sha,
+              })
+            }
+
+      - name: Update rolling nightly release
+        if: env.RELEASE_PRERELEASE == 'true'
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          name: Nightly
+          tag_name: nightly
+          prerelease: true
+          body: ${{ env.RELEASE_BODY }}
+          files: release/*
+          fail_on_unmatched_files: true
 
   containerize:
     name: Containerize (${{ matrix.title }})
@@ -210,6 +302,9 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    env:
+      RELEASE_NIGHTLY_TAG: ""
+
     strategy:
       matrix:
         include:
@@ -237,6 +332,13 @@ jobs:
           name: aarch64-unknown-linux-gnu
           path: ./arm64/
 
+      - name: Set nightly tag (if applicable)
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" -a "${{ inputs.nightly }}" = "true" ]; then
+            short_sha="${GITHUB_SHA::7}"
+            echo "RELEASE_NIGHTLY_TAG=nightly-${short_sha}" >> "$GITHUB_ENV"
+          fi
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
         with:
@@ -254,6 +356,8 @@ jobs:
           images: ghcr.io/edgeandnode/${{ matrix.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ env.RELEASE_NIGHTLY_TAG }},enable=${{ env.RELEASE_NIGHTLY_TAG != '' }}
+            type=raw,value=nightly,enable=${{ env.RELEASE_NIGHTLY_TAG != '' }}
             type=ref,event=tag
             type=sha
           labels: |
