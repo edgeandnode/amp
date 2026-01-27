@@ -2,9 +2,6 @@
 //!
 //! This module provides the `FuncName` type for validated UDF function names that enforce
 //! naming conventions compatible with DataFusion UDFs.
-//!
-//! TODO: Consider moving this module to `datasets-derived` crate to break circular dependency.
-//! Currently used by `common::sql::FunctionReference` which may also need refactoring.
 
 /// Maximum length for function identifiers (practical limit for reasonable function names).
 const MAX_IDENTIFIER_LENGTH: usize = 255;

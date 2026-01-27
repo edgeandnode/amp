@@ -20,10 +20,10 @@ use datasets_common::{
     func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
     hash::Hash,
     hash_reference::HashReference,
-    manifest::Function,
     table_name::TableName,
     udf::{IsolatePool, JsUdf},
 };
+use datasets_derived::manifest::Function;
 
 use crate::{
     BoxError,

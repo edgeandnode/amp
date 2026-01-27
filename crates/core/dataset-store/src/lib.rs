@@ -182,7 +182,7 @@ impl DatasetStore {
                         kind: kind.into(),
                         source,
                     })?;
-                datasets_derived::dataset(reference.clone(), manifest)
+                common::datasets_derived::dataset(reference.clone(), manifest)
                     .map(Arc::new)
                     .map_err(|source| GetDatasetError::CreateDerivedDataset {
                         reference: reference.clone(),

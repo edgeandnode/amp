@@ -10,10 +10,13 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BlockNum, BlockRange, BoxError, DetachedLogicalPlan, LogicalCatalog, LogicalTable,
-    PlanningContext, QueryContext, ResumeWatermark, SPECIAL_BLOCK_NUM, Watermark,
+    BlockNum, BlockRange, BoxError, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
+    QueryContext, ResumeWatermark, SPECIAL_BLOCK_NUM, Watermark,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::{
+        logical::LogicalTable,
+        physical::{Catalog, PhysicalTable},
+    },
     incrementalizer::incrementalize_plan,
     metadata::segments::Segment,
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},

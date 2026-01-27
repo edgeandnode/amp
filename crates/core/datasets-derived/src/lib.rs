@@ -12,18 +12,15 @@
 //!
 //! See [`manifest::Manifest`] for the complete derived dataset specification.
 
-mod dataset;
+pub mod dataset;
 mod dataset_kind;
 pub mod deps;
-pub mod logical;
+pub mod function;
 pub mod manifest;
+pub mod sql_str;
 
 pub use self::{
     dataset::Dataset,
     dataset_kind::{DerivedDatasetKind, DerivedDatasetKindError},
-    logical::{
-        DatasetError, SortTablesByDependenciesError, TableDependencySortError, dataset,
-        sort_tables_by_dependencies,
-    },
     manifest::Manifest,
 };

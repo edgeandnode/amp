@@ -1,8 +1,8 @@
 use std::fmt;
 
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use datasets_common::{dataset::Table, hash_reference::HashReference, table_name::TableName};
 
-use crate::{catalog::logical::Table, sql::TableReference};
+use crate::sql::TableReference;
 
 /// A table that holds a reference to its dataset.
 #[derive(Debug, Clone)]
