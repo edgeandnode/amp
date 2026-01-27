@@ -45,16 +45,27 @@
 //! - **Data Validation**: Comprehensive consistency checks ensure data integrity
 //! - **Error Recovery**: Detailed error messages for troubleshooting
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use amp_config::Config;
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, dataset_and_dependencies};
-use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
+use amp_dataset_store::{DatasetStore, GetDatasetError};
+use amp_datasets_registry::{
+    DatasetsRegistry, error::ResolveRevisionError, manifests::DatasetManifestsStore,
+};
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use clap::Parser;
 use common::BoxError;
 use datasets_common::reference::Reference;
+use datasets_derived::{
+    DerivedDatasetKind,
+    deps::{DfsError, dfs},
+};
 use dump::consistency_check;
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
@@ -430,4 +441,106 @@ fn resolve_test_data_dir() -> Result<PathBuf, BoxError> {
             )
             .into()
         })
+}
+
+/// Return the input datasets and their dataset dependencies. The output set is ordered such that
+/// each dataset comes after all datasets it depends on.
+async fn dataset_and_dependencies(
+    store: &DatasetStore,
+    dataset: Reference,
+) -> Result<Vec<Reference>, DatasetDependencyError> {
+    let mut datasets = vec![dataset];
+    let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
+    while let Some(dataset_ref) = datasets.pop() {
+        // Resolve the reference to a hash reference first
+        let hash_ref = store
+            .resolve_revision(&dataset_ref)
+            .await
+            .map_err(DatasetDependencyError::ResolveRevision)?
+            .ok_or_else(|| DatasetDependencyError::DatasetNotFound(dataset_ref.clone()))?;
+        let dataset = store
+            .get_dataset(&hash_ref)
+            .await
+            .map_err(DatasetDependencyError::GetDataset)?;
+
+        if dataset.kind() != DerivedDatasetKind {
+            deps.insert(dataset_ref, vec![]);
+            continue;
+        }
+
+        let refs: Vec<Reference> = dataset
+            .dependencies()
+            .values()
+            .map(|dep| dep.to_reference())
+            .collect();
+        let mut untracked_refs = refs
+            .iter()
+            .filter(|r| deps.keys().all(|d| d != *r))
+            .cloned()
+            .collect();
+        datasets.append(&mut untracked_refs);
+        deps.insert(dataset_ref, refs);
+    }
+
+    dependency_sort(deps).map_err(DatasetDependencyError::CycleDetected)
+}
+
+/// Errors that occur when resolving dataset dependencies.
+///
+/// Derived datasets can depend on other datasets (raw or derived). These errors
+/// cover failures during the dependency resolution process, including missing
+/// datasets, revision lookups, and cycle detection in the dependency graph.
+#[derive(Debug, thiserror::Error)]
+enum DatasetDependencyError {
+    /// A referenced dataset was not found.
+    ///
+    /// This occurs when a dataset references another dataset by name or hash
+    /// that does not exist in the registry. The dependency cannot be resolved
+    /// because the target dataset is missing.
+    #[error("dataset '{0}' not found")]
+    DatasetNotFound(Reference),
+
+    /// Failed to resolve the revision for a dataset reference.
+    ///
+    /// When a dataset is referenced by name (without a specific hash), the system
+    /// must resolve it to a specific revision. This error occurs when that resolution
+    /// fails, typically due to registry lookup issues.
+    #[error("failed to resolve dataset revision")]
+    ResolveRevision(#[source] ResolveRevisionError),
+
+    /// Failed to retrieve a dataset from the store.
+    ///
+    /// After resolving a reference, the actual dataset must be fetched. This error
+    /// occurs when the dataset retrieval fails, which may be due to manifest parsing
+    /// issues or object store access problems.
+    #[error("failed to get dataset")]
+    GetDataset(#[source] GetDatasetError),
+
+    /// A circular dependency was detected in the dataset graph.
+    ///
+    /// Datasets cannot depend on themselves directly or transitively. This error
+    /// occurs when traversing the dependency graph reveals a cycle, which would
+    /// cause infinite recursion during query execution.
+    #[error("dependency cycle detected")]
+    CycleDetected(#[source] datasets_derived::deps::DfsError<Reference>),
+}
+
+/// Given a map of values to their dependencies, return a set where each value is ordered after
+/// all of its dependencies. An error is returned if a cycle is detected.
+fn dependency_sort(
+    deps: BTreeMap<Reference, Vec<Reference>>,
+) -> Result<Vec<Reference>, DfsError<Reference>> {
+    let nodes: BTreeSet<&Reference> = deps
+        .iter()
+        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
+        .collect();
+    let mut ordered: Vec<Reference> = Default::default();
+    let mut visited: BTreeSet<&Reference> = Default::default();
+    let mut visited_cycle: BTreeSet<&Reference> = Default::default();
+    for node in nodes {
+        if !visited.contains(node) {
+            dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
+        }
+    }
+    Ok(ordered)
 }
