@@ -1,0 +1,45 @@
+# Sample Canton Provider Configuration
+#
+# Canton providers connect to canton-bridge Arrow Flight endpoints to extract
+# Daml ledger data from Canton Network validators. Canton-bridge translates
+# between the Canton Ledger API v2 (gRPC) and Arrow Flight for efficient data streaming.
+
+# Provider type - must be "canton" for Canton providers
+kind = "canton"
+
+# Network identifier for the Canton deployment (e.g., "devnet", "testnet", "mainnet")
+network = "devnet"
+
+# Canton-bridge Arrow Flight endpoint URL
+# This is the Arrow Flight server running canton-bridge, NOT the Canton node directly.
+# Canton-bridge connects to the Canton Ledger API and exposes data via Arrow Flight.
+bridge_url = "${CANTON_BRIDGE_URL}"
+
+# Party ID for Canton ledger access
+# This is the Daml party identifier that canton-bridge uses to subscribe to ledger updates.
+# The party must have visibility into the contracts and transactions you want to extract.
+# Format is typically: "party-name::participant-id"
+party_id = "${CANTON_PARTY_ID}"
+
+# -----------------------------------------------------------------------------
+# GCP Dev Environment Connection (Edge & Node internal)
+# -----------------------------------------------------------------------------
+# To connect to the GKE-deployed Canton validator in GCP:
+#
+# 1. Get kubectl credentials:
+#    gcloud container clusters get-credentials canton-validator-dev-gke \
+#      --region us-central1 \
+#      --project edgeandnode-canton-network
+#
+# 2. Port-forward the Canton Ledger API (for canton-bridge to connect to):
+#    kubectl port-forward -n validator svc/participant 5002:5002
+#
+# 3. Run canton-bridge locally pointing to localhost:5002
+#
+# 4. Configure this provider to point to canton-bridge's Arrow Flight endpoint:
+#    bridge_url = "http://localhost:9092"
+#
+# Authentication: The Canton participant uses OIDC/JWT. Get credentials from
+# GCP Secret Manager (validator-client-id, validator-client-secret) and configure
+# canton-bridge with the appropriate JWT token.
+# -----------------------------------------------------------------------------

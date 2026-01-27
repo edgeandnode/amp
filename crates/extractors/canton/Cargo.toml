@@ -1,0 +1,32 @@
+[package]
+name = "canton-datasets"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars"]
+
+[dependencies]
+alloy.workspace = true
+arrow.workspace = true
+arrow-flight.workspace = true
+async-stream.workspace = true
+canton-bridge = { git = "ssh://git@github.com/edgeandnode/canton-bridge", branch = "canton-phaser-demo" }
+canton-schema = { git = "ssh://git@github.com/edgeandnode/canton-bridge", branch = "canton-phaser-demo" }
+datasets-common = { path = "../../core/datasets-common" }
+datasets-raw = { path = "../../core/datasets-raw" }
+futures.workspace = true
+monitoring = { path = "../../core/monitoring" }
+schemars = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+typed-arrow = "0.5.2"
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
