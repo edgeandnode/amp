@@ -148,7 +148,6 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_NAME: ${{ github.ref_name }}
-      RELEASE_BODY: ""
       RELEASE_PRERELEASE: "false"
 
     steps:
@@ -169,7 +168,7 @@ jobs:
 
       - name: Build changelog
         if: env.RELEASE_PRERELEASE == 'true'
-        id: build_changelog
+        id: changelog
         uses: mikepenz/release-changelog-builder-action@439f79b5b5428107c7688c1d2b0e8bacc9b8792c # v6
         continue-on-error: true
         with:
@@ -177,18 +176,6 @@ jobs:
           toTag: ${{ env.RELEASE_TAG }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set release body
-        run: |
-          if [ "${{ env.RELEASE_PRERELEASE }}" = "true" ]; then
-            if [ -n "${{ steps.build_changelog.outputs.changelog }}" ]; then
-              {
-                echo "RELEASE_BODY<<'EOF'"
-                echo "${{ steps.build_changelog.outputs.changelog }}"
-                echo "EOF"
-              } >> "$GITHUB_ENV"
-            fi
-          fi
 
       - name: Download Linux artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -246,7 +233,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
           prerelease: ${{ env.RELEASE_PRERELEASE }}
-          body: ${{ env.RELEASE_BODY }}
+          body: ${{ steps.changelog.outputs.changelog || '' }}
 
       - name: Finalize release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
@@ -289,7 +276,7 @@ jobs:
           name: Nightly
           tag_name: nightly
           prerelease: true
-          body: ${{ env.RELEASE_BODY }}
+          body: ${{ steps.changelog.outputs.changelog || '' }}
           files: release/*
           fail_on_unmatched_files: true
 
