@@ -185,7 +185,13 @@ impl RawTableWriter {
             .last()
             .is_some_and(|r| *r.end() < block_num)
         {
-            parquet_meta = Some(self.close_current_file().await?);
+            // Only commit metadata if data was written to current file
+            if self.current_range.is_some() {
+                parquet_meta = Some(self.close_current_file().await?);
+            } else {
+                // Discard empty file without committing
+                self.current_file.take();
+            }
             assert!(self.current_file.is_none());
             self.ranges_to_write.pop();
             let new_file = self
@@ -290,6 +296,12 @@ impl RawTableWriter {
             assert!(self.ranges_to_write.is_empty());
             return Ok(None);
         }
+
+        // No data was written to this file - discard without committing
+        if self.current_range.is_none() {
+            return Ok(None);
+        }
+
         // We should be closing the last range.
         assert_eq!(self.ranges_to_write.len(), 1);
         self.close_current_file().await.map(Some)
