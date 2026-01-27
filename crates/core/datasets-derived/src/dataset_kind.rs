@@ -3,7 +3,7 @@
 //! This module defines the type-safe representation of the manifest dataset kind
 //! and provides parsing functionality with proper error handling.
 
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 
 /// The canonical string identifier for manifest datasets.
 ///
@@ -33,9 +33,9 @@ impl DerivedDatasetKind {
     }
 }
 
-impl From<DerivedDatasetKind> for RawDatasetKind {
+impl From<DerivedDatasetKind> for DatasetKindStr {
     fn from(value: DerivedDatasetKind) -> Self {
-        RawDatasetKind::new(value.to_string())
+        DatasetKindStr::new(value.to_string())
     }
 }
 
@@ -120,19 +120,19 @@ impl PartialEq<DerivedDatasetKind> for String {
     }
 }
 
-impl PartialEq<RawDatasetKind> for DerivedDatasetKind {
-    fn eq(&self, other: &RawDatasetKind) -> bool {
+impl PartialEq<DatasetKindStr> for DerivedDatasetKind {
+    fn eq(&self, other: &DatasetKindStr) -> bool {
         DATASET_KIND == other.as_str()
     }
 }
 
-impl PartialEq<DerivedDatasetKind> for RawDatasetKind {
+impl PartialEq<DerivedDatasetKind> for DatasetKindStr {
     fn eq(&self, _other: &DerivedDatasetKind) -> bool {
         self.as_str() == DATASET_KIND
     }
 }
 
-impl PartialEq<DerivedDatasetKind> for &RawDatasetKind {
+impl PartialEq<DerivedDatasetKind> for &DatasetKindStr {
     fn eq(&self, _other: &DerivedDatasetKind) -> bool {
         self.as_str() == DATASET_KIND
     }

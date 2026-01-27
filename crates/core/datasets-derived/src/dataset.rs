@@ -3,9 +3,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
 use datasets_common::{
     dataset::{BlockNum, Table},
+    dataset_kind_str::DatasetKindStr,
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
-    raw_dataset_kind::RawDatasetKind,
     udf::{IsolatePool, JsUdf},
 };
 
@@ -60,7 +60,7 @@ impl datasets_common::dataset::Dataset for Dataset {
         self.start_block
     }
 
-    fn kind(&self) -> RawDatasetKind {
+    fn kind(&self) -> DatasetKindStr {
         self.kind.into()
     }
 

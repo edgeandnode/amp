@@ -3,7 +3,7 @@
 //! This module defines the type-safe representation of the EVM-RPC dataset kind
 //! and provides parsing functionality with proper error handling.
 
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 
 /// The canonical string identifier for EVM-RPC datasets.
 ///
@@ -33,9 +33,9 @@ impl EvmRpcDatasetKind {
     }
 }
 
-impl From<EvmRpcDatasetKind> for RawDatasetKind {
+impl From<EvmRpcDatasetKind> for DatasetKindStr {
     fn from(value: EvmRpcDatasetKind) -> Self {
-        RawDatasetKind::new(value.to_string())
+        DatasetKindStr::new(value.to_string())
     }
 }
 
@@ -120,19 +120,19 @@ impl PartialEq<EvmRpcDatasetKind> for String {
     }
 }
 
-impl PartialEq<RawDatasetKind> for EvmRpcDatasetKind {
-    fn eq(&self, other: &RawDatasetKind) -> bool {
+impl PartialEq<DatasetKindStr> for EvmRpcDatasetKind {
+    fn eq(&self, other: &DatasetKindStr) -> bool {
         DATASET_KIND == other.as_str()
     }
 }
 
-impl PartialEq<EvmRpcDatasetKind> for RawDatasetKind {
+impl PartialEq<EvmRpcDatasetKind> for DatasetKindStr {
     fn eq(&self, _other: &EvmRpcDatasetKind) -> bool {
         self.as_str() == DATASET_KIND
     }
 }
 
-impl PartialEq<EvmRpcDatasetKind> for &RawDatasetKind {
+impl PartialEq<EvmRpcDatasetKind> for &DatasetKindStr {
     fn eq(&self, _other: &EvmRpcDatasetKind) -> bool {
         self.as_str() == DATASET_KIND
     }

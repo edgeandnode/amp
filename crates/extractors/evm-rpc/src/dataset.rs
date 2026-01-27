@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use datasets_common::{
     dataset::{BlockNum, Table},
+    dataset_kind_str::DatasetKindStr,
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
-    raw_dataset_kind::RawDatasetKind,
 };
 
 use crate::EvmRpcDatasetKind;
@@ -28,7 +28,7 @@ impl datasets_common::dataset::Dataset for Dataset {
         self.start_block
     }
 
-    fn kind(&self) -> RawDatasetKind {
+    fn kind(&self) -> DatasetKindStr {
         self.kind.into()
     }
 
