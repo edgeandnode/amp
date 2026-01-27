@@ -205,7 +205,8 @@ Each Skill provides:
 
 #### 2. Planning Phase
 
-- Create detailed implementation plan based on [Coding Patterns](#2-coding-patterns)
+- **First**: Use `/code-pattern-discovery` to load relevant patterns for the affected crate(s)
+- Create detailed implementation plan based on the loaded patterns
 - Ensure plan follows required patterns (error handling, type design, module structure, etc.)
 - Identify validation checkpoints
 - Consider edge cases and error handling according to pattern guidelines
@@ -302,6 +303,7 @@ Edit File → /code-format skill
 
 | What             | Where                                 | When                                |
 |------------------|---------------------------------------|-------------------------------------|
+| **Plan work**    | `/code-pattern-discovery`             | BEFORE creating any plan            |
 | **Run commands** | `.claude/skills/`                     | Check Skills BEFORE any command     |
 | **Write code**   | [Coding Patterns](#2-coding-patterns) | Load patterns before implementation |
 | **Format**       | `/code-format`                        | IMMEDIATELY after each edit         |
