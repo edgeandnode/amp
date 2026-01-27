@@ -5,10 +5,9 @@ version.workspace = true
 license-file.workspace = true
 
 [features]
-schemars = ["dep:schemars", "datasets-common/schemars", "common/schemars", "dep:serde_json"]
+schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 
 [dependencies]
-common = { version = "0.1.0", path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 js-runtime = { version = "0.1.0", path = "../js-runtime" }

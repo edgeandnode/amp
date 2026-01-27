@@ -1,8 +1,4 @@
-use std::sync::Arc;
-
-use datafusion::{arrow::datatypes::DataType, logical_expr::ScalarUDF};
-use datasets_common::dataset::Table;
-use serde::Deserialize;
+use datafusion::logical_expr::ScalarUDF;
 
 pub mod for_admin_api;
 pub mod for_dump;
@@ -11,22 +7,6 @@ pub mod for_query;
 pub mod table;
 
 pub use table::LogicalTable;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Function {
-    pub name: String,
-
-    // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
-    pub input_types: Vec<DataType>,
-    pub output_type: DataType,
-    pub source: FunctionSource,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct FunctionSource {
-    pub source: Arc<str>,
-    pub filename: String,
-}
 
 #[derive(Clone, Debug)]
 pub struct LogicalCatalog {

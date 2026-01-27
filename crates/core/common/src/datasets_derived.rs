@@ -1,4 +1,4 @@
-//! Derived dataset utilities
+//! Derived dataset transformation utilities.
 //!
 //! This module provides utilities for working with derived datasets, including:
 //! - Converting manifest representations to logical datasets
@@ -11,31 +11,31 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{
-    catalog::logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
-    sql::{ResolveTableReferencesError, TableReference, resolve_table_references},
-};
 use datafusion::sql::parser;
 use datasets_common::{
     dataset::Table as LogicalTable, hash_reference::HashReference, table_name::TableName,
 };
+use datasets_derived::{
+    Dataset, DerivedDatasetKind, Manifest,
+    function::{Function, FunctionSource},
+    manifest::TableInput,
+};
 
-use crate::{DerivedDatasetKind, Manifest, deps, manifest::TableInput};
+use crate::sql::{ResolveTableReferencesError, TableReference, resolve_table_references};
 
 /// Convert a derived dataset manifest into a logical dataset representation.
 ///
 /// This function transforms a derived dataset manifest with its tables, functions, and metadata
 /// into the internal `Dataset` structure used by the query engine. Dataset identity (namespace,
 /// name, version, hash reference) must be provided externally as they are not part of the manifest.
-pub fn dataset(
-    reference: HashReference,
-    manifest: Manifest,
-) -> Result<crate::dataset::Dataset, DatasetError> {
+// TODO This module should be moved to `datasets-derived` crate. It's temporarily located in
+//  `common` as part of inverting the dependency relationship.
+pub fn dataset(reference: HashReference, manifest: Manifest) -> Result<Dataset, DatasetError> {
     let queries = {
         let mut queries = BTreeMap::new();
         for (table_name, table) in &manifest.tables {
             let TableInput::View(query) = &table.input;
-            let query = common::sql::parse(&query.sql).map_err(|err| DatasetError::ParseSql {
+            let query = crate::sql::parse(&query.sql).map_err(|err| DatasetError::ParseSql {
                 table_name: table_name.clone(),
                 source: err,
             })?;
@@ -59,27 +59,27 @@ pub fn dataset(
     let functions = manifest
         .functions
         .into_iter()
-        .map(|(name, f)| LogicalFunction {
+        .map(|(name, f)| Function {
             name: name.into_inner(),
             input_types: f.input_types.into_iter().map(|dt| dt.0).collect(),
             output_type: f.output_type.0,
-            source: LogicalFunctionSource {
+            source: FunctionSource {
                 source: f.source.source,
                 filename: f.source.filename,
             },
         })
         .collect();
 
-    Ok(crate::dataset::Dataset {
+    Ok(Dataset::new(
         reference,
-        dependencies: manifest.dependencies,
-        kind: DerivedDatasetKind,
-        network: None,
-        start_block: manifest.start_block,
-        finalized_blocks_only: false,
+        manifest.dependencies,
+        DerivedDatasetKind,
+        None,
+        manifest.start_block,
+        false,
         tables,
         functions,
-    })
+    ))
 }
 
 /// Errors that occur when converting a derived dataset manifest to a logical dataset
@@ -102,7 +102,7 @@ pub enum DatasetError {
     ParseSql {
         table_name: TableName,
         #[source]
-        source: common::sql::ParseSqlError,
+        source: crate::sql::ParseSqlError,
     },
 
     /// Failed to sort tables by their SQL dependencies
@@ -231,11 +231,10 @@ fn table_dependency_sort(
 
     for node in nodes {
         if !visited.contains(node) {
-            deps::dfs(node, &deps, &mut ordered, &mut visited, &mut visiting).map_err(|err| {
-                TableDependencySortError {
+            datasets_derived::deps::dfs(node, &deps, &mut ordered, &mut visited, &mut visiting)
+                .map_err(|err| TableDependencySortError {
                     table_name: err.node,
-                }
-            })?;
+                })?;
         }
     }
 

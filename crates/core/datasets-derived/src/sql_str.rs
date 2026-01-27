@@ -4,11 +4,6 @@
 //! It performs minimal validation (non-empty, non-whitespace) and defers actual
 //! SQL statement parsing to the query engine.
 
-// NOTE: `SqlStr` lives in the `datasets-derived` crate rather than `common` crate
-// to avoid a dependency cycle. The derived dataset manifest (in `datasets-derived`)
-// depends on `SqlStr` for SQL query validation, and `common` depends on `datasets-derived`,
-// so placing `SqlStr` in `common` would create: common → datasets-derived → common.
-
 /// A string intended to contain SQL, with minimal validation.
 ///
 /// This type performs basic string validation but does **not** parse or validate

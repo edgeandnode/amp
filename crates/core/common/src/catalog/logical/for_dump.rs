@@ -10,18 +10,21 @@ use std::{
 
 use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
 use datasets_common::{
-    deps::alias::{DepAlias, DepAliasOrSelfRef},
+    deps::alias::{DepAlias, DepAliasOrSelfRef, SELF_REF_KEYWORD},
     func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
     hash::Hash,
     hash_reference::HashReference,
-    manifest::Function,
     table_name::TableName,
     udf::{IsolatePool, JsUdf},
 };
+use datasets_derived::manifest::Function;
 
 use crate::{
-    BoxError, LogicalTable,
-    catalog::{dataset_access::DatasetAccess, logical::LogicalCatalog},
+    BoxError,
+    catalog::{
+        dataset_access::DatasetAccess,
+        logical::{LogicalCatalog, LogicalTable},
+    },
     sql::{FunctionReference, TableReference},
 };
 
@@ -253,7 +256,7 @@ async fn resolve_udfs(
                         // Use "self" as schema qualifier to preserve case sensitivity
                         let udf = AsyncScalarUDF::new(Arc::new(JsUdf::new(
                             isolate_pool.clone(),
-                            Some(datasets_common::deps::alias::SELF_REF_KEYWORD.to_string()), // Schema = "self"
+                            Some(SELF_REF_KEYWORD.to_string()), // Schema = "self"
                             func_def.source.source.clone(),
                             func_def.source.filename.clone().into(),
                             Arc::from(function.as_ref().as_str()),

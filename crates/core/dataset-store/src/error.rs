@@ -79,7 +79,7 @@ pub enum GetDatasetError {
     CreateDerivedDataset {
         reference: HashReference,
         #[source]
-        source: datasets_derived::DatasetError,
+        source: common::datasets_derived::DatasetError,
     },
 }
 

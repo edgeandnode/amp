@@ -18,10 +18,11 @@ use datafusion::{
 use tracing::instrument;
 
 use crate::{
-    LogicalCatalog, LogicalTable, QueryContext,
+    LogicalCatalog,
+    catalog::logical::LogicalTable,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::{is_incremental, propagate_block_num},
-    query_context::{Error, default_catalog_name},
+    query_context::{Error, QueryContext, default_catalog_name},
     sql::TableReference,
 };
 

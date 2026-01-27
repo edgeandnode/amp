@@ -13,8 +13,11 @@ use datasets_common::{
 };
 
 use crate::{
-    BoxError, LogicalTable,
-    catalog::{dataset_access::DatasetAccess, logical::LogicalCatalog},
+    BoxError,
+    catalog::{
+        dataset_access::DatasetAccess,
+        logical::{LogicalCatalog, LogicalTable},
+    },
     sql::{FunctionReference, TableReference},
 };
 

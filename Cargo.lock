@@ -2765,13 +2765,13 @@ dependencies = [
  "datafusion-datasource",
  "datafusion-tracing",
  "datasets-common",
+ "datasets-derived",
  "futures",
  "itertools 0.14.0",
  "metadata-db",
  "object_store",
  "rand 0.9.2",
  "regex",
- "schemars 1.2.0",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -4087,7 +4087,6 @@ dependencies = [
 name = "datasets-derived"
 version = "0.1.0"
 dependencies = [
- "common",
  "datafusion",
  "datasets-common",
  "js-runtime",
