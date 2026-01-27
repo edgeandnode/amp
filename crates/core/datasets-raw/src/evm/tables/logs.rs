@@ -203,7 +203,7 @@ fn default_to_arrow() {
                 numbers: log.block_num..=log.block_num,
                 network: "test_network".to_string(),
                 hash: log.block_hash.into(),
-                prev_hash: None,
+                parent_hash: None,
             })
             .unwrap()
     };

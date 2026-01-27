@@ -327,7 +327,7 @@ impl QueryContext {
                     // Intersect: take max start, min end
                     if table_range.start() > existing.start() {
                         existing.numbers = table_range.start()..=existing.end();
-                        existing.prev_hash = table_range.prev_hash;
+                        existing.parent_hash = table_range.parent_hash;
                     }
                     if table_range.end() < existing.end() {
                         existing.numbers = existing.start()..=table_range.end();

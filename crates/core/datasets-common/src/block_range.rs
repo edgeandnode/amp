@@ -19,7 +19,7 @@ pub struct BlockRange {
     /// Hash of the end block.
     pub hash: BlockHash,
     /// Hash of the block before the start block (for reorg detection).
-    pub prev_hash: Option<BlockHash>,
+    pub parent_hash: Option<BlockHash>,
 }
 
 impl BlockRange {
@@ -40,6 +40,6 @@ impl BlockRange {
     pub fn adjacent(&self, other: &Self) -> bool {
         self.network == other.network
             && (self.end() + 1) == other.start()
-            && other.prev_hash.map(|h| h == self.hash).unwrap_or(true)
+            && other.parent_hash.map(|h| h == self.hash).unwrap_or(true)
     }
 }

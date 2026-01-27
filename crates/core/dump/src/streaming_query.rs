@@ -540,7 +540,7 @@ impl StreamingQuery {
                 numbers: start.number..=end.number,
                 network: self.network.clone(),
                 hash: end.hash,
-                prev_hash: start.prev_hash,
+                parent_hash: start.prev_hash,
             },
             direction,
         }))

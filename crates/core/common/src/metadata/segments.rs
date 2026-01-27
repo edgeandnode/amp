@@ -115,7 +115,7 @@ impl Chain {
             numbers: self.start()..=self.end(),
             network: self.first().network.clone(),
             hash: self.last().hash,
-            prev_hash: self.first().prev_hash,
+            parent_hash: self.first().parent_hash,
         }
     }
 }
@@ -379,7 +379,7 @@ mod test {
             numbers: numbers.clone(),
             network: "test".to_string(),
             hash: test_hash(*numbers.end() as u8, fork.1),
-            prev_hash: if *numbers.start() == 0 {
+            parent_hash: if *numbers.start() == 0 {
                 Some(Default::default())
             } else {
                 Some(test_hash(*numbers.start() as u8 - 1, fork.0))
