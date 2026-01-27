@@ -471,14 +471,14 @@ impl TransactionStatusMeta {
             pre_balances: rpc_meta.pre_balances,
             post_balances: rpc_meta.post_balances,
             inner_instructions,
-            log_messages: rpc_meta.log_messages.map(|log_messages| log_messages),
+            log_messages: rpc_meta.log_messages.into(),
             pre_token_balances,
             post_token_balances,
             rewards,
             loaded_addresses,
             return_data,
-            compute_units_consumed: rpc_meta.compute_units_consumed.map(|cuc| cuc),
-            cost_units: rpc_meta.cost_units.map(|cu| cu),
+            compute_units_consumed: rpc_meta.compute_units_consumed.into(),
+            cost_units: rpc_meta.cost_units.into(),
         })
     }
 }
