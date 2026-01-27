@@ -34,7 +34,8 @@ dependencies = [
  "amp-datasets-registry",
  "amp-providers-registry",
  "async-trait",
- "axum",
+ "axum 0.8.8",
+ "canton-datasets",
  "common",
  "datafusion",
  "datasets-common",
@@ -995,6 +996,7 @@ dependencies = [
  "amp-datasets-registry",
  "amp-providers-registry",
  "async-stream",
+ "canton-datasets",
  "common",
  "datafusion",
  "datasets-common",
@@ -1150,7 +1152,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "arrow-to-postgres",
- "axum",
+ "axum 0.8.8",
  "backon",
  "bytes",
  "clap",
@@ -1897,7 +1899,7 @@ name = "auth-http"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
+ "axum 0.8.8",
  "axum-extra",
  "chrono",
  "headers",
@@ -1933,11 +1935,45 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "axum"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
+dependencies = [
+ "async-trait",
+ "axum-core 0.4.5",
+ "bytes",
+ "futures-util",
+ "http 1.4.0",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "itoa",
+ "matchit 0.7.3",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustversion",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8"
 dependencies = [
- "axum-core",
+ "axum-core 0.5.6",
  "axum-macros",
  "bytes",
  "form_urlencoded",
@@ -1948,7 +1984,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "itoa",
- "matchit",
+ "matchit 0.8.4",
  "memchr",
  "mime",
  "percent-encoding",
@@ -1960,6 +1996,27 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http 1.4.0",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -1990,8 +2047,8 @@ version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fef252edff26ddba56bbcdf2ee3307b8129acb86f5749b68990c168a6fcc9c76"
 dependencies = [
- "axum",
- "axum-core",
+ "axum 0.8.8",
+ "axum-core 0.5.6",
  "bytes",
  "futures-core",
  "futures-util",
@@ -2452,6 +2509,84 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629a66d692cb9ff1a1c664e41771b3dcaf961985a9774c0eb0bd1b51cf60a48"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "canton-bridge"
+version = "0.1.0"
+source = "git+ssh://git@github.com/edgeandnode/canton-bridge?branch=canton-phaser-demo#b605af7f5e1d2f5c0feb173ba27b411b2fc49795"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arrow-array",
+ "arrow-flight",
+ "arrow-ipc",
+ "arrow-schema",
+ "async-stream",
+ "async-trait",
+ "axum 0.7.9",
+ "base64 0.22.1",
+ "canton-schema",
+ "chrono",
+ "clap",
+ "futures",
+ "hex",
+ "http 1.4.0",
+ "hyper-util",
+ "lazy_static",
+ "num_cpus",
+ "phaser-bridge",
+ "phaser-metrics",
+ "prometheus",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.13.1",
+ "tonic-build",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "typed-arrow",
+]
+
+[[package]]
+name = "canton-datasets"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "arrow",
+ "arrow-flight",
+ "async-stream",
+ "canton-bridge",
+ "canton-schema",
+ "datasets-common",
+ "datasets-raw",
+ "futures",
+ "monitoring",
+ "schemars 1.2.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tonic 0.13.1",
+ "tracing",
+ "typed-arrow",
+]
+
+[[package]]
+name = "canton-schema"
+version = "0.1.0"
+source = "git+ssh://git@github.com/edgeandnode/canton-bridge?branch=canton-phaser-demo#b605af7f5e1d2f5c0feb173ba27b411b2fc49795"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "prost-types 0.13.5",
+ "typed-arrow",
 ]
 
 [[package]]
@@ -2930,7 +3065,7 @@ dependencies = [
  "amp-datasets-registry",
  "amp-providers-registry",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "datasets-common",
  "dump",
  "metadata-db",
@@ -6627,6 +6762,12 @@ dependencies = [
 
 [[package]]
 name = "matchit"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
+
+[[package]]
+name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
@@ -7361,7 +7502,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fa342b7ded339a38c6df9a3aef833298bca24a7aeec098397b4b3ec741b0e52"
 dependencies = [
- "axum",
+ "axum 0.8.8",
  "futures-util",
  "http 1.4.0",
  "http-body",
@@ -7750,6 +7891,44 @@ checksum = "e9567389417feee6ce15dd6527a8a1ecac205ef62c2932bcf3d9f6fc5b78b414"
 dependencies = [
  "futures",
  "rustc_version 0.4.1",
+]
+
+[[package]]
+name = "phaser-bridge"
+version = "0.1.0"
+source = "git+ssh://git@github.com/edgeandnode/phaser-bridge?branch=canton-phaser-demo#46d4ff1c1e16a2450574aff9a23571fbc7e92f77"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arrow-array",
+ "arrow-flight",
+ "arrow-ipc",
+ "arrow-schema",
+ "async-stream",
+ "async-trait",
+ "bincode 1.3.3",
+ "futures",
+ "hyper-util",
+ "prost 0.13.5",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic 0.13.1",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "phaser-metrics"
+version = "0.1.0"
+source = "git+ssh://git@github.com/edgeandnode/phaser-bridge?branch=canton-phaser-demo#46d4ff1c1e16a2450574aff9a23571fbc7e92f77"
+dependencies = [
+ "once_cell",
+ "phaser-bridge",
+ "prometheus",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -8161,6 +8340,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "protobuf",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "proptest"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8262,6 +8456,12 @@ checksum = "b9b4db3d6da204ed77bb26ba83b6122a73aeb2e87e25fbf7ad2e84c4ccbf8f72"
 dependencies = [
  "prost 0.14.1",
 ]
+
+[[package]]
+name = "protobuf"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "psm"
@@ -9451,7 +9651,7 @@ dependencies = [
  "arrow-flight",
  "async-stream",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "bincode 2.0.1",
  "bytes",
  "common",
@@ -12620,7 +12820,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
 dependencies = [
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "base64 0.22.1",
  "bytes",
  "flate2",
@@ -12643,6 +12843,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
@@ -12652,7 +12853,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb7613188ce9f7df5bfe185db26c5814347d110db17920415cf2fbcad85e7203"
 dependencies = [
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "base64 0.22.1",
  "bytes",
  "h2",
@@ -12895,6 +13096,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 dependencies = [
  "rand 0.9.2",
+]
+
+[[package]]
+name = "typed-arrow"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a90c028b772d380c29ae66cabce698a4f24fc9f02dd673250d32eaf9132a5bc9"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "half 2.7.1",
+ "thiserror 2.0.17",
+ "typed-arrow-derive",
+]
+
+[[package]]
+name = "typed-arrow-derive"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65560c198e13adbbd185b7970ca7fcf9237546a5db39949e64f16e050b75825a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
 ]
 
 [[package]]

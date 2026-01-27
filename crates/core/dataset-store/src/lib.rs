@@ -7,6 +7,7 @@ use std::{
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
+use canton_datasets::{Manifest as CantonManifest, ProviderConfig as CantonProviderConfig};
 use common::{
     catalog::dataset_access::{
         EthCallForDatasetError as DatasetAccessEthCallForDatasetError,
@@ -155,6 +156,16 @@ impl DatasetStore {
         })?;
 
         let dataset: Arc<dyn datasets_common::dataset::Dataset> = match kind {
+            DatasetKind::Canton => {
+                let manifest = manifest_content
+                    .try_into_manifest::<CantonManifest>()
+                    .map_err(|source| GetDatasetError::ParseManifest {
+                        reference: reference.clone(),
+                        kind: kind.into(),
+                        source,
+                    })?;
+                Arc::new(canton_datasets::dataset(reference.clone(), manifest))
+            }
             DatasetKind::EvmRpc => {
                 let manifest = manifest_content
                     .try_into_manifest::<EvmRpcManifest>()
@@ -303,6 +314,21 @@ impl DatasetStore {
 
         let provider_name = config.name.clone();
         let client = match kind {
+            DatasetKind::Canton => {
+                let config = config
+                    .try_into_config::<CantonProviderConfig>()
+                    .map_err(|err| GetClientError::ProviderConfigParseError {
+                        name: provider_name.clone(),
+                        source: err,
+                    })?;
+                canton_datasets::Client::new(config)
+                    .await
+                    .map(BlockStreamClient::Canton)
+                    .map_err(|err| GetClientError::CantonClientError {
+                        name: provider_name.clone(),
+                        source: err,
+                    })?
+            }
             DatasetKind::EvmRpc => {
                 let config = config
                     .try_into_config::<EvmRpcProviderConfig>()

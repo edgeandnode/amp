@@ -4,6 +4,7 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
+use canton_datasets::{CantonDatasetKind, Manifest as CantonManifest};
 use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
@@ -179,6 +180,11 @@ pub async fn handler(
                     &ctx.dataset_store,
                 )
                 .await
+                .map_err(Error::from)?
+            } else if manifest.kind == CantonDatasetKind {
+                parse_and_canonicalize_raw_dataset_manifest::<CantonManifest>(
+                    manifest_content.get(),
+                )
                 .map_err(Error::from)?
             } else if manifest.kind == EvmRpcDatasetKind {
                 parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(
@@ -452,7 +458,7 @@ pub enum Error {
     /// This occurs when:
     /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
     #[error(
-        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose'"
+        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'canton', 'evm-rpc', 'firehose', 'solana'"
     )]
     UnsupportedDatasetKind(String),
 

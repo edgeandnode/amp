@@ -8,6 +8,7 @@ use futures::Stream;
 
 #[derive(Clone)]
 pub enum BlockStreamClient {
+    Canton(canton_datasets::Client),
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
     Solana(solana_datasets::SolanaExtractor),
     Firehose(Box<firehose_datasets::Client>),
@@ -23,6 +24,12 @@ impl BlockStreamer for BlockStreamClient {
         // use `stream!` to unify them into a wrapper stream
         stream! {
             match self {
+                Self::Canton(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
                 Self::EvmRpc(client) => {
                     let stream = client.block_stream(start_block, end_block).await;
                     for await item in stream {
@@ -50,6 +57,7 @@ impl BlockStreamer for BlockStreamClient {
         finalized: bool,
     ) -> Result<Option<BlockNum>, LatestBlockError> {
         match self {
+            Self::Canton(client) => client.latest_block(finalized).await,
             Self::EvmRpc(client) => client.latest_block(finalized).await,
             Self::Solana(client) => client.latest_block(finalized).await,
             Self::Firehose(client) => client.latest_block(finalized).await,
@@ -58,6 +66,7 @@ impl BlockStreamer for BlockStreamClient {
 
     async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
         match self {
+            Self::Canton(client) => client.wait_for_cleanup().await,
             Self::EvmRpc(client) => client.wait_for_cleanup().await,
             Self::Solana(client) => client.wait_for_cleanup().await,
             Self::Firehose(client) => client.wait_for_cleanup().await,
@@ -66,6 +75,7 @@ impl BlockStreamer for BlockStreamClient {
 
     fn provider_name(&self) -> &str {
         match self {
+            Self::Canton(client) => client.provider_name(),
             Self::EvmRpc(client) => client.provider_name(),
             Self::Solana(client) => client.provider_name(),
             Self::Firehose(client) => client.provider_name(),

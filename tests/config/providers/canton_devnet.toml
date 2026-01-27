@@ -1,0 +1,4 @@
+kind = "canton"
+network = "devnet"
+bridge_url = "${CANTON_BRIDGE_URL}"
+party_id = "${CANTON_PARTY_ID}"

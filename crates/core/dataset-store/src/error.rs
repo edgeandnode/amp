@@ -248,6 +248,16 @@ pub enum GetClientError {
         source: firehose_datasets::Error,
     },
 
+    /// Failed to create a Canton client.
+    ///
+    /// This occurs during initialization of the Canton client, which may fail due to
+    /// invalid canton-bridge endpoints or connection issues.
+    #[error("Failed to create Canton client for dataset '{name}': {source}")]
+    CantonClientError {
+        name: String,
+        source: canton_datasets::client::Error,
+    },
+
     #[error("Manifest {0} is not registered")]
     ManifestNotRegistered(Hash),
 

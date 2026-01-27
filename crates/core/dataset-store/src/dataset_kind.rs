@@ -10,6 +10,7 @@
 //! - **Firehose**: StreamingFast Firehose protocol for real-time blockchain data
 //! - **Derived**: Modern manifest-based dataset definitions
 
+use canton_datasets::CantonDatasetKind;
 use datasets_common::raw_dataset_kind::RawDatasetKind;
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
@@ -19,11 +20,13 @@ use solana_datasets::SolanaDatasetKind;
 /// Represents the different types of datasets supported by the system.
 ///
 /// Dataset kinds determine how data is extracted, processed, and served.
-/// Raw datasets (`EvmRpc`, `Firehose`) extract data directly
+/// Raw datasets (`EvmRpc`, `Firehose`, `Canton`) extract data directly
 /// from blockchain sources, while derived datasets (`Derived`)
 /// transform data from other datasets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatasetKind {
+    /// Canton Network dataset for ledger data via canton-bridge.
+    Canton,
     /// Ethereum-compatible JSON-RPC dataset for direct blockchain access.
     EvmRpc,
     /// Solana dataset for direct blockchain access.
@@ -39,10 +42,13 @@ pub enum DatasetKind {
 impl DatasetKind {
     /// Returns `true` if this dataset kind extracts raw data from blockchain sources.
     ///
-    /// Raw datasets (`EvmRpc`, `Firehose`) connect directly to blockchain
+    /// Raw datasets (`EvmRpc`, `Firehose`, `Canton`) connect directly to blockchain
     /// infrastructure, while derived datasets (`Derived`) process data from other datasets.
     pub fn is_raw(&self) -> bool {
-        matches!(self, Self::EvmRpc | Self::Solana | Self::Firehose)
+        matches!(
+            self,
+            Self::Canton | Self::EvmRpc | Self::Solana | Self::Firehose
+        )
     }
 
     /// Returns the string representation of this dataset kind.
@@ -51,6 +57,7 @@ impl DatasetKind {
     /// and configuration files.
     pub fn as_str(&self) -> &str {
         match self {
+            Self::Canton => CantonDatasetKind.as_str(),
             Self::EvmRpc => EvmRpcDatasetKind.as_str(),
             Self::Solana => SolanaDatasetKind.as_str(),
             Self::Firehose => FirehoseDatasetKind.as_str(),
@@ -70,6 +77,7 @@ impl std::str::FromStr for DatasetKind {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            s if s == CantonDatasetKind => Ok(Self::Canton),
             s if s == EvmRpcDatasetKind => Ok(Self::EvmRpc),
             s if s == SolanaDatasetKind => Ok(Self::Solana),
             s if s == FirehoseDatasetKind => Ok(Self::Firehose),
