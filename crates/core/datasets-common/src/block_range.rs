@@ -18,8 +18,8 @@ pub struct BlockRange {
     pub network: String,
     /// Hash of the end block.
     pub hash: BlockHash,
-    /// Hash of the block before the start block (for reorg detection).
-    pub parent_hash: Option<BlockHash>,
+    /// Hash of the block before the start block.
+    pub parent_hash: BlockHash,
 }
 
 impl BlockRange {
@@ -36,10 +36,11 @@ impl BlockRange {
     }
 
     /// Return true iff `self` is sequenced immediately before `other`.
+    /// We allow gaps between numbers, but the hashes must line up.
     #[inline]
     pub fn adjacent(&self, other: &Self) -> bool {
         self.network == other.network
-            && (self.end() + 1) == other.start()
-            && other.parent_hash.map(|h| h == self.hash).unwrap_or(true)
+            && self.end() < other.start()
+            && self.hash == other.parent_hash
     }
 }

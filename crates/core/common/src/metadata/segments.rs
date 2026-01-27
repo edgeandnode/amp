@@ -380,9 +380,9 @@ mod test {
             network: "test".to_string(),
             hash: test_hash(*numbers.end() as u8, fork.1),
             parent_hash: if *numbers.start() == 0 {
-                Some(Default::default())
+                Default::default()
             } else {
-                Some(test_hash(*numbers.start() as u8 - 1, fork.0))
+                test_hash(*numbers.start() as u8 - 1, fork.0)
             },
         }
     }
