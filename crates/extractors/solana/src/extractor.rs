@@ -109,6 +109,7 @@ impl SolanaExtractor {
             // Slots can be skipped, so we'll track the next expected slot and in the case of a
             // mismatch, yield empty rows for the skipped slots.
             let mut expected_next_slot = start;
+            let requested_range = start..=end;
 
             // Download historical blocks from the Old Faithful archive.
             futures::pin_mut!(historical_block_stream);
@@ -122,10 +123,13 @@ impl SolanaExtractor {
                 };
 
                 let current_slot = slot.slot;
-                assert!(
-                    (start..=end).contains(&current_slot),
-                    "historical block stream should be limited to requested range"
-                );
+                if !requested_range.contains(&current_slot) {
+                    let e = format!(
+                        "historical block stream yielded slot {current_slot} outside of requested range {start}..={end}"
+                    );
+                    yield Err(e.into());
+                    return;
+                }
 
                 if current_slot != expected_next_slot {
                     // NOTE: If `current_slot == end`, we don't yield an empty row for it since
