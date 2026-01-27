@@ -140,7 +140,7 @@ impl SolanaExtractor {
 
                 yield tables::convert_slot_to_db_rows(non_empty_of1_slot(slot), &self.network).map_err(Into::into);
 
-                if current_slot >= end {
+                if current_slot == end {
                     // Reached the end of the requested range.
                     return;
                 }
