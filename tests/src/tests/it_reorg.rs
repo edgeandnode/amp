@@ -589,7 +589,7 @@ impl ReorgTestCtx {
             numbers: numbers.clone(),
             network: "anvil".parse().expect("valid network id"),
             hash: blocks[*numbers.end() as usize].hash,
-            prev_hash: Some(blocks[*numbers.start() as usize].parent_hash),
+            parent_hash: Some(blocks[*numbers.start() as usize].parent_hash),
         }
     }
 }

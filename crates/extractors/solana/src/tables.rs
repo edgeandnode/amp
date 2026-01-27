@@ -54,7 +54,7 @@ pub(crate) fn convert_slot_to_db_rows(
         network: network.clone(),
         hash: blockhash.into(),
         // Previous slot could be skipped, do not set prev_hash.
-        prev_hash: None,
+        parent_hash: None,
     };
 
     let block_headers_row = {
@@ -137,7 +137,7 @@ pub(crate) fn empty_db_rows(slot: Slot, network: &NetworkId) -> Result<Rows, Row
         network: network.clone(),
         hash: [0u8; 32].into(),
         // Previous slot could be skipped, do not set prev_hash.
-        prev_hash: None,
+        parent_hash: None,
     };
 
     let header = block_headers::BlockHeader {

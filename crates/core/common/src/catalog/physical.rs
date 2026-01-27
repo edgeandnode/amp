@@ -503,7 +503,7 @@ impl TableSnapshot {
             network: start.range.network.clone(),
             numbers: start.range.start()..=end.range.end(),
             hash: end.range.hash,
-            prev_hash: start.range.prev_hash,
+            parent_hash: start.range.parent_hash,
         })
     }
 

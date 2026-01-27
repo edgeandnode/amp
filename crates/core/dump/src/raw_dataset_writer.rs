@@ -226,7 +226,7 @@ impl RawTableWriter {
         // blocks within a segment form a valid chain.
         let reorg = match (
             self.current_range.as_ref().map(|r| &r.hash),
-            table_rows.range.prev_hash.as_ref(),
+            table_rows.range.parent_hash.as_ref(),
         ) {
             (Some(a), Some(b)) => a != b,
             _ => false,
@@ -277,7 +277,7 @@ impl RawTableWriter {
                     numbers: range.start()..=table_rows.range.end(),
                     network: range.network,
                     hash: table_rows.range.hash,
-                    prev_hash: range.prev_hash,
+                    parent_hash: range.parent_hash,
                 })
             }
         };
