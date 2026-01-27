@@ -20,7 +20,7 @@ use crate::{
     ctx::Ctx,
     handlers::{
         common::{
-            ParseDerivedManifestError, ParseRawManifestError,
+            ManifestValidationError, ParseDerivedManifestError, ParseRawManifestError,
             parse_and_canonicalize_derived_dataset_manifest,
             parse_and_canonicalize_raw_dataset_manifest,
         },
@@ -191,7 +191,7 @@ pub enum Error {
 
     /// Manifest validation error for derived datasets
     #[error("manifest validation error: {0}")]
-    ManifestValidationError(#[source] datasets_derived::ManifestValidationError),
+    ManifestValidationError(#[source] ManifestValidationError),
 
     /// Unsupported dataset kind
     ///
