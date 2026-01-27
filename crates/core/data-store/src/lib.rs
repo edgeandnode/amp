@@ -413,6 +413,27 @@ impl DataStore {
         Ok(())
     }
 
+    /// Deletes a physical table revision completely.
+    ///
+    /// This removes:
+    /// 1. All Parquet files from object storage
+    /// 2. All file metadata records from the database (via CASCADE)
+    /// 3. The physical table revision record from the database
+    pub async fn delete_revision(
+        &self,
+        revision: &PhyTableRevision,
+    ) -> Result<(), DeleteRevisionError> {
+        metadata_db::physical_table::delete_by_id(&self.metadata_db, revision.location_id)
+            .await
+            .map_err(DeleteRevisionError::Delete)?;
+
+        self.truncate_revision(revision)
+            .await
+            .map_err(DeleteRevisionError::Truncate)?;
+
+        Ok(())
+    }
+
     /// Deletes multiple files from object storage.
     ///
     /// Validates that the number of successfully deleted files matches the expected count.
@@ -806,6 +827,34 @@ pub enum TruncateError {
     /// - Incomplete deletion (partial failure)
     #[error("Failed to delete files from object store")]
     DeleteFiles(#[source] DeleteFilesInObjectStoreError),
+}
+
+/// Errors that occur when deleting a physical table revision
+///
+/// This error type is used by `DataStore::delete_revision()`.
+#[derive(Debug, thiserror::Error)]
+pub enum DeleteRevisionError {
+    /// Failed to truncate revision
+    ///
+    /// This error occurs when deleting files from object storage fails.
+    ///
+    /// Common causes:
+    /// - Object store unavailable or unreachable
+    /// - Network connectivity issues
+    /// - Permission denied for deleting objects
+    #[error("Failed to truncate revision")]
+    Truncate(#[source] TruncateError),
+
+    /// Failed to delete physical table revision from metadata database
+    ///
+    /// This error occurs when deleting the physical table revision from the metadata database fails.
+    ///
+    /// Common causes:
+    /// - Database connection lost during deletion
+    /// - Database server unreachable
+    /// - Network connectivity issues
+    #[error("Failed to delete physical table revision from metadata database")]
+    Delete(#[source] metadata_db::Error),
 }
 
 /// Failed to register file metadata in the metadata database
