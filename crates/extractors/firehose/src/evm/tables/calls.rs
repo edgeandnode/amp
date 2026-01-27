@@ -282,7 +282,7 @@ fn default_to_arrow() {
                 numbers: call.block_num..=call.block_num,
                 network: "test_network".parse().expect("valid network id"),
                 hash: call.block_hash.into(),
-                parent_hash: None,
+                parent_hash: Default::default(),
             })
             .unwrap()
     };

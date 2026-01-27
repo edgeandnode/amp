@@ -639,7 +639,7 @@ fn rpc_to_rows(
         numbers: header.block_num..=header.block_num,
         network: network.clone(),
         hash: header.hash.into(),
-        parent_hash: Some(header.parent_hash.into()),
+        parent_hash: header.parent_hash.into(),
     };
 
     let header_row = {

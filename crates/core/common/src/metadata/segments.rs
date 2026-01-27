@@ -233,77 +233,62 @@ struct Chains {
 
 /// Find the canonical and fork chain from a sequence of segments. The result is independent of the
 /// input order.
-// The implementation uses depth-first from the segment with the greatest end block number,
-// favoring segments with the latest object `last_modified` timestamp.
 #[inline]
-fn chains(segments: Vec<Segment>) -> Option<Chains> {
-    let min_start = segments.iter().map(|s| s.range.start()).min()?;
-    let mut by_end: BTreeMap<BlockNum, Vec<Segment>> = Default::default();
-    for s in segments {
-        by_end.entry(s.range.end()).or_default().push(s);
+fn chains(mut segments: Vec<Segment>) -> Option<Chains> {
+    if segments.is_empty() {
+        return None;
     }
 
-    fn pick_segment(
-        by_end: &mut BTreeMap<BlockNum, Vec<Segment>>,
-        end: BlockNum,
-        next: Option<&BlockRange>,
-    ) -> Option<Segment> {
-        let segments = by_end.get_mut(&end)?;
-        segments.sort_unstable_by_key(|s| s.object.last_modified);
-        let index = segments.iter().rposition(|s| {
-            next.map(|next| BlockRange::adjacent(&s.range, next))
-                .unwrap_or(true)
-        })?;
-        let segment = segments.remove(index);
-        if segments.is_empty() {
-            by_end.remove(&end);
+    // Order segments by block range start ascending, then by object last_modified decending.
+    segments.sort_unstable_by(|a, b| {
+        use std::cmp::Ord;
+        Ord::cmp(&a.range.start(), &b.range.start())
+            .then_with(|| Ord::cmp(&b.object.last_modified, &a.object.last_modified))
+    });
+
+    let mut canonical: Vec<Segment> = Default::default();
+    let mut non_canonical: Vec<Segment> = Default::default();
+    for segment in segments {
+        if canonical.is_empty() {
+            canonical.push(segment);
+            continue;
         }
-        Some(segment)
+
+        if BlockRange::adjacent(&canonical.last().unwrap().range, &segment.range) {
+            canonical.push(segment);
+        } else {
+            non_canonical.push(segment);
+        }
     }
-    fn pick_chain(by_end: &mut BTreeMap<BlockNum, Vec<Segment>>) -> Chain {
-        assert!(!by_end.is_empty());
-        let latest = {
-            let end = *by_end.last_key_value().unwrap().0;
-            pick_segment(by_end, end, None).unwrap()
-        };
-        let mut chain = vec![latest];
-        loop {
-            let next = &chain.last().unwrap().range;
-            if next.start() == 0 {
-                break;
+
+    let canonical = Chain(canonical);
+
+    // Order non-canonical segments by block range end ascending, then by object last_modified
+    // ascending.
+    non_canonical.sort_unstable_by(|a, b| {
+        use std::cmp::Ord;
+        Ord::cmp(&a.range.end(), &b.range.end())
+            .then_with(|| Ord::cmp(&a.object.last_modified, &b.object.last_modified))
+    });
+
+    let mut fork: Option<Chain> = None;
+    while let Some(fork_end) = non_canonical.pop() {
+        if fork_end.range.end() <= canonical.end() {
+            break;
+        }
+
+        // TODO: optimize
+        let mut fork_segments = vec![fork_end];
+        for segment in non_canonical.iter().rev() {
+            if BlockRange::adjacent(&segment.range, &fork_segments.last().unwrap().range) {
+                fork_segments.insert(0, segment.clone());
             }
-            match pick_segment(by_end, next.start() - 1, Some(next)) {
-                Some(segment) => chain.push(segment),
-                None => break,
-            };
         }
-        chain.reverse();
-        Chain(chain)
+        if fork_segments.first().unwrap().range.start() <= (canonical.end() + 1) {
+            fork = Some(Chain(fork_segments));
+            break;
+        }
     }
-
-    let latest = pick_chain(&mut by_end);
-    if latest.start() == min_start {
-        #[cfg(test)]
-        latest.check_invariants();
-
-        return Some(Chains {
-            canonical: latest,
-            fork: None,
-        });
-    }
-
-    let mut chains = vec![latest];
-    while chains.last().unwrap().start() != min_start {
-        chains.push(pick_chain(&mut by_end));
-    }
-
-    let canonical = chains.pop().unwrap();
-    let fork_min = canonical.end() + 1;
-    let fork = chains
-        .iter()
-        .filter(|c| c.end() > canonical.end())
-        .position(|c| c.start() <= fork_min)
-        .map(|index| chains.remove(index));
 
     #[cfg(test)]
     {
@@ -381,9 +366,9 @@ mod test {
             network: "test".parse().expect("valid network id"),
             hash: test_hash(*numbers.end() as u8, fork.1),
             parent_hash: if *numbers.start() == 0 {
-                Some(Default::default())
+                Default::default()
             } else {
-                Some(test_hash(*numbers.start() as u8 - 1, fork.0))
+                test_hash(*numbers.start() as u8 - 1, fork.0)
             },
         }
     }
@@ -482,12 +467,12 @@ mod test {
                 test_segment(3..=5, (0, 0), 0),
                 test_segment(4..=5, (0, 0), 0),
                 test_segment(4..=6, (0, 0), 0),
-                test_segment(3..=6, (0, 0), 0),
+                test_segment(3..=6, (0, 0), 1),
             ]),
             Some(Chains {
                 canonical: Chain(vec![
                     test_segment(0..=2, (0, 0), 0),
-                    test_segment(3..=6, (0, 0), 0),
+                    test_segment(3..=6, (0, 0), 1),
                 ]),
                 fork: None,
             })
@@ -570,19 +555,103 @@ mod test {
         assert_eq!(
             super::chains(vec![
                 test_segment(0..=3, (0, 0), 0),
-                test_segment(4..=6, (1, 1), 0),
-                test_segment(4..=8, (0, 0), 0),
-                test_segment(7..=9, (1, 1), 0),
-                test_segment(4..=9, (2, 2), 0),
+                test_segment(4..=6, (1, 1), 1),
+                test_segment(4..=8, (0, 0), 2),
+                test_segment(7..=9, (1, 1), 3),
+                test_segment(4..=9, (2, 2), 4),
             ]),
             Some(Chains {
                 canonical: Chain(vec![
                     test_segment(0..=3, (0, 0), 0),
-                    test_segment(4..=8, (0, 0), 0),
+                    test_segment(4..=8, (0, 0), 2),
                 ]),
-                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 0)])),
+                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 4)])),
             })
         );
+    }
+
+    #[test]
+    fn segments_with_empty_slots() {
+        // Test that segments with gaps in block numbers (empty slots) can form a valid chain as
+        // long as their hashes align correctly. This is important for blockchains like Solana
+        // where blocks can be skipped.
+
+        fn test_hash(number: u8, fork: u8) -> BlockHash {
+            let mut hash: BlockHash = Default::default();
+            hash.0[0] = number;
+            hash.0[31] = fork;
+            hash
+        }
+
+        let object = ObjectMeta {
+            location: Default::default(),
+            last_modified: DateTime::from_timestamp_millis(0).unwrap(),
+            size: 0,
+            e_tag: None,
+            version: None,
+        };
+
+        // Segment 1: blocks 0-3 (hash based on block 3, parent is genesis)
+        let seg1 = Segment {
+            range: BlockRange {
+                numbers: 0..=3,
+                network: "test".parse().unwrap(),
+                hash: test_hash(3, 0),
+                parent_hash: Default::default(),
+            },
+            object: object.clone(),
+            id: FileId::try_from(1i64).unwrap(),
+        };
+
+        // Empty slot: block 4
+        // Segment 2: blocks 5-7 (hash based on block 7, parent is block 3)
+        let seg2 = Segment {
+            range: BlockRange {
+                numbers: 5..=7,
+                network: "test".parse().unwrap(),
+                hash: test_hash(7, 0),
+                parent_hash: test_hash(3, 0), // gap: parent is block 3, not block 4
+            },
+            object: object.clone(),
+            id: FileId::try_from(1i64).unwrap(),
+        };
+
+        // Empty slots: blocks 8-9
+        // Segment 3: blocks 10-12 (hash based on block 12, parent is block 7)
+        let seg3 = Segment {
+            range: BlockRange {
+                numbers: 10..=12,
+                network: "test".parse().unwrap(),
+                hash: test_hash(12, 0),
+                parent_hash: test_hash(7, 0), // gap: parent is block 7, not block 9
+            },
+            object: object.clone(),
+            id: FileId::try_from(1i64).unwrap(),
+        };
+
+        // Verify segments are adjacent despite gaps
+        assert!(BlockRange::adjacent(&seg1.range, &seg2.range));
+        assert!(BlockRange::adjacent(&seg2.range, &seg3.range));
+
+        // All three segments should form a single canonical chain
+        let result = super::chains(vec![seg1.clone(), seg2.clone(), seg3.clone()]);
+
+        assert_eq!(
+            result,
+            Some(Chains {
+                canonical: Chain(vec![seg1, seg2, seg3]),
+                fork: None,
+            })
+        );
+
+        // Verify Chain::range() spans the full range including gaps
+        let chain = result.unwrap().canonical;
+        assert_eq!(chain.start(), 0);
+        assert_eq!(chain.end(), 12);
+        assert_eq!(chain.range().numbers, 0..=12);
+
+        // The chain covers blocks 0-3, 5-7, 10-12
+        // But range() returns 0..=12 which includes the gaps at blocks 4, 8, 9
     }
 
     #[test]
