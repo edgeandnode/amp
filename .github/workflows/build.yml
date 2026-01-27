@@ -142,10 +142,17 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
 
-      - name: Download all artifacts
+      - name: Download Linux artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: artifacts
+          pattern: "*-unknown-linux-gnu"
+
+      - name: Download notarized macOS artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: artifacts
+          pattern: "*-apple-darwin-*-notarized"
 
       - name: Prepare release binaries
         run: |
