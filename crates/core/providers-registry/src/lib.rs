@@ -12,138 +12,28 @@
 //! - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
 //!
 //! Additional fields depend on the provider type.
+use std::{collections::BTreeMap, ops::Deref};
 
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
-
-use datasets_common::raw_dataset_kind::RawDatasetKind;
-use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
-use monitoring::logging;
+use datasets_common::dataset_kind_str::DatasetKindStr;
+use monitoring::{logging, telemetry::metrics::Meter};
 use object_store::ObjectStore;
-use parking_lot::RwLock;
+use rand::seq::SliceRandom as _;
 
-/// Store for provider configuration files.
-///
-/// Wraps an ObjectStore to provide provider-specific storage semantics.
-/// This follows the same pattern as `DatasetManifestsStore` for consistency.
-#[derive(Debug, Clone)]
-pub struct ProviderConfigsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
-    store: S,
-}
+mod client;
+mod config;
+mod env_subs;
+mod store;
 
-impl<S> ProviderConfigsStore<S>
-where
-    S: ObjectStore + Clone,
-{
-    /// Create a new store with the given underlying object store.
-    pub fn new(store: S) -> Self {
-        Self { store }
-    }
+pub use self::{
+    client::{
+        block_stream::{BlockStreamClient, CreateClientError},
+        evm_rpc::{CreateEvmRpcClientError, EvmRpcProvider},
+    },
+    config::{ParseConfigError, ProviderConfig},
+    store::{ConfigDeleteError, ConfigStoreError, ProviderConfigsStore},
+};
 
-    /// Store a provider configuration file.
-    ///
-    /// Writes the content to `{name}.toml` in the underlying store.
-    pub async fn store(&self, name: &str, content: Vec<u8>) -> Result<(), object_store::Error> {
-        let path: object_store::path::Path = format!("{}.toml", name).into();
-        self.store.put(&path, content.into()).await?;
-        Ok(())
-    }
-
-    /// Get a provider configuration file by name.
-    ///
-    /// Returns `None` if the file doesn't exist.
-    pub async fn get(&self, name: &str) -> Result<Option<ProviderConfigContent>, GetError> {
-        let path: object_store::path::Path = format!("{}.toml", name).into();
-
-        let get_result = match self.store.get(&path).await {
-            Ok(res) => res,
-            Err(object_store::Error::NotFound { .. }) => return Ok(None),
-            Err(err) => return Err(GetError::ObjectStoreGet(err)),
-        };
-
-        let bytes = get_result
-            .bytes()
-            .await
-            .map_err(GetError::ObjectStoreReadBytes)?;
-
-        let content = String::from_utf8(bytes.to_vec()).map_err(GetError::Utf8Error)?;
-
-        Ok(Some(ProviderConfigContent(content)))
-    }
-
-    /// Check if a provider configuration file exists.
-    pub async fn exists(&self, name: &str) -> Result<bool, object_store::Error> {
-        let path: object_store::path::Path = format!("{}.toml", name).into();
-        match self.store.head(&path).await {
-            Ok(_) => Ok(true),
-            Err(object_store::Error::NotFound { .. }) => Ok(false),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Delete a provider configuration file.
-    ///
-    /// Returns `NotFound` error if the file doesn't exist.
-    pub async fn delete(&self, name: &str) -> Result<(), object_store::Error> {
-        let path: object_store::path::Path = format!("{}.toml", name).into();
-        // Check existence first to provide consistent not-found behavior
-        self.store.head(&path).await?;
-        self.store.delete(&path).await
-    }
-
-    /// List all provider configuration files.
-    ///
-    /// Returns a stream of (name, metadata) for all `.toml` files.
-    pub fn list(
-        &self,
-    ) -> futures::stream::BoxStream<'_, object_store::Result<object_store::ObjectMeta>> {
-        self.store.list(None)
-    }
-}
-
-impl<S: ObjectStore> std::ops::Deref for ProviderConfigsStore<S> {
-    type Target = S;
-
-    fn deref(&self) -> &Self::Target {
-        &self.store
-    }
-}
-
-/// Errors when getting provider configuration.
-#[derive(Debug, thiserror::Error)]
-pub enum GetError {
-    /// Failed to get object from store.
-    #[error("Failed to get provider config from object store: {0}")]
-    ObjectStoreGet(#[source] object_store::Error),
-
-    /// Failed to read bytes from object.
-    #[error("Failed to read provider config bytes: {0}")]
-    ObjectStoreReadBytes(#[source] object_store::Error),
-
-    /// Content is not valid UTF-8.
-    #[error("Provider config is not valid UTF-8: {0}")]
-    Utf8Error(#[source] std::string::FromUtf8Error),
-}
-
-/// Provider configuration file content.
-pub struct ProviderConfigContent(String);
-
-impl ProviderConfigContent {
-    /// Get the raw TOML string content.
-    pub fn into_string(self) -> String {
-        self.0
-    }
-
-    /// Parse into a ProviderConfig.
-    pub fn try_into_config(self, name: &str) -> Result<ProviderConfig, toml::de::Error> {
-        let mut config: ProviderConfig = toml::from_str(&self.0)?;
-        if config.name.is_empty() {
-            config.name = name.to_string();
-        }
-        Ok(config)
-    }
-}
-
-/// Manages provider configurations and caching
+/// Manages provider configurations with caching
 ///
 /// ## Object Store Agnostic Design
 ///
@@ -154,90 +44,22 @@ impl ProviderConfigContent {
 /// - **Path Prefixing**: Use `object_store::prefix::PrefixStore` or equivalent for path isolation
 /// - **Composition**: These can be combined as needed (e.g., `LimitStore<PrefixStore<LocalFileSystem>>`)
 ///
-/// ## Caching Mechanism
+/// ## Caching
 ///
-/// This store implements a lazy-loaded, write-through caching strategy:
-///
-/// - **Lazy Loading**: The cache is populated on the first read operation when empty
-/// - **Write-Through**: Both `register()` and `delete()` operations update both the
-///   underlying store and the in-memory cache synchronously
-/// - **Thread-Safe**: Uses `Arc<RwLock<BTreeMap>>` for safe concurrent access
-/// - **No Expiration**: The cache never expires or invalidates
-///
-/// **Note**: External changes to the underlying store will not be reflected in the cache
-/// until the process is restarted, as there is no automatic cache invalidation mechanism.
+/// Caching is handled by the underlying [`ProviderConfigsStore`]. See its documentation for
+/// details on the lazy-loaded, write-through caching strategy.
 #[derive(Debug, Clone)]
-pub struct ProvidersRegistry<S: ObjectStore = Arc<dyn ObjectStore>> {
+pub struct ProvidersRegistry<S: ObjectStore = std::sync::Arc<dyn ObjectStore>> {
     store: ProviderConfigsStore<S>,
-    cache: Arc<RwLock<BTreeMap<String, ProviderConfig>>>,
 }
 
 impl<S> ProvidersRegistry<S>
 where
     S: ObjectStore + Clone,
 {
-    /// Create a new [`ProvidersRegistry`] instance with the given provider configs store.
+    /// Creates a new registry wrapping the given provider configs store.
     pub fn new(store: ProviderConfigsStore<S>) -> Self {
-        Self {
-            store,
-            cache: Default::default(),
-        }
-    }
-
-    /// Load provider configurations from disk and initialize the cache.
-    ///
-    /// Overwrites existing cache contents. Invalid configuration files are logged and skipped.
-    pub async fn load_into_cache(&self) {
-        let stream = match self.fetch_from_store().await {
-            Ok(stream) => stream,
-            Err(err) => {
-                tracing::error!(
-                    error = %err, error_source = logging::error_source(&err),
-                    "Failed to enumerate provider configurations from store, leaving cache empty"
-                );
-
-                *self.cache.write() = Default::default();
-                return;
-            }
-        };
-
-        let mut provider_map = BTreeMap::new();
-        let mut failed_count = 0;
-        let mut total_count = 0;
-
-        let mut stream = std::pin::pin!(stream);
-        while let Some(result) = stream.next().await {
-            total_count += 1;
-            match result {
-                Ok((name, provider)) => {
-                    provider_map.insert(name.clone(), provider);
-                    tracing::debug!(name = %name, "Successfully loaded provider configuration");
-                }
-                Err(err) => {
-                    failed_count += 1;
-                    tracing::warn!(
-                        file = %err.path(),
-                        error = %err, error_source = logging::error_source(&err),
-                        "Failed to load and parse provider configuration file, skipping"
-                    );
-                }
-            }
-        }
-
-        if failed_count > 0 {
-            tracing::warn!(
-                invalid_files = failed_count,
-                total_files = total_count,
-                "Provider configuration loading completed with some failures"
-            );
-        } else {
-            tracing::info!(
-                total_files = total_count,
-                "Successfully loaded all provider configuration files"
-            );
-        }
-
-        *self.cache.write() = provider_map;
+        Self { store }
     }
 
     /// Get all provider configurations, using cache if available
@@ -253,315 +75,147 @@ where
     /// the guard as soon as possible.
     #[must_use]
     pub async fn get_all(&self) -> impl Deref<Target = BTreeMap<String, ProviderConfig>> + '_ {
-        // Load and populate cache if empty
-        if self.cache.read().is_empty() {
-            self.load_into_cache().await;
-        }
-
-        // Return the read guard for the cached provider configurations
-        self.cache.read()
+        self.store.get_all().await
     }
 
-    /// Get a provider configuration by `name`, using cache if available
+    /// Get a provider configuration by `name`, using cache if available. Returns None if not found.
     pub async fn get_by_name(&self, name: &str) -> Option<ProviderConfig> {
-        // Load and populate cache if empty
-        if self.cache.read().is_empty() {
-            self.load_into_cache().await;
-        }
-
-        self.cache.read().get(name).cloned()
+        self.store.get(name).await
     }
 
-    /// Register a new provider configuration in both cache and store
+    /// Register a provider configuration in both cache and store
     ///
-    /// If a provider configuration with the same name already exists, returns a conflict error.
+    /// If a provider configuration with the same name already exists, it will be overwritten.
     pub async fn register(&self, provider: ProviderConfig) -> Result<(), RegisterError> {
-        // Load and populate cache if empty
-        if self.cache.read().is_empty() {
-            self.load_into_cache().await;
-        }
+        let name = provider.name.clone();
 
-        let name = &provider.name;
-
-        // Check if provider configuration already exists
-        if self.cache.read().contains_key(name) {
-            return Err(RegisterError::Conflict {
-                name: name.to_string(),
-            });
-        }
-
-        // Serialize and write to store
-        let content = toml::to_string(&provider)?.into_bytes();
-        self.store.store(name, content).await?;
-
-        // Add to cache
-        self.cache.write().insert(name.to_string(), provider);
-
-        Ok(())
+        self.store
+            .store(&name, provider)
+            .await
+            .map_err(RegisterError)
     }
 
     /// Delete a provider configuration by name from both the store and cache
     ///
-    /// This operation fails if the provider configuration file does not exist in the store, ensuring
-    /// consistent delete behavior across different object store implementations.
+    /// This operation is idempotent: deleting a non-existent provider succeeds silently.
     ///
     /// # Cache Management
-    /// - If file not found: removes stale cache entry and returns `DeleteError::NotFound`
+    /// - If file not found: removes stale cache entry and returns `Ok(())`
     /// - If other store errors: preserves cache (file may still exist) and propagates error
     /// - If deletion succeeds: removes from both store and cache
     pub async fn delete(&self, name: &str) -> Result<(), DeleteError> {
-        // Delete from store (will check existence first)
-        if let Err(err) = self.store.delete(name).await {
-            match &err {
-                object_store::Error::NotFound { .. } => {
-                    // Remove from cache if present (safe even if not in cache)
-                    self.cache.write().remove(name);
-                    return Err(DeleteError::NotFound {
-                        name: name.to_string(),
-                    });
-                }
-                _ => return Err(DeleteError::StoreError(err)),
-            }
-        }
-
-        // Remove from cache if present (safe even if not in cache)
-        self.cache.write().remove(name);
-
-        Ok(())
+        self.store.delete(name).await.map_err(DeleteError)
     }
+}
 
-    /// Fetch all [`ProviderConfig`]s from the underlying store and parse them.
+impl<S> ProvidersRegistry<S>
+where
+    S: ObjectStore + Clone,
+{
+    /// Find a provider and create a block stream client for the given kind and network.
     ///
-    /// Filters for non-empty `.toml` files with valid filenames, then loads and parses each file.
-    /// Returns a stream of provider configuration results that can fail individually.
-    /// Store enumeration failure returns an error immediately.
-    async fn fetch_from_store(
+    /// This method combines provider lookup and client creation in one operation.
+    /// Providers are tried in random order to distribute load.
+    pub async fn create_block_stream_client(
         &self,
-    ) -> Result<impl Stream<Item = Result<(String, ProviderConfig), LoadFileError>>, LoadError>
-    {
-        let providers: Vec<_> = self
-            .store
-            .list()
-            .try_filter_map(|meta| async move {
-                // Select valid provider configuration files and extract their names for processing
-                let is_empty = meta.size == 0;
-                let is_toml_file = meta.location.as_ref().ends_with(".toml");
-
-                if is_empty || !is_toml_file {
-                    return Ok(None);
-                }
-
-                // Use the full relative path (with prefix stripped by PrefixedStore)
-                // instead of just the filename to handle subdirectories correctly
-                let path_str = meta.location.as_ref();
-                let Some(name) = path_str.strip_suffix(".toml") else {
-                    return Ok(None);
-                };
-
-                Ok(Some((name.to_string(), meta.location)))
-            })
-            .try_collect()
+        kind: impl Into<DatasetKindStr>,
+        network: &str,
+        meter: Option<&Meter>,
+    ) -> Result<BlockStreamClient, CreateClientError> {
+        let kind = kind.into();
+        let config = self
+            .find_provider(kind.clone(), network)
             .await
-            .map_err(|source| LoadError { source })?;
-
-        let store = (*self.store).clone();
-        let stream = stream::iter(providers).then(move |(name, path)| {
-            let store = store.clone();
-            async move {
-                let provider = load_and_parse_file(&store, &path).await?;
-                Ok((name, provider))
-            }
-        });
-
-        Ok(stream)
+            .ok_or_else(|| CreateClientError::ProviderNotFound {
+                kind: kind.to_string(),
+                network: network.to_string(),
+            })?;
+        client::block_stream::create(config, meter).await
     }
-}
 
-/// Provider configuration with required and provider-specific fields.
-///
-/// This struct captures the required fields (`kind` and `network`) that must be present
-/// in all provider configurations, while using serde's `flatten` attribute to collect
-/// all additional provider-specific configuration fields in the `rest` field.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ProviderConfig {
-    /// Unique name of the provider configuration
-    #[serde(default)]
-    pub name: String,
-    /// The type of provider as string (e.g., "evm-rpc", "firehose")
-    pub kind: RawDatasetKind,
-    /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
-    pub network: String,
-    /// All other provider-specific configuration fields
-    #[serde(flatten)]
-    pub rest: toml::Table,
-}
-
-impl ProviderConfig {
-    /// Convert this provider configuration into a specific configuration type.
+    /// Find a provider by kind and network, applying environment variable substitution.
     ///
-    /// Deserializes all fields (`kind`, `network`, and provider-specific fields from `rest`)
-    /// into a strongly-typed configuration struct. The conversion can fail if required fields
-    /// are missing, field types don't match, or values are invalid for the target type.
-    pub fn try_into_config<T>(&self) -> Result<T, ParseConfigError>
-    where
-        T: for<'de> serde::Deserialize<'de>,
-    {
-        let value = toml::Value::try_from(self).unwrap_or_else(|err| {
-            unreachable!(
-                "Failed to convert ProviderConfig to toml::Value: {err}. This should never happen."
-            )
-        });
-        value.try_into().map_err(ParseConfigError)
-    }
-}
+    /// Providers are tried in random order to distribute load.
+    pub async fn find_provider(
+        &self,
+        kind: impl Into<DatasetKindStr>,
+        network: &str,
+    ) -> Option<ProviderConfig> {
+        let kind = kind.into();
 
-/// Error that can occur when parsing provider configuration into specific config types.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to parse provider configuration: {0}")]
-pub struct ParseConfigError(#[source] toml::de::Error);
+        let mut matching_providers = self
+            .get_all()
+            .await
+            .values()
+            .filter(|prov| prov.kind == kind && prov.network == network)
+            .cloned()
+            .collect::<Vec<_>>();
 
-/// Load and parse a single provider configuration file.
-///
-/// Loads a provider configuration file from storage, parses it as TOML,
-/// and deserializes it into a [`ProviderConfig`] struct.
-///
-/// Returns detailed error information suitable for structured logging and diagnostics.
-async fn load_and_parse_file(
-    store: &impl ObjectStore,
-    location: &object_store::path::Path,
-) -> Result<ProviderConfig, LoadFileError> {
-    let path = location.to_string();
-
-    // Fetch file contents
-    let get_res = store
-        .get(location)
-        .await
-        .map_err(|source| LoadFileError::StoreFetchFailed {
-            path: path.clone(),
-            source,
-        })?;
-
-    let bytes = get_res
-        .bytes()
-        .await
-        .map_err(|source| LoadFileError::StoreReadFailed {
-            path: path.clone(),
-            source,
-        })?;
-
-    // Parse as UTF-8
-    let content =
-        String::from_utf8(bytes.to_vec()).map_err(|source| LoadFileError::InvalidUtf8 {
-            path: path.clone(),
-            source,
-        })?;
-
-    // Parse TOML and deserialize directly to ProviderConfig
-    let mut provider = toml::from_str::<ProviderConfig>(&content).map_err(|source| {
-        LoadFileError::TomlParseError {
-            path: path.clone(),
-            source,
+        if matching_providers.is_empty() {
+            return None;
         }
-    })?;
 
-    // Auto-populate name field from file path if not present in TOML
-    if provider.name.is_empty() {
-        provider.name = path.strip_suffix(".toml").unwrap_or(&path).to_string();
+        matching_providers.shuffle(&mut rand::rng());
+
+        'try_find_provider: for mut provider in matching_providers {
+            for (_key, value) in provider.rest.iter_mut() {
+                if let Err(err) = env_subs::substitute_env_vars(value) {
+                    tracing::warn!(
+                        provider_name = %provider.name,
+                        provider_kind = %kind,
+                        provider_network = %network,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "environment variable substitution failed for provider, trying next"
+                    );
+                    continue 'try_find_provider;
+                }
+            }
+
+            tracing::debug!(
+                provider_kind = %kind,
+                provider_network = %network,
+                "successfully selected provider with environment substitution"
+            );
+
+            return Some(provider);
+        }
+
+        None
     }
 
-    Ok(provider)
+    /// Create an EVM RPC client for the given network.
+    ///
+    /// This method combines provider lookup, configuration parsing, and provider construction
+    /// into a single operation. It automatically detects whether to use IPC or HTTP/HTTPS
+    /// based on the URL scheme in the provider configuration.
+    ///
+    /// Returns `None` if no provider found for the network, or an error if a provider was
+    /// found but configuration parsing or provider construction failed.
+    pub async fn create_evm_rpc_client(
+        &self,
+        network: &str,
+    ) -> Result<Option<EvmRpcProvider>, CreateEvmRpcClientError> {
+        let Some(config) = self
+            .find_provider(evm_rpc_datasets::EvmRpcDatasetKind, network)
+            .await
+        else {
+            return Ok(None);
+        };
+
+        client::evm_rpc::create(config).await.map(Some)
+    }
 }
 
 /// Error that can occur when registering a provider configuration.
 #[derive(Debug, thiserror::Error)]
-pub enum RegisterError {
-    /// Provider configuration already exists with the same name.
-    #[error("provider configuration '{name}' already exists")]
-    Conflict { name: String },
-    /// Failed to serialize provider configuration to TOML.
-    #[error("failed to serialize provider configuration to TOML: {0}")]
-    SerializeError(#[from] toml::ser::Error),
-    /// Failed to write provider configuration to store.
-    #[error("failed to write provider configuration to store: {0}")]
-    StoreError(#[from] object_store::Error),
-}
+#[error("failed to store provider configuration")]
+pub struct RegisterError(#[source] ConfigStoreError);
 
 /// Error that can occur when deleting a provider configuration.
 #[derive(Debug, thiserror::Error)]
-pub enum DeleteError {
-    /// The provider configuration file was not found in the store.
-    #[error("provider configuration not found: {name}")]
-    NotFound { name: String },
-
-    /// An error occurred while accessing the store.
-    #[error("store error: {0}")]
-    StoreError(object_store::Error),
-}
-
-impl From<object_store::Error> for DeleteError {
-    fn from(error: object_store::Error) -> Self {
-        match error {
-            object_store::Error::NotFound { path, .. } => {
-                // Extract provider configuration name from path by removing .toml extension
-                let name = path.strip_suffix(".toml").unwrap_or(&path).to_string();
-                DeleteError::NotFound { name }
-            }
-            other => DeleteError::StoreError(other),
-        }
-    }
-}
-
-/// Error that can occur when loading provider configurations from the store into the cache.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to enumerate provider configuration files from store")]
-pub struct LoadError {
-    pub source: object_store::Error,
-}
-
-/// Error types when loading and parsing individual provider configuration files.
-/// These are used for structured logging and error handling during graceful degradation.
-#[derive(Debug, thiserror::Error)]
-pub enum LoadFileError {
-    /// Failed to fetch file from the underlying store
-    #[error("Failed to fetch file from the object store: {source}")]
-    StoreFetchFailed {
-        path: String,
-        source: object_store::Error,
-    },
-
-    /// Failed to read bytes from the fetched file
-    #[error("Failed to read file bytes from the object store: {source}")]
-    StoreReadFailed {
-        path: String,
-        source: object_store::Error,
-    },
-
-    /// File contains invalid UTF-8 content
-    #[error("Invalid UTF-8 content: {source}")]
-    InvalidUtf8 {
-        path: String,
-        source: std::string::FromUtf8Error,
-    },
-
-    /// TOML parsing failed
-    #[error("Invalid TOML file format: {source}")]
-    TomlParseError {
-        path: String,
-        source: toml::de::Error,
-    },
-}
-
-impl LoadFileError {
-    /// Get the file path associated with this error
-    pub fn path(&self) -> &str {
-        match self {
-            LoadFileError::StoreFetchFailed { path, .. }
-            | LoadFileError::StoreReadFailed { path, .. }
-            | LoadFileError::InvalidUtf8 { path, .. }
-            | LoadFileError::TomlParseError { path, .. } => path,
-        }
-    }
-}
+#[error("Failed to delete provider configuration")]
+pub struct DeleteError(#[source] pub ConfigDeleteError);
 
 #[cfg(test)]
 mod tests {

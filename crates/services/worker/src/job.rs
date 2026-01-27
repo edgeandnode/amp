@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use datasets_common::{
-    hash::Hash, name::Name, namespace::Namespace, raw_dataset_kind::RawDatasetKind,
+    dataset_kind_str::DatasetKindStr, hash::Hash, name::Name, namespace::Namespace,
 };
 pub use dump::Ctx;
 use dump::EndBlock;
@@ -30,7 +30,7 @@ pub enum JobDescriptor {
         dataset_namespace: Namespace,
         dataset_name: Name,
         manifest_hash: Hash,
-        dataset_kind: RawDatasetKind,
+        dataset_kind: DatasetKindStr,
     },
 }
 
@@ -63,7 +63,7 @@ impl JobDescriptor {
     }
 
     /// Get the dataset kind from the job descriptor
-    pub fn dataset_kind(&self) -> &RawDatasetKind {
+    pub fn dataset_kind(&self) -> &DatasetKindStr {
         match self {
             JobDescriptor::Dump { dataset_kind, .. } => dataset_kind,
         }

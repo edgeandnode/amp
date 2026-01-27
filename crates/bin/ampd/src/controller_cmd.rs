@@ -6,7 +6,6 @@ use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
-use common::BoxError;
 use controller::config::Config;
 use monitoring::telemetry::metrics::Meter;
 
@@ -109,7 +108,7 @@ pub enum Error {
     /// This occurs after the Admin API server has started successfully but
     /// encounters an error during operation.
     #[error("Controller runtime error: {0}")]
-    Runtime(#[source] BoxError),
+    Runtime(#[source] controller::service::ServerError),
 }
 
 /// Convert common config to controller-specific config

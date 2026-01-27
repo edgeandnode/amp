@@ -2,6 +2,7 @@ mod it_admin_api_datasets_list_jobs;
 mod it_admin_api_datasets_manifest;
 mod it_admin_api_datasets_register;
 mod it_admin_api_datasets_stop_job;
+mod it_admin_api_jobs_progress;
 mod it_admin_api_schema;
 mod it_ampctl_gen_manifest;
 mod it_client;

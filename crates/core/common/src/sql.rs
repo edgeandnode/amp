@@ -8,8 +8,7 @@ use datafusion::{
     sql::{parser, parser::Statement},
 };
 use datasets_common::{func_name::FuncName, table_name::TableName};
-
-use crate::sql_str::SqlStr;
+use datasets_derived::sql_str::SqlStr;
 
 /// Parses a SQL string into a single DataFusion statement.
 ///

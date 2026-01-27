@@ -221,7 +221,7 @@ fn constrain_by_range(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum NonIncrementalError {
+pub enum NonIncrementalQueryError {
     /// The plan node is invalid for any kind of query
     #[error("invalid operation: {0}")]
     Invalid(String),
@@ -237,15 +237,17 @@ pub enum IncrementalOpKind {
     Table,
 }
 
-pub fn incremental_op_kind(node: &LogicalPlan) -> Result<IncrementalOpKind, NonIncrementalError> {
+pub fn incremental_op_kind(
+    node: &LogicalPlan,
+) -> Result<IncrementalOpKind, NonIncrementalQueryError> {
     use IncrementalOpKind::*;
     use LogicalPlan::*;
-    use NonIncrementalError::*;
+    use NonIncrementalQueryError::*;
 
     match node {
         // Entirely unsupported operations.
         Dml(_) | Ddl(_) | Statement(_) | Copy(_) | Extension(_) => {
-            Err(NonIncrementalError::Invalid(node.to_string()))
+            Err(NonIncrementalQueryError::Invalid(node.to_string()))
         }
 
         // Stateless operators

@@ -26,8 +26,8 @@ use std::path::PathBuf;
 
 use datasets_common::{
     dataset::Table,
+    dataset_kind_str::DatasetKindStr,
     manifest::{ArrowSchema, Field, TableSchema},
-    raw_dataset_kind::RawDatasetKind,
 };
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
@@ -40,7 +40,7 @@ use solana_datasets::SolanaDatasetKind;
 pub struct Args {
     /// Kind of the dataset (evm-rpc, firehose, solana).
     #[arg(long, required = true, env = "GM_KIND")]
-    pub kind: RawDatasetKind,
+    pub kind: DatasetKindStr,
 
     /// The name of the network.
     #[arg(long, required = true, env = "GM_NETWORK")]
@@ -122,7 +122,7 @@ pub async fn run(
 /// or write errors.
 #[tracing::instrument(skip(writer))]
 pub async fn generate_manifest<W>(
-    kind: &RawDatasetKind,
+    kind: &DatasetKindStr,
     network: String,
     start_block: Option<u64>,
     finalized_blocks_only: bool,
@@ -268,7 +268,7 @@ pub enum Error {
     /// This occurs when the provided dataset kind is not recognized by the manifest generator.
     /// Supported kinds are: evm-rpc, firehose, solana.
     #[error("Unsupported dataset kind '{0}'")]
-    UnsupportedKind(RawDatasetKind),
+    UnsupportedKind(DatasetKindStr),
 
     /// Failed to serialize the manifest to JSON format.
     ///

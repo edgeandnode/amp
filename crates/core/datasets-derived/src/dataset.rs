@@ -1,16 +1,15 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use common::Function;
 use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
 use datasets_common::{
     dataset::{BlockNum, Table},
+    dataset_kind_str::DatasetKindStr,
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
-    raw_dataset_kind::RawDatasetKind,
     udf::{IsolatePool, JsUdf},
 };
 
-use crate::DerivedDatasetKind;
+use crate::{DerivedDatasetKind, function::Function};
 
 pub struct Dataset {
     pub(crate) tables: Vec<Table>,
@@ -23,6 +22,35 @@ pub struct Dataset {
     pub(crate) finalized_blocks_only: bool,
 }
 
+impl Dataset {
+    /// Creates a new Dataset instance.
+    ///
+    /// This is used by the `common::datasets_derived::dataset()` function to construct
+    /// the Dataset after processing the manifest.
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        reference: HashReference,
+        dependencies: BTreeMap<DepAlias, DepReference>,
+        kind: DerivedDatasetKind,
+        network: Option<String>,
+        start_block: Option<BlockNum>,
+        finalized_blocks_only: bool,
+        tables: Vec<Table>,
+        functions: Vec<Function>,
+    ) -> Self {
+        Self {
+            reference,
+            dependencies,
+            kind,
+            network,
+            start_block,
+            finalized_blocks_only,
+            tables,
+            functions,
+        }
+    }
+}
+
 impl datasets_common::dataset::Dataset for Dataset {
     fn tables(&self) -> &[Table] {
         &self.tables
@@ -32,7 +60,7 @@ impl datasets_common::dataset::Dataset for Dataset {
         self.start_block
     }
 
-    fn kind(&self) -> RawDatasetKind {
+    fn kind(&self) -> DatasetKindStr {
         self.kind.into()
     }
 

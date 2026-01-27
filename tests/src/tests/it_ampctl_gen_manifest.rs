@@ -10,7 +10,7 @@
 //! correct structure for each dataset kind.
 
 use ampctl::cmd::manifest::generate;
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
@@ -22,7 +22,7 @@ async fn gen_manifest_produces_expected_eth_rpc_json() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = EvmRpcDatasetKind.into();
+    let kind: DatasetKindStr = EvmRpcDatasetKind.into();
     let network = "mainnet".to_string();
     let start_block = Some(15000000u64);
 
@@ -59,7 +59,7 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = EvmRpcDatasetKind.into();
+    let kind: DatasetKindStr = EvmRpcDatasetKind.into();
     let network = "mainnet".to_string();
 
     //* When
@@ -84,7 +84,7 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = FirehoseDatasetKind.into();
+    let kind: DatasetKindStr = FirehoseDatasetKind.into();
     let network = "mainnet".to_string();
 
     //* When
@@ -112,7 +112,7 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = DerivedDatasetKind.into();
+    let kind: DatasetKindStr = DerivedDatasetKind.into();
     let network = "mainnet".to_string();
 
     //* When
@@ -138,7 +138,7 @@ async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = EvmRpcDatasetKind.into();
+    let kind: DatasetKindStr = EvmRpcDatasetKind.into();
     let network = "mainnet".to_string();
     let start_block = 1000000u64;
 
@@ -169,7 +169,7 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = FirehoseDatasetKind.into();
+    let kind: DatasetKindStr = FirehoseDatasetKind.into();
     let network = "mainnet".to_string();
 
     //* When
@@ -197,7 +197,7 @@ async fn gen_manifest_produces_expected_solana_json() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = SolanaDatasetKind.into();
+    let kind: DatasetKindStr = SolanaDatasetKind.into();
     let network = "mainnet".to_string();
 
     //* When
@@ -232,7 +232,7 @@ async fn gen_manifest_cmd_run_with_solana_kind_generates_valid_manifest() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = SolanaDatasetKind.into();
+    let kind: DatasetKindStr = SolanaDatasetKind.into();
     let network = "mainnet".to_string();
 
     //* When
@@ -257,7 +257,7 @@ async fn gen_manifest_cmd_run_with_solana_kind_and_start_block() {
     logging::init();
 
     //* Given
-    let kind: RawDatasetKind = SolanaDatasetKind.into();
+    let kind: DatasetKindStr = SolanaDatasetKind.into();
     let network = "mainnet".to_string();
     let start_block = 200000000u64;
 

@@ -346,3 +346,50 @@ where
         .await?;
     Ok(res)
 }
+
+/// Query active tables and their writer info for a dataset
+pub async fn get_active_tables_with_writer_info<'c, E>(
+    exe: E,
+    manifest_hash: ManifestHash<'_>,
+) -> Result<Vec<super::TableWriterInfo>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            pt.table_name,
+            pt.writer AS job_id,
+            j.status AS job_status
+        FROM physical_tables pt
+        LEFT JOIN jobs j ON pt.writer = j.id
+        WHERE pt.manifest_hash = $1 AND pt.active = true
+        ORDER BY pt.table_name
+    "#};
+
+    sqlx::query_as(query)
+        .bind(manifest_hash)
+        .fetch_all(exe)
+        .await
+}
+
+/// Query tables associated with a specific writer
+pub async fn get_tables_by_writer<'c, E>(
+    exe: E,
+    writer_id: JobId,
+) -> Result<Vec<super::WriterTableInfo>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            table_name,
+            manifest_hash,
+            dataset_namespace,
+            dataset_name
+        FROM physical_tables
+        WHERE writer = $1 AND active = true
+        ORDER BY table_name
+    "#};
+
+    sqlx::query_as(query).bind(writer_id).fetch_all(exe).await
+}

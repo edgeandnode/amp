@@ -1,6 +1,6 @@
 //! Provider information types for API requests and responses
 
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 
 use super::convert;
 use crate::handlers::common::NonEmptyString;
@@ -24,7 +24,7 @@ pub struct ProviderInfo {
     pub name: NonEmptyString,
     /// The type of provider (e.g., "evm-rpc", "firehose")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub kind: RawDatasetKind,
+    pub kind: DatasetKindStr,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub network: NonEmptyString,

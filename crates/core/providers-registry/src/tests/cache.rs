@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use object_store::{ObjectStore, memory::InMemory, path::Path};
 
-use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry, RegisterError};
+use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry};
 
 #[tokio::test]
 async fn register_with_valid_provider_makes_immediately_available() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let evm_provider = create_test_evm_provider("evm-mainnet");
     let fhs_provider = create_test_firehose_provider("fhs-polygon");
 
@@ -16,8 +16,6 @@ async fn register_with_valid_provider_makes_immediately_available() {
         .register(evm_provider.clone())
         .await
         .expect("should register first provider");
-
-    store.load_into_cache().await;
 
     //* When
     let register_result = store.register(fhs_provider.clone()).await;
@@ -89,7 +87,7 @@ async fn register_with_valid_provider_makes_immediately_available() {
 #[tokio::test]
 async fn get_by_name_after_registration_returns_provider() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let provider_name = "consistent-provider";
     let provider = create_test_evm_provider(provider_name);
 
@@ -97,9 +95,6 @@ async fn get_by_name_after_registration_returns_provider() {
         .register(provider)
         .await
         .expect("should register provider");
-
-    // Load providers into cache
-    store.load_into_cache().await;
 
     //* When
     let provider_option = store.get_by_name(provider_name).await;
@@ -119,7 +114,7 @@ async fn get_by_name_after_registration_returns_provider() {
 #[tokio::test]
 async fn delete_with_existing_provider_removes_from_operations() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let evm_provider = create_test_evm_provider("evm-to-delete");
     let fhs_provider = create_test_firehose_provider("fhs-to-keep");
 
@@ -131,9 +126,6 @@ async fn delete_with_existing_provider_removes_from_operations() {
         .register(fhs_provider)
         .await
         .expect("should register second provider");
-
-    // Ensure both providers are available
-    store.load_into_cache().await;
 
     //* When
     let delete_result = store.delete("evm-to-delete").await;
@@ -186,7 +178,7 @@ async fn delete_with_existing_provider_removes_from_operations() {
 #[tokio::test]
 async fn get_all_with_store_providers_loads_on_first_access() {
     //* Given
-    let (providers_store, raw_store) = create_test_providers_store();
+    let (providers_store, _configs_store, raw_store) = create_test_providers_store();
 
     // Manually write provider TOML files to the in-memory store
     let evm_toml = indoc::indoc! {r#"
@@ -247,7 +239,7 @@ async fn get_all_with_store_providers_loads_on_first_access() {
 #[tokio::test]
 async fn get_all_with_invalid_toml_handles_gracefully() {
     //* Given
-    let (providers_store, raw_store) = create_test_providers_store();
+    let (providers_store, _configs_store, raw_store) = create_test_providers_store();
 
     // Write one valid and one invalid TOML file to the in-memory store
     let valid_toml = indoc::indoc! {r#"
@@ -305,7 +297,7 @@ async fn get_all_with_invalid_toml_handles_gracefully() {
 #[tokio::test]
 async fn get_all_with_externally_removed_file_returns_cached_data() {
     //* Given
-    let (providers_store, raw_store) = create_test_providers_store();
+    let (providers_store, configs_store, raw_store) = create_test_providers_store();
 
     // Write provider files to the in-memory store
     let evm_toml = indoc::indoc! {r#"
@@ -336,7 +328,7 @@ async fn get_all_with_externally_removed_file_returns_cached_data() {
         .expect("should write Firehose provider file to store");
 
     // Load providers into cache
-    providers_store.load_into_cache().await;
+    configs_store.load_into_cache().await;
 
     // Remove one file directly from store (bypassing the ProvidersStore)
     raw_store
@@ -358,7 +350,7 @@ async fn get_all_with_externally_removed_file_returns_cached_data() {
 #[tokio::test]
 async fn get_by_name_with_externally_removed_file_returns_cached_provider() {
     //* Given
-    let (providers_store, raw_store) = create_test_providers_store();
+    let (providers_store, configs_store, raw_store) = create_test_providers_store();
 
     let evm_toml = indoc::indoc! {r#"
         name = "evm-provider"
@@ -374,7 +366,7 @@ async fn get_by_name_with_externally_removed_file_returns_cached_provider() {
         .expect("should write EVM provider file to store");
 
     // Load providers into cache
-    providers_store.load_into_cache().await;
+    configs_store.load_into_cache().await;
 
     // Remove file directly from store (bypassing the ProvidersStore)
     raw_store
@@ -393,9 +385,9 @@ async fn get_by_name_with_externally_removed_file_returns_cached_provider() {
 }
 
 #[tokio::test]
-async fn delete_with_externally_removed_file_fails() {
+async fn delete_with_externally_removed_file_succeeds_idempotent() {
     //* Given
-    let (providers_store, raw_store) = create_test_providers_store();
+    let (providers_store, configs_store, raw_store) = create_test_providers_store();
 
     let evm_toml = indoc::indoc! {r#"
         name = "evm-provider"
@@ -411,7 +403,7 @@ async fn delete_with_externally_removed_file_fails() {
         .expect("should write EVM provider file to store");
 
     // Load providers into cache
-    providers_store.load_into_cache().await;
+    configs_store.load_into_cache().await;
 
     // Remove file directly from store (bypassing the ProvidersStore)
     raw_store
@@ -424,15 +416,15 @@ async fn delete_with_externally_removed_file_fails() {
 
     //* Then
     assert!(
-        result.is_err(),
-        "Expected delete to fail for externally removed file"
+        result.is_ok(),
+        "Expected delete to succeed (idempotent) for externally removed file"
     );
 }
 
 #[tokio::test]
-async fn register_with_externally_removed_file_returns_conflict_error() {
+async fn register_with_externally_removed_file_overwrites_cached_entry() {
     //* Given
-    let (providers_store, raw_store) = create_test_providers_store();
+    let (providers_store, configs_store, raw_store) = create_test_providers_store();
 
     let evm_toml = indoc::indoc! {r#"
         name = "existing-provider"
@@ -451,7 +443,7 @@ async fn register_with_externally_removed_file_returns_conflict_error() {
         .expect("should write EVM provider file to store");
 
     // Load providers into cache
-    providers_store.load_into_cache().await;
+    configs_store.load_into_cache().await;
 
     // Remove file directly from store (bypassing the ProvidersStore)
     raw_store
@@ -466,28 +458,42 @@ async fn register_with_externally_removed_file_returns_conflict_error() {
 
     //* Then
     assert!(
-        result.is_err(),
-        "Expected register to fail with conflict error"
+        result.is_ok(),
+        "Expected register to succeed with overwrite, got: {:?}",
+        result
     );
-    let error = result.expect_err("should return register error");
-    match error {
-        RegisterError::Conflict { name } => {
-            assert_eq!(
-                name, "existing-provider",
-                "Expected conflict for the correct provider name"
-            );
-        }
-        other => panic!("Expected RegisterError::Conflict, got: {:?}", other),
-    }
+
+    // Verify the provider was overwritten with new data
+    let provider = providers_store
+        .get_by_name("existing-provider")
+        .await
+        .expect("should have provider");
+    assert_eq!(
+        provider.kind, "firehose",
+        "Expected provider to be overwritten with firehose type"
+    );
+
+    // Verify the file was recreated in the store
+    let file_exists = raw_store
+        .head(&Path::from("existing-provider.toml"))
+        .await
+        .is_ok();
+    assert!(file_exists, "Expected file to be recreated in store");
 }
 
-/// Create a test ProvidersStore backed by in-memory storage
-/// Returns (ProvidersStore, underlying Arc<InMemory>) for testing caching logic
-fn create_test_providers_store() -> (ProvidersRegistry, Arc<dyn ObjectStore>) {
+/// Create a test ProvidersRegistry backed by in-memory storage.
+///
+/// Returns (ProvidersRegistry, ProviderConfigsStore, raw ObjectStore) for testing caching logic.
+fn create_test_providers_store() -> (
+    ProvidersRegistry,
+    ProviderConfigsStore<Arc<dyn ObjectStore>>,
+    Arc<dyn ObjectStore>,
+) {
     let in_memory_store = Arc::new(InMemory::new());
     let store: Arc<dyn ObjectStore> = in_memory_store.clone();
-    let providers_store = ProvidersRegistry::new(ProviderConfigsStore::new(store.clone()));
-    (providers_store, store)
+    let configs_store = ProviderConfigsStore::new(store.clone());
+    let providers_registry = ProvidersRegistry::new(configs_store.clone());
+    (providers_registry, configs_store, store)
 }
 
 /// Create a test EVM RPC provider with mainnet configuration

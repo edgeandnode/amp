@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use object_store::{ObjectStore, memory::InMemory};
 
-use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry, RegisterError};
+use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry};
 
 #[tokio::test]
 async fn get_all_with_empty_store_returns_empty_list() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
 
     //* When
     let providers = store.get_all().await;
@@ -19,7 +19,7 @@ async fn get_all_with_empty_store_returns_empty_list() {
 #[tokio::test]
 async fn register_with_valid_provider_stores_and_retrieves() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let provider_name = "test-evm";
     let provider = create_test_evm_provider(provider_name);
 
@@ -53,7 +53,7 @@ async fn register_with_valid_provider_stores_and_retrieves() {
 #[tokio::test]
 async fn register_with_multiple_providers_all_retrievable() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let evm_provider = create_test_evm_provider("evm-mainnet");
     let fhs_provider = create_test_firehose_provider("fhs-polygon");
 
@@ -99,9 +99,9 @@ async fn register_with_multiple_providers_all_retrievable() {
 }
 
 #[tokio::test]
-async fn register_with_duplicate_name_returns_conflict_error() {
+async fn register_with_duplicate_name_overwrites_existing() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let provider_name = "duplicate-name";
     let evm_provider = create_test_evm_provider(provider_name);
     let fhs_provider = create_test_firehose_provider(provider_name);
@@ -117,25 +117,29 @@ async fn register_with_duplicate_name_returns_conflict_error() {
         first_result
     );
     assert!(
-        second_result.is_err(),
-        "Expected second registration to fail"
+        second_result.is_ok(),
+        "Expected second registration to succeed (overwrite), got: {:?}",
+        second_result
     );
 
-    match second_result {
-        Err(RegisterError::Conflict { name }) => {
-            assert_eq!(
-                name, provider_name,
-                "Expected conflict error with correct name"
-            );
-        }
-        other => panic!("Expected RegisterError::Conflict, got: {:?}", other),
-    }
+    // Verify only one provider exists with the new data
+    let all_providers = store.get_all().await;
+    assert_eq!(all_providers.len(), 1, "Expected exactly one provider");
+
+    let provider = store
+        .get_by_name(provider_name)
+        .await
+        .expect("should have provider");
+    assert_eq!(
+        provider.kind, "firehose",
+        "Expected provider to be overwritten with firehose type"
+    );
 }
 
 #[tokio::test]
 async fn delete_with_existing_provider_removes_from_store_and_cache() {
     //* Given
-    let (store, _raw_store) = create_test_providers_store();
+    let (store, _configs_store, _raw_store) = create_test_providers_store();
     let provider_name = "test-delete";
     let provider = create_test_evm_provider(provider_name);
 
@@ -143,9 +147,6 @@ async fn delete_with_existing_provider_removes_from_store_and_cache() {
         .register(provider)
         .await
         .expect("should register provider");
-
-    // Load providers into cache
-    store.load_into_cache().await;
 
     //* When
     let delete_result = store.delete(provider_name).await;
@@ -177,7 +178,7 @@ async fn delete_with_existing_provider_removes_from_store_and_cache() {
 #[tokio::test]
 async fn register_with_subdirectory_path_stores_at_correct_location() {
     //* Given
-    let (store, raw_store) = create_test_providers_store();
+    let (store, _configs_store, raw_store) = create_test_providers_store();
     let provider_name = "networks/mainnet/primary-rpc";
     let provider = create_test_evm_provider(provider_name);
 
@@ -199,7 +200,7 @@ async fn register_with_subdirectory_path_stores_at_correct_location() {
 #[tokio::test]
 async fn delete_with_subdirectory_path_removes_correct_file() {
     //* Given
-    let (store, raw_store) = create_test_providers_store();
+    let (store, _configs_store, raw_store) = create_test_providers_store();
     let provider_name = "networks/mainnet/primary-rpc";
     let provider = create_test_evm_provider(provider_name);
 
@@ -226,13 +227,19 @@ async fn delete_with_subdirectory_path_removes_correct_file() {
     );
 }
 
-/// Create a test ProvidersStore backed by in-memory storage
-/// Returns (ProvidersStore, underlying Arc<InMemory>) for testing caching logic
-fn create_test_providers_store() -> (ProvidersRegistry, Arc<dyn ObjectStore>) {
+/// Create a test ProvidersRegistry backed by in-memory storage.
+///
+/// Returns (ProvidersRegistry, ProviderConfigsStore, raw ObjectStore) for testing caching logic.
+fn create_test_providers_store() -> (
+    ProvidersRegistry,
+    ProviderConfigsStore<Arc<dyn ObjectStore>>,
+    Arc<dyn ObjectStore>,
+) {
     let in_memory_store = Arc::new(InMemory::new());
     let store: Arc<dyn ObjectStore> = in_memory_store.clone();
-    let providers_store = ProvidersRegistry::new(ProviderConfigsStore::new(store.clone()));
-    (providers_store, in_memory_store)
+    let configs_store = ProviderConfigsStore::new(store.clone());
+    let providers_registry = ProvidersRegistry::new(configs_store.clone());
+    (providers_registry, configs_store, in_memory_store)
 }
 
 /// Create a test EVM RPC provider with mainnet configuration

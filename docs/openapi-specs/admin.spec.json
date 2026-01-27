@@ -968,6 +968,69 @@
         }
       }
     },
+    "/jobs/{id}/progress": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs/{id}/progress` endpoint",
+        "description": "Retrieves progress information for all tables written by a specific job,\nincluding current block numbers, file counts, and size statistics.\n\n## Path Parameters\n- `id`: The unique identifier of the job\n\n## Response\n- **200 OK**: Returns progress for all tables written by this job\n- **400 Bad Request**: Invalid job ID format\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler\n- `GET_TABLES_ERROR`: Failed to get tables written by this job\n- `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata",
+        "operationId": "get_job_progress",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved job progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobProgressResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{id}/stop": {
       "put": {
         "tags": [
@@ -1341,7 +1404,7 @@
           "providers"
         ],
         "summary": "Handler for the `POST /providers` endpoint",
-        "description": "Creates a new provider configuration and stores it in the dataset store.\n\n## Request Body\n- JSON object containing provider configuration with required fields:\n  - `name`: The unique identifier for the provider\n  - `kind`: The type of provider (e.g., \"evm-rpc\", \"firehose\")\n  - `network`: The blockchain network (e.g., \"mainnet\", \"goerli\", \"polygon\")\n  - Additional provider-specific configuration fields as needed\n\n## Response\n- **201 Created**: Provider created successfully\n- **400 Bad Request**: Invalid request body or provider configuration\n- **409 Conflict**: Provider with the same name already exists\n- **500 Internal Server Error**: Store error\n\n## Error Codes\n- `INVALID_REQUEST_BODY`: Malformed JSON request body\n- `DATA_CONVERSION_ERROR`: Failed to convert JSON to TOML format\n- `PROVIDER_CONFLICT`: Provider name already exists\n- `STORE_ERROR`: Failed to save provider configuration\n\nThis handler:\n- Validates and extracts the provider data from the JSON request body\n- Converts additional JSON configuration fields to TOML format\n- Registers the provider configuration in the dataset store\n- Returns HTTP 201 on successful creation",
+        "description": "Creates or updates a provider configuration in the dataset store.\n\n## Request Body\n- JSON object containing provider configuration with required fields:\n  - `name`: The unique identifier for the provider\n  - `kind`: The type of provider (e.g., \"evm-rpc\", \"firehose\")\n  - `network`: The blockchain network (e.g., \"mainnet\", \"goerli\", \"polygon\")\n  - Additional provider-specific configuration fields as needed\n\n## Response\n- **201 Created**: Provider created or updated successfully\n- **400 Bad Request**: Invalid request body or provider configuration\n- **500 Internal Server Error**: Store error\n\n## Error Codes\n- `INVALID_REQUEST_BODY`: Malformed JSON request body\n- `DATA_CONVERSION_ERROR`: Failed to convert JSON to TOML format\n- `STORE_ERROR`: Failed to save provider configuration\n\nThis handler:\n- Validates and extracts the provider data from the JSON request body\n- Converts additional JSON configuration fields to TOML format\n- Registers the provider configuration in the dataset store (overwrites if exists)\n- Returns HTTP 201 on successful creation",
         "operationId": "providers_create",
         "requestBody": {
           "content": {
@@ -1355,20 +1418,10 @@
         },
         "responses": {
           "201": {
-            "description": "Provider created successfully"
+            "description": "Provider created or updated successfully"
           },
           "400": {
             "description": "Invalid request body or provider configuration",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Provider with the same name already exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -1918,6 +1971,36 @@
           }
         }
       },
+      "JobProgressResponse": {
+        "type": "object",
+        "description": "API response containing progress information for a job",
+        "required": [
+          "job_id",
+          "job_status",
+          "tables"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Job ID"
+          },
+          "job_status": {
+            "type": "string",
+            "description": "Current job status"
+          },
+          "tables": {
+            "type": "object",
+            "description": "Progress for each table written by this job, keyed by table name",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TableProgress"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "JobsResponse": {
         "type": "object",
         "description": "API response containing job information",
@@ -2233,6 +2316,42 @@
           "Stopped",
           "Error"
         ]
+      },
+      "TableProgress": {
+        "type": "object",
+        "description": "Progress information for a single table",
+        "required": [
+          "files_count",
+          "total_size_bytes"
+        ],
+        "properties": {
+          "current_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Highest block number that has been synced (null if no data yet)"
+          },
+          "files_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of Parquet files written for this table"
+          },
+          "start_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Lowest block number that has been synced (null if no data yet)"
+          },
+          "total_size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total size of all Parquet files in bytes"
+          }
+        }
       },
       "TableSchemaWithNetworks": {
         "type": "object",

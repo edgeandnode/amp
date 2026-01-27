@@ -15,7 +15,8 @@ pub use self::{
     path::{Path as TablePath, PathOwned as TablePathOwned},
 };
 use crate::{
-    DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
+    DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, JobStatus,
+    ManifestHashOwned,
     db::Executor,
     error::Error,
     jobs::{Job, JobId},
@@ -303,6 +304,64 @@ impl LocationWithDetails {
     pub fn active(&self) -> bool {
         self.table.active
     }
+}
+
+/// Writer info for a table
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TableWriterInfo {
+    /// Name of the table within the dataset
+    pub table_name: TableNameOwned,
+    /// ID of the writer job (if one exists)
+    pub job_id: Option<JobId>,
+    /// Status of the writer job (if one exists)
+    pub job_status: Option<JobStatus>,
+}
+
+/// Info about a table associated with a writer
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct WriterTableInfo {
+    /// Name of the table within the dataset
+    pub table_name: TableNameOwned,
+    /// Manifest hash identifying the dataset version
+    pub manifest_hash: ManifestHashOwned,
+    /// Dataset namespace
+    pub dataset_namespace: DatasetNamespaceOwned,
+    /// Dataset name
+    pub dataset_name: DatasetNameOwned,
+}
+
+/// Get active tables with writer info for a dataset
+///
+/// Returns a list of active tables for the given dataset manifest hash,
+/// along with their writer job information.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_active_tables_with_writer_info<'c, E>(
+    exe: E,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+) -> Result<Vec<TableWriterInfo>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_active_tables_with_writer_info(exe, manifest_hash.into())
+        .await
+        .map_err(Error::Database)
+}
+
+/// Get tables associated with a specific writer
+///
+/// Returns a list of active tables where the specified writer is assigned,
+/// along with metadata about each table including dataset information.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_tables_by_writer<'c, E>(
+    exe: E,
+    writer_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<Vec<WriterTableInfo>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_tables_by_writer(exe, writer_id.into())
+        .await
+        .map_err(Error::Database)
 }
 
 /// In-tree integration tests

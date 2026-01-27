@@ -6,7 +6,8 @@ use axum::{
     http::StatusCode,
 };
 use common::{
-    BoxError, catalog::physical::PhysicalTable, metadata::amp_metadata_from_parquet_file,
+    catalog::physical::PhysicalTable,
+    metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
 };
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
@@ -440,12 +441,17 @@ pub enum RegisterRevisionFilesError {
 
     /// Failed to read Amp metadata from parquet file
     ///
-    /// This occurs when the parquet file cannot be read or its metadata cannot be parsed.
+    /// This occurs when extracting Amp-specific metadata from a Parquet file fails.
+    /// Common causes include:
+    /// - Corrupted or invalid Parquet file structure
+    /// - Missing required metadata keys in the file
+    /// - Incompatible metadata schema version
+    /// - I/O errors reading from object store
+    /// - JSON parsing failures in metadata values
     ///
-    /// TODO: Replace BoxError with concrete error type when amp_metadata_from_parquet_file
-    /// is migrated to use proper error handling patterns.
+    /// See `AmpMetadataFromParquetError` for specific error details.
     #[error("Failed to read Amp metadata from parquet file")]
-    ReadParquetMetadata(#[source] BoxError),
+    ReadParquetMetadata(#[source] AmpMetadataFromParquetError),
 
     /// Failed to serialize parquet metadata to JSON
     #[error("Failed to serialize parquet metadata to JSON")]

@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod datasets_derived;
 pub mod evm;
 pub mod incrementalizer;
 pub mod memory_pool;
@@ -7,24 +8,25 @@ pub mod plan_visitors;
 pub mod planning_context;
 pub mod query_context;
 pub mod sql;
-pub mod sql_str;
 pub mod stream_helpers;
-pub mod utils;
 
 use std::{
     ops::RangeInclusive,
     time::{Duration, SystemTime},
 };
 
+pub use ::datasets_derived::sql_str;
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
-pub use catalog::logical::*;
-use datafusion::arrow::error::ArrowError;
 pub use datafusion::{arrow, parquet};
 pub use datasets_common::{BlockNum, SPECIAL_BLOCK_NUM, block_range::BlockRange};
-pub use metadata::segments::{ResumeWatermark, Watermark};
-pub use planning_context::{DetachedLogicalPlan, PlanningContext};
-pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};
+
+pub use self::{
+    catalog::logical::{LogicalCatalog, LogicalTable},
+    metadata::segments::{ResumeWatermark, Watermark},
+    planning_context::{DetachedLogicalPlan, PlanningContext},
+    query_context::{Error as QueryError, QueryContext},
+};
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub type BoxResult<T> = Result<T, BoxError>;

@@ -3,7 +3,7 @@
 //! This module defines the type-safe representation of the Solana dataset kind
 //! and provides parsing functionality with proper error handling.
 
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 
 /// The canonical string identifier for Solana datasets.
 ///
@@ -33,9 +33,9 @@ impl SolanaDatasetKind {
     }
 }
 
-impl From<SolanaDatasetKind> for RawDatasetKind {
+impl From<SolanaDatasetKind> for DatasetKindStr {
     fn from(value: SolanaDatasetKind) -> Self {
-        RawDatasetKind::new(value.to_string())
+        DatasetKindStr::new(value.to_string())
     }
 }
 
@@ -120,19 +120,19 @@ impl PartialEq<SolanaDatasetKind> for String {
     }
 }
 
-impl PartialEq<RawDatasetKind> for SolanaDatasetKind {
-    fn eq(&self, other: &RawDatasetKind) -> bool {
+impl PartialEq<DatasetKindStr> for SolanaDatasetKind {
+    fn eq(&self, other: &DatasetKindStr) -> bool {
         DATASET_KIND == other.as_str()
     }
 }
 
-impl PartialEq<SolanaDatasetKind> for RawDatasetKind {
+impl PartialEq<SolanaDatasetKind> for DatasetKindStr {
     fn eq(&self, _other: &SolanaDatasetKind) -> bool {
         self.as_str() == DATASET_KIND
     }
 }
 
-impl PartialEq<SolanaDatasetKind> for &RawDatasetKind {
+impl PartialEq<SolanaDatasetKind> for &DatasetKindStr {
     fn eq(&self, _other: &SolanaDatasetKind) -> bool {
         self.as_str() == DATASET_KIND
     }

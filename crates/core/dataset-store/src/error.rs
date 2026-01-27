@@ -1,10 +1,8 @@
 use amp_datasets_registry::{error::ResolveRevisionError, manifests::ManifestParseError};
-use amp_providers_registry::ParseConfigError;
 use datasets_common::{
-    hash::Hash, hash_reference::HashReference, raw_dataset_kind::RawDatasetKind,
+    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
     reference::Reference,
 };
-use evm_rpc_datasets::error::ProviderError;
 
 /// Errors specific to getting dataset operations
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +64,7 @@ pub enum GetDatasetError {
     #[error("Failed to parse {kind} manifest for dataset '{reference}'")]
     ParseManifest {
         reference: HashReference,
-        kind: RawDatasetKind,
+        kind: DatasetKindStr,
         #[source]
         source: ManifestParseError,
     },
@@ -81,7 +79,7 @@ pub enum GetDatasetError {
     CreateDerivedDataset {
         reference: HashReference,
         #[source]
-        source: datasets_derived::DatasetError,
+        source: common::datasets_derived::DatasetError,
     },
 }
 
@@ -156,13 +154,6 @@ pub enum GetDerivedManifestError {
 /// Errors specific to getting client operations for raw datasets
 #[derive(Debug, thiserror::Error)]
 pub enum GetClientError {
-    /// Failed to query manifest path from metadata database
-    ///
-    /// This occurs when attempting to retrieve the manifest file path associated
-    /// with the given hash from the metadata database.
-    #[error("Failed to query manifest path from metadata database")]
-    QueryManifestPath(#[source] metadata_db::Error),
-
     /// Failed to load manifest content from object store
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
@@ -196,60 +187,14 @@ pub enum GetClientError {
     #[error("Dataset is missing required 'network' field for raw dataset kind")]
     MissingNetwork,
 
-    /// No provider configuration found for the dataset kind and network combination.
+    /// Failed to create client for the dataset.
     ///
-    /// This occurs when:
-    /// - No provider is configured for the specific kind-network pair
-    /// - All providers for this kind-network are disabled
-    /// - Provider configuration files are missing or invalid
-    #[error("No provider found with kind '{dataset_kind}' and network '{network}'")]
-    ProviderNotFound {
-        dataset_kind: RawDatasetKind,
-        network: String,
-    },
-
-    /// Failed to parse the provider configuration.
-    ///
-    /// This occurs when the provider configuration cannot be deserialized into the
-    /// expected type for the dataset kind (EvmRpc, EthBeacon, or Firehose).
-    #[error("Failed to parse provider configuration for provider '{name}': {source}")]
-    ProviderConfigParseError {
-        name: String,
-        source: ParseConfigError,
-    },
-
-    /// Failed to create an EVM RPC client.
-    ///
-    /// This occurs during initialization of the EVM RPC client, which may fail due to
-    /// invalid RPC URLs, connection issues, or authentication failures.
-    #[error("Failed to create EVM RPC client for dataset '{name}': {source}")]
-    EvmRpcClientError {
-        name: String,
-        source: evm_rpc_datasets::error::ProviderError,
-    },
-
-    /// Failed to create a Solana extractor.
-    ///
-    /// This occurs during initialization of the Solana extractor, which may fail due to
-    /// invalid or unsupported URL schemes.
-    #[error("Failed to create Solana extractor for dataset '{name}': {source}")]
-    SolanaExtractorError {
-        name: String,
-        source: solana_datasets::error::ExtractorError,
-    },
-
-    /// Failed to create a Firehose client.
-    ///
-    /// This occurs during initialization of the Firehose client, which may fail due to
-    /// invalid gRPC endpoints, connection issues, or authentication failures.
-    #[error("Failed to create Firehose client for dataset '{name}': {source}")]
-    FirehoseClientError {
-        name: String,
-        source: firehose_datasets::Error,
-    },
-
-    #[error("Manifest {0} is not registered")]
-    ManifestNotRegistered(Hash),
+    /// This occurs during client creation for the provider, which may fail due to:
+    /// - No provider found for the kind-network combination
+    /// - Invalid provider configuration
+    /// - Client initialization failures (connection issues, invalid URLs, etc.)
+    #[error("Failed to create client")]
+    ClientCreation(#[source] amp_providers_registry::CreateClientError),
 
     #[error("Manifest {0} not found in the manifest store")]
     ManifestNotFound(Hash),
@@ -276,25 +221,16 @@ pub enum EthCallForDatasetError {
     /// - Provider configuration files are missing or invalid
     #[error("No provider found for dataset kind '{dataset_kind}' and network '{network}'")]
     ProviderNotFound {
-        dataset_kind: RawDatasetKind,
+        dataset_kind: DatasetKindStr,
         network: String,
     },
 
-    /// Failed to parse the provider configuration.
+    /// Failed to create the EVM RPC provider.
     ///
-    /// This occurs when the provider configuration cannot be deserialized into the
-    /// expected EvmRpcProviderConfig type, typically due to missing required fields
-    /// or invalid field values.
-    #[error("Failed to parse provider configuration: {0}")]
-    ProviderConfigParse(#[source] ParseConfigError),
-
-    /// Failed to establish an IPC connection to the EVM provider.
-    ///
-    /// This occurs specifically when using IPC (Inter-Process Communication) as the
-    /// transport protocol, and the connection to the provider socket fails due to
-    /// socket unavailability, permission issues, or other IPC-specific problems.
-    #[error("Failed to establish IPC connection: {0}")]
-    IpcConnection(#[source] ProviderError),
+    /// This occurs when provider configuration parsing fails or when
+    /// establishing an IPC connection fails.
+    #[error("Failed to create EVM RPC provider")]
+    ProviderCreation(#[source] amp_providers_registry::CreateEvmRpcClientError),
 }
 
 /// Errors that occur when resolving dataset dependencies.
@@ -334,5 +270,5 @@ pub enum DatasetDependencyError {
     /// occurs when traversing the dependency graph reveals a cycle, which would
     /// cause infinite recursion during query execution.
     #[error("dependency cycle detected")]
-    CycleDetected(#[source] common::utils::DfsError<Reference>),
+    CycleDetected(#[source] datasets_derived::deps::DfsError<Reference>),
 }

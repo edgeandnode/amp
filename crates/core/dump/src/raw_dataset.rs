@@ -91,8 +91,11 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
-    BlockNum, BoxError, LogicalCatalog, LogicalTable,
-    catalog::physical::{Catalog, MissingRangesError, PhysicalTable},
+    BlockNum, BoxError, LogicalCatalog,
+    catalog::{
+        logical::LogicalTable,
+        physical::{Catalog, MissingRangesError, PhysicalTable},
+    },
     metadata::segments::merge_ranges,
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};

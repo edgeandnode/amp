@@ -8,7 +8,6 @@ license-file.workspace = true
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
 async-trait.workspace = true
-axum.workspace = true
 bigdecimal = "0.4"
 bytes.workspace = true
 chrono.workspace = true
@@ -16,13 +15,13 @@ datafusion.workspace = true
 datafusion-datasource.workspace = true
 datafusion-tracing.workspace = true
 datasets-common = { path = "../datasets-common" }
+datasets-derived = { path = "../datasets-derived" }
 futures.workspace = true
 itertools.workspace = true
 metadata-db = { path = "../metadata-db" }
 object_store.workspace = true
 rand.workspace = true
 regex.workspace = true
-schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

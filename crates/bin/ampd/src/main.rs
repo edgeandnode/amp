@@ -63,7 +63,7 @@ enum Command {
 async fn main() {
     if let Err(err) = main_inner().await {
         // Manually print the error so we can control the format.
-        let err = common::utils::error_with_causes(&*err);
+        let err = error_with_causes(&*err);
         eprintln!("Exiting with error: {err}");
         std::process::exit(1);
     }
@@ -180,4 +180,20 @@ async fn load_config(
 
     let config = Config::load(config, true, None, allow_temp_db, build_info).await?;
     Ok(config)
+}
+
+/// Builds an error chain string from an error and its sources.
+fn error_with_causes(err: &dyn std::error::Error) -> String {
+    let mut error_chain = Vec::new();
+    let mut current = err;
+    while let Some(source) = current.source() {
+        error_chain.push(source.to_string());
+        current = source;
+    }
+
+    if error_chain.is_empty() {
+        err.to_string()
+    } else {
+        format!("{} | Caused by: {}", err, error_chain.join(" -> "))
+    }
 }

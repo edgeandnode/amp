@@ -28,7 +28,7 @@ pub use self::{
     notification_multiplexer::NotificationMultiplexerHandle,
     physical_table::{
         LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
-        LocationWithDetails, PhysicalTable,
+        LocationWithDetails, PhysicalTable, TableWriterInfo, WriterTableInfo,
         events::{
             LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
             LocationNotification,

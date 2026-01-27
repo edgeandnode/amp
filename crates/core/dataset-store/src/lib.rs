@@ -1,12 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    num::NonZeroU32,
     str::FromStr,
     sync::Arc,
 };
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
-use amp_providers_registry::{ProviderConfig, ProvidersRegistry};
+use amp_providers_registry::ProvidersRegistry;
 use common::{
     catalog::dataset_access::{
         EthCallForDatasetError as DatasetAccessEthCallForDatasetError,
@@ -25,26 +24,16 @@ use datasets_common::{
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use datasets_raw::client::{BlockStreamer, BlockStreamerExt};
-use evm_rpc_datasets::{
-    EvmRpcDatasetKind, Manifest as EvmRpcManifest, ProviderConfig as EvmRpcProviderConfig,
-    provider as evm_provider,
-};
-use firehose_datasets::dataset::{
-    Manifest as FirehoseManifest, ProviderConfig as FirehoseProviderConfig,
-};
-use monitoring::{logging, telemetry::metrics::Meter};
+use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
+use firehose_datasets::dataset::Manifest as FirehoseManifest;
+use monitoring::telemetry::metrics::Meter;
 use parking_lot::RwLock;
-use rand::seq::SliceRandom as _;
-use solana_datasets::{Manifest as SolanaManifest, ProviderConfig as SolanaProviderConfig};
+use solana_datasets::Manifest as SolanaManifest;
 use tracing::instrument;
-use url::Url;
 
-mod client;
 mod dataset_kind;
-mod env_substitute;
 mod error;
 
-use self::client::BlockStreamClient;
 pub use self::error::{
     EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
     GetDerivedManifestError,
@@ -193,7 +182,7 @@ impl DatasetStore {
                         kind: kind.into(),
                         source,
                     })?;
-                datasets_derived::dataset(reference.clone(), manifest)
+                common::datasets_derived::dataset(reference.clone(), manifest)
                     .map(Arc::new)
                     .map_err(|source| GetDatasetError::CreateDerivedDataset {
                         reference: reference.clone(),
@@ -288,124 +277,13 @@ impl DatasetStore {
             return Err(GetClientError::MissingNetwork);
         };
 
-        let Some(config) = self.find_provider(kind, network.clone()).await else {
-            tracing::warn!(
-                provider_kind = %manifest.kind,
-                provider_network = %network,
-                "no providers available for the requested kind-network configuration"
-            );
-
-            return Err(GetClientError::ProviderNotFound {
-                dataset_kind: kind.into(),
-                network,
-            });
-        };
-
-        let provider_name = config.name.clone();
-        let client = match kind {
-            DatasetKind::EvmRpc => {
-                let config = config
-                    .try_into_config::<EvmRpcProviderConfig>()
-                    .map_err(|err| GetClientError::ProviderConfigParseError {
-                        name: provider_name.clone(),
-                        source: err,
-                    })?;
-                evm_rpc_datasets::client(config, meter)
-                    .await
-                    .map(BlockStreamClient::EvmRpc)
-                    .map_err(|err| GetClientError::EvmRpcClientError {
-                        name: provider_name.clone(),
-                        source: err,
-                    })?
-            }
-            DatasetKind::Solana => {
-                let config = config
-                    .try_into_config::<SolanaProviderConfig>()
-                    .map_err(|err| GetClientError::ProviderConfigParseError {
-                        name: provider_name.to_string(),
-                        source: err,
-                    })?;
-                solana_datasets::extractor(config, meter)
-                    .map(BlockStreamClient::Solana)
-                    .map_err(|err| GetClientError::SolanaExtractorError {
-                        name: provider_name.to_string(),
-                        source: err,
-                    })?
-            }
-            DatasetKind::Firehose => {
-                let config = config
-                    .try_into_config::<FirehoseProviderConfig>()
-                    .map_err(|err| GetClientError::ProviderConfigParseError {
-                        name: provider_name.clone(),
-                        source: err,
-                    })?;
-                firehose_datasets::Client::new(config, meter)
-                    .await
-                    .map(|c| BlockStreamClient::Firehose(Box::new(c)))
-                    .map_err(|err| GetClientError::FirehoseClientError {
-                        name: provider_name.clone(),
-                        source: err,
-                    })?
-            }
-            DatasetKind::Derived => {
-                unreachable!("non-raw dataset kinds are filtered out earlier");
-            }
-        };
+        let client = self
+            .providers_registry
+            .create_block_stream_client(kind, &network, meter)
+            .await
+            .map_err(GetClientError::ClientCreation)?;
 
         Ok(client.with_retry())
-    }
-
-    async fn find_provider(&self, kind: DatasetKind, network: String) -> Option<ProviderConfig> {
-        // Collect matching provider configurations into a vector for shuffling
-        let mut matching_providers = self
-            .providers_registry
-            .get_all()
-            .await
-            .values()
-            .filter_map(|prov| {
-                // Filter out providers with unknown dataset kinds (try_into fails)
-                let prov_kind: DatasetKind = (&prov.kind).try_into().ok()?;
-                if prov_kind != kind || prov.network != network {
-                    return None;
-                }
-                Some(prov)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if matching_providers.is_empty() {
-            return None;
-        }
-
-        // Try each provider in random order until we find one with successful env substitution
-        matching_providers.shuffle(&mut rand::rng());
-
-        'try_find_provider: for mut provider in matching_providers {
-            // Apply environment variable substitution to the `rest` table values
-            for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = env_substitute::substitute_env_vars(value) {
-                    tracing::warn!(
-                        provider_name = %provider.name,
-                        provider_kind = %kind,
-                        provider_network = %network,
-                        error = %err, error_source = logging::error_source(&err),
-                        "environment variable substitution failed for provider, trying next"
-                    );
-                    continue 'try_find_provider;
-                }
-            }
-
-            tracing::debug!(
-                provider_kind = %kind,
-                provider_network = %network,
-                "successfully selected provider with environment substitution"
-            );
-
-            return Some(provider);
-        }
-
-        // If we get here, no suitable providers were found
-        None
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
@@ -436,39 +314,22 @@ impl DatasetStore {
             });
         };
 
-        let Some(config) = self
-            .find_provider(DatasetKind::EvmRpc, network.clone())
-            .await
-        else {
-            tracing::warn!(
-                provider_kind = %DatasetKind::EvmRpc,
-                provider_network = %network,
-                "no providers available for the requested kind-network configuration"
-            );
-            return Err(EthCallForDatasetError::ProviderNotFound {
-                dataset_kind: DatasetKind::EvmRpc.into(),
-                network: network.clone(),
-            });
-        };
-
-        // Internal struct for extracting specific provider config fields.
-        #[derive(serde::Deserialize)]
-        struct EvmRpcProviderConfig {
-            url: Url,
-            rate_limit_per_minute: Option<NonZeroU32>,
-        }
-
-        let provider = config
-            .try_into_config::<EvmRpcProviderConfig>()
-            .map_err(EthCallForDatasetError::ProviderConfigParse)?;
-
-        // Cache the provider.
-        let provider = if provider.url.scheme() == "ipc" {
-            evm_provider::new_ipc(provider.url.path(), provider.rate_limit_per_minute)
-                .await
-                .map_err(EthCallForDatasetError::IpcConnection)?
-        } else {
-            evm_provider::new(provider.url, provider.rate_limit_per_minute)
+        let provider = match self.providers_registry.create_evm_rpc_client(network).await {
+            Ok(Some(provider)) => provider,
+            Ok(None) => {
+                tracing::warn!(
+                    provider_kind = %DatasetKind::EvmRpc,
+                    provider_network = %network,
+                    "no providers available for the requested kind-network configuration"
+                );
+                return Err(EthCallForDatasetError::ProviderNotFound {
+                    dataset_kind: DatasetKind::EvmRpc.into(),
+                    network: network.clone(),
+                });
+            }
+            Err(err) => {
+                return Err(EthCallForDatasetError::ProviderCreation(err));
+            }
         };
 
         let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(sql_table_ref_schema, provider)))
@@ -559,7 +420,7 @@ pub async fn dataset_and_dependencies(
 /// all of its dependencies. An error is returned if a cycle is detected.
 fn dependency_sort(
     deps: BTreeMap<Reference, Vec<Reference>>,
-) -> Result<Vec<Reference>, common::utils::DfsError<Reference>> {
+) -> Result<Vec<Reference>, datasets_derived::deps::DfsError<Reference>> {
     let nodes: BTreeSet<&Reference> = deps
         .iter()
         .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
@@ -569,7 +430,13 @@ fn dependency_sort(
     let mut visited_cycle: BTreeSet<&Reference> = Default::default();
     for node in nodes {
         if !visited.contains(node) {
-            common::utils::dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
+            datasets_derived::deps::dfs(
+                node,
+                &deps,
+                &mut ordered,
+                &mut visited,
+                &mut visited_cycle,
+            )?;
         }
     }
     Ok(ordered)

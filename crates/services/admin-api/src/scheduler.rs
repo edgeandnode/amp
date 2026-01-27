@@ -25,8 +25,8 @@
 
 use async_trait::async_trait;
 use datasets_common::{
-    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
-    raw_dataset_kind::RawDatasetKind,
+    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference, name::Name,
+    namespace::Namespace,
 };
 use dump::EndBlock;
 use metadata_db::Worker;
@@ -55,7 +55,7 @@ pub trait SchedulerJobs: Send + Sync {
     async fn schedule_dataset_sync_job(
         &self,
         dataset_reference: HashReference,
-        dataset_kind: RawDatasetKind,
+        dataset_kind: DatasetKindStr,
         end_block: EndBlock,
         max_writers: u16,
         worker_id: Option<NodeSelector>,

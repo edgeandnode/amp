@@ -13,8 +13,11 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use common::{
-    BoxError, LogicalCatalog, LogicalTable, QueryContext,
-    catalog::physical::{Catalog, PhysicalTable},
+    BoxError, LogicalCatalog, QueryContext,
+    catalog::{
+        logical::LogicalTable,
+        physical::{Catalog, PhysicalTable},
+    },
 };
 use server::config::Config;
 
