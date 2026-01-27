@@ -342,7 +342,7 @@ jobs:
         with:
           images: ghcr.io/edgeandnode/${{ matrix.name }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=raw,value=${{ env.RELEASE_NIGHTLY_TAG }},enable=${{ env.RELEASE_NIGHTLY_TAG != '' }}
             type=raw,value=nightly,enable=${{ env.RELEASE_NIGHTLY_TAG != '' }}
             type=ref,event=tag
@@ -353,6 +353,9 @@ jobs:
             org.opencontainers.image.vendor=Edge & Node
             org.opencontainers.image.title=${{ matrix.title }}
             org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.created=${{ github.run_started_at }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
           annotations: |
             manifest:org.opencontainers.image.source=https://github.com/edgeandnode/amp
             manifest:org.opencontainers.image.url=https://github.com/edgeandnode/amp
