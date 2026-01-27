@@ -33,8 +33,8 @@ use admin_api::scheduler::{
 };
 use async_trait::async_trait;
 use datasets_common::{
-    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
-    raw_dataset_kind::RawDatasetKind,
+    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference, name::Name,
+    namespace::Namespace,
 };
 use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
@@ -75,7 +75,7 @@ impl Scheduler {
         end_block: EndBlock,
         max_writers: u16,
         hash_reference: HashReference,
-        dataset_kind: RawDatasetKind,
+        dataset_kind: DatasetKindStr,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
@@ -277,7 +277,7 @@ impl SchedulerJobs for Scheduler {
     async fn schedule_dataset_sync_job(
         &self,
         dataset_reference: HashReference,
-        dataset_kind: RawDatasetKind,
+        dataset_kind: DatasetKindStr,
         end_block: EndBlock,
         max_writers: u16,
         worker_id: Option<NodeSelector>,

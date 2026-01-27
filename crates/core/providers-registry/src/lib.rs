@@ -14,7 +14,7 @@
 //! Additional fields depend on the provider type.
 use std::{collections::BTreeMap, ops::Deref};
 
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 use monitoring::{logging, telemetry::metrics::Meter};
 use object_store::ObjectStore;
 use rand::seq::SliceRandom as _;
@@ -118,7 +118,7 @@ where
     /// Providers are tried in random order to distribute load.
     pub async fn create_block_stream_client(
         &self,
-        kind: impl Into<RawDatasetKind>,
+        kind: impl Into<DatasetKindStr>,
         network: &str,
         meter: Option<&Meter>,
     ) -> Result<BlockStreamClient, CreateClientError> {
@@ -138,7 +138,7 @@ where
     /// Providers are tried in random order to distribute load.
     pub async fn find_provider(
         &self,
-        kind: impl Into<RawDatasetKind>,
+        kind: impl Into<DatasetKindStr>,
         network: &str,
     ) -> Option<ProviderConfig> {
         let kind = kind.into();

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use datasets_common::{hash_reference::HashReference, raw_dataset_kind::RawDatasetKind};
+use datasets_common::{dataset_kind_str::DatasetKindStr, hash_reference::HashReference};
 use datasets_derived::DerivedDatasetKind;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
@@ -40,7 +40,7 @@ use crate::{
 pub async fn dump_tables(
     ctx: Ctx,
     dataset: &HashReference,
-    kind: RawDatasetKind,
+    kind: DatasetKindStr,
     max_writers: u16,
     microbatch_max_interval: u64,
     end: EndBlock,

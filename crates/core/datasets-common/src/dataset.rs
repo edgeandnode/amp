@@ -4,9 +4,9 @@ use datafusion::{arrow::datatypes::SchemaRef, logical_expr::ScalarUDF};
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
+    dataset_kind_str::DatasetKindStr,
     deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
-    raw_dataset_kind::RawDatasetKind,
     table_name::TableName,
 };
 
@@ -33,7 +33,7 @@ pub trait Dataset: Sync + Send + 'static {
     fn start_block(&self) -> Option<BlockNum>;
 
     /// Returns the kind of this dataset (e.g., `evm-rpc`, `solana`, `derived`).
-    fn kind(&self) -> RawDatasetKind;
+    fn kind(&self) -> DatasetKindStr;
 
     /// Returns the dependencies of this dataset on other datasets.
     ///

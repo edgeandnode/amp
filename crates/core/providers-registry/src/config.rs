@@ -1,4 +1,4 @@
-use datasets_common::raw_dataset_kind::RawDatasetKind;
+use datasets_common::dataset_kind_str::DatasetKindStr;
 
 /// Provider configuration with required and provider-specific fields.
 ///
@@ -11,7 +11,7 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub name: String,
     /// The type of provider as string (e.g., "evm-rpc", "firehose")
-    pub kind: RawDatasetKind,
+    pub kind: DatasetKindStr,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     pub network: String,
     /// All other provider-specific configuration fields
