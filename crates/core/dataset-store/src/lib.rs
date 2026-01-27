@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{str::FromStr, sync::Arc};
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use amp_providers_registry::ProvidersRegistry;
@@ -22,7 +18,7 @@ use datasets_common::{
     hash::Hash, hash_reference::HashReference, manifest::Manifest as CommonManifest,
     reference::Reference,
 };
-use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
+use datasets_derived::Manifest as DerivedManifest;
 use datasets_raw::client::{BlockStreamer, BlockStreamerExt};
 use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
@@ -38,10 +34,7 @@ pub use self::error::{
     EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
     GetDerivedManifestError,
 };
-use crate::{
-    dataset_kind::{DatasetKind, UnsupportedKindError},
-    error::DatasetDependencyError,
-};
+use crate::dataset_kind::{DatasetKind, UnsupportedKindError};
 
 #[derive(Clone)]
 pub struct DatasetStore {
@@ -371,118 +364,5 @@ impl common::catalog::dataset_access::DatasetAccess for DatasetStore {
         self.eth_call_for_dataset(sql_table_ref_schema, dataset)
             .await
             .map_err(Into::into)
-    }
-}
-
-/// Return the input datasets and their dataset dependencies. The output set is ordered such that
-/// each dataset comes after all datasets it depends on.
-pub async fn dataset_and_dependencies(
-    store: &DatasetStore,
-    dataset: Reference,
-) -> Result<Vec<Reference>, DatasetDependencyError> {
-    let mut datasets = vec![dataset];
-    let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
-    while let Some(dataset_ref) = datasets.pop() {
-        // Resolve the reference to a hash reference first
-        let hash_ref = store
-            .resolve_revision(&dataset_ref)
-            .await
-            .map_err(DatasetDependencyError::ResolveRevision)?
-            .ok_or_else(|| DatasetDependencyError::DatasetNotFound(dataset_ref.clone()))?;
-        let dataset = store
-            .get_dataset(&hash_ref)
-            .await
-            .map_err(DatasetDependencyError::GetDataset)?;
-
-        if dataset.kind() != DerivedDatasetKind {
-            deps.insert(dataset_ref, vec![]);
-            continue;
-        }
-
-        let refs: Vec<Reference> = dataset
-            .dependencies()
-            .values()
-            .map(|dep| dep.to_reference())
-            .collect();
-        let mut untracked_refs = refs
-            .iter()
-            .filter(|r| deps.keys().all(|d| d != *r))
-            .cloned()
-            .collect();
-        datasets.append(&mut untracked_refs);
-        deps.insert(dataset_ref, refs);
-    }
-
-    dependency_sort(deps).map_err(DatasetDependencyError::CycleDetected)
-}
-
-/// Given a map of values to their dependencies, return a set where each value is ordered after
-/// all of its dependencies. An error is returned if a cycle is detected.
-fn dependency_sort(
-    deps: BTreeMap<Reference, Vec<Reference>>,
-) -> Result<Vec<Reference>, datasets_derived::deps::DfsError<Reference>> {
-    let nodes: BTreeSet<&Reference> = deps
-        .iter()
-        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
-        .collect();
-    let mut ordered: Vec<Reference> = Default::default();
-    let mut visited: BTreeSet<&Reference> = Default::default();
-    let mut visited_cycle: BTreeSet<&Reference> = Default::default();
-    for node in nodes {
-        if !visited.contains(node) {
-            datasets_derived::deps::dfs(
-                node,
-                &deps,
-                &mut ordered,
-                &mut visited,
-                &mut visited_cycle,
-            )?;
-        }
-    }
-    Ok(ordered)
-}
-
-#[cfg(test)]
-mod tests {
-    use datasets_common::revision::Revision;
-
-    #[test]
-    fn dependency_sort_order() {
-        #[expect(clippy::type_complexity)]
-        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
-            (&[("a", &["b"]), ("b", &["a"])], None),
-            (&[("a", &["b"])], Some(&["b", "a"])),
-            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
-            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
-            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
-            (
-                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
-                Some(&["d", "b", "c", "a"]),
-            ),
-            (
-                &[("a", &["b", "c"]), ("b", &["c", "d"])],
-                Some(&["c", "d", "b", "a"]),
-            ),
-        ];
-        let name_to_ref = |name: &str| {
-            datasets_common::reference::Reference::new(
-                "_".parse().unwrap(),
-                name.parse().unwrap(),
-                Revision::Dev,
-            )
-        };
-        for (input, expected) in cases {
-            let deps = input
-                .iter()
-                .map(|(k, v)| (name_to_ref(k), v.iter().map(|n| name_to_ref(n)).collect()))
-                .collect();
-            let expected: Option<Vec<datasets_common::reference::Reference>> =
-                expected.map(|n| n.iter().map(|n| name_to_ref(n)).collect());
-            let result = super::dependency_sort(deps);
-            match expected {
-                Some(expected) => assert_eq!(*expected, result.unwrap()),
-                None => assert!(result.is_err()),
-            }
-        }
     }
 }

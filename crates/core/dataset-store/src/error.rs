@@ -1,7 +1,6 @@
-use amp_datasets_registry::{error::ResolveRevisionError, manifests::ManifestParseError};
+use amp_datasets_registry::manifests::ManifestParseError;
 use datasets_common::{
     dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
-    reference::Reference,
 };
 
 /// Errors specific to getting dataset operations
@@ -231,44 +230,4 @@ pub enum EthCallForDatasetError {
     /// establishing an IPC connection fails.
     #[error("Failed to create EVM RPC provider")]
     ProviderCreation(#[source] amp_providers_registry::CreateEvmRpcClientError),
-}
-
-/// Errors that occur when resolving dataset dependencies.
-///
-/// Derived datasets can depend on other datasets (raw or derived). These errors
-/// cover failures during the dependency resolution process, including missing
-/// datasets, revision lookups, and cycle detection in the dependency graph.
-#[derive(Debug, thiserror::Error)]
-pub enum DatasetDependencyError {
-    /// A referenced dataset was not found.
-    ///
-    /// This occurs when a dataset references another dataset by name or hash
-    /// that does not exist in the registry. The dependency cannot be resolved
-    /// because the target dataset is missing.
-    #[error("dataset '{0}' not found")]
-    DatasetNotFound(Reference),
-
-    /// Failed to resolve the revision for a dataset reference.
-    ///
-    /// When a dataset is referenced by name (without a specific hash), the system
-    /// must resolve it to a specific revision. This error occurs when that resolution
-    /// fails, typically due to registry lookup issues.
-    #[error("failed to resolve dataset revision")]
-    ResolveRevision(#[source] ResolveRevisionError),
-
-    /// Failed to retrieve a dataset from the store.
-    ///
-    /// After resolving a reference, the actual dataset must be fetched. This error
-    /// occurs when the dataset retrieval fails, which may be due to manifest parsing
-    /// issues or object store access problems.
-    #[error("failed to get dataset")]
-    GetDataset(#[source] GetDatasetError),
-
-    /// A circular dependency was detected in the dataset graph.
-    ///
-    /// Datasets cannot depend on themselves directly or transitively. This error
-    /// occurs when traversing the dependency graph reveals a cycle, which would
-    /// cause infinite recursion during query execution.
-    #[error("dependency cycle detected")]
-    CycleDetected(#[source] datasets_derived::deps::DfsError<Reference>),
 }
