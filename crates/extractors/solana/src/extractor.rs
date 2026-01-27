@@ -15,12 +15,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use anyhow::Context;
 use datasets_common::dataset::BlockNum;
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     rows::Rows,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
+use solana_clock::Slot;
 use url::Url;
 
 use crate::{
@@ -57,13 +59,16 @@ impl SolanaExtractor {
         use_archive: crate::UseArchive,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
+        assert_eq!(network, "mainnet", "only mainnet is supported");
+
+        let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
+
         let rpc_client = rpc_client::SolanaRpcClient::new(
             rpc_provider_url,
             max_rpc_calls_per_second,
             provider_name.clone(),
             network.clone(),
         );
-        let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
 
         let (of1_car_manager_tx, of1_car_manager_rx) = tokio::sync::mpsc::channel(128);
         let of1_car_manager_jh = tokio::task::spawn(of1_client::car_file_manager(
@@ -74,7 +79,6 @@ impl SolanaExtractor {
             network.clone(),
             metrics.clone(),
         ));
-
         let handles = Of1CarManagerHandles {
             tx: of1_car_manager_tx,
             jh: of1_car_manager_jh,
@@ -99,27 +103,38 @@ impl SolanaExtractor {
         get_block_config: rpc_client::rpc_config::RpcBlockConfig,
     ) -> impl Stream<Item = Result<Rows, BlockStreamError>>
     where
-        T: Stream<Item = Result<of1_client::DecodedBlock, BlockStreamError>>,
+        T: Stream<Item = Result<of1_client::DecodedSlot, BlockStreamError>>,
     {
         async_stream::stream! {
             // Slots can be skipped, so we'll track the next expected slot and in the case of a
             // mismatch, yield empty rows for the skipped slots.
             let mut expected_next_slot = start;
+            let requested_range = start..=end;
 
+            // Download historical blocks from the Old Faithful archive.
             futures::pin_mut!(historical_block_stream);
+            while let Some(slot) = historical_block_stream.next().await {
+                let slot = match slot {
+                    Ok(slot) => slot,
+                    Err(e) => {
+                        yield Err(e);
+                        return;
+                    },
+                };
 
-            while let Some(block) = historical_block_stream.next().await.transpose()? {
-                let current_slot = block.slot;
-
-                debug_assert!(
-                    (start..=end).contains(&current_slot),
-                    "historical block stream should be limited to requested range"
-                );
+                let current_slot = slot.slot;
+                if !requested_range.contains(&current_slot) {
+                    let e = format!(
+                        "historical block stream yielded slot {current_slot} outside of requested range {start}..={end}"
+                    );
+                    yield Err(e.into());
+                    return;
+                }
 
                 if current_slot != expected_next_slot {
-                    // NOTE: If `block.slot == end`, we don't yield an empty row for it since
+                    // NOTE: If `current_slot == end`, we don't yield an empty row for it since
                     // we're about to yield the actual block rows for that slot.
-                    let end = std::cmp::min(block.slot, end);
+                    let end = std::cmp::min(current_slot, end);
 
                     // Yield empty rows for skipped slots.
                     for skipped_slot in expected_next_slot..end {
@@ -127,7 +142,7 @@ impl SolanaExtractor {
                     }
                 }
 
-                yield tables::convert_of_data_to_db_rows(block, &self.network).map_err(Into::into);
+                yield tables::convert_slot_to_db_rows(non_empty_of1_slot(slot), &self.network).map_err(Into::into);
 
                 if current_slot == end {
                     // Reached the end of the requested range.
@@ -137,8 +152,6 @@ impl SolanaExtractor {
                 expected_next_slot = current_slot + 1;
             }
 
-            debug_assert!(expected_next_slot <= end);
-
             tracing::debug!(
                 next = %expected_next_slot,
                 end,
@@ -146,27 +159,33 @@ impl SolanaExtractor {
             );
 
             // Download the remaining blocks via JSON-RPC.
-            for block_num in expected_next_slot..=end {
+            for slot in expected_next_slot..=end {
                 let get_block_resp = self.rpc_client.get_block(
-                    block_num,
+                    slot,
                     get_block_config,
                     self.metrics.clone(),
                 ).await;
 
-                let block = match get_block_resp {
-                    Ok(block) => block,
+                match get_block_resp {
+                    Ok(block) => {
+                        let non_empty_slot = match non_empty_rpc_slot(slot, block) {
+                            Ok(slot) => slot,
+                            Err(e) => {
+                                yield Err(e.into());
+                                return;
+                            },
+                        };
+                        yield tables::convert_slot_to_db_rows(non_empty_slot, &self.network).map_err(Into::into);
+                    }
                     Err(e) => {
                         if rpc_client::is_block_missing_err(&e) {
-                            yield tables::empty_db_rows(block_num, &self.network).map_err(Into::into);
+                            yield tables::empty_db_rows(slot, &self.network).map_err(Into::into);
                         } else {
                             yield Err(e.into());
+                            return;
                         }
-
-                        continue;
                     }
                 };
-
-                yield tables::convert_rpc_block_to_db_rows(block_num, block, &self.network).map_err(Into::into);
             }
         }
     }
@@ -322,22 +341,140 @@ impl BlockStreamer for SolanaExtractor {
     }
 }
 
+/// Converts to [tables::NonEmptySlot]. This conversion cannot fail since the Old Faithful
+/// CAR parser only produces non-empty slots.
+fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> tables::NonEmptySlot {
+    let of1_client::DecodedSlot {
+        slot,
+        parent_slot,
+        blockhash,
+        prev_blockhash,
+        block_height,
+        blocktime,
+        transactions,
+        transaction_metas,
+        block_rewards: _block_rewards,
+    } = slot;
+
+    let mut txs = Vec::with_capacity(transactions.len());
+    let mut msgs = Vec::with_capacity(transactions.len());
+
+    for (index, (tx, tx_meta)) in transactions.into_iter().zip(transaction_metas).enumerate() {
+        let solana_sdk::transaction::VersionedTransaction {
+            signatures,
+            message,
+        } = tx;
+        let tx_index = index.try_into().expect("conversion error");
+
+        let tx = tables::transactions::Transaction::from_of1_transaction(
+            slot, tx_index, signatures, tx_meta,
+        );
+        let message = tables::messages::Message::from_of1_message(slot, tx_index, message);
+
+        txs.push(tx);
+        msgs.push(message);
+    }
+
+    tables::NonEmptySlot {
+        slot,
+        parent_slot,
+        blockhash,
+        prev_blockhash,
+        block_height,
+        blocktime: Some(blocktime),
+        transactions: txs,
+        messages: msgs,
+    }
+}
+
+/// Converts a JSON-RPC confirmed block into a [tables::NonEmptySlot]. This conversion
+/// can fail if the JSON-RPC response does not match the expected format in any way.
+fn non_empty_rpc_slot(
+    slot: Slot,
+    confirmed_block: rpc_client::UiConfirmedBlock,
+) -> anyhow::Result<tables::NonEmptySlot> {
+    // Transactions should be present since we requested them when fetching the block.
+    let transactions = confirmed_block
+        .transactions
+        .with_context(|| format!("missing transactions in confirmed block {slot}"))?;
+
+    let mut txs = Vec::with_capacity(transactions.len());
+    let mut msgs = Vec::with_capacity(transactions.len());
+
+    for (index, tx_with_meta) in transactions.into_iter().enumerate() {
+        let tx_index = index.try_into().expect("conversion error");
+
+        let rpc_client::EncodedTransactionWithStatusMeta {
+            transaction, meta, ..
+        } = tx_with_meta;
+
+        // These should follow the encoding we requested when fetching the block.
+        let rpc_client::EncodedTransaction::Json(rpc_client::UiTransaction {
+            signatures,
+            message,
+        }) = transaction
+        else {
+            anyhow::bail!("expected JSON encoded transaction for slot {slot}, tx index {tx_index}");
+        };
+        let rpc_client::UiMessage::Raw(msg) = message else {
+            anyhow::bail!("expected raw message for slot {slot}, tx index {tx_index}");
+        };
+
+        let tx = tables::transactions::Transaction::from_rpc_transaction(
+            slot, tx_index, signatures, meta,
+        )?;
+        let msg = tables::messages::Message::from_rpc_message(slot, tx_index, msg);
+
+        txs.push(tx);
+        msgs.push(msg);
+    }
+
+    Ok(tables::NonEmptySlot {
+        slot,
+        parent_slot: confirmed_block.parent_slot,
+        blockhash: bs58_decode_blockhash(&confirmed_block.blockhash)?,
+        prev_blockhash: bs58_decode_blockhash(&confirmed_block.previous_blockhash)?,
+        block_height: confirmed_block.block_height,
+        blocktime: confirmed_block.block_time,
+        transactions: txs,
+        messages: msgs,
+    })
+}
+
+fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
+    bs58::decode(blockhash_str)
+        .into_vec()
+        .context("base58 decoding blockhash string")
+        .and_then(|bytes| {
+            bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("block hash should be 32 bytes long"))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use futures::StreamExt;
+    use solana_clock::Slot;
     use url::Url;
 
     use super::SolanaExtractor;
     use crate::{of1_client, rpc_client};
 
-    impl of1_client::DecodedBlock {
-        fn empty(slot: solana_clock::Slot) -> Self {
+    impl of1_client::DecodedSlot {
+        fn dummy(slot: Slot) -> Self {
             Self {
                 slot,
                 parent_slot: slot.saturating_sub(1),
-                ..Default::default()
+                blockhash: [0; 32],
+                prev_blockhash: [0; 32],
+                block_height: None,
+                blocktime: 0,
+                transactions: Vec::new(),
+                transaction_metas: Vec::new(),
+                block_rewards: of1_client::DecodedBlockRewards::Empty,
             }
         }
     }
@@ -347,7 +484,7 @@ mod tests {
         let extractor = SolanaExtractor::new(
             Url::parse("https://example.net").unwrap(),
             None,
-            String::new(),
+            String::from("mainnet"),
             String::new(),
             PathBuf::new(),
             false,
@@ -361,7 +498,7 @@ mod tests {
         // Stream the entire range as historical blocks.
         let historical = async_stream::stream! {
             for slot in start..=end {
-                yield Ok(of1_client::DecodedBlock::empty(slot));
+                yield Ok(of1_client::DecodedSlot::dummy(slot));
             }
         };
 
@@ -394,7 +531,7 @@ mod tests {
         let extractor = SolanaExtractor::new(
             solana_rpc_provider_url,
             None,
-            String::new(),
+            String::from("mainnet"),
             String::new(),
             PathBuf::new(),
             false,
@@ -409,7 +546,7 @@ mod tests {
         // Stream part of the range as historical blocks.
         let historical = async_stream::stream! {
             for slot in start..=historical_end {
-                yield Ok(of1_client::DecodedBlock::empty(slot));
+                yield Ok(of1_client::DecodedSlot::dummy(slot));
             }
         };
 

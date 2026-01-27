@@ -13,7 +13,7 @@ use datasets_raw::{
 };
 use solana_clock::Slot;
 
-use crate::{rpc_client::UiRawMessage, tables::BASE58_ENCODED_HASH_LEN};
+use crate::{rpc_client, tables::BASE58_ENCODED_HASH_LEN};
 
 pub const TABLE_NAME: &str = "messages";
 
@@ -75,7 +75,6 @@ fn address_table_lookups_dtype() -> DataType {
     )))
 }
 
-/// A Solana message.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Message {
     pub(crate) slot: Slot,
@@ -84,29 +83,28 @@ pub(crate) struct Message {
     pub(crate) num_required_signatures: u8,
     pub(crate) num_readonly_signed_accounts: u8,
     pub(crate) num_readonly_unsigned_accounts: u8,
-
     pub(crate) instructions: Vec<super::instructions::Instruction>,
     pub(crate) address_table_lookups: Option<Vec<AddressTableLookup>>,
-
     pub(crate) account_keys: Vec<String>,
     pub(crate) recent_block_hash: String,
 }
 
 impl Message {
     pub(crate) fn from_of1_message(
-        slot: u64,
+        slot: Slot,
         tx_index: u32,
         message: solana_sdk::message::VersionedMessage,
     ) -> Self {
         let instructions = message
             .instructions()
             .iter()
+            .cloned()
             .map(|inst| super::instructions::Instruction {
                 slot,
                 tx_index,
                 program_id_index: inst.program_id_index,
-                accounts: inst.accounts.clone(),
-                data: inst.data.clone(),
+                accounts: inst.accounts,
+                data: inst.data,
                 inner_index: None,
                 inner_stack_height: None,
             })
@@ -139,7 +137,11 @@ impl Message {
         }
     }
 
-    pub(crate) fn from_rpc_message(slot: Slot, tx_index: u32, message: &UiRawMessage) -> Self {
+    pub(crate) fn from_rpc_message(
+        slot: Slot,
+        tx_index: u32,
+        message: rpc_client::UiRawMessage,
+    ) -> Self {
         let instructions = message
             .instructions
             .iter()
@@ -185,9 +187,9 @@ impl Message {
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct AddressTableLookup {
-    pub(crate) account_key: String,
-    pub(crate) writable_indexes: Vec<u8>,
-    pub(crate) readonly_indexes: Vec<u8>,
+    account_key: String,
+    writable_indexes: Vec<u8>,
+    readonly_indexes: Vec<u8>,
 }
 
 /// A builder for converting [Message]s into [TableRows].

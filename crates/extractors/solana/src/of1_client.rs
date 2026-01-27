@@ -11,7 +11,7 @@ use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;
 pub use yellowstone_faithful_car_parser as car_parser;
 
-use crate::{error::Of1StreamError, metrics, rpc_client, tables};
+use crate::{error::Of1StreamError, metrics, rpc_client};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
 
@@ -26,24 +26,6 @@ type PendingMessageMap = HashMap<Epoch, Vec<tokio::sync::oneshot::Sender<bool>>>
 /// NOTE: The interest data type should match max dump parallelism data type.
 type FileInterestMap = HashMap<Epoch, u16>;
 
-#[derive(Debug, Default)]
-pub(crate) struct DecodedBlock {
-    pub(crate) slot: Slot,
-    pub(crate) parent_slot: Slot,
-
-    pub(crate) blockhash: [u8; 32],
-    pub(crate) prev_blockhash: [u8; 32],
-
-    pub(crate) block_height: Option<u64>,
-    pub(crate) blocktime: u64,
-
-    pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
-    pub(crate) transaction_metas: Vec<tables::transactions::TransactionStatusMeta>,
-
-    #[allow(dead_code)]
-    pub(crate) block_rewards: Vec<solana_storage_proto::confirmed_block::Rewards>,
-}
-
 pub(crate) enum CarManagerMessage {
     /// Request to download the CAR file for the given epoch. The oneshot sender will be
     /// notified when the download is complete. The boolean indicates whether the file
@@ -52,6 +34,35 @@ pub(crate) enum CarManagerMessage {
     /// Notification that the CAR file for the given epoch has been processed and can
     /// be deleted if no other streams are interested in it.
     FileProcessed(Epoch),
+}
+
+pub(crate) type DecodedTransactionStatusMeta = DecodedField<
+    solana_storage_proto::confirmed_block::TransactionStatusMeta,
+    solana_storage_proto::StoredTransactionStatusMeta,
+>;
+
+pub(crate) type DecodedBlockRewards = DecodedField<
+    solana_storage_proto::confirmed_block::Rewards,
+    solana_storage_proto::StoredExtendedRewards,
+>;
+
+pub(crate) enum DecodedField<P, B> {
+    Empty,
+    Proto(P),
+    Bincode(B),
+}
+
+pub(crate) struct DecodedSlot {
+    pub(crate) slot: Slot,
+    pub(crate) parent_slot: Slot,
+    pub(crate) blockhash: [u8; 32],
+    pub(crate) prev_blockhash: [u8; 32],
+    pub(crate) block_height: Option<u64>,
+    pub(crate) blocktime: i64,
+    pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
+    pub(crate) transaction_metas: Vec<DecodedTransactionStatusMeta>,
+    #[allow(dead_code)]
+    pub(crate) block_rewards: DecodedBlockRewards,
 }
 
 pub(crate) async fn car_file_manager(
@@ -207,14 +218,14 @@ pub(crate) fn stream(
     solana_rpc_client: Arc<rpc_client::SolanaRpcClient>,
     get_block_config: rpc_client::rpc_config::RpcBlockConfig,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> impl Stream<Item = Result<DecodedBlock, Of1StreamError>> {
+) -> impl Stream<Item = Result<DecodedSlot, Of1StreamError>> {
     async_stream::stream! {
         let mut epoch = start / solana_clock::DEFAULT_SLOTS_PER_EPOCH;
 
         // Pre-fetch the initial previous block hash via JSON-RPC so that we don't have to
         // (potentially) read multiple CAR files to find it.
         let mut prev_blockhash = if start == 0 {
-            // Known previous blockhash for genesis block.
+            // Known previous blockhash for genesis mainnet block.
             bs58::decode("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
                 .into_vec()
                 .map(TryInto::try_into)
@@ -304,9 +315,9 @@ pub(crate) fn stream(
 
             let mut node_reader = car_parser::node::NodeReader::new(&mmap[..]);
 
-            while let Some(block) = read_entire_block(&mut node_reader, prev_blockhash).await.transpose() {
-                let block = match block {
-                    Ok(block) => block,
+            while let Some(slot) = read_next_slot(&mut node_reader, prev_blockhash).await.transpose() {
+                let slot = match slot {
+                    Ok(slot) => slot,
                     Err(e) => {
                         car_manager_tx
                             .send(CarManagerMessage::FileProcessed(epoch))
@@ -316,23 +327,23 @@ pub(crate) fn stream(
                         return;
                     }
                 };
-                prev_blockhash = block.blockhash;
+                prev_blockhash = slot.blockhash;
 
-                if block.slot < start {
+                if slot.slot < start {
                     // Skip blocks before the start of the requested range.
                     continue;
                 }
 
-                match block.slot.cmp(&end) {
+                match slot.slot.cmp(&end) {
                     std::cmp::Ordering::Less => {
-                        yield Ok(block);
+                        yield Ok(slot);
                     },
                     std::cmp::Ordering::Equal => {
                         car_manager_tx
                             .send(CarManagerMessage::FileProcessed(epoch))
                             .await
                             .expect("receiver not dropped");
-                        yield Ok(block);
+                        yield Ok(slot);
                         return;
                     },
                     std::cmp::Ordering::Greater => {
@@ -507,12 +518,49 @@ enum FileDownloadError {
 ///
 /// Inspired by the Old Faithful CAR parser example:
 /// <https://github.com/lamports-dev/yellowstone-faithful-car-parser/blob/master/src/bin/counter.rs>
-async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
+async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
     node_reader: &mut car_parser::node::NodeReader<R>,
     prev_blockhash: [u8; 32],
-) -> Result<Option<DecodedBlock>, Of1StreamError> {
-    // TODO: Could this be executed while downloading the block? As in, read from a stream and
-    // attempt to decode until successful.
+) -> Result<Option<DecodedSlot>, Of1StreamError> {
+    /// Attempt to decode a field read from a CAR file as either protobuf or bincode encoded.
+    /// Fail if both decoding attempts fail.
+    ///
+    /// For some epochs transaction metadata / block rewards are stored as protobuf encoded,
+    /// while for others they are stored as bincode encoded. This function handles both cases.
+    fn decode_proto_or_bincode<P, B>(
+        field_name: &'static str,
+        data: &[u8],
+    ) -> Result<DecodedField<P, B>, Of1StreamError>
+    where
+        P: prost::Message + Default,
+        B: serde::de::DeserializeOwned,
+    {
+        if data.is_empty() {
+            Ok(DecodedField::Empty)
+        } else {
+            // All fields that need to be decoded this way are ZSTD compressed in CAR files.
+            let decompressed = &*zstd::decode_all(data).map_err(|e| Of1StreamError::Zstd {
+                field_name,
+                error: e.to_string(),
+            })?;
+            match prost::Message::decode(decompressed).map(DecodedField::Proto) {
+                Ok(data_proto) => Ok(data_proto),
+                Err(prost_err) => {
+                    match bincode::deserialize(decompressed).map(DecodedField::Bincode) {
+                        Ok(data_bincode) => Ok(data_bincode),
+                        Err(bincode_err) => {
+                            let err = Of1StreamError::DecodeField {
+                                field_name,
+                                prost_err: prost_err.to_string(),
+                                bincode_err: bincode_err.to_string(),
+                            };
+                            Err(err)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Once we reach `Node::Block`, the node map will contain all of the nodes needed to reassemble
     // that block.
@@ -521,7 +569,9 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
         .map_err(Of1StreamError::NodeParse)?;
 
     let block = match nodes.nodes.pop() {
+        // Expected block node.
         Some((_, car_parser::node::Node::Block(block))) => block,
+        // Reached end of CAR file.
         None | Some((_, car_parser::node::Node::Epoch(_))) => return Ok(None),
         Some((cid, node)) => {
             return Err(Of1StreamError::UnexpectedNode {
@@ -532,7 +582,7 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
     };
 
     let mut transactions = Vec::new();
-    let mut transactions_meta = Vec::new();
+    let mut transaction_metas = Vec::new();
 
     for entry_cid in &block.entries {
         let Some(car_parser::node::Node::Entry(entry)) = nodes.nodes.get(entry_cid) else {
@@ -541,7 +591,7 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
                 cid: entry_cid.to_string(),
             });
         };
-        for (idx, tx_cid) in entry.transactions.iter().enumerate() {
+        for tx_cid in &entry.transactions {
             let Some(car_parser::node::Node::Transaction(tx)) = nodes.nodes.get(tx_cid) else {
                 return Err(Of1StreamError::MissingNode {
                     expected: "transaction",
@@ -557,47 +607,10 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
                 .map_err(Of1StreamError::DataframeReassembly)?;
 
             let tx = bincode::deserialize(&tx_df).map_err(Of1StreamError::Bincode)?;
-            let tx_meta = if tx_meta_df.is_empty() {
-                // Empty dataframe, return default transaction metadata.
-                tables::transactions::TransactionStatusMeta::default()
-            } else {
-                let tx_index = idx.try_into().expect("conversion error");
-
-                // Transaction metadata is ZSTD compressed in CAR files.
-                let tx_meta = zstd::decode_all(tx_meta_df.as_slice()).expect("zstd decode error");
-                let tx_meta = tx_meta.as_slice();
-
-                // It seems that in CAR files some transaction metadata is protobuf
-                // encoded and some is bincode encoded. We'll attempt both here and
-                // only return an error if both of them fail.
-                match prost::Message::decode(tx_meta) {
-                    Ok(tx_meta_proto) => {
-                        tables::transactions::TransactionStatusMeta::from_proto_meta(
-                            block.slot,
-                            tx_index,
-                            tx_meta_proto,
-                        )
-                    }
-                    Err(prost_err) => match bincode::deserialize(tx_meta) {
-                        Ok(tx_meta_bincode) => {
-                            tables::transactions::TransactionStatusMeta::from_stored_meta(
-                                block.slot,
-                                tx_index,
-                                tx_meta_bincode,
-                            )
-                        }
-                        Err(bincode_err) => {
-                            return Err(Of1StreamError::TransactionMetaDecode {
-                                prost_err: prost_err.to_string(),
-                                bincode_err: bincode_err.to_string(),
-                            });
-                        }
-                    },
-                }
-            };
+            let tx_meta = decode_proto_or_bincode("tx_status_meta", tx_meta_df.as_slice())?;
 
             transactions.push(tx);
-            transactions_meta.push(tx_meta);
+            transaction_metas.push(tx_meta);
         }
     }
 
@@ -619,18 +632,24 @@ async fn read_entire_block<R: tokio::io::AsyncRead + Unpin>(
             .expect("blockhash is 32 bytes")
     };
 
-    let block = DecodedBlock {
+    let blocktime = block
+        .meta
+        .blocktime
+        .try_into()
+        .expect("blocktime fits in i64");
+
+    let block = DecodedSlot {
         slot: block.slot,
         parent_slot: block.meta.parent_slot,
         blockhash,
-        prev_blockhash: prev_blockhash.to_owned(),
+        prev_blockhash,
         block_height: block.meta.block_height,
-        blocktime: block.meta.blocktime,
+        blocktime,
         transactions,
-        transaction_metas: transactions_meta,
+        transaction_metas,
         // TODO: Work with rewards?
         #[allow(dead_code)]
-        block_rewards: Vec::new(),
+        block_rewards: DecodedField::Empty,
     };
 
     Ok(Some(block))

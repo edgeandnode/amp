@@ -10021,6 +10021,7 @@ dependencies = [
 name = "solana-datasets"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "backon",
  "base64 0.22.1",
