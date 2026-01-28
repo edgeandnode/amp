@@ -1,7 +1,8 @@
 //! AMP Registry API client.
 
-use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use reqwest::Client;
+use url::Url;
 
 use super::{
     domain::{
@@ -11,17 +12,54 @@ use super::{
     error::AmpRegistryError,
 };
 
+/// Build URL path for listing all datasets from the amp-registry-api.
+///
+/// GET `/api/v1/datasets`
+fn dataset_list() -> &'static str {
+    "api/v1/datasets"
+}
+
+/// Build URL path for searching datasets from the amp-registry-api.
+///
+/// GET `/api/v1/datasets/search`
+fn dataset_search() -> &'static str {
+    "api/v1/datasets/search"
+}
+
+/// Build URL path for listing datasets owned by the authenticated user from the amp-registry-api.
+///
+/// GET `/api/v1/owners/@me/datasets`
+fn owned_datasets_list() -> &'static str {
+    "api/v1/owners/@me/datasets"
+}
+
+/// Build URL path for searching datasets owned by the authenticated user from the amp-registry-api.
+///
+/// GET `/api/v1/owners/@me/datasets/search`
+fn owned_datasets_search() -> &'static str {
+    "api/v1/owners/@me/datasets/search"
+}
+
+/// Build URL path for fetching the Dataset Manifest from the amp-registry-api.
+///
+/// GET `/api/v1/datasets/{namespace}/{name}/versions/{revision}/manifest`
+fn dataset_revision_manifest(reference: &Reference) -> String {
+    format!(
+        "api/v1/datasets/{}/{}/versions/{}/manifest",
+        reference.namespace(),
+        reference.name(),
+        reference.revision()
+    )
+}
+
 pub struct AmpRegistryClient {
     client: Client,
-    base_url: String,
+    base_url: Url,
 }
 
 impl AmpRegistryClient {
-    pub fn new(client: Client, base_url: impl Into<String>) -> AmpRegistryClient {
-        AmpRegistryClient {
-            client,
-            base_url: base_url.into(),
-        }
+    pub fn new(client: Client, base_url: Url) -> AmpRegistryClient {
+        AmpRegistryClient { client, base_url }
     }
 
     /// Build query params from FetchDatasetsParams, taking ownership to avoid cloning.
@@ -90,8 +128,8 @@ impl AmpRegistryClient {
         &self,
         params: Option<FetchDatasetsParams>,
     ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
-        let url = format!("{}/api/v1/datasets", self.base_url);
-        let mut request = self.client.get(&url);
+        let url = self.base_url.join(dataset_list()).expect("valid URL");
+        let mut request = self.client.get(url);
 
         if let Some(p) = params {
             let query_params = Self::build_fetch_query_params(p);
@@ -116,14 +154,14 @@ impl AmpRegistryClient {
         params: SearchDatasetsParams,
     ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
         let search_term = params.search.clone();
-        let url = format!("{}/api/v1/datasets/search", self.base_url);
+        let url = self.base_url.join(dataset_search()).expect("valid URL");
         let query_params = Self::build_search_query_params(params);
 
         let make_err = |err| AmpRegistryError::SearchDatasets(search_term.clone(), err);
 
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .query(&query_params)
             .send()
             .await
@@ -145,8 +183,11 @@ impl AmpRegistryClient {
         params: Option<FetchDatasetsParams>,
         access_token: &str,
     ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
-        let url = format!("{}/api/v1/owners/@me/datasets", self.base_url);
-        let mut request = self.client.get(&url).bearer_auth(access_token);
+        let url = self
+            .base_url
+            .join(owned_datasets_list())
+            .expect("valid URL");
+        let mut request = self.client.get(url).bearer_auth(access_token);
 
         if let Some(p) = params {
             let query_params = Self::build_fetch_query_params(p);
@@ -184,14 +225,17 @@ impl AmpRegistryClient {
         access_token: &str,
     ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
         let search_term = params.search.clone();
-        let url = format!("{}/api/v1/owners/@me/datasets/search", self.base_url);
+        let url = self
+            .base_url
+            .join(owned_datasets_search())
+            .expect("valid URL");
         let query_params = Self::build_search_query_params(params);
 
         let make_err = |err| AmpRegistryError::SearchOwnedDatasets(search_term.clone(), err);
 
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .bearer_auth(access_token)
             .query(&query_params)
             .send()
@@ -213,23 +257,17 @@ impl AmpRegistryClient {
         name: Name,
         revision: Revision,
     ) -> Result<DerivedManifest, AmpRegistryError> {
-        let url = format!(
-            "{}/api/v1/datasets/{}/{}/versions/{}/manifest",
-            self.base_url, namespace, name, revision
-        );
+        let reference = Reference::new(namespace, name, revision);
+        let url = self
+            .base_url
+            .join(&dataset_revision_manifest(&reference))
+            .expect("valid URL");
 
-        let make_err = |err| {
-            AmpRegistryError::FetchDatasetRevisionManifest(
-                namespace.clone(),
-                name.clone(),
-                revision.clone(),
-                err,
-            )
-        };
+        let make_err = |err| AmpRegistryError::FetchDatasetRevisionManifest(reference.clone(), err);
 
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .send()
             .await
             .map_err(&make_err)?
@@ -450,14 +488,15 @@ mod tests {
     fn new_with_valid_url_stores_base_url() {
         //* Given
         let http_client = Client::new();
-        let base_url = "https://api.example.com";
+        let base_url = Url::parse("https://api.example.com").expect("valid test URL");
 
         //* When
         let client = AmpRegistryClient::new(http_client, base_url);
 
         //* Then
         assert_eq!(
-            client.base_url, "https://api.example.com",
+            client.base_url.as_str(),
+            "https://api.example.com/",
             "base_url should match provided URL"
         );
     }

@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
@@ -18,6 +18,7 @@ use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use reqwest::Client as HttpClient;
 use tokio::sync::mpsc;
+use url::Url;
 
 mod action;
 mod amp_registry;
@@ -47,10 +48,8 @@ async fn main() -> Result<()> {
     let http_client = HttpClient::new();
 
     // Create AMP registry client
-    let amp_registry_client = Arc::new(AmpRegistryClient::new(
-        http_client.clone(),
-        &config.registry_url,
-    ));
+    let registry_url = Url::parse(&config.registry_url).context("invalid registry URL")?;
+    let amp_registry_client = Arc::new(AmpRegistryClient::new(http_client.clone(), registry_url));
 
     // Create action channel
     let (action_tx, action_rx) = mpsc::unbounded_channel::<Action>();

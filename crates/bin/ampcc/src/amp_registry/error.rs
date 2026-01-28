@@ -1,4 +1,4 @@
-use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
+use datasets_common::reference::Reference;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AmpRegistryError {
@@ -41,7 +41,7 @@ pub enum AmpRegistryError {
     /// - Error could be an internal-server error (5xx) from the amp-registry-api if the service is down.
     /// - Error could also be a bad request error (400) if the path params are invalid
     ///     - for example: if the namespace is an invalid namespace
-    /// - If the status if a 404, no manifest exists for the given Dataset namespace, name and revision
-    #[error("Failure fetching Dataset: {0}/{1}@{2} Manifest: {3}")]
-    FetchDatasetRevisionManifest(Namespace, Name, Revision, #[source] reqwest::Error),
+    /// - If the status is a 404, no manifest exists for the given Dataset namespace, name and revision
+    #[error("Failure fetching Dataset: {0} Manifest: {1}")]
+    FetchDatasetRevisionManifest(Reference, #[source] reqwest::Error),
 }

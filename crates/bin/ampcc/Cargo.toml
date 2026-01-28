@@ -32,4 +32,3 @@ datasets-common = { path = "../../core/datasets-common" }
 serde_json.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true
-urlencoding = "2.1"
