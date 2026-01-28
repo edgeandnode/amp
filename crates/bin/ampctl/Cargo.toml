@@ -19,7 +19,6 @@ amp-object-store = { path = "../../core/object-store" }
 anyhow.workspace = true
 clap.workspace = true
 console = "0.16.1"
-amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
