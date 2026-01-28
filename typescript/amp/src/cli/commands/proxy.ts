@@ -50,5 +50,5 @@ export const proxy = Command.make("proxy", {
       yield* Effect.acquireRelease(acquire, release).pipe(Effect.zip(Effect.never))
     }, Effect.scoped),
   ),
-  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: args.flightUrl.toString() }))),
 )
