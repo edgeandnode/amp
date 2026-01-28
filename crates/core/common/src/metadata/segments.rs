@@ -232,87 +232,22 @@ struct Chains {
 
 /// Find the canonical and fork chain from a sequence of segments. The result is independent of the
 /// input order.
-// The implementation uses depth-first from the segment with the greatest end block number,
-// favoring segments with the latest object `last_modified` timestamp.
 #[inline]
 fn chains(segments: Vec<Segment>) -> Option<Chains> {
-    let min_start = segments.iter().map(|s| s.range.start()).min()?;
-    let mut by_end: BTreeMap<BlockNum, Vec<Segment>> = Default::default();
-    for s in segments {
-        by_end.entry(s.range.end()).or_default().push(s);
-    }
+    // TODO: depth-first search from table start block.
+    // Favor segments with latest object `last_modified` timestamp.
 
-    fn pick_segment(
-        by_end: &mut BTreeMap<BlockNum, Vec<Segment>>,
-        end: BlockNum,
-        next: Option<&BlockRange>,
-    ) -> Option<Segment> {
-        let segments = by_end.get_mut(&end)?;
-        segments.sort_unstable_by_key(|s| s.object.last_modified);
-        let index = segments.iter().rposition(|s| {
-            next.map(|next| BlockRange::adjacent(&s.range, next))
-                .unwrap_or(true)
-        })?;
-        let segment = segments.remove(index);
-        if segments.is_empty() {
-            by_end.remove(&end);
-        }
-        Some(segment)
-    }
-    fn pick_chain(by_end: &mut BTreeMap<BlockNum, Vec<Segment>>) -> Chain {
-        assert!(!by_end.is_empty());
-        let latest = {
-            let end = *by_end.last_key_value().unwrap().0;
-            pick_segment(by_end, end, None).unwrap()
-        };
-        let mut chain = vec![latest];
-        loop {
-            let next = &chain.last().unwrap().range;
-            if next.start() == 0 {
-                break;
-            }
-            match pick_segment(by_end, next.start() - 1, Some(next)) {
-                Some(segment) => chain.push(segment),
-                None => break,
-            };
-        }
-        chain.reverse();
-        Chain(chain)
-    }
+    todo!()
 
-    let latest = pick_chain(&mut by_end);
-    if latest.start() == min_start {
-        #[cfg(test)]
-        latest.check_invariants();
+    // #[cfg(test)]
+    // {
+    //     canonical.check_invariants();
+    //     if let Some(fork) = &fork {
+    //         fork.check_invariants();
+    //     }
+    // }
 
-        return Some(Chains {
-            canonical: latest,
-            fork: None,
-        });
-    }
-
-    let mut chains = vec![latest];
-    while chains.last().unwrap().start() != min_start {
-        chains.push(pick_chain(&mut by_end));
-    }
-
-    let canonical = chains.pop().unwrap();
-    let fork_min = canonical.end() + 1;
-    let fork = chains
-        .iter()
-        .filter(|c| c.end() > canonical.end())
-        .position(|c| c.start() <= fork_min)
-        .map(|index| chains.remove(index));
-
-    #[cfg(test)]
-    {
-        canonical.check_invariants();
-        if let Some(fork) = &fork {
-            fork.check_invariants();
-        }
-    }
-
-    Some(Chains { canonical, fork })
+    // Some(Chains { canonical, fork })
 }
 
 fn missing_block_ranges(
