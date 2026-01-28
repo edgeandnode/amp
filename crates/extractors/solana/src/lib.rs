@@ -8,8 +8,9 @@
 //! performance. Therefore, the slot number does not always correspond directly to a block number.
 //!
 //! Since [`datasets_raw::client::BlockStreamer`] and related infrastructure generally operate on the concept of block numbers,
-//! this implementation treats Solana slots as block numbers for the most part. Skipped slots are handled
-//! by yielding empty rows for those slots, ensuring that the sequence of block numbers remains continuous.
+//! this implementation treats Solana slots as block numbers. Skipped slots do not produce any rows,
+//! resulting in gaps in the block number sequence. Chain integrity is maintained through hash-based
+//! validation where each block's parent_hash must match the previous block's hash.
 
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 

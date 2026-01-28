@@ -276,7 +276,7 @@ fn default_to_arrow() {
                 numbers: block.block_num..=block.block_num,
                 network: "test_network".to_string(),
                 hash: block.hash.into(),
-                parent_hash: Some(block.parent_hash.into()),
+                parent_hash: block.parent_hash.into(),
             })
             .unwrap()
     };

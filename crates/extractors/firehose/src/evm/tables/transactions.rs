@@ -337,7 +337,7 @@ fn default_to_arrow() {
                 numbers: tx.block_num..=tx.block_num,
                 network: "test_network".to_string(),
                 hash: tx.block_hash.into(),
-                parent_hash: None,
+                parent_hash: Default::default(),
             })
             .unwrap()
     };
