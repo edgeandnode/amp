@@ -48,7 +48,6 @@ dependencies = [
  "monitoring",
  "serde",
  "serde_json",
- "serde_with",
  "solana-datasets",
  "thiserror 2.0.17",
  "tokio",
@@ -994,7 +993,6 @@ version = "0.1.0"
 dependencies = [
  "amp-datasets-registry",
  "amp-providers-registry",
- "async-stream",
  "common",
  "datafusion",
  "datasets-common",
@@ -1002,16 +1000,12 @@ dependencies = [
  "datasets-raw",
  "evm-rpc-datasets",
  "firehose-datasets",
- "futures",
  "metadata-db",
  "monitoring",
  "parking_lot",
- "serde",
  "solana-datasets",
  "thiserror 2.0.17",
- "toml",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -1098,7 +1092,6 @@ name = "ampctl"
 version = "0.1.0"
 dependencies = [
  "admin-client",
- "amp-dataset-store",
  "amp-object-store",
  "anyhow",
  "clap",
@@ -4089,7 +4082,6 @@ version = "0.1.0"
 dependencies = [
  "datafusion",
  "datasets-common",
- "js-runtime",
  "schemars 1.2.0",
  "serde",
  "serde_json",
