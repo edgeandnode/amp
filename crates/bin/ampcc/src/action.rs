@@ -93,7 +93,7 @@ pub enum Action {
     ToggleDatasetsFilter,
 
     /// Datasets loaded from source.
-    DatasetsLoaded(Result<Vec<crate::app::DatasetEntry>, String>),
+    DatasetsLoaded(Result<crate::app::DatasetsResult, String>),
 
     /// Dataset versions loaded.
     VersionsLoaded {

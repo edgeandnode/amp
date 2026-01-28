@@ -24,6 +24,7 @@ mod amp_registry;
 mod app;
 mod auth;
 mod config;
+mod error;
 mod ui;
 mod util;
 

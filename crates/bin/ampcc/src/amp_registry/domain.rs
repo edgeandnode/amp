@@ -3,9 +3,7 @@
 //! These types mirror the AMP Registry API responses. Some fields may not be
 //! directly accessed in application code but are required for deserialization.
 
-use datasets_common::{
-    hash::Hash, name::Name, namespace::Namespace, reference::Reference, revision::Revision,
-};
+use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 
 /// Query parameters for fetching datasets.
 #[derive(Debug, Default, serde::Serialize, schemars::JsonSchema)]
@@ -100,6 +98,7 @@ impl std::fmt::Display for DatasetVersionStatus {
         }
     }
 }
+
 #[derive(
     Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
@@ -111,48 +110,6 @@ pub enum DatasetVisibility {
     /// The dataset is publicly visible.
     #[serde(rename = "public")]
     Public,
-}
-
-#[derive(
-    Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-pub enum ManifestKind {
-    #[serde(rename = "manifest")]
-    Manifest,
-    #[serde(rename = "evm-rpc")]
-    EvmRpc,
-    #[serde(rename = "eth-beacon")]
-    EthBeacon,
-    #[serde(rename = "firehose")]
-    Firehose,
-}
-impl std::fmt::Display for ManifestKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ManifestKind::Manifest => write!(f, "manifest"),
-            ManifestKind::EvmRpc => write!(f, "evm-rpc"),
-            ManifestKind::EthBeacon => write!(f, "eth-beacon"),
-            ManifestKind::Firehose => write!(f, "firehose"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct ManifestDto {
-    pub manifest_hash: Hash,
-    pub kind: ManifestKind,
-    pub created_at: String,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct ManifestTagDto {
-    pub namespace: Namespace,
-    pub name: Name,
-    pub version_tag: Revision,
-    pub dataset_reference: Reference,
-    pub created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manifest: Option<ManifestDto>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]

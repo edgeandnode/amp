@@ -3,9 +3,12 @@
 use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
 use reqwest::Client;
 
-use super::domain::{
-    DatasetDto, DerivedManifest, FetchDatasetsParams, FetchDatasetsResponse, LastUpdatedBucket,
-    SearchDatasetsParams, SortDirection,
+use super::{
+    domain::{
+        DerivedManifest, FetchDatasetsParams, FetchDatasetsResponse, LastUpdatedBucket,
+        SearchDatasetsParams, SortDirection,
+    },
+    error::AmpRegistryError,
 };
 
 pub struct AmpRegistryClient {
@@ -86,7 +89,7 @@ impl AmpRegistryClient {
     pub async fn fetch_datasets(
         &self,
         params: Option<FetchDatasetsParams>,
-    ) -> Result<FetchDatasetsResponse, reqwest::Error> {
+    ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
         let url = format!("{}/api/v1/datasets", self.base_url);
         let mut request = self.client.get(&url);
 
@@ -95,31 +98,53 @@ impl AmpRegistryClient {
             request = request.query(&query_params);
         }
 
-        let response = request.send().await?.error_for_status()?;
-        response.json().await
+        let response = request
+            .send()
+            .await
+            .map_err(AmpRegistryError::FetchDatasets)?
+            .error_for_status()
+            .map_err(AmpRegistryError::FetchDatasets)?;
+        response
+            .json()
+            .await
+            .map_err(AmpRegistryError::FetchDatasets)
     }
 
     /// Search datasets using the search endpoint.
     pub async fn search_datasets(
         &self,
         params: SearchDatasetsParams,
-    ) -> Result<FetchDatasetsResponse, reqwest::Error> {
+    ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
+        let search_term = params.search.clone();
         let url = format!("{}/api/v1/datasets/search", self.base_url);
         let query_params = Self::build_search_query_params(params);
 
-        let request = self.client.get(&url).query(&query_params);
-        let response = request.send().await?.error_for_status()?;
-        response.json().await
+        let make_err = |err| AmpRegistryError::SearchDatasets(search_term.clone(), err);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&query_params)
+            .send()
+            .await
+            .map_err(&make_err)?
+            .error_for_status()
+            .map_err(&make_err)?;
+        response.json().await.map_err(make_err)
     }
 
     /// Fetch owned datasets for the authenticated user.
     ///
     /// Requires authentication via bearer token.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AmpRegistryError::Unauthorized`] if the access token is invalid or expired (401).
     pub async fn fetch_owned_datasets(
         &self,
         params: Option<FetchDatasetsParams>,
         access_token: &str,
-    ) -> Result<FetchDatasetsResponse, reqwest::Error> {
+    ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
         let url = format!("{}/api/v1/owners/@me/datasets", self.base_url);
         let mut request = self.client.get(&url).bearer_auth(access_token);
 
@@ -128,42 +153,57 @@ impl AmpRegistryClient {
             request = request.query(&query_params);
         }
 
-        let response = request.send().await?.error_for_status()?;
-        response.json().await
+        let response = request
+            .send()
+            .await
+            .map_err(AmpRegistryError::FetchOwnedDatasets)?;
+
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AmpRegistryError::Unauthorized);
+        }
+
+        let response = response
+            .error_for_status()
+            .map_err(AmpRegistryError::FetchOwnedDatasets)?;
+        response
+            .json()
+            .await
+            .map_err(AmpRegistryError::FetchOwnedDatasets)
     }
 
     /// Search owned datasets for the authenticated user.
     ///
     /// Requires authentication via bearer token.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AmpRegistryError::Unauthorized`] if the access token is invalid or expired (401).
     pub async fn search_owned_datasets(
         &self,
         params: SearchDatasetsParams,
         access_token: &str,
-    ) -> Result<FetchDatasetsResponse, reqwest::Error> {
+    ) -> Result<FetchDatasetsResponse, AmpRegistryError> {
+        let search_term = params.search.clone();
         let url = format!("{}/api/v1/owners/@me/datasets/search", self.base_url);
         let query_params = Self::build_search_query_params(params);
 
-        let request = self
+        let make_err = |err| AmpRegistryError::SearchOwnedDatasets(search_term.clone(), err);
+
+        let response = self
             .client
             .get(&url)
             .bearer_auth(access_token)
-            .query(&query_params);
-        let response = request.send().await?.error_for_status()?;
-        response.json().await
-    }
+            .query(&query_params)
+            .send()
+            .await
+            .map_err(&make_err)?;
 
-    /// Fetches a Dataset by its fully qualified name
-    pub async fn fetch_dataset(
-        &self,
-        namespace: Namespace,
-        name: Name,
-    ) -> Result<DatasetDto, reqwest::Error> {
-        let url = format!("{}/api/v1/datasets/{}/{}", self.base_url, namespace, name);
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AmpRegistryError::Unauthorized);
+        }
 
-        let request = self.client.get(&url);
-
-        let response = request.send().await?.error_for_status()?;
-        response.json().await
+        let response = response.error_for_status().map_err(&make_err)?;
+        response.json().await.map_err(make_err)
     }
 
     /// Fetches the dataset version manifest containing the Dataset schema
@@ -172,16 +212,30 @@ impl AmpRegistryClient {
         namespace: Namespace,
         name: Name,
         revision: Revision,
-    ) -> Result<DerivedManifest, reqwest::Error> {
+    ) -> Result<DerivedManifest, AmpRegistryError> {
         let url = format!(
             "{}/api/v1/datasets/{}/{}/versions/{}/manifest",
             self.base_url, namespace, name, revision
         );
 
-        let request = self.client.get(&url);
+        let make_err = |err| {
+            AmpRegistryError::FetchDatasetRevisionManifest(
+                namespace.clone(),
+                name.clone(),
+                revision.clone(),
+                err,
+            )
+        };
 
-        let response = request.send().await?.error_for_status()?;
-        response.json().await
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(&make_err)?
+            .error_for_status()
+            .map_err(&make_err)?;
+        response.json().await.map_err(make_err)
     }
 }
 
@@ -194,82 +248,130 @@ mod tests {
     // ==========================================================================
 
     #[test]
-    fn test_build_fetch_query_params_empty() {
+    fn build_fetch_query_params_with_empty_params_returns_empty_vec() {
+        //* Given
         let params = FetchDatasetsParams::default();
+
+        //* When
         let query = AmpRegistryClient::build_fetch_query_params(params);
-        assert!(query.is_empty());
+
+        //* Then
+        assert!(
+            query.is_empty(),
+            "query params should be empty for default params"
+        );
     }
 
     #[test]
-    fn test_build_fetch_query_params_pagination() {
+    fn build_fetch_query_params_with_pagination_includes_limit_and_page() {
+        //* Given
         let params = FetchDatasetsParams {
             limit: Some(25),
             page: Some(2),
             ..Default::default()
         };
+
+        //* When
         let query = AmpRegistryClient::build_fetch_query_params(params);
 
-        assert!(query.contains(&("limit", "25".to_string())));
-        assert!(query.contains(&("page", "2".to_string())));
+        //* Then
+        assert!(
+            query.contains(&("limit", "25".to_string())),
+            "query should contain limit param"
+        );
+        assert!(
+            query.contains(&("page", "2".to_string())),
+            "query should contain page param"
+        );
     }
 
     #[test]
-    fn test_build_fetch_query_params_sort() {
+    fn build_fetch_query_params_with_sort_includes_sort_by_and_direction() {
+        //* Given
         let params = FetchDatasetsParams {
             sort_by: Some("updated_at".to_string()),
             direction: Some(SortDirection::Desc),
             ..Default::default()
         };
+
+        //* When
         let query = AmpRegistryClient::build_fetch_query_params(params);
 
-        assert!(query.contains(&("sort_by", "updated_at".to_string())));
-        assert!(query.contains(&("direction", "desc".to_string())));
+        //* Then
+        assert!(
+            query.contains(&("sort_by", "updated_at".to_string())),
+            "query should contain sort_by param"
+        );
+        assert!(
+            query.contains(&("direction", "desc".to_string())),
+            "query should contain direction param"
+        );
     }
 
     #[test]
-    fn test_build_fetch_query_params_direction_asc() {
+    fn build_fetch_query_params_with_asc_direction_includes_asc_value() {
+        //* Given
         let params = FetchDatasetsParams {
             direction: Some(SortDirection::Asc),
             ..Default::default()
         };
+
+        //* When
         let query = AmpRegistryClient::build_fetch_query_params(params);
 
-        assert!(query.contains(&("direction", "asc".to_string())));
+        //* Then
+        assert!(
+            query.contains(&("direction", "asc".to_string())),
+            "query should contain direction=asc"
+        );
     }
 
     #[test]
-    fn test_build_fetch_query_params_keywords() {
+    fn build_fetch_query_params_with_keywords_includes_multiple_keyword_entries() {
+        //* Given
         let params = FetchDatasetsParams {
             keywords: Some(vec!["defi".to_string(), "nft".to_string()]),
             ..Default::default()
         };
+
+        //* When
         let query = AmpRegistryClient::build_fetch_query_params(params);
 
-        // Should have two keyword entries
+        //* Then
         let keyword_entries: Vec<_> = query.iter().filter(|(k, _)| *k == "keywords").collect();
-        assert_eq!(keyword_entries.len(), 2);
-        assert!(query.contains(&("keywords", "defi".to_string())));
-        assert!(query.contains(&("keywords", "nft".to_string())));
+        assert_eq!(keyword_entries.len(), 2, "should have two keyword entries");
+        assert!(
+            query.contains(&("keywords", "defi".to_string())),
+            "query should contain defi keyword"
+        );
+        assert!(
+            query.contains(&("keywords", "nft".to_string())),
+            "query should contain nft keyword"
+        );
     }
 
     #[test]
-    fn test_build_fetch_query_params_chains() {
+    fn build_fetch_query_params_with_chains_includes_multiple_chain_entries() {
+        //* Given
         let params = FetchDatasetsParams {
             indexing_chains: Some(vec!["eip155:1".to_string(), "eip155:137".to_string()]),
             ..Default::default()
         };
+
+        //* When
         let query = AmpRegistryClient::build_fetch_query_params(params);
 
+        //* Then
         let chain_entries: Vec<_> = query
             .iter()
             .filter(|(k, _)| *k == "indexing_chains")
             .collect();
-        assert_eq!(chain_entries.len(), 2);
+        assert_eq!(chain_entries.len(), 2, "should have two chain entries");
     }
 
     #[test]
-    fn test_build_fetch_query_params_last_updated_buckets() {
-        // Test all bucket variants
+    fn build_fetch_query_params_with_last_updated_bucket_includes_correct_value() {
+        //* Given
         let test_cases = [
             (LastUpdatedBucket::OneDay, "1 day"),
             (LastUpdatedBucket::OneWeek, "1 week"),
@@ -278,40 +380,66 @@ mod tests {
         ];
 
         for (bucket, expected) in test_cases {
+            //* When
             let params = FetchDatasetsParams {
                 last_updated: Some(bucket),
                 ..Default::default()
             };
             let query = AmpRegistryClient::build_fetch_query_params(params);
-            assert!(query.contains(&("last_updated", expected.to_string())));
+
+            //* Then
+            assert!(
+                query.contains(&("last_updated", expected.to_string())),
+                "query should contain last_updated={expected}"
+            );
         }
     }
 
     #[test]
-    fn test_build_search_query_params() {
+    fn build_search_query_params_with_all_params_includes_search_limit_and_page() {
+        //* Given
         let params = SearchDatasetsParams {
             search: "ethereum".to_string(),
             limit: Some(10),
             page: Some(1),
         };
+
+        //* When
         let query = AmpRegistryClient::build_search_query_params(params);
 
-        assert!(query.contains(&("search", "ethereum".to_string())));
-        assert!(query.contains(&("limit", "10".to_string())));
-        assert!(query.contains(&("page", "1".to_string())));
+        //* Then
+        assert!(
+            query.contains(&("search", "ethereum".to_string())),
+            "query should contain search param"
+        );
+        assert!(
+            query.contains(&("limit", "10".to_string())),
+            "query should contain limit param"
+        );
+        assert!(
+            query.contains(&("page", "1".to_string())),
+            "query should contain page param"
+        );
     }
 
     #[test]
-    fn test_build_search_query_params_minimal() {
+    fn build_search_query_params_with_only_search_returns_single_entry() {
+        //* Given
         let params = SearchDatasetsParams {
             search: "test".to_string(),
             limit: None,
             page: None,
         };
+
+        //* When
         let query = AmpRegistryClient::build_search_query_params(params);
 
-        assert_eq!(query.len(), 1);
-        assert!(query.contains(&("search", "test".to_string())));
+        //* Then
+        assert_eq!(query.len(), 1, "query should have exactly one entry");
+        assert!(
+            query.contains(&("search", "test".to_string())),
+            "query should contain search param"
+        );
     }
 
     // ==========================================================================
@@ -319,8 +447,18 @@ mod tests {
     // ==========================================================================
 
     #[test]
-    fn test_client_new() {
-        let client = AmpRegistryClient::new(Client::new(), "https://api.example.com");
-        assert_eq!(client.base_url, "https://api.example.com");
+    fn new_with_valid_url_stores_base_url() {
+        //* Given
+        let http_client = Client::new();
+        let base_url = "https://api.example.com";
+
+        //* When
+        let client = AmpRegistryClient::new(http_client, base_url);
+
+        //* Then
+        assert_eq!(
+            client.base_url, "https://api.example.com",
+            "base_url should match provided URL"
+        );
     }
 }

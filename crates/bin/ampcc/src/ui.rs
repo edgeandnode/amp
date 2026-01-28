@@ -464,7 +464,12 @@ fn draw_datasets_section(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let title = format!("Datasets ({})", app.filtered_datasets.len());
+    // Use total_count from API when available, otherwise fall back to filtered count
+    let count = app
+        .datasets_total_count
+        .map(|c| c as usize)
+        .unwrap_or(app.filtered_datasets.len());
+    let title = format!("Datasets ({})", count);
     let border_style = if app.active_pane == ActivePane::Datasets {
         Theme::border_focused()
     } else {
@@ -648,7 +653,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let title = format!("Datasets ({})", app.filtered_datasets.len());
+    // Use total_count from API when available, otherwise fall back to filtered count
+    let count = app
+        .datasets_total_count
+        .map(|c| c as usize)
+        .unwrap_or(app.filtered_datasets.len());
+    let title = format!("Datasets ({})", count);
     let border_style = if app.active_pane == ActivePane::Datasets {
         Theme::border_focused()
     } else {

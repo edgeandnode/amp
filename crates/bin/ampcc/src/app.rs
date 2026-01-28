@@ -21,6 +21,7 @@ use crate::{
     },
     auth::AuthStorage,
     config::Config,
+    error::AmpccError,
 };
 
 /// Default page size for paginated API requests.
@@ -131,16 +132,6 @@ pub enum DatasetsFilter {
 }
 
 impl DatasetsFilter {
-    /// Get the display string for the filter.
-    /// Used by UI to display current filter in header.
-    #[allow(dead_code)]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DatasetsFilter::All => "All",
-            DatasetsFilter::Owned => "My Datasets",
-        }
-    }
-
     /// Toggle to the next filter value.
     pub fn toggle(self) -> Self {
         match self {
@@ -228,6 +219,15 @@ impl DatasetEntry {
             format!("{}/{}", self.namespace, self.name)
         }
     }
+}
+
+/// Result of loading datasets from a source, including the total count.
+#[derive(Debug, Clone)]
+pub struct DatasetsResult {
+    /// The list of datasets.
+    pub datasets: Vec<DatasetEntry>,
+    /// Total count of datasets from the API (for paginated results).
+    pub total_count: i64,
 }
 
 impl From<DatasetDto> for DatasetEntry {
@@ -546,6 +546,7 @@ pub struct App {
     // Dataset state
     pub datasets: Vec<DatasetEntry>,
     pub filtered_datasets: Vec<DatasetEntry>,
+    pub datasets_total_count: Option<i64>,
     pub selected_index: usize,
 
     // For expanded datasets, track which version is selected
@@ -628,6 +629,7 @@ impl App {
             search_query: String::new(),
             datasets: Vec::new(),
             filtered_datasets: Vec::new(),
+            datasets_total_count: None,
             selected_index: 0,
             selected_version_indices: HashMap::new(),
             jobs: Vec::new(),
@@ -822,9 +824,9 @@ impl App {
     /// Fetch datasets from local admin API.
     ///
     /// This is an associated function that can be called from spawn tasks.
-    pub async fn fetch_local_datasets(client: &admin_client::Client) -> Result<Vec<DatasetEntry>> {
+    pub async fn fetch_local_datasets(client: &Client) -> Result<DatasetsResult> {
         let response = client.datasets().list_all().await?;
-        Ok(response
+        let datasets: Vec<DatasetEntry> = response
             .datasets
             .into_iter()
             .map(|d| DatasetEntry {
@@ -837,7 +839,12 @@ impl App {
                 versions: None,
                 expanded: false,
             })
-            .collect())
+            .collect();
+        let total_count = datasets.len() as i64;
+        Ok(DatasetsResult {
+            datasets,
+            total_count,
+        })
     }
 
     /// Fetch datasets from the AMP registry.
@@ -848,9 +855,10 @@ impl App {
         client: &AmpRegistryClient,
         filter: DatasetsFilter,
         access_token: Option<&str>,
-    ) -> Result<Vec<DatasetEntry>> {
+    ) -> Result<DatasetsResult, AmpccError> {
         let mut all_datasets = Vec::new();
         let mut page = 1i64;
+        let mut total_count = 0i64;
 
         loop {
             let params = FetchDatasetsParams {
@@ -860,14 +868,23 @@ impl App {
             };
 
             let response = match filter {
-                DatasetsFilter::All => client.fetch_datasets(Some(params)).await?,
+                DatasetsFilter::All => client
+                    .fetch_datasets(Some(params))
+                    .await
+                    .map_err(AmpccError::FetchRegistryDatasets)?,
                 DatasetsFilter::Owned => {
-                    let token = access_token.ok_or_else(|| {
-                        anyhow::anyhow!("Authentication required for owned datasets")
-                    })?;
-                    client.fetch_owned_datasets(Some(params), token).await?
+                    let token = access_token.ok_or(AmpccError::Unauthenticated)?;
+                    client
+                        .fetch_owned_datasets(Some(params), token)
+                        .await
+                        .map_err(AmpccError::FetchRegistryDatasets)?
                 }
             };
+
+            // Capture total_count from the first page response
+            if page == 1 {
+                total_count = response.total_count;
+            }
 
             for dto in response.datasets {
                 all_datasets.push(DatasetEntry::from(dto));
@@ -879,7 +896,10 @@ impl App {
             page += 1;
         }
 
-        Ok(all_datasets)
+        Ok(DatasetsResult {
+            datasets: all_datasets,
+            total_count,
+        })
     }
 
     /// Search datasets from the AMP registry using full-text search.
@@ -891,9 +911,10 @@ impl App {
         query: &str,
         filter: DatasetsFilter,
         access_token: Option<&str>,
-    ) -> Result<Vec<DatasetEntry>> {
+    ) -> Result<DatasetsResult, AmpccError> {
         let mut all_datasets = Vec::new();
         let mut page = 1i64;
+        let mut total_count = 0i64;
 
         loop {
             let params = SearchDatasetsParams {
@@ -903,14 +924,23 @@ impl App {
             };
 
             let response = match filter {
-                DatasetsFilter::All => client.search_datasets(params).await?,
+                DatasetsFilter::All => client
+                    .search_datasets(params)
+                    .await
+                    .map_err(|err| AmpccError::SearchRegistryDatasets(query.to_string(), err))?,
                 DatasetsFilter::Owned => {
-                    let token = access_token.ok_or_else(|| {
-                        anyhow::anyhow!("Authentication required for owned datasets")
-                    })?;
-                    client.search_owned_datasets(params, token).await?
+                    let token = access_token.ok_or(AmpccError::Unauthenticated)?;
+                    client
+                        .search_owned_datasets(params, token)
+                        .await
+                        .map_err(|err| AmpccError::SearchRegistryDatasets(query.to_string(), err))?
                 }
             };
+
+            // Capture total_count from the first page response
+            if page == 1 {
+                total_count = response.total_count;
+            }
 
             for dto in response.datasets {
                 all_datasets.push(DatasetEntry::from(dto));
@@ -922,7 +952,10 @@ impl App {
             page += 1;
         }
 
-        Ok(all_datasets)
+        Ok(DatasetsResult {
+            datasets: all_datasets,
+            total_count,
+        })
     }
 
     /// Get access token from auth state if available.
@@ -1347,8 +1380,9 @@ impl App {
 
             Action::DatasetsLoaded(result) => {
                 match result {
-                    Ok(datasets) => {
-                        self.datasets = datasets;
+                    Ok(datasets_result) => {
+                        self.datasets = datasets_result.datasets;
+                        self.datasets_total_count = Some(datasets_result.total_count);
                         self.update_search();
                         self.send_action(Action::LoadManifest);
                     }
