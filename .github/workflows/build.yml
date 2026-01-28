@@ -95,10 +95,6 @@ jobs:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_CACHE_SIZE: 5G
     strategy:
       fail-fast: false
       matrix:
@@ -110,9 +106,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - name: Setup rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
@@ -130,10 +123,6 @@ jobs:
         run: |
           export RUSTFLAGS="-C link-arg=-fuse-ld=mold ${RUSTFLAGS}"
           cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampup -p ampsync
-
-      - name: Sccache stats
-        if: always()
-        run: sccache -s
 
       - name: Compress debug sections (Linux only)
         if: contains(matrix.target, 'linux')
@@ -162,10 +151,6 @@ jobs:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_CACHE_SIZE: 5G
     strategy:
       fail-fast: false
       matrix:
@@ -178,9 +163,6 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
       - name: Setup rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
         with:
@@ -192,10 +174,6 @@ jobs:
 
       - name: Build binaries
         run: cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampup -p ampsync
-
-      - name: Sccache stats
-        if: always()
-        run: sccache -s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
