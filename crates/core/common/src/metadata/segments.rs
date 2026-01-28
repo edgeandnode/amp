@@ -585,6 +585,90 @@ mod test {
     }
 
     #[test]
+    fn segments_with_empty_slots() {
+        // Test that segments with gaps in block numbers (empty slots) can form a valid chain as
+        // long as their hashes align correctly. This is important for blockchains like Solana
+        // where blocks can be skipped.
+
+        fn test_hash(number: u8, fork: u8) -> BlockHash {
+            let mut hash: BlockHash = Default::default();
+            hash.0[0] = number;
+            hash.0[31] = fork;
+            hash
+        }
+
+        let object = ObjectMeta {
+            location: Default::default(),
+            last_modified: DateTime::from_timestamp_millis(0).unwrap(),
+            size: 0,
+            e_tag: None,
+            version: None,
+        };
+
+        // Segment 1: blocks 0-3 (hash based on block 3, parent is genesis)
+        let seg1 = Segment {
+            range: BlockRange {
+                numbers: 0..=3,
+                network: "test".to_string(),
+                hash: test_hash(3, 0),
+                parent_hash: Default::default(),
+            },
+            object: object.clone(),
+            id: FileId::try_from(1i64).unwrap(),
+        };
+
+        // Empty slot: block 4
+        // Segment 2: blocks 5-7 (hash based on block 7, parent is block 3)
+        let seg2 = Segment {
+            range: BlockRange {
+                numbers: 5..=7,
+                network: "test".to_string(),
+                hash: test_hash(7, 0),
+                parent_hash: test_hash(3, 0), // gap: parent is block 3, not block 4
+            },
+            object: object.clone(),
+            id: FileId::try_from(1i64).unwrap(),
+        };
+
+        // Empty slots: blocks 8-9
+        // Segment 3: blocks 10-12 (hash based on block 12, parent is block 7)
+        let seg3 = Segment {
+            range: BlockRange {
+                numbers: 10..=12,
+                network: "test".to_string(),
+                hash: test_hash(12, 0),
+                parent_hash: test_hash(7, 0), // gap: parent is block 7, not block 9
+            },
+            object: object.clone(),
+            id: FileId::try_from(1i64).unwrap(),
+        };
+
+        // Verify segments are adjacent despite gaps
+        assert!(BlockRange::adjacent(&seg1.range, &seg2.range));
+        assert!(BlockRange::adjacent(&seg2.range, &seg3.range));
+
+        // All three segments should form a single canonical chain
+        let result = super::chains(vec![seg1.clone(), seg2.clone(), seg3.clone()]);
+
+        assert_eq!(
+            result,
+            Some(Chains {
+                canonical: Chain(vec![seg1, seg2, seg3]),
+                fork: None,
+            })
+        );
+
+        // Verify Chain::range() spans the full range including gaps
+        let chain = result.unwrap().canonical;
+        assert_eq!(chain.start(), 0);
+        assert_eq!(chain.end(), 12);
+        assert_eq!(chain.range().numbers, 0..=12);
+
+        // The chain covers blocks 0-3, 5-7, 10-12
+        // But range() returns 0..=12 which includes the gaps at blocks 4, 8, 9
+    }
+
+    #[test]
     fn missing_ranges() {
         fn missing_ranges(
             ranges: &[RangeInclusive<BlockNum>],
