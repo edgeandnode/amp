@@ -5,6 +5,13 @@ on:
     tags: ["v*"]
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: "Create a nightly release"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -26,19 +33,34 @@ jobs:
       canary: ${{ steps.meta.outputs.canary }}
       version: ${{ steps.meta.outputs.version }}
       timestamp: ${{ steps.meta.outputs.timestamp }}
+      release: ${{ steps.meta.outputs.release }}
+      containerize: ${{ steps.meta.outputs.containerize }}
 
     steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Compute release metadata
         id: meta
         run: |
           timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ] || { [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.nightly }}" = "true" ]; }; then
             tag="nightly-${GITHUB_SHA::7}"
             name="Nightly ($(date -u +%Y-%m-%d))"
             nightly="true"
             latest="false"
             canary="false"
             version="${tag}"
+            release="true"
+            containerize="true"
+
+            # Check if the commit is already tagged as nightly
+            if git tag --points-at HEAD | grep -q '^nightly-'; then
+              release="false"
+              containerize="false"
+            fi
           elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag="${GITHUB_REF_NAME}"
             name="${GITHUB_REF_NAME}"
@@ -46,6 +68,8 @@ jobs:
             latest="true"
             canary="false"
             version="${GITHUB_REF_NAME}"
+            release="true"
+            containerize="true"
           else
             tag="${GITHUB_REF_NAME}"
             name="${GITHUB_REF_NAME}"
@@ -53,6 +77,8 @@ jobs:
             latest="false"
             canary="true"
             version="${GITHUB_SHA}"
+            release="false"
+            containerize="true"
           fi
 
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
@@ -61,6 +87,8 @@ jobs:
           echo "latest=${latest}" >> "$GITHUB_OUTPUT"
           echo "canary=${canary}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
+          echo "containerize=${containerize}" >> "$GITHUB_OUTPUT"
           echo "timestamp=${timestamp}" >> "$GITHUB_OUTPUT"
 
   build:
@@ -184,7 +212,7 @@ jobs:
     name: Release
     needs: [metadata, build, notarize]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule'
+    if: needs.metadata.outputs.release == 'true'
     permissions:
       contents: write
 
@@ -265,6 +293,7 @@ jobs:
     name: Containerize (${{ matrix.title }})
     runs-on: ubuntu-latest
     needs: [metadata, build]
+    if: needs.metadata.outputs.containerize == 'true'
     permissions:
       contents: read
       packages: write
