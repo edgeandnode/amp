@@ -77,14 +77,6 @@ impl Revision {
             _ => None,
         }
     }
-
-    /// Returns a compact display format (shortened hash for Hash variant)
-    pub fn compact(&self) -> String {
-        match self {
-            Revision::Hash(hash) => hash.compact().to_string(),
-            other => other.to_string(),
-        }
-    }
 }
 
 impl From<Version> for Revision {
@@ -99,13 +91,33 @@ impl From<Hash> for Revision {
     }
 }
 
+/// Displays the revision in its canonical string format.
+///
+/// # Alternate Format
+///
+/// Use `{:#}` for compact display. When the revision is a hash, it will be shortened to 7 characters.
+/// Other revision types (Version, Latest, Dev) are displayed unchanged.
+///
+/// ```no_run
+/// format!("{}", version_revision); // "1.0.0"
+/// format!("{}", latest_revision);  // "latest"
+/// format!("{}", dev_revision);     // "dev"
+/// format!("{}", hash_revision);    // "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+/// format!("{:#}", hash_revision);  // "b94d27b"
+/// ```
 impl std::fmt::Display for Revision {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Revision::Version(version) => write!(f, "{}", version),
-            Revision::Hash(hash) => write!(f, "{}", hash),
-            Revision::Latest => write!(f, "latest"),
-            Revision::Dev => write!(f, "dev"),
+            Revision::Version(v) => write!(f, "{v}"),
+            Revision::Hash(h) => {
+                if f.alternate() {
+                    f.write_str(h.as_short_hash_str())
+                } else {
+                    write!(f, "{h}")
+                }
+            }
+            Revision::Latest => f.write_str("latest"),
+            Revision::Dev => f.write_str("dev"),
         }
     }
 }
@@ -244,6 +256,39 @@ mod tests {
         assert!(
             result.is_err(),
             "parsing invalid revision format should fail"
+        );
+    }
+
+    #[test]
+    fn display_hash_variant_with_default_format_shows_full_hash() {
+        //* Given
+        let hash_str = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let revision: Revision = hash_str.parse().expect("should parse valid hash revision");
+
+        //* When
+        let result = format!("{}", revision);
+
+        //* Then
+        assert_eq!(
+            result, hash_str,
+            "default format should show full 64-character hash"
+        );
+    }
+
+    #[test]
+    fn display_hash_variant_with_alternate_format_shows_short_hash() {
+        //* Given
+        let revision: Revision = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("should parse valid hash revision");
+
+        //* When
+        let result = format!("{:#}", revision);
+
+        //* Then
+        assert_eq!(
+            result, "b94d27b",
+            "alternate format should show 7-character short hash"
         );
     }
 }

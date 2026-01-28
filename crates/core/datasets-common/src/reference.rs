@@ -127,26 +127,26 @@ impl Reference {
         // Parse the remainder as a standard reference
         parse_reference_parts(remainder).map_err(PurlParseError::Reference)
     }
-
-    /// Same as normal display, but hash revisions only show first 7 characters.
-    pub fn short_display(&self) -> String {
-        let rev = match self.revision() {
-            Revision::Hash(h) => h.as_str()[..7].to_string(),
-            rev => rev.to_string(),
-        };
-
-        format!(
-            "{}/{}@{}",
-            self.namespace().as_str(),
-            self.name().as_str(),
-            rev
-        )
-    }
 }
 
+/// Displays the reference in `namespace/name@revision` format.
+///
+/// # Alternate Format
+///
+/// Use `{:#}` for compact display. When the revision is a hash, it will be shortened to 7 characters:
+///
+/// ```no_run
+/// format!("{}", version_ref); // "my_namespace/my_dataset@1.0.0"
+/// format!("{}", hash_ref);    // "my_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+/// format!("{:#}", hash_ref);  // "my_namespace/my_dataset@b94d27b"
+/// ```
 impl std::fmt::Display for Reference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}", self.0, self.1)
+        if f.alternate() {
+            write!(f, "{}@{:#}", self.0, self.1)
+        } else {
+            write!(f, "{}@{}", self.0, self.1)
+        }
     }
 }
 
@@ -644,6 +644,43 @@ mod tests {
         assert!(
             reference.revision().is_version(),
             "revision should be parsed as Version variant"
+        );
+    }
+
+    #[test]
+    fn display_with_hash_revision_default_format_shows_full_hash() {
+        //* Given
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let reference: Reference = format!("my_namespace/my_dataset@{}", hash)
+            .parse()
+            .expect("should parse valid reference");
+
+        //* When
+        let result = format!("{}", reference);
+
+        //* Then
+        assert_eq!(
+            result,
+            format!("my_namespace/my_dataset@{}", hash),
+            "default format should show full 64-character hash in revision"
+        );
+    }
+
+    #[test]
+    fn display_with_hash_revision_alternate_format_shows_short_hash() {
+        //* Given
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let reference: Reference = format!("my_namespace/my_dataset@{}", hash)
+            .parse()
+            .expect("should parse valid reference");
+
+        //* When
+        let result = format!("{:#}", reference);
+
+        //* Then
+        assert_eq!(
+            result, "my_namespace/my_dataset@b94d27b",
+            "alternate format should show 7-character short hash in revision"
         );
     }
 }

@@ -99,15 +99,15 @@ impl DatasetStore {
 
         // Check cache using HashReference as the key
         if let Some(dataset) = self.dataset_cache.read().get(reference).cloned() {
-            tracing::trace!(dataset = %reference.short_display(), "Cache hit, returning cached dataset");
+            tracing::trace!(dataset = %format!("{reference:#}"), "Cache hit, returning cached dataset");
             tracing::debug!(
-                dataset = %reference.short_display(),
+                dataset = %format!("{reference:#}"),
                 "Dataset loaded successfully"
             );
             return Ok(dataset);
         }
 
-        tracing::debug!(dataset = %reference.short_display(), "Cache miss, loading from store");
+        tracing::debug!(dataset = %format!("{reference:#}"), "Cache miss, loading from store");
 
         // Load the manifest content using the path
         let Some(manifest_content) =
@@ -190,7 +190,7 @@ impl DatasetStore {
             .insert(reference.clone(), dataset.clone());
 
         tracing::debug!(
-            dataset = %reference.short_display(),
+            dataset = %format!("{reference:#}"),
             "Dataset loaded successfully"
         );
 
@@ -299,7 +299,7 @@ impl DatasetStore {
         // Load the provider from the dataset definition.
         let Some(network) = dataset.network() else {
             tracing::warn!(
-                dataset = %dataset.reference().short_display(),
+                dataset = %format!("{:#}", dataset.reference()),
                 "dataset is missing required 'network' field for evm-rpc kind"
             );
             return Err(EthCallForDatasetError::MissingNetwork {

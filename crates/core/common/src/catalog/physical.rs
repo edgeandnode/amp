@@ -276,13 +276,9 @@ impl PhysicalTable {
     /// Returns a compact table reference with shortened hash.
     ///
     /// Format: `namespace/name@shortHash.table_name`
-    /// Uses `HashReference::short_display()` which shows first 7 characters of the hash.
+    /// Uses alternate display format `{:#}` which shows first 7 characters of the hash.
     pub fn table_ref_compact(&self) -> String {
-        format!(
-            "{}.{}",
-            self.dataset_reference.short_display(),
-            self.table_name
-        )
+        format!("{:#}.{}", self.dataset_reference, self.table_name)
     }
 
     fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
