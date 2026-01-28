@@ -77,21 +77,6 @@ impl PartialReference {
         (self.namespace, self.name, self.revision)
     }
 
-    /// Returns a compact string representation with shortened hash
-    pub fn compact(&self) -> String {
-        let mut result = String::new();
-        if let Some(namespace) = &self.namespace {
-            result.push_str(namespace.as_ref());
-            result.push('/');
-        }
-        result.push_str(self.name.as_ref());
-        if let Some(revision) = &self.revision {
-            result.push('@');
-            result.push_str(&revision.compact());
-        }
-        result
-    }
-
     /// Convert this partial reference to a full `Reference` by filling in defaults.
     ///
     /// - Missing namespace defaults to global namespace (`_`).
@@ -123,6 +108,17 @@ impl From<PartialReference> for Reference {
     }
 }
 
+/// Displays the partial reference in `[namespace/]name[@revision]` format.
+///
+/// # Alternate Format
+///
+/// Use `{:#}` for compact display. When the revision is a hash, it will be shortened to 7 characters:
+///
+/// ```no_run
+/// format!("{}", name_only);  // "my_dataset"
+/// format!("{}", full_ref);   // "my_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+/// format!("{:#}", full_ref); // "my_namespace/my_dataset@b94d27b"
+/// ```
 impl std::fmt::Display for PartialReference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(namespace) = &self.namespace {
@@ -130,7 +126,11 @@ impl std::fmt::Display for PartialReference {
         }
         write!(f, "{}", self.name)?;
         if let Some(revision) = &self.revision {
-            write!(f, "@{}", revision)?;
+            if f.alternate() {
+                write!(f, "@{:#}", revision)?;
+            } else {
+                write!(f, "@{}", revision)?;
+            }
         }
         Ok(())
     }
@@ -258,5 +258,42 @@ mod tests {
             revision: None,
         };
         assert_eq!(partial.to_string(), "_/eth_rpc");
+    }
+
+    #[test]
+    fn display_with_hash_revision_default_format_shows_full_hash() {
+        //* Given
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let partial: PartialReference = format!("my_namespace/my_dataset@{}", hash)
+            .parse()
+            .expect("should parse valid partial reference");
+
+        //* When
+        let result = format!("{}", partial);
+
+        //* Then
+        assert_eq!(
+            result,
+            format!("my_namespace/my_dataset@{}", hash),
+            "default format should show full 64-character hash in revision"
+        );
+    }
+
+    #[test]
+    fn display_with_hash_revision_alternate_format_shows_short_hash() {
+        //* Given
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let partial: PartialReference = format!("my_namespace/my_dataset@{}", hash)
+            .parse()
+            .expect("should parse valid partial reference");
+
+        //* When
+        let result = format!("{:#}", partial);
+
+        //* Then
+        assert_eq!(
+            result, "my_namespace/my_dataset@b94d27b",
+            "alternate format should show 7-character short hash in revision"
+        );
     }
 }

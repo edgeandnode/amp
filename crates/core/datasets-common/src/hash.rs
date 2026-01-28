@@ -31,8 +31,8 @@ impl Hash {
         &self.0
     }
 
-    /// Returns a compact version of the hash (first 7 characters)
-    pub fn compact(&self) -> &str {
+    /// Returns a short version of the hash (first 7 characters)
+    pub fn as_short_hash_str(&self) -> &str {
         &self.0[..7]
     }
 
@@ -101,9 +101,23 @@ impl TryFrom<String> for Hash {
     }
 }
 
+/// Displays the hash as a hex string.
+///
+/// # Alternate Format
+///
+/// Use `{:#}` for a compact 7-character short hash:
+///
+/// ```no_run
+/// format!("{}", hash); // "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+/// format!("{:#}", hash); // "b94d27b"
+/// ```
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        if f.alternate() {
+            f.write_str(self.as_short_hash_str())
+        } else {
+            self.0.fmt(f)
+        }
     }
 }
 
@@ -312,5 +326,39 @@ mod tests {
 
         //* Then
         assert_eq!(deserialized, original_hash);
+    }
+
+    #[test]
+    fn display_with_default_format_shows_full_hash() {
+        //* Given
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("should parse valid hash");
+
+        //* When
+        let result = format!("{}", hash);
+
+        //* Then
+        assert_eq!(
+            result, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+            "default format should show full 64-character hash"
+        );
+    }
+
+    #[test]
+    fn display_with_alternate_format_shows_short_hash() {
+        //* Given
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("should parse valid hash");
+
+        //* When
+        let result = format!("{:#}", hash);
+
+        //* Then
+        assert_eq!(
+            result, "b94d27b",
+            "alternate format should show 7-character short hash"
+        );
     }
 }

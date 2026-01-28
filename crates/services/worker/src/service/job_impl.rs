@@ -61,7 +61,7 @@ pub(super) fn new(
             end_block,
             writer,
         )
-        .instrument(info_span!("dump_job", %job_id, dataset = %reference.short_display()))
+        .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
         .await
         .map_err(|err| err.into())
     }

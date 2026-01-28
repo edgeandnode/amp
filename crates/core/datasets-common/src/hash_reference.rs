@@ -105,21 +105,25 @@ impl HashReference {
         let (namespace, name, hash) = self.into_parts();
         Reference::new(namespace, name, Revision::Hash(hash))
     }
-
-    /// Same as normal display, but hash only shows first 7 characters.
-    pub fn short_display(&self) -> String {
-        format!(
-            "{}/{}@{}",
-            self.namespace().as_str(),
-            self.name().as_str(),
-            &self.hash().as_str()[..7]
-        )
-    }
 }
 
+/// Displays the hash reference in `namespace/name@hash` format.
+///
+/// # Alternate Format
+///
+/// Use `{:#}` for compact display with a 7-character short hash:
+///
+/// ```no_run
+/// format!("{}", hash_ref);   // "my_namespace/my_dataset@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+/// format!("{:#}", hash_ref); // "my_namespace/my_dataset@b94d27b"
+/// ```
 impl std::fmt::Display for HashReference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}", self.0, self.1)
+        if f.alternate() {
+            write!(f, "{}@{:#}", self.0, self.1)
+        } else {
+            write!(f, "{}@{}", self.0, self.1)
+        }
     }
 }
 
@@ -268,4 +272,46 @@ pub enum HashReferenceConversionError {
     /// Only references with `Revision::Hash` variants can be converted to `HashReference`.
     #[error("Reference does not contain a hash revision, found: {0}")]
     NotHashRevision(Revision),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_with_default_format_shows_full_hash() {
+        //* Given
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let reference: HashReference = format!("my_namespace/my_dataset@{}", hash)
+            .parse()
+            .expect("should parse valid hash reference");
+
+        //* When
+        let result = format!("{}", reference);
+
+        //* Then
+        assert_eq!(
+            result,
+            format!("my_namespace/my_dataset@{}", hash),
+            "default format should show full 64-character hash"
+        );
+    }
+
+    #[test]
+    fn display_with_alternate_format_shows_short_hash() {
+        //* Given
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let reference: HashReference = format!("my_namespace/my_dataset@{}", hash)
+            .parse()
+            .expect("should parse valid hash reference");
+
+        //* When
+        let result = format!("{:#}", reference);
+
+        //* Then
+        assert_eq!(
+            result, "my_namespace/my_dataset@b94d27b",
+            "alternate format should show 7-character short hash"
+        );
+    }
 }
