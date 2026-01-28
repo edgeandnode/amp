@@ -63,7 +63,7 @@ use clap::Parser;
 use common::BoxError;
 use datasets_common::reference::Reference;
 use datasets_derived::{
-    DerivedDatasetKind,
+    Dataset as DerivedDataset,
     deps::{DfsError, dfs},
 };
 use dump::consistency_check;
@@ -463,10 +463,11 @@ async fn dataset_and_dependencies(
             .await
             .map_err(DatasetDependencyError::GetDataset)?;
 
-        if dataset.kind() != DerivedDatasetKind {
+        // Only derived datasets have dependencies; raw datasets are leaf nodes
+        let Some(dataset) = dataset.downcast_ref::<DerivedDataset>() else {
             deps.insert(dataset_ref, vec![]);
             continue;
-        }
+        };
 
         let refs: Vec<Reference> = dataset
             .dependencies()

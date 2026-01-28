@@ -4,12 +4,15 @@ use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
 use datasets_common::{
     dataset::{BlockNum, Table},
     dataset_kind_str::DatasetKindStr,
-    deps::{alias::DepAlias, reference::DepReference},
     hash_reference::HashReference,
-    udf::{IsolatePool, JsUdf},
 };
+use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 
-use crate::{DerivedDatasetKind, function::Function};
+use crate::{
+    DerivedDatasetKind,
+    deps::{DepAlias, DepReference},
+    function::Function,
+};
 
 pub struct Dataset {
     pub(crate) tables: Vec<Table>,
@@ -49,46 +52,22 @@ impl Dataset {
             functions,
         }
     }
-}
 
-impl datasets_common::dataset::Dataset for Dataset {
-    fn tables(&self) -> &[Table] {
-        &self.tables
-    }
-
-    fn start_block(&self) -> Option<BlockNum> {
-        self.start_block
-    }
-
-    fn kind(&self) -> DatasetKindStr {
-        self.kind.into()
-    }
-
-    fn dependencies(&self) -> &BTreeMap<DepAlias, DepReference> {
+    /// Returns the dependencies of this derived dataset.
+    ///
+    /// The map keys are aliases used to reference dependencies in SQL queries,
+    /// and values are references to the dependent datasets.
+    pub fn dependencies(&self) -> &BTreeMap<DepAlias, DepReference> {
         &self.dependencies
     }
 
-    fn reference(&self) -> &HashReference {
-        &self.reference
-    }
-
-    fn network(&self) -> Option<&String> {
-        self.network.as_ref()
-    }
-
-    fn finalized_blocks_only(&self) -> bool {
-        self.finalized_blocks_only
-    }
-
-    fn as_dataset_with_functions(
-        &self,
-    ) -> Option<&dyn datasets_common::dataset::DatasetWithFunctions> {
-        Some(self)
-    }
-}
-
-impl datasets_common::dataset::DatasetWithFunctions for Dataset {
-    fn function_by_name(
+    /// Looks up a user-defined function by name.
+    ///
+    /// Returns the [`ScalarUDF`] for the function if found. This is used
+    /// for derived datasets that define custom JavaScript functions.
+    ///
+    /// Returns `None` if the function name is not found.
+    pub fn function_by_name(
         &self,
         schema: String,
         name: &str,
@@ -106,5 +85,31 @@ impl datasets_common::dataset::DatasetWithFunctions for Dataset {
             )))
             .into_scalar_udf()
         })
+    }
+}
+
+impl datasets_common::dataset::Dataset for Dataset {
+    fn reference(&self) -> &HashReference {
+        &self.reference
+    }
+
+    fn kind(&self) -> DatasetKindStr {
+        self.kind.into()
+    }
+
+    fn tables(&self) -> &[Table] {
+        &self.tables
+    }
+
+    fn network(&self) -> Option<&String> {
+        self.network.as_ref()
+    }
+
+    fn start_block(&self) -> Option<BlockNum> {
+        self.start_block
+    }
+
+    fn finalized_blocks_only(&self) -> bool {
+        self.finalized_blocks_only
     }
 }

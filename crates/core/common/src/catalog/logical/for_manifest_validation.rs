@@ -16,14 +16,17 @@ use std::{
 
 use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
 use datasets_common::{
-    deps::alias::{DepAlias, DepAliasOrSelfRef, SELF_REF_KEYWORD},
     func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
     hash::Hash,
     hash_reference::HashReference,
     table_name::TableName,
-    udf::{IsolatePool, JsUdf},
 };
-use datasets_derived::manifest::Function;
+use datasets_derived::{
+    dataset::Dataset as DerivedDataset,
+    deps::{DepAlias, DepAliasOrSelfRef, SELF_REF_KEYWORD},
+    manifest::Function,
+};
+use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 
 use crate::{
     BoxError,
@@ -227,7 +230,7 @@ async fn resolve_udfs<'a>(
                             })?
                     } else {
                         dataset
-                            .as_dataset_with_functions()
+                            .downcast_ref::<DerivedDataset>()
                             .and_then(|d| {
                                 d.function_by_name(
                                     schema.to_string(),

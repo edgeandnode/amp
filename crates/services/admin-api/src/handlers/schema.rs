@@ -22,16 +22,14 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{
+use datasets_common::{func_name::FuncName, hash_reference::HashReference, table_name::TableName};
+use datasets_derived::{
     deps::{
-        alias::{DepAlias, DepAliasOrSelfRef},
-        reference::{DepReference, HashOrVersion},
+        DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, DepReference,
+        HashOrVersion,
     },
-    func_name::FuncName,
-    hash_reference::HashReference,
-    table_name::TableName,
+    manifest::{Function, TableSchema},
 };
-use datasets_derived::manifest::{Function, TableSchema};
 use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
 
@@ -484,7 +482,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -498,8 +496,7 @@ enum Error {
         table_name: TableName,
         /// The underlying extraction error
         #[source]
-        source:
-            ResolveFunctionReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
+        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Dependency not found in dataset store
@@ -557,7 +554,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasError>,
     },
 
     /// Unqualified table reference
@@ -572,9 +569,7 @@ enum Error {
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
-    InvalidTableName(
-        #[source] ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
-    ),
+    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
 
     /// Dataset reference not found
     ///
@@ -627,7 +622,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source: ResolveTableReferencesError<datasets_common::deps::alias::DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasError>,
     },
 
     /// Invalid dependency alias in function reference
@@ -642,8 +637,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source:
-            ResolveFunctionReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
+        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Catalog-qualified function reference not supported
@@ -658,8 +652,7 @@ enum Error {
         table_name: TableName,
         /// The underlying resolution error
         #[source]
-        source:
-            ResolveFunctionReferencesError<datasets_common::deps::alias::DepAliasOrSelfRefError>,
+        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Dependency alias not found
