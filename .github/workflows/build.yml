@@ -284,10 +284,12 @@ jobs:
       - name: Finalize release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
-          tag_name: ${{ needs.metadata.outputs.tag }}
           draft: false
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          name: ${{ needs.metadata.outputs.name }}
           prerelease: ${{ needs.metadata.outputs.nightly == 'true' }}
           target_commitish: ${{ github.sha }}
+          make_latest: ${{ needs.metadata.outputs.latest == 'true' }}
 
   containerize:
     name: Containerize (${{ matrix.title }})
