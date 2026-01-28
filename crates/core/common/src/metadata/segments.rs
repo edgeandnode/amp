@@ -233,21 +233,71 @@ struct Chains {
 /// Find the canonical and fork chain from a sequence of segments. The result is independent of the
 /// input order.
 #[inline]
-fn chains(segments: Vec<Segment>) -> Option<Chains> {
-    // TODO: depth-first search from table start block.
-    // Favor segments with latest object `last_modified` timestamp.
+fn chains(mut segments: Vec<Segment>) -> Option<Chains> {
+    if segments.is_empty() {
+        return None;
+    }
 
-    todo!()
+    // Order segments by block range start ascending, then by object last_modified decending.
+    segments.sort_unstable_by(|a, b| {
+        use std::cmp::Ord;
+        Ord::cmp(&a.range.start(), &b.range.start())
+            .then_with(|| Ord::cmp(&b.object.last_modified, &a.object.last_modified))
+    });
 
-    // #[cfg(test)]
-    // {
-    //     canonical.check_invariants();
-    //     if let Some(fork) = &fork {
-    //         fork.check_invariants();
-    //     }
-    // }
+    let mut canonical: Vec<Segment> = Default::default();
+    let mut non_canonical: Vec<Segment> = Default::default();
+    for segment in segments {
+        if canonical.is_empty() {
+            canonical.push(segment);
+            continue;
+        }
 
-    // Some(Chains { canonical, fork })
+        if BlockRange::adjacent(&canonical.last().unwrap().range, &segment.range) {
+            canonical.push(segment);
+        } else {
+            non_canonical.push(segment);
+        }
+    }
+
+    let canonical = Chain(canonical);
+
+    // Order non-canonical segments by block range end ascending, then by object last_modified
+    // ascending.
+    non_canonical.sort_unstable_by(|a, b| {
+        use std::cmp::Ord;
+        Ord::cmp(&a.range.end(), &b.range.end())
+            .then_with(|| Ord::cmp(&a.object.last_modified, &b.object.last_modified))
+    });
+
+    let mut fork: Option<Chain> = None;
+    while let Some(fork_end) = non_canonical.pop() {
+        if fork_end.range.end() <= canonical.end() {
+            break;
+        }
+
+        // TODO: optimize
+        let mut fork_segments = vec![fork_end];
+        for segment in non_canonical.iter().rev() {
+            if BlockRange::adjacent(&segment.range, &fork_segments.last().unwrap().range) {
+                fork_segments.insert(0, segment.clone());
+            }
+        }
+        if fork_segments.first().unwrap().range.start() <= (canonical.end() + 1) {
+            fork = Some(Chain(fork_segments));
+            break;
+        }
+    }
+
+    #[cfg(test)]
+    {
+        canonical.check_invariants();
+        if let Some(fork) = &fork {
+            fork.check_invariants();
+        }
+    }
+
+    Some(Chains { canonical, fork })
 }
 
 fn missing_block_ranges(
@@ -416,12 +466,12 @@ mod test {
                 test_segment(3..=5, (0, 0), 0),
                 test_segment(4..=5, (0, 0), 0),
                 test_segment(4..=6, (0, 0), 0),
-                test_segment(3..=6, (0, 0), 0),
+                test_segment(3..=6, (0, 0), 1),
             ]),
             Some(Chains {
                 canonical: Chain(vec![
                     test_segment(0..=2, (0, 0), 0),
-                    test_segment(3..=6, (0, 0), 0),
+                    test_segment(3..=6, (0, 0), 1),
                 ]),
                 fork: None,
             })
@@ -504,17 +554,17 @@ mod test {
         assert_eq!(
             super::chains(vec![
                 test_segment(0..=3, (0, 0), 0),
-                test_segment(4..=6, (1, 1), 0),
-                test_segment(4..=8, (0, 0), 0),
-                test_segment(7..=9, (1, 1), 0),
-                test_segment(4..=9, (2, 2), 0),
+                test_segment(4..=6, (1, 1), 1),
+                test_segment(4..=8, (0, 0), 2),
+                test_segment(7..=9, (1, 1), 3),
+                test_segment(4..=9, (2, 2), 4),
             ]),
             Some(Chains {
                 canonical: Chain(vec![
                     test_segment(0..=3, (0, 0), 0),
-                    test_segment(4..=8, (0, 0), 0),
+                    test_segment(4..=8, (0, 0), 2),
                 ]),
-                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 0)])),
+                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 4)])),
             })
         );
     }
