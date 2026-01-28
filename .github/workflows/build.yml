@@ -9,7 +9,7 @@ permissions:
   packages: write
 
 concurrency:
-  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
 
 jobs:
@@ -230,6 +230,9 @@ jobs:
       id-token: write
     env:
       RELEASE_NIGHTLY: ${{ startsWith(github.ref, 'refs/tags/nightly-') }}
+      RELEASE_LATEST: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      RELEASE_CANARY: ${{ github.ref == 'refs/heads/main' }}
+      RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
 
     strategy:
       matrix:
@@ -278,7 +281,8 @@ jobs:
         with:
           images: ghcr.io/edgeandnode/${{ matrix.name }}
           tags: |
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=raw,value=canary,enable=${{ env.RELEASE_CANARY == 'true' }}
+            type=raw,value=latest,enable=${{ env.RELEASE_LATEST == 'true' }}
             type=raw,value=nightly,enable=${{ env.RELEASE_NIGHTLY == 'true' }}
             type=ref,event=tag
             type=sha
@@ -290,7 +294,7 @@ jobs:
             org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.created=${{ steps.timestamp.outputs.timestamp }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+            org.opencontainers.image.version=${{ env.RELEASE_VERSION }}
           annotations: |
             manifest:org.opencontainers.image.source=https://github.com/edgeandnode/amp
             manifest:org.opencontainers.image.url=https://github.com/edgeandnode/amp
