@@ -12,18 +12,15 @@ use datafusion::{
     common::DFSchemaRef,
 };
 
+use crate::dataset_kind_str::DatasetKindStr;
+
 /// Common metadata fields required by all dataset definitions.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Manifest {
     /// Dataset kind. See specific dataset definitions for supported values.
     ///
     /// Common values include: `manifest`, `evm-rpc`, `firehose`.
-    pub kind: String,
-
-    /// Network name, e.g., `mainnet`, `sepolia`
-    ///
-    /// Raw datasets' specific
-    pub network: Option<String>,
+    pub kind: DatasetKindStr,
 }
 
 /// A serializable representation of a collection of Arrow schemas without metadata.

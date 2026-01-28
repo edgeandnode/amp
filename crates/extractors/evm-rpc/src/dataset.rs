@@ -11,7 +11,6 @@ pub struct Dataset {
     pub(crate) start_block: Option<BlockNum>,
     pub(crate) kind: EvmRpcDatasetKind,
     pub(crate) reference: HashReference,
-    pub(crate) network: Option<String>,
     pub(crate) finalized_blocks_only: bool,
 }
 
@@ -26,10 +25,6 @@ impl datasets_common::dataset::Dataset for Dataset {
 
     fn tables(&self) -> &[Table] {
         &self.tables
-    }
-
-    fn network(&self) -> Option<&String> {
-        self.network.as_ref()
     }
 
     fn start_block(&self) -> Option<BlockNum> {

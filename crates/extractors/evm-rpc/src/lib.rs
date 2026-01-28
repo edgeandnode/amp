@@ -90,7 +90,6 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,
         tables: tables::all(&network),
-        network: Some(network),
     }
 }
 

@@ -118,7 +118,7 @@ pub async fn handler(
         parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&manifest_str)
             .map_err(Error::from)?
     } else {
-        return Err(Error::UnsupportedDatasetKind(manifest.kind.clone()).into());
+        return Err(Error::UnsupportedDatasetKind(manifest.kind.to_string()).into());
     };
 
     // Compute manifest hash from canonical serialization

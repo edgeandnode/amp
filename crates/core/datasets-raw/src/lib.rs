@@ -13,6 +13,7 @@ use ::arrow::{
 pub mod arrow;
 pub mod client;
 pub mod evm;
+pub mod manifest;
 pub mod rows;
 #[cfg(feature = "gen-schema")]
 pub mod schema;

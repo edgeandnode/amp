@@ -196,7 +196,7 @@ pub async fn handler(
                 )
                 .map_err(Error::from)?
             } else {
-                return Err(Error::UnsupportedDatasetKind(manifest.kind.clone()).into());
+                return Err(Error::UnsupportedDatasetKind(manifest.kind.to_string()).into());
             };
 
             // Compute manifest hash from canonical serialization

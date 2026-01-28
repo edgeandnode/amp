@@ -24,8 +24,8 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use datasets_common::hash_reference::HashReference;
-use datasets_derived::DerivedDatasetKind;
+use datasets_common::{dataset::Dataset, hash_reference::HashReference};
+use datasets_derived::dataset::Dataset as DerivedDataset;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{LocationId, NotificationMultiplexerHandle};
@@ -869,7 +869,7 @@ async fn search_dependencies_for_raw_dataset(
     dataset_store: &DatasetStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &str,
-) -> Result<Arc<dyn datasets_common::dataset::Dataset>, BoxError> {
+) -> Result<Arc<dyn Dataset>, BoxError> {
     let mut queue: VecDeque<Arc<dyn datasets_common::dataset::Dataset>> = VecDeque::new();
     for hash_ref in root_dataset_refs {
         let dataset = dataset_store.get_dataset(hash_ref).await?;
@@ -885,16 +885,17 @@ async fn search_dependencies_for_raw_dataset(
             continue;
         }
 
-        if dataset.kind() != DerivedDatasetKind
-            && let Some(dataset_network) = dataset.network()
-            && dataset_network == network
+        // Check if this is a raw dataset matching the target network
+        if !dataset.is::<DerivedDataset>()
+            && let Some(table) = dataset.tables().first()
+            && table.network() == network
         {
             // Found matching dataset
             return Ok(dataset);
         }
 
         // Enqueue dependencies for exploration (only derived datasets have dependencies)
-        if let Some(derived) = dataset.downcast_ref::<datasets_derived::Dataset>() {
+        if let Some(derived) = dataset.downcast_ref::<DerivedDataset>() {
             for dep in derived.dependencies().values() {
                 // Resolve the reference to a hash reference first
                 let hash_ref = dataset_store

@@ -119,7 +119,7 @@ pub async fn handler(
         name,
         revision,
         manifest_hash: reference.hash().to_string(),
-        kind: manifest.kind,
+        kind: manifest.kind.to_string(),
     }))
 }
 
