@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt::Debug, ops::RangeInclusive};
 
 use alloy::primitives::BlockHash;
+use datasets_common::network_id::NetworkId;
 use metadata_db::files::FileId;
 use object_store::ObjectMeta;
 
@@ -27,7 +28,7 @@ impl From<&BlockRange> for Watermark {
 /// Public interface for resuming a stream from a watermark.
 // TODO: unify with `Watermark` when adding support for multi-network streaming.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ResumeWatermark(pub BTreeMap<String, Watermark>);
+pub struct ResumeWatermark(pub BTreeMap<NetworkId, Watermark>);
 
 impl ResumeWatermark {
     /// Create a ResumeWatermark from a slice of BlockRanges.
@@ -40,7 +41,7 @@ impl ResumeWatermark {
     }
 
     /// Extract the watermark for a specific network.
-    pub fn to_watermark(self, network: &str) -> Result<Watermark, BoxError> {
+    pub fn to_watermark(self, network: &NetworkId) -> Result<Watermark, BoxError> {
         self.0
             .into_iter()
             .find(|(n, _)| n == network)
@@ -50,7 +51,7 @@ impl ResumeWatermark {
 }
 
 // encoding to remote plan
-impl From<ResumeWatermark> for BTreeMap<String, (BlockNum, [u8; 32])> {
+impl From<ResumeWatermark> for BTreeMap<NetworkId, (BlockNum, [u8; 32])> {
     fn from(value: ResumeWatermark) -> Self {
         value
             .0
@@ -60,8 +61,8 @@ impl From<ResumeWatermark> for BTreeMap<String, (BlockNum, [u8; 32])> {
     }
 }
 // decoding from remote plan
-impl From<BTreeMap<String, (BlockNum, [u8; 32])>> for ResumeWatermark {
-    fn from(value: BTreeMap<String, (BlockNum, [u8; 32])>) -> Self {
+impl From<BTreeMap<NetworkId, (BlockNum, [u8; 32])>> for ResumeWatermark {
+    fn from(value: BTreeMap<NetworkId, (BlockNum, [u8; 32])>) -> Self {
         let inner = value
             .into_iter()
             .map(|(network, (number, hash))| {
@@ -377,7 +378,7 @@ mod test {
         }
         BlockRange {
             numbers: numbers.clone(),
-            network: "test".to_string(),
+            network: "test".parse().expect("valid network id"),
             hash: test_hash(*numbers.end() as u8, fork.1),
             prev_hash: if *numbers.start() == 0 {
                 Some(Default::default())

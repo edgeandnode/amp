@@ -17,7 +17,8 @@ use datafusion::arrow::datatypes::SchemaRef;
 use downcast_rs::{DowncastSync, impl_downcast};
 
 use crate::{
-    dataset_kind_str::DatasetKindStr, hash_reference::HashReference, table_name::TableName,
+    dataset_kind_str::DatasetKindStr, hash_reference::HashReference, network_id::NetworkId,
+    table_name::TableName,
 };
 
 pub const SPECIAL_BLOCK_NUM: &str = "_block_num";
@@ -78,7 +79,7 @@ pub struct Table {
     /// Arrow schema defining the table's columns and their data types.
     schema: SchemaRef,
     /// Network identifier (e.g., "mainnet", "sepolia").
-    network: String,
+    network: NetworkId,
     /// Column names by which this table is naturally sorted.
     sorted_by: BTreeSet<String>,
 }
@@ -88,7 +89,7 @@ impl Table {
     pub fn new(
         name: TableName,
         schema: SchemaRef,
-        network: String,
+        network: NetworkId,
         sorted_by: Vec<String>,
     ) -> Self {
         let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
@@ -112,7 +113,7 @@ impl Table {
     }
 
     /// Returns the network this table is associated with (e.g., `"mainnet"`).
-    pub fn network(&self) -> &str {
+    pub fn network(&self) -> &NetworkId {
         &self.network
     }
 

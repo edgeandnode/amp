@@ -1,4 +1,4 @@
-use datasets_common::block_range::BlockRange;
+use datasets_common::{block_range::BlockRange, network_id::NetworkId};
 use datasets_raw::rows::Rows;
 use solana_clock::Slot;
 
@@ -12,12 +12,12 @@ pub mod transactions;
 /// Maximum number of ASCII characters in a base58-encoded 32-byte hash.
 pub(crate) const BASE58_ENCODED_HASH_LEN: usize = 44;
 
-pub fn all(network: &str) -> Vec<datasets_common::dataset::Table> {
+pub fn all(network: &NetworkId) -> Vec<datasets_common::dataset::Table> {
     vec![
-        block_headers::table(network.to_string()),
-        transactions::table(network.to_string()),
-        messages::table(network.to_string()),
-        instructions::table(network.to_string()),
+        block_headers::table(network.clone()),
+        transactions::table(network.clone()),
+        messages::table(network.clone()),
+        instructions::table(network.clone()),
     ]
 }
 
@@ -35,7 +35,7 @@ pub(crate) struct NonEmptySlot {
 
 pub(crate) fn convert_slot_to_db_rows(
     non_empty_slot: NonEmptySlot,
-    network: &str,
+    network: &NetworkId,
 ) -> Result<Rows, RowConversionError> {
     let NonEmptySlot {
         slot,
@@ -51,7 +51,7 @@ pub(crate) fn convert_slot_to_db_rows(
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.
         numbers: slot..=slot,
-        network: network.to_string(),
+        network: network.clone(),
         hash: blockhash.into(),
         // Previous slot could be skipped, do not set prev_hash.
         prev_hash: None,
@@ -130,11 +130,11 @@ pub(crate) fn convert_slot_to_db_rows(
     ]))
 }
 
-pub(crate) fn empty_db_rows(slot: Slot, network: &str) -> Result<Rows, RowConversionError> {
+pub(crate) fn empty_db_rows(slot: Slot, network: &NetworkId) -> Result<Rows, RowConversionError> {
     let range = BlockRange {
         // Using the slot as a block number since we don't skip empty slots.
         numbers: slot..=slot,
-        network: network.to_string(),
+        network: network.clone(),
         hash: [0u8; 32].into(),
         // Previous slot could be skipped, do not set prev_hash.
         prev_hash: None,

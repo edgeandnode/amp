@@ -29,6 +29,7 @@ use datafusion::{
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
+use datasets_common::network_id::NetworkId;
 use futures::{TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
@@ -314,7 +315,7 @@ impl QueryContext {
     /// Returns an empty Vec if any referenced table has no synced data.
     #[instrument(skip_all, err)]
     pub async fn common_ranges(&self, plan: &LogicalPlan) -> Result<Vec<BlockRange>, BoxError> {
-        let mut ranges_by_network: BTreeMap<String, BlockRange> = BTreeMap::new();
+        let mut ranges_by_network: BTreeMap<NetworkId, BlockRange> = BTreeMap::new();
         for df_table_ref in extract_table_references_from_plan(plan)? {
             let table_ref: TableReference<String> = df_table_ref.try_into()?;
             let Some(table_range) = self.get_table(&table_ref)?.synced_range() else {
@@ -348,7 +349,7 @@ impl QueryContext {
     pub async fn max_end_blocks(
         &self,
         plan: &LogicalPlan,
-    ) -> Result<BTreeMap<String, BlockNum>, BoxError> {
+    ) -> Result<BTreeMap<NetworkId, BlockNum>, BoxError> {
         Ok(self
             .common_ranges(plan)
             .await?

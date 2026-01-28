@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use alloy::primitives::U256;
-use datasets_common::block_range::BlockRange;
+use datasets_common::{block_range::BlockRange, network_id::NetworkId};
 use datasets_raw::{
     Timestamp,
     evm::{
@@ -37,7 +37,7 @@ pub enum ProtobufToRowError {
 
 pub fn protobufs_to_rows(
     block: pbethereum::Block,
-    network: &str,
+    network: &NetworkId,
 ) -> Result<Rows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
@@ -233,7 +233,7 @@ pub fn protobufs_to_rows(
 
     let block = BlockRange {
         numbers: header.block_num..=header.block_num,
-        network: network.to_string(),
+        network: network.clone(),
         hash: header.hash.into(),
         prev_hash: Some(header.parent_hash.into()),
     };

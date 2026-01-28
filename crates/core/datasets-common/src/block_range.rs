@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 use alloy::primitives::BlockHash;
 use serde::{Deserialize, Serialize};
 
-use crate::BlockNum;
+use crate::{BlockNum, network_id::NetworkId};
 
 /// Block range for data extraction and segment management.
 ///
@@ -15,7 +15,7 @@ pub struct BlockRange {
     /// Inclusive range of block numbers.
     pub numbers: RangeInclusive<BlockNum>,
     /// Network identifier (e.g., "mainnet", "sepolia").
-    pub network: String,
+    pub network: NetworkId,
     /// Hash of the end block.
     pub hash: BlockHash,
     /// Hash of the block before the start block (for reorg detection).

@@ -28,6 +28,7 @@ use datasets_common::{
     dataset::Table,
     dataset_kind_str::DatasetKindStr,
     manifest::{ArrowSchema, Field, TableSchema},
+    network_id::NetworkId,
 };
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::EvmRpcDatasetKind;
@@ -44,7 +45,7 @@ pub struct Args {
 
     /// The name of the network.
     #[arg(long, required = true, env = "GM_NETWORK")]
-    pub network: String,
+    pub network: NetworkId,
 
     /// Output file or directory. If it's a directory, the generated file name will
     /// match the `kind` parameter.
@@ -123,7 +124,7 @@ pub async fn run(
 #[tracing::instrument(skip(writer))]
 pub async fn generate_manifest<W>(
     kind: &DatasetKindStr,
-    network: String,
+    network: NetworkId,
     start_block: Option<u64>,
     finalized_blocks_only: bool,
     writer: &mut W,
@@ -136,11 +137,11 @@ where
     let dataset_bytes = if kind == DerivedDatasetKind {
         return Err(Error::DerivedNotSupported);
     } else if kind == EvmRpcDatasetKind {
-        generate_evm_rpc_manifest(&network, start_block, finalized_blocks_only)?
+        generate_evm_rpc_manifest(network, start_block, finalized_blocks_only)?
     } else if kind == FirehoseDatasetKind {
-        generate_firehose_manifest(&network, start_block, finalized_blocks_only)?
+        generate_firehose_manifest(network, start_block, finalized_blocks_only)?
     } else if kind == SolanaDatasetKind {
-        generate_solana_manifest(&network, start_block, finalized_blocks_only)?
+        generate_solana_manifest(network, start_block, finalized_blocks_only)?
     } else {
         return Err(Error::UnsupportedKind(kind.clone()));
     };
@@ -155,22 +156,22 @@ where
 /// Generate an EVM RPC dataset manifest.
 #[inline]
 fn generate_evm_rpc_manifest(
-    network: &str,
+    network: NetworkId,
     start_block: u64,
     finalized_blocks_only: bool,
 ) -> Result<Vec<u8>, Error> {
-    let tables = evm_rpc_datasets::tables::all(network)
+    let tables = evm_rpc_datasets::tables::all(&network)
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table = evm_rpc_datasets::Table::new(schema, network.to_string());
+            let manifest_table = evm_rpc_datasets::Table::new(schema, network.clone());
             (table.name().to_string(), manifest_table)
         })
         .collect();
 
     let manifest = evm_rpc_datasets::Manifest {
         kind: EvmRpcDatasetKind,
-        network: network.to_string(),
+        network,
         start_block,
         finalized_blocks_only,
         tables,
@@ -182,22 +183,22 @@ fn generate_evm_rpc_manifest(
 /// Generate a Solana dataset manifest.
 #[inline]
 fn generate_solana_manifest(
-    network: &str,
+    network: NetworkId,
     start_block: u64,
     finalized_blocks_only: bool,
 ) -> Result<Vec<u8>, Error> {
-    let tables = solana_datasets::tables::all(network)
+    let tables = solana_datasets::tables::all(&network)
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table = solana_datasets::Table::new(schema, network.to_string());
+            let manifest_table = solana_datasets::Table::new(schema, network.clone());
             (table.name().to_string(), manifest_table)
         })
         .collect();
 
     let manifest = solana_datasets::Manifest {
         kind: SolanaDatasetKind,
-        network: network.to_string(),
+        network,
         start_block,
         finalized_blocks_only,
         tables,
@@ -209,23 +210,22 @@ fn generate_solana_manifest(
 /// Generate a Firehose dataset manifest.
 #[inline]
 fn generate_firehose_manifest(
-    network: &str,
+    network: NetworkId,
     start_block: u64,
     finalized_blocks_only: bool,
 ) -> Result<Vec<u8>, Error> {
-    let tables = firehose_datasets::evm::tables::all(network)
+    let tables = firehose_datasets::evm::tables::all(&network)
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table =
-                firehose_datasets::dataset::Table::new(schema, network.to_string());
+            let manifest_table = firehose_datasets::dataset::Table::new(schema, network.clone());
             (table.name().to_string(), manifest_table)
         })
         .collect();
 
     let manifest = firehose_datasets::dataset::Manifest {
         kind: FirehoseDatasetKind,
-        network: network.to_string(),
+        network,
         start_block,
         finalized_blocks_only,
         tables,

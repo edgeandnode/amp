@@ -1,4 +1,4 @@
-use datasets_common::dataset_kind_str::DatasetKindStr;
+use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
 
 /// Provider configuration with required and provider-specific fields.
 ///
@@ -13,7 +13,7 @@ pub struct ProviderConfig {
     /// The type of provider as string (e.g., "evm-rpc", "firehose")
     pub kind: DatasetKindStr,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
-    pub network: String,
+    pub network: NetworkId,
     /// All other provider-specific configuration fields
     #[serde(flatten)]
     pub rest: toml::Table,

@@ -12,6 +12,7 @@ pub mod hash_reference;
 pub mod manifest;
 pub mod name;
 pub mod namespace;
+pub mod network_id;
 pub mod partial_reference;
 pub mod reference;
 pub mod revision;

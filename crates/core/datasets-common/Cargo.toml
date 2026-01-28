@@ -10,6 +10,7 @@ default = ["metadata-db"]
 
 [dependencies]
 alloy = { workspace = true }
+bincode = { workspace = true, optional = true }
 datafusion = { workspace = true }
 downcast-rs = "1.2"
 hex = { workspace = true }

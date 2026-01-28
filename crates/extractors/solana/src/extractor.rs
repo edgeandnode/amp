@@ -16,7 +16,7 @@ use std::{
 };
 
 use anyhow::Context;
-use datasets_common::dataset::BlockNum;
+use datasets_common::{dataset::BlockNum, network_id::NetworkId};
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     rows::Rows,
@@ -41,7 +41,7 @@ pub struct SolanaExtractor {
     of1_car_manager_handles: Arc<Mutex<Option<Of1CarManagerHandles>>>,
     rpc_client: Arc<rpc_client::SolanaRpcClient>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    network: String,
+    network: NetworkId,
     provider_name: String,
     of1_car_directory: PathBuf,
     use_archive: crate::UseArchive,
@@ -52,7 +52,7 @@ impl SolanaExtractor {
     pub fn new(
         rpc_provider_url: Url,
         max_rpc_calls_per_second: Option<NonZeroU32>,
-        network: String,
+        network: NetworkId,
         provider_name: String,
         of1_car_directory: PathBuf,
         keep_of1_car_files: bool,
@@ -484,7 +484,7 @@ mod tests {
         let extractor = SolanaExtractor::new(
             Url::parse("https://example.net").unwrap(),
             None,
-            String::from("mainnet"),
+            "mainnet".parse().expect("valid network id"),
             String::new(),
             PathBuf::new(),
             false,
@@ -531,7 +531,7 @@ mod tests {
         let extractor = SolanaExtractor::new(
             solana_rpc_provider_url,
             None,
-            String::from("mainnet"),
+            "mainnet".parse().expect("valid network id"),
             String::new(),
             PathBuf::new(),
             false,

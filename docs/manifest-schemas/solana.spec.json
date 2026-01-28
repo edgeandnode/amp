@@ -14,7 +14,7 @@
     },
     "network": {
       "description": "Network name, e.g., `mainnet`",
-      "type": "string"
+      "$ref": "#/$defs/NetworkId"
     },
     "start_block": {
       "description": "Dataset start block",
@@ -80,13 +80,18 @@
         "nullable"
       ]
     },
+    "NetworkId": {
+      "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
+      "type": "string",
+      "minLength": 1
+    },
     "Table": {
       "description": "Table definition for raw datasets.",
       "type": "object",
       "properties": {
         "network": {
           "description": "Network for this table.",
-          "type": "string"
+          "$ref": "#/$defs/NetworkId"
         },
         "schema": {
           "description": "Arrow schema for this table.",

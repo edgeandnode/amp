@@ -297,7 +297,7 @@ mod tests {
     fn create_test_range(start: u64, end: u64) -> BlockRange {
         BlockRange {
             numbers: start..=end,
-            network: "test".to_string(),
+            network: "test".parse().expect("valid network id"),
             hash: [0u8; 32].into(),
             prev_hash: Some([0u8; 32].into()),
         }

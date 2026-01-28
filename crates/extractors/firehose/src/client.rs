@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_stream::stream;
-use datasets_common::dataset::BlockNum;
+use datasets_common::{dataset::BlockNum, network_id::NetworkId};
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     rows::Rows,
@@ -33,7 +33,7 @@ use crate::{
 pub struct Client {
     endpoint: Endpoint,
     auth: AuthInterceptor,
-    network: String,
+    network: NetworkId,
     provider_name: String,
     metrics: Option<crate::metrics::MetricsRegistry>,
 }
@@ -68,8 +68,8 @@ impl Client {
         Ok(client)
     }
 
-    pub fn network(&self) -> String {
-        self.network.to_string()
+    pub fn network(&self) -> &NetworkId {
+        &self.network
     }
 
     pub fn provider_name(&self) -> &str {

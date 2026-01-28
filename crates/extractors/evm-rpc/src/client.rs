@@ -22,7 +22,7 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 use async_stream::stream;
-use datasets_common::{block_range::BlockRange, dataset::BlockNum};
+use datasets_common::{block_range::BlockRange, dataset::BlockNum, network_id::NetworkId};
 use datasets_raw::{
     Timestamp,
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
@@ -107,7 +107,7 @@ impl BatchingRpcWrapper {
 #[derive(Clone)]
 pub struct JsonRpcClient {
     client: RootProviderWithMetrics,
-    network: String,
+    network: NetworkId,
     provider_name: String,
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
@@ -118,7 +118,7 @@ impl JsonRpcClient {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         url: Url,
-        network: String,
+        network: NetworkId,
         provider_name: String,
         request_limit: u16,
         batch_size: usize,
@@ -144,7 +144,7 @@ impl JsonRpcClient {
     #[expect(clippy::too_many_arguments)]
     pub async fn new_ipc(
         path: std::path::PathBuf,
-        network: String,
+        network: NetworkId,
         provider_name: String,
         request_limit: u16,
         batch_size: usize,
@@ -170,7 +170,7 @@ impl JsonRpcClient {
     #[expect(clippy::too_many_arguments)]
     pub async fn new_ws(
         url: Url,
-        network: String,
+        network: NetworkId,
         provider_name: String,
         request_limit: u16,
         batch_size: usize,
@@ -490,7 +490,7 @@ struct RootProviderWithMetrics {
     inner: alloy::providers::RootProvider<AnyNetwork>,
     metrics: Option<crate::metrics::MetricsRegistry>,
     provider: String,
-    network: String,
+    network: NetworkId,
 }
 
 impl RootProviderWithMetrics {
@@ -498,7 +498,7 @@ impl RootProviderWithMetrics {
         inner: alloy::providers::RootProvider<AnyNetwork>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
         provider: String,
-        network: String,
+        network: NetworkId,
     ) -> Self {
         let metrics = meter.map(crate::metrics::MetricsRegistry::new);
         Self {
@@ -602,7 +602,7 @@ impl RootProviderWithMetrics {
 fn rpc_to_rows(
     block: AnyRpcBlock,
     receipts: Vec<AnyTxReceipt>,
-    network: &str,
+    network: &NetworkId,
 ) -> Result<Rows, RpcToRowsError> {
     if block.transactions.len() != receipts.len() {
         return Err(RpcToRowsError::TxReceiptCountMismatch {
@@ -637,7 +637,7 @@ fn rpc_to_rows(
 
     let block = BlockRange {
         numbers: header.block_num..=header.block_num,
-        network: network.to_string(),
+        network: network.clone(),
         hash: header.hash.into(),
         prev_hash: Some(header.parent_hash.into()),
     };

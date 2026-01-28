@@ -104,7 +104,7 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
         &ranges[0],
         &BlockRange {
             numbers: 0..=2,
-            network: "anvil".to_string(),
+            network: "anvil".parse().expect("valid network id"),
             hash: blocks0[2].hash,
             prev_hash: Some(blocks0[0].parent_hash),
         }
@@ -587,7 +587,7 @@ impl ReorgTestCtx {
         let blocks = self.query_blocks(dataset, None).await;
         BlockRange {
             numbers: numbers.clone(),
-            network: "anvil".to_string(),
+            network: "anvil".parse().expect("valid network id"),
             hash: blocks[*numbers.end() as usize].hash,
             prev_hash: Some(blocks[*numbers.start() as usize].parent_hash),
         }

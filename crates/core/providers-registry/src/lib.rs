@@ -14,7 +14,7 @@
 //! Additional fields depend on the provider type.
 use std::{collections::BTreeMap, ops::Deref};
 
-use datasets_common::dataset_kind_str::DatasetKindStr;
+use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
 use monitoring::{logging, telemetry::metrics::Meter};
 use object_store::ObjectStore;
 use rand::seq::SliceRandom as _;
@@ -119,7 +119,7 @@ where
     pub async fn create_block_stream_client(
         &self,
         kind: impl Into<DatasetKindStr>,
-        network: &str,
+        network: &NetworkId,
         meter: Option<&Meter>,
     ) -> Result<BlockStreamClient, CreateClientError> {
         let kind = kind.into();
@@ -128,7 +128,7 @@ where
             .await
             .ok_or_else(|| CreateClientError::ProviderNotFound {
                 kind: kind.to_string(),
-                network: network.to_string(),
+                network: network.clone(),
             })?;
         client::block_stream::create(config, meter).await
     }
@@ -139,7 +139,7 @@ where
     pub async fn find_provider(
         &self,
         kind: impl Into<DatasetKindStr>,
-        network: &str,
+        network: &NetworkId,
     ) -> Option<ProviderConfig> {
         let kind = kind.into();
 
@@ -147,7 +147,7 @@ where
             .get_all()
             .await
             .values()
-            .filter(|prov| prov.kind == kind && prov.network == network)
+            .filter(|prov| prov.kind == kind && &prov.network == network)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -194,7 +194,7 @@ where
     /// found but configuration parsing or provider construction failed.
     pub async fn create_evm_rpc_client(
         &self,
-        network: &str,
+        network: &NetworkId,
     ) -> Result<Option<EvmRpcProvider>, CreateEvmRpcClientError> {
         let Some(config) = self
             .find_provider(evm_rpc_datasets::EvmRpcDatasetKind, network)

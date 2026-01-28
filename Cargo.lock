@@ -4065,6 +4065,7 @@ name = "datasets-common"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "bincode 2.0.1",
  "datafusion",
  "downcast-rs",
  "hex",
@@ -4103,6 +4104,7 @@ dependencies = [
 name = "datasets-evm-rpc-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-common",
  "datasets-raw",
  "evm-rpc-datasets",
  "schemars 1.2.0",
@@ -4114,6 +4116,7 @@ dependencies = [
 name = "datasets-firehose-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-common",
  "datasets-raw",
  "firehose-datasets",
  "schemars 1.2.0",
@@ -4142,6 +4145,7 @@ dependencies = [
 name = "datasets-solana-gen"
 version = "0.1.0"
 dependencies = [
+ "datasets-common",
  "datasets-raw",
  "schemars 1.2.0",
  "serde_json",
