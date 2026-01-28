@@ -107,11 +107,12 @@ use common::{
     query_context::QueryEnv,
     sql::{resolve_function_references, resolve_table_references},
 };
-use datasets_common::{
-    deps::alias::{DepAlias, DepAliasOrSelfRef},
-    hash_reference::HashReference,
+use datasets_common::hash_reference::HashReference;
+use datasets_derived::{
+    Manifest as DerivedManifest,
+    deps::{DepAlias, DepAliasOrSelfRef},
+    manifest::TableInput,
 };
-use datasets_derived::{Manifest as DerivedManifest, manifest::TableInput};
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::{Instrument, instrument};

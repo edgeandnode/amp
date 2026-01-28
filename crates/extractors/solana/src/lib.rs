@@ -105,7 +105,6 @@ pub struct ProviderConfig {
 pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
     crate::dataset::Dataset {
         reference,
-        dependencies: BTreeMap::new(),
         kind: manifest.kind,
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,

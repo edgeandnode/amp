@@ -18,13 +18,10 @@ use common::{
     },
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{
-    deps::alias::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
-    hash_reference::HashReference,
-    table_name::TableName,
-};
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     Manifest as DerivedDatasetManifest,
+    deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::{TableInput, View},
 };
 use js_runtime::isolate_pool::IsolatePool;

@@ -29,8 +29,8 @@ use datafusion::{
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
-use datasets_common::udf::IsolatePool;
 use futures::{TryStreamExt, stream};
+use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
 use thiserror::Error;
 use tracing::{field, instrument};

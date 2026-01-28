@@ -9,8 +9,9 @@ use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{
     func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, hash_reference::HashReference,
     partial_reference::PartialReference, reference::Reference, table_name::TableName,
-    udf::IsolatePool,
 };
+use datasets_derived::dataset::Dataset as DerivedDataset;
+use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     BoxError,
@@ -220,7 +221,7 @@ async fn resolve_udfs(
                         })?
                 } else {
                     dataset
-                        .as_dataset_with_functions()
+                        .downcast_ref::<DerivedDataset>()
                         .and_then(|d| {
                             d.function_by_name(schema.to_string(), function, isolate_pool.clone())
                         })

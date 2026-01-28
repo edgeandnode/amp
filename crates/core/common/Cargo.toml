@@ -18,6 +18,7 @@ datasets-common = { path = "../datasets-common" }
 datasets-derived = { path = "../datasets-derived" }
 futures.workspace = true
 itertools.workspace = true
+js-runtime = { path = "../js-runtime" }
 metadata-db = { path = "../metadata-db" }
 object_store.workspace = true
 rand.workspace = true

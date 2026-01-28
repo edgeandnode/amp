@@ -1,52 +1,17 @@
-//! Dependency graph utilities.
+//! Dependency types and utilities for derived datasets.
+//!
+//! This module provides types for working with dependency aliases in derived dataset manifests
+//! and utilities for dependency graph operations.
 
-use std::collections::{BTreeMap, BTreeSet};
+mod alias;
+mod dfs;
+mod reference;
 
-pub fn dfs<'a, N>(
-    node: &'a N,
-    deps: &'a BTreeMap<N, Vec<N>>,
-    ordered: &mut Vec<N>,
-    visited: &mut BTreeSet<&'a N>,
-    visited_cycle: &mut BTreeSet<&'a N>,
-) -> Result<(), DfsError<N>>
-where
-    N: Clone + std::fmt::Debug + Ord,
-{
-    if visited_cycle.contains(node) {
-        return Err(DfsError { node: node.clone() });
-    }
-    if visited.contains(node) {
-        return Ok(());
-    }
-    visited_cycle.insert(node);
-    for dep in deps.get(node).into_iter().flatten() {
-        dfs(dep, deps, ordered, visited, visited_cycle)?;
-    }
-    visited_cycle.remove(node);
-    visited.insert(node);
-    ordered.push(node.clone());
-    Ok(())
-}
-
-/// Error when circular dependency is detected during depth-first search
-///
-/// This occurs when the DFS algorithm encounters a node that is currently
-/// being visited (i.e., it's in the `visited_cycle` set), indicating a
-/// cycle in the dependency graph.
-///
-/// For example, in a table dependency graph:
-/// - Table A depends on Table B
-/// - Table B depends on Table C
-/// - Table C depends on Table A (creates cycle at node A)
-///
-/// The cycle is detected when revisiting a node that's on the current
-/// traversal path (not yet completed).
-#[derive(Debug, thiserror::Error)]
-#[error("Circular dependency detected at node: {node:?}")]
-pub struct DfsError<N>
-where
-    N: std::fmt::Debug,
-{
-    /// The node where the cycle was detected
-    pub node: N,
-}
+pub use self::{
+    alias::{
+        DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, SELF_REF_KEYWORD,
+        validate_dep_alias,
+    },
+    dfs::{DfsError, dfs},
+    reference::{DepReference, DepReferenceParseError, HashOrVersion, HashOrVersionParseError},
+};

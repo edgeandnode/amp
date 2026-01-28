@@ -893,18 +893,20 @@ async fn search_dependencies_for_raw_dataset(
             return Ok(dataset);
         }
 
-        // Enqueue dependencies for exploration
-        for dep in dataset.dependencies().values() {
-            // Resolve the reference to a hash reference first
-            let hash_ref = dataset_store
-                .resolve_revision(dep.to_reference())
-                .await?
-                .ok_or_else(|| -> BoxError {
-                    format!("dependency '{}' not found", dep.to_reference()).into()
-                })?;
-            let dataset = dataset_store.get_dataset(&hash_ref).await?;
+        // Enqueue dependencies for exploration (only derived datasets have dependencies)
+        if let Some(derived) = dataset.downcast_ref::<datasets_derived::Dataset>() {
+            for dep in derived.dependencies().values() {
+                // Resolve the reference to a hash reference first
+                let hash_ref = dataset_store
+                    .resolve_revision(dep.to_reference())
+                    .await?
+                    .ok_or_else(|| -> BoxError {
+                        format!("dependency '{}' not found", dep.to_reference()).into()
+                    })?;
+                let dataset = dataset_store.get_dataset(&hash_ref).await?;
 
-            queue.push_back(dataset);
+                queue.push_back(dataset);
+            }
         }
     }
 

@@ -86,7 +86,6 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
     let network = manifest.network;
     crate::dataset::Dataset {
         reference,
-        dependencies: BTreeMap::new(),
         kind: manifest.kind,
         start_block: Some(manifest.start_block),
         finalized_blocks_only: manifest.finalized_blocks_only,

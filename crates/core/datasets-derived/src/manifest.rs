@@ -8,14 +8,13 @@ use std::collections::BTreeMap;
 
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, Function, FunctionSource, TableSchema};
-use datasets_common::{
-    BlockNum,
-    deps::{alias::DepAlias, reference::DepReference},
-    func_name::FuncName,
-    table_name::TableName,
-};
+use datasets_common::{BlockNum, func_name::FuncName, table_name::TableName};
 
-use crate::{dataset_kind::DerivedDatasetKind, sql_str::SqlStr};
+use crate::{
+    dataset_kind::DerivedDatasetKind,
+    deps::{DepAlias, DepReference},
+    sql_str::SqlStr,
+};
 
 /// Complete manifest definition for a derived dataset.
 ///
