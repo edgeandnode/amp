@@ -1,0 +1,33 @@
+name: Tag Nightly
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Create nightly tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Tag nightly if needed
+        run: |
+          existing_tags="$(git tag --points-at "$GITHUB_SHA" --list 'nightly-*')"
+          if [ -n "$existing_tags" ]; then
+            echo "Commit already tagged with: $existing_tags"
+            exit 0
+          fi
+
+          nightly_date="$(date -u +%Y-%m-%d)"
+          tag_name="nightly-${GITHUB_SHA::7}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag_name" -m "Nightly ${nightly_date}"
+          git push origin "$tag_name"
