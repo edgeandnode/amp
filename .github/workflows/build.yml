@@ -2,7 +2,9 @@ name: Build
 on:
   push:
     branches: ["main"]
-    tags: ["v*", "nightly-*"]
+    tags: ["v*"]
+  schedule:
+    - cron: "0 0 * * *"
 
 permissions:
   contents: read
@@ -13,6 +15,54 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
 
 jobs:
+  metadata:
+    name: Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      nightly: ${{ steps.meta.outputs.nightly }}
+      latest: ${{ steps.meta.outputs.latest }}
+      canary: ${{ steps.meta.outputs.canary }}
+      version: ${{ steps.meta.outputs.version }}
+      timestamp: ${{ steps.meta.outputs.timestamp }}
+
+    steps:
+      - name: Compute release metadata
+        id: meta
+        run: |
+          timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            tag="nightly-${GITHUB_SHA::7}"
+            name="Nightly ($(date -u +%Y-%m-%d))"
+            nightly="true"
+            latest="false"
+            canary="false"
+            version="${tag}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            name="${GITHUB_REF_NAME}"
+            nightly="false"
+            latest="true"
+            canary="false"
+            version="${GITHUB_REF_NAME}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            name="${GITHUB_REF_NAME}"
+            nightly="false"
+            latest="false"
+            canary="true"
+            version="${GITHUB_SHA}"
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "nightly=${nightly}" >> "$GITHUB_OUTPUT"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "canary=${canary}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "timestamp=${timestamp}" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
@@ -132,27 +182,17 @@ jobs:
 
   release:
     name: Release
-    needs: [build, notarize]
+    needs: [metadata, build, notarize]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/nightly-')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule'
     permissions:
       contents: write
-    env:
-      RELEASE_TAG: ${{ github.ref_name }}
-      RELEASE_NAME: ${{ github.ref_name }}
-      RELEASE_NIGHTLY: ${{ startsWith(github.ref, 'refs/tags/nightly-') }}
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Override nightly release name
-        if: env.RELEASE_NIGHTLY == 'true'
-        run: |
-          timestamp="$(date -u +%Y-%m-%d)"
-          echo "RELEASE_NAME=Nightly (${timestamp})" >> "$GITHUB_ENV"
 
       - name: Download Linux artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -207,32 +247,29 @@ jobs:
           files: release/*
           fail_on_unmatched_files: true
           draft: true
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_NAME }}
-          prerelease: ${{ env.RELEASE_NIGHTLY == 'true' }}
-          generate_release_notes: ${{ env.RELEASE_NIGHTLY == 'false' }}
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          name: ${{ needs.metadata.outputs.name }}
+          prerelease: ${{ needs.metadata.outputs.nightly == 'true' }}
+          generate_release_notes: ${{ needs.metadata.outputs.nightly == 'false' }}
+          target_commitish: ${{ github.sha }}
 
       - name: Finalize release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ needs.metadata.outputs.tag }}
           draft: false
-          prerelease: ${{ env.RELEASE_NIGHTLY == 'true' }}
+          prerelease: ${{ needs.metadata.outputs.nightly == 'true' }}
+          target_commitish: ${{ github.sha }}
 
   containerize:
     name: Containerize (${{ matrix.title }})
     runs-on: ubuntu-latest
-    needs: build
+    needs: [metadata, build]
     permissions:
       contents: read
       packages: write
       attestations: write
       id-token: write
-    env:
-      RELEASE_NIGHTLY: ${{ startsWith(github.ref, 'refs/tags/nightly-') }}
-      RELEASE_LATEST: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      RELEASE_CANARY: ${{ github.ref == 'refs/heads/main' }}
-      RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
 
     strategy:
       matrix:
@@ -261,10 +298,6 @@ jobs:
           name: aarch64-unknown-linux-gnu
           path: ./arm64/
 
-      - name: Set build time
-        id: timestamp
-        run: echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
       - name: Login to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
         with:
@@ -281,9 +314,9 @@ jobs:
         with:
           images: ghcr.io/edgeandnode/${{ matrix.name }}
           tags: |
-            type=raw,value=canary,enable=${{ env.RELEASE_CANARY == 'true' }}
-            type=raw,value=latest,enable=${{ env.RELEASE_LATEST == 'true' }}
-            type=raw,value=nightly,enable=${{ env.RELEASE_NIGHTLY == 'true' }}
+            type=raw,value=canary,enable=${{ needs.metadata.outputs.canary == 'true' }}
+            type=raw,value=latest,enable=${{ needs.metadata.outputs.latest == 'true' }}
+            type=raw,value=nightly,enable=${{ needs.metadata.outputs.nightly == 'true' }}
             type=ref,event=tag
             type=sha
           labels: |
@@ -292,9 +325,9 @@ jobs:
             org.opencontainers.image.vendor=Edge & Node
             org.opencontainers.image.title=${{ matrix.title }}
             org.opencontainers.image.description=${{ matrix.description }}
-            org.opencontainers.image.created=${{ steps.timestamp.outputs.timestamp }}
+            org.opencontainers.image.created=${{ needs.metadata.outputs.timestamp }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ env.RELEASE_VERSION }}
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
           annotations: |
             manifest:org.opencontainers.image.source=https://github.com/edgeandnode/amp
             manifest:org.opencontainers.image.url=https://github.com/edgeandnode/amp
