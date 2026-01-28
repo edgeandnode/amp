@@ -28,8 +28,14 @@ async fn gen_manifest_produces_expected_eth_rpc_json() {
 
     //* When
     let mut out = Vec::new();
-    let result =
-        generate::generate_manifest(&kind, network.clone(), start_block, false, &mut out).await;
+    let result = generate::generate_manifest(
+        &kind,
+        network.parse().unwrap(),
+        start_block,
+        false,
+        &mut out,
+    )
+    .await;
 
     //* Then
     assert!(result.is_ok(), "manifest generation should succeed");
@@ -64,7 +70,8 @@ async fn gen_manifest_cmd_run_with_evm_rpc_kind_generates_valid_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result = generate::generate_manifest(&kind, network.clone(), None, false, &mut out).await;
+    let result =
+        generate::generate_manifest(&kind, network.parse().unwrap(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -89,7 +96,8 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result = generate::generate_manifest(&kind, network.clone(), None, false, &mut out).await;
+    let result =
+        generate::generate_manifest(&kind, network.parse().unwrap(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -117,7 +125,8 @@ async fn gen_manifest_cmd_run_with_derived_kind_fails_with_unsupported_error() {
 
     //* When
     let mut out = Vec::new();
-    let result = generate::generate_manifest(&kind, network, None, false, &mut out).await;
+    let result =
+        generate::generate_manifest(&kind, network.parse().unwrap(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -144,9 +153,14 @@ async fn gen_manifest_cmd_run_with_start_block_includes_it_in_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result =
-        generate::generate_manifest(&kind, network.clone(), Some(start_block), false, &mut out)
-            .await;
+    let result = generate::generate_manifest(
+        &kind,
+        network.parse().unwrap(),
+        Some(start_block),
+        false,
+        &mut out,
+    )
+    .await;
 
     //* Then
     assert!(
@@ -174,7 +188,8 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
 
     //* When
     let mut out = Vec::new();
-    let result = generate::generate_manifest(&kind, network.clone(), None, false, &mut out).await;
+    let result =
+        generate::generate_manifest(&kind, network.parse().unwrap(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -202,7 +217,8 @@ async fn gen_manifest_produces_expected_solana_json() {
 
     //* When
     let mut out = Vec::new();
-    let result = generate::generate_manifest(&kind, network.clone(), None, false, &mut out).await;
+    let result =
+        generate::generate_manifest(&kind, network.parse().unwrap(), None, false, &mut out).await;
 
     //* Then
     assert!(result.is_ok(), "manifest generation should succeed");
@@ -237,7 +253,8 @@ async fn gen_manifest_cmd_run_with_solana_kind_generates_valid_manifest() {
 
     //* When
     let mut out = Vec::new();
-    let result = generate::generate_manifest(&kind, network.clone(), None, false, &mut out).await;
+    let result =
+        generate::generate_manifest(&kind, network.parse().unwrap(), None, false, &mut out).await;
 
     //* Then
     assert!(
@@ -263,9 +280,14 @@ async fn gen_manifest_cmd_run_with_solana_kind_and_start_block() {
 
     //* When
     let mut out = Vec::new();
-    let result =
-        generate::generate_manifest(&kind, network.clone(), Some(start_block), false, &mut out)
-            .await;
+    let result = generate::generate_manifest(
+        &kind,
+        network.parse().unwrap(),
+        Some(start_block),
+        false,
+        &mut out,
+    )
+    .await;
 
     //* Then
     assert!(

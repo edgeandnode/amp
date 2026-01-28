@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, Function, FunctionSource, TableSchema};
-use datasets_common::{BlockNum, table_name::TableName};
+use datasets_common::{BlockNum, network_id::NetworkId, table_name::TableName};
 
 use crate::{
     dataset_kind::DerivedDatasetKind,
@@ -55,7 +55,7 @@ pub struct Table {
     /// Arrow schema definition for the table
     pub schema: TableSchema,
     /// Network this table belongs to
-    pub network: String,
+    pub network: NetworkId,
 }
 
 /// Input source for a table definition.

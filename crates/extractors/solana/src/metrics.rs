@@ -1,3 +1,4 @@
+use datasets_common::network_id::NetworkId;
 use monitoring::telemetry;
 
 #[derive(Debug, Clone)]
@@ -68,7 +69,7 @@ impl MetricsRegistry {
         &self,
         duration_millis: u64,
         provider: &str,
-        network: &str,
+        network: &NetworkId,
         method: &str,
     ) {
         let kv_pairs = [
@@ -82,7 +83,7 @@ impl MetricsRegistry {
     }
 
     /// Record RPC error
-    pub(crate) fn record_rpc_error(&self, provider: &str, network: &str) {
+    pub(crate) fn record_rpc_error(&self, provider: &str, network: &NetworkId) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
             telemetry::metrics::KeyValue::new("network", network.to_string()),
@@ -96,7 +97,7 @@ impl MetricsRegistry {
         duration_secs: f64,
         epoch: u64,
         provider: &str,
-        network: &str,
+        network: &NetworkId,
     ) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
@@ -114,7 +115,7 @@ impl MetricsRegistry {
         bytes: u64,
         epoch: u64,
         provider: &str,
-        network: &str,
+        network: &NetworkId,
     ) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
@@ -126,7 +127,12 @@ impl MetricsRegistry {
     }
 
     /// Record OF1 CAR download error
-    pub(crate) fn record_of1_car_download_error(&self, epoch: u64, provider: &str, network: &str) {
+    pub(crate) fn record_of1_car_download_error(
+        &self,
+        epoch: u64,
+        provider: &str,
+        network: &NetworkId,
+    ) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
             telemetry::metrics::KeyValue::new("network", network.to_string()),

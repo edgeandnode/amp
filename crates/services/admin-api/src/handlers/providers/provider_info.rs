@@ -1,6 +1,6 @@
 //! Provider information types for API requests and responses
 
-use datasets_common::dataset_kind_str::DatasetKindStr;
+use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
 
 use super::convert;
 use crate::handlers::common::NonEmptyString;
@@ -27,7 +27,7 @@ pub struct ProviderInfo {
     pub kind: DatasetKindStr,
     /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub network: NonEmptyString,
+    pub network: NetworkId,
     /// Additional provider-specific configuration fields
     #[serde(flatten)]
     pub rest: serde_json::Map<String, serde_json::Value>,
@@ -42,9 +42,7 @@ impl TryFrom<(String, amp_providers_registry::ProviderConfig)> for ProviderInfo 
         // SAFETY: Provider names from the dataset store are guaranteed to be non-empty
         // as they are validated during provider registration and storage.
         let name = unsafe { NonEmptyString::new_unchecked(name) };
-        // SAFETY: Provider networks from the dataset store are guaranteed to be non-empty
-        // as they are validated during provider registration and storage.
-        let network = unsafe { NonEmptyString::new_unchecked(config.network) };
+        let network = config.network.clone();
 
         let rest = convert::from_toml_table_to_json_map(config.rest)?;
 

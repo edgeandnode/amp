@@ -22,7 +22,9 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use datasets_common::{
+    hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
+};
 use datasets_derived::{
     deps::{
         DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, DepReference,
@@ -349,10 +351,10 @@ pub async fn handler(
         let schema = prepend_special_block_num_field(&schema);
 
         // Extract networks from all tables in the catalog
-        let mut networks: Vec<String> = planning_ctx
+        let mut networks: Vec<NetworkId> = planning_ctx
             .catalog()
             .iter()
-            .map(|t| t.table().network().to_string())
+            .map(|t| t.table().network().clone())
             .collect();
         networks.sort();
         networks.dedup();
@@ -694,7 +696,8 @@ pub struct TableSchemaWithNetworks {
     ///
     /// Contains the network names of all datasets/tables referenced
     /// in this specific table's SQL query (e.g., "mainnet", "polygon", etc.).
-    networks: Vec<String>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
+    networks: Vec<NetworkId>,
 }
 
 impl IntoErrorResponse for Error {

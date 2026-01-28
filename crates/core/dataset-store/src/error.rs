@@ -1,6 +1,7 @@
 use amp_datasets_registry::manifests::ManifestParseError;
 use datasets_common::{
     dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
+    network_id::NetworkId,
 };
 
 /// Errors specific to getting dataset operations
@@ -163,7 +164,7 @@ pub enum EthCallForDatasetError {
     #[error("No provider found for dataset kind '{dataset_kind}' and network '{network}'")]
     ProviderNotFound {
         dataset_kind: DatasetKindStr,
-        network: String,
+        network: NetworkId,
     },
 
     /// Failed to create the EVM RPC provider.

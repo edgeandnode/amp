@@ -5,6 +5,7 @@ use base64::Engine;
 use datasets_common::{
     block_range::BlockRange,
     dataset::{SPECIAL_BLOCK_NUM, Table},
+    network_id::NetworkId,
 };
 use datasets_raw::{
     arrow::{
@@ -23,7 +24,7 @@ pub const TABLE_NAME: &str = "transactions";
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
-pub fn table(network: String) -> Table {
+pub fn table(network: NetworkId) -> Table {
     let name = TABLE_NAME.parse().expect("table name is valid");
     Table::new(name, SCHEMA.clone(), network, vec!["slot".to_string()])
 }

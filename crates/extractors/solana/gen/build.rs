@@ -27,8 +27,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "cargo:warning=Config 'gen_schema_tables' enabled: Running table schema markdown generation"
         );
         let rt = tokio::runtime::Runtime::new()?;
+        let network: datasets_common::network_id::NetworkId = "test_network".parse().unwrap();
         let markdown = rt.block_on(async {
-            datasets_raw::schema::to_markdown(solana_datasets::tables::all("test_network")).await
+            datasets_raw::schema::to_markdown(solana_datasets::tables::all(&network)).await
         });
         let out_dir = std::env::var("OUT_DIR")?;
         let tables_schema_path = format!("{out_dir}/tables.md");

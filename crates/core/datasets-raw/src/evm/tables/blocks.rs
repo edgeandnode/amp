@@ -7,6 +7,7 @@ use arrow::{
 use datasets_common::{
     block_range::BlockRange,
     dataset::{SPECIAL_BLOCK_NUM, Table},
+    network_id::NetworkId,
 };
 
 use crate::{
@@ -23,7 +24,7 @@ use crate::{
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
-pub fn table(network: String) -> Table {
+pub fn table(network: NetworkId) -> Table {
     let name = TABLE_NAME.parse().expect("table name is valid");
     Table::new(
         name,
@@ -274,7 +275,7 @@ fn default_to_arrow() {
         builder
             .build(BlockRange {
                 numbers: block.block_num..=block.block_num,
-                network: "test_network".to_string(),
+                network: "test_network".parse().expect("valid network id"),
                 hash: block.hash.into(),
                 prev_hash: Some(block.parent_hash.into()),
             })

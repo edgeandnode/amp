@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 use datasets_common::{
     block_range::BlockRange,
     dataset::{SPECIAL_BLOCK_NUM, Table},
+    network_id::NetworkId,
 };
 use datasets_raw::{
     Timestamp,
@@ -21,7 +22,7 @@ use datasets_raw::{
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
-pub fn table(network: String) -> Table {
+pub fn table(network: NetworkId) -> Table {
     let name = TABLE_NAME.parse().expect("table name is valid");
     Table::new(
         name,
@@ -279,7 +280,7 @@ fn default_to_arrow() {
         builder
             .build(BlockRange {
                 numbers: call.block_num..=call.block_num,
-                network: "test_network".to_string(),
+                network: "test_network".parse().expect("valid network id"),
                 hash: call.block_hash.into(),
                 prev_hash: None,
             })

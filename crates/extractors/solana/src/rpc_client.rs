@@ -1,5 +1,6 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
+use datasets_common::network_id::NetworkId;
 pub use solana_client::{
     rpc_config,
     rpc_response::{RewardType, UiReturnDataEncoding},
@@ -22,7 +23,7 @@ pub(crate) struct SolanaRpcClient {
     inner: solana_client::nonblocking::rpc_client::RpcClient,
     rate_limiter: Option<governor::DefaultDirectRateLimiter>,
     provider: String,
-    network: String,
+    network: NetworkId,
 }
 
 impl SolanaRpcClient {
@@ -30,7 +31,7 @@ impl SolanaRpcClient {
         url: Url,
         max_calls_per_second: Option<NonZeroU32>,
         provider: String,
-        network: String,
+        network: NetworkId,
     ) -> Self {
         let inner = solana_client::nonblocking::rpc_client::RpcClient::new(url.to_string());
         let rate_limiter = max_calls_per_second.map(|max| {

@@ -153,6 +153,11 @@
         "filename"
       ]
     },
+    "NetworkId": {
+      "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
+      "type": "string",
+      "minLength": 1
+    },
     "SqlStr": {
       "description": "A string intended to contain SQL, with minimal validation.\n\nThis type performs basic string validation but does **not** parse or validate\nSQL syntax. Actual SQL statement parsing is deferred to the query engine.\n\n[`SqlStr`] is a marker type that provides minimal guarantees: the string is\nnon-empty and contains at least one non-whitespace character.\n\n## Validation Rules\n\n[`SqlStr`] must:\n- **Not be empty** (minimum length of 1 character)\n- **Not be only whitespace** (must contain at least one non-whitespace character)\n\n## Non-Goals\n\nThis type does **not**:\n- Parse SQL syntax\n- Validate SQL statement correctness\n- Check for SQL injection vulnerabilities",
       "type": "string",
@@ -168,7 +173,7 @@
         },
         "network": {
           "description": "Network this table belongs to",
-          "type": "string"
+          "$ref": "#/$defs/NetworkId"
         },
         "schema": {
           "description": "Arrow schema definition for the table",

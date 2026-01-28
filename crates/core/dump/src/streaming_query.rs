@@ -24,7 +24,7 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use datasets_common::{dataset::Dataset, hash_reference::HashReference};
+use datasets_common::{dataset::Dataset, hash_reference::HashReference, network_id::NetworkId};
 use datasets_derived::dataset::Dataset as DerivedDataset;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
@@ -94,7 +94,7 @@ pub enum SpawnError {
     /// Streaming queries require a single chain for consistent block ordering
     /// and watermark tracking.
     #[error("multi-network streaming queries are not supported: {networks:?}")]
-    MultiNetwork { networks: Vec<String> },
+    MultiNetwork { networks: Vec<NetworkId> },
 
     /// Failed to resolve blocks table for network
     ///
@@ -286,7 +286,7 @@ pub struct StreamingQuery {
     keep_alive_interval: Option<u64>,
     destination: Option<Arc<PhysicalTable>>,
     preserve_block_num: bool,
-    network: String,
+    network: NetworkId,
     /// `blocks` table for the network associated with the catalog.
     blocks_table: Arc<PhysicalTable>,
     /// The watermark associated with the previously processed range. This may be provided by the
@@ -341,9 +341,9 @@ impl StreamingQuery {
 
         let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
 
-        let networks: BTreeSet<&str> = tables.iter().map(|t| t.network()).collect();
+        let networks: BTreeSet<&NetworkId> = tables.iter().map(|t| t.network()).collect();
         if networks.len() != 1 {
-            let networks: Vec<String> = networks.into_iter().map(ToString::to_string).collect();
+            let networks: Vec<NetworkId> = networks.into_iter().cloned().collect();
             return Err(SpawnError::MultiNetwork { networks });
         }
         let network = networks.into_iter().next().unwrap();
@@ -379,7 +379,7 @@ impl StreamingQuery {
             keep_alive_interval,
             destination,
             preserve_block_num,
-            network: network.to_string(),
+            network: network.clone(),
             blocks_table: Arc::new(blocks_table),
         };
 
@@ -824,7 +824,7 @@ async fn resolve_blocks_table(
     dataset_store: &DatasetStore,
     data_store: DataStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
-    network: &str,
+    network: &NetworkId,
 ) -> Result<PhysicalTable, BoxError> {
     let dataset =
         search_dependencies_for_raw_dataset(dataset_store, root_dataset_refs, network).await?;
@@ -868,7 +868,7 @@ async fn resolve_blocks_table(
 async fn search_dependencies_for_raw_dataset(
     dataset_store: &DatasetStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
-    network: &str,
+    network: &NetworkId,
 ) -> Result<Arc<dyn Dataset>, BoxError> {
     let mut queue: VecDeque<Arc<dyn datasets_common::dataset::Dataset>> = VecDeque::new();
     for hash_ref in root_dataset_refs {

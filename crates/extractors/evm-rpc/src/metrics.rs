@@ -1,3 +1,4 @@
+use datasets_common::network_id::NetworkId;
 use monitoring::telemetry;
 
 #[derive(Debug, Clone)]
@@ -66,7 +67,7 @@ impl MetricsRegistry {
         &self,
         duration_millis: f64,
         provider: &str,
-        network: &str,
+        network: &NetworkId,
         method: &str,
     ) {
         let kv_pairs = [
@@ -85,7 +86,7 @@ impl MetricsRegistry {
         duration_millis: f64,
         batch_size: u64,
         provider: &str,
-        network: &str,
+        network: &NetworkId,
     ) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
@@ -98,7 +99,7 @@ impl MetricsRegistry {
     }
 
     /// Record RPC error
-    pub(crate) fn record_error(&self, provider: &str, network: &str) {
+    pub(crate) fn record_error(&self, provider: &str, network: &NetworkId) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
             telemetry::metrics::KeyValue::new("network", network.to_string()),

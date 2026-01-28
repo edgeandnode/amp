@@ -52,7 +52,10 @@ use common::{
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
-use datasets_common::partial_reference::{PartialReference, PartialReferenceError};
+use datasets_common::{
+    network_id::NetworkId,
+    partial_reference::{PartialReference, PartialReferenceError},
+};
 use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,
@@ -196,7 +199,7 @@ impl Service {
 
             for range in &block_ranges {
                 tracing::debug!(
-                    range.network,
+                    network = %range.network,
                     "execute range [{}-{}]",
                     range.start(),
                     range.end(),
@@ -551,7 +554,7 @@ impl FlightService for Service {
 pub struct AmpTicket {
     pub query: String,
     pub is_streaming: bool,
-    pub resume_watermark: Option<BTreeMap<String, (BlockNum, [u8; 32])>>,
+    pub resume_watermark: Option<BTreeMap<NetworkId, (BlockNum, [u8; 32])>>,
 }
 
 pub enum QueryResultStream {

@@ -13,7 +13,9 @@
 
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
-use datasets_common::{dataset::BlockNum, hash_reference::HashReference, manifest::TableSchema};
+use datasets_common::{
+    dataset::BlockNum, hash_reference::HashReference, manifest::TableSchema, network_id::NetworkId,
+};
 use serde_with::serde_as;
 use url::Url;
 
@@ -40,12 +42,12 @@ pub struct Table {
     /// Arrow schema for this table.
     pub schema: TableSchema,
     /// Network for this table.
-    pub network: String,
+    pub network: NetworkId,
 }
 
 impl Table {
     /// Create a new table with the given schema and network.
-    pub fn new(schema: TableSchema, network: String) -> Self {
+    pub fn new(schema: TableSchema, network: NetworkId) -> Self {
         Self { schema, network }
     }
 }
@@ -70,7 +72,7 @@ pub struct Manifest {
     pub kind: SolanaDatasetKind,
 
     /// Network name, e.g., `mainnet`
-    pub network: String,
+    pub network: NetworkId,
     /// Dataset start block
     #[serde(default)]
     pub start_block: BlockNum,
@@ -87,7 +89,7 @@ pub struct Manifest {
 pub struct ProviderConfig {
     pub name: String,
     pub kind: SolanaDatasetKind,
-    pub network: String,
+    pub network: NetworkId,
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub rpc_provider_url: Url,
     pub max_rpc_calls_per_second: Option<NonZeroU32>,

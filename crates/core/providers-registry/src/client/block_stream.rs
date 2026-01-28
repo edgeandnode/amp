@@ -1,7 +1,7 @@
 //! Client creation for raw dataset providers.
 
 use async_stream::stream;
-use datasets_common::BlockNum;
+use datasets_common::{BlockNum, network_id::NetworkId};
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     rows::Rows,
@@ -172,7 +172,7 @@ pub enum CreateClientError {
     /// - All providers for this kind-network are disabled
     /// - Provider configuration files are missing or invalid
     #[error("no provider found for kind '{kind}' and network '{network}'")]
-    ProviderNotFound { kind: String, network: String },
+    ProviderNotFound { kind: String, network: NetworkId },
 
     /// Unsupported provider kind.
     ///

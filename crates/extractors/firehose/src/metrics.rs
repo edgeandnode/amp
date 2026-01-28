@@ -1,3 +1,4 @@
+use datasets_common::network_id::NetworkId;
 use monitoring::telemetry;
 
 #[derive(Debug, Clone)]
@@ -35,7 +36,7 @@ impl MetricsRegistry {
     }
 
     /// Record a block received from Firehose
-    pub(crate) fn record_block_received(&self, provider: &str, network: &str) {
+    pub(crate) fn record_block_received(&self, provider: &str, network: &NetworkId) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
             telemetry::metrics::KeyValue::new("network", network.to_string()),
@@ -44,7 +45,12 @@ impl MetricsRegistry {
     }
 
     /// Record a stream error
-    pub(crate) fn record_stream_error(&self, provider: &str, network: &str, error_type: &str) {
+    pub(crate) fn record_stream_error(
+        &self,
+        provider: &str,
+        network: &NetworkId,
+        error_type: &str,
+    ) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),
             telemetry::metrics::KeyValue::new("network", network.to_string()),
@@ -58,7 +64,7 @@ impl MetricsRegistry {
         &self,
         duration_millis: f64,
         provider: &str,
-        network: &str,
+        network: &NetworkId,
     ) {
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("provider", provider.to_string()),

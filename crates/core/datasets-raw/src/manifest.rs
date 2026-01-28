@@ -1,6 +1,6 @@
 //! Raw dataset manifest types.
 
-use datasets_common::dataset_kind_str::DatasetKindStr;
+use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
 
 /// Common metadata fields for raw dataset manifests.
 ///
@@ -14,5 +14,5 @@ pub struct RawDatasetManifest {
     /// Network name, e.g., `mainnet`, `sepolia`.
     ///
     /// Required for all raw datasets to identify the blockchain network.
-    pub network: String,
+    pub network: NetworkId,
 }

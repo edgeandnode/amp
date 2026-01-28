@@ -6,6 +6,7 @@ use std::{
 };
 
 use backon::{ExponentialBuilder, Retryable};
+use datasets_common::network_id::NetworkId;
 use futures::{Stream, StreamExt};
 use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;
@@ -70,7 +71,7 @@ pub(crate) async fn car_file_manager(
     car_directory: PathBuf,
     keep_car_files: bool,
     provider: String,
-    network: String,
+    network: NetworkId,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) {
     let mut downloaders = futures::stream::FuturesUnordered::new();
@@ -374,7 +375,7 @@ async fn ensure_car_file_exists(
     reqwest: &reqwest::Client,
     dest: &Path,
     provider: &str,
-    network: &str,
+    network: &NetworkId,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), FileDownloadError> {
     enum DownloadAction {

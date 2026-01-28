@@ -21,7 +21,9 @@ use datafusion::{
     prelude::Expr,
 };
 use datafusion_datasource::compute_all_files_statistics;
-use datasets_common::{dataset::Table, hash_reference::HashReference, table_name::TableName};
+use datasets_common::{
+    dataset::Table, hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
+};
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use metadata_db::LocationId;
 use object_store::ObjectStore;
@@ -172,7 +174,7 @@ pub struct PhysicalTable {
     table_name: TableName,
 
     /// Network identifier.
-    network: String,
+    network: NetworkId,
 
     /// Data store for accessing metadata database and object storage.
     store: DataStore,
@@ -201,7 +203,7 @@ impl PhysicalTable {
             dataset_start_block,
             sql_table_ref_schema,
             table_name: table.name().clone(),
-            network: table.network().to_string(),
+            network: table.network().clone(),
             store,
             table,
         }
@@ -222,7 +224,7 @@ impl PhysicalTable {
         &self.table_name
     }
 
-    pub fn network(&self) -> &str {
+    pub fn network(&self) -> &NetworkId {
         &self.network
     }
 

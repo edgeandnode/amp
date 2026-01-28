@@ -74,7 +74,7 @@ pub async fn handler(
     let provider_config = ProviderConfig {
         name: provider_info.name.to_string(),
         kind: provider_info.kind,
-        network: provider_info.network.to_string(),
+        network: provider_info.network,
         rest: provider_rest_table,
     };
 

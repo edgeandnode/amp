@@ -20,7 +20,7 @@ use datasets_common::{
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use datasets_raw::{
-    client::{BlockStreamer, BlockStreamerExt},
+    client::{BlockStreamer, BlockStreamerExt as _},
     manifest::RawDatasetManifest,
 };
 use evm_rpc_datasets::{Dataset as EvmRpcDataset, Manifest as EvmRpcManifest};
@@ -298,7 +298,7 @@ impl DatasetStore {
                 );
                 return Err(EthCallForDatasetError::ProviderNotFound {
                     dataset_kind: DatasetKind::EvmRpc.into(),
-                    network: network.to_string(),
+                    network: network.clone(),
                 });
             }
             Err(err) => {
