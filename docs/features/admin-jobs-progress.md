@@ -36,7 +36,7 @@ The API uses a **Pull Model** where progress is calculated on-demand:
 2. **Leverages existing infrastructure** - Uses Postgres metadata and Foyer caches
 3. **Point-in-time accuracy** - Each request returns the current state at query time
 
-A **Push Model** (event-driven) may be implemented in a future PR for real-time progress updates to support dashboards and streaming consumers.
+A **Push Model** (event-driven) is available via [Worker Event Streaming](app-ampd-worker-events.md) for real-time progress updates to support dashboards and streaming consumers.
 
 ### Logic Location & Ownership
 
@@ -179,3 +179,4 @@ This approach provides a reliable "ground truth" for sync progress, unaffected b
 - [app-ampctl](app-ampctl.md) - Related: CLI tool
 - [admin-datasets](admin-datasets.md) - Related: Dataset management
 - [admin-jobs](admin-jobs.md) - Related: Job management
+- [app-ampd-worker-events](app-ampd-worker-events.md) - Related: Push Model (Kafka) for real-time progress
