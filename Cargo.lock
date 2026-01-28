@@ -4132,6 +4132,7 @@ dependencies = [
  "datasets-common",
  "futures",
  "monitoring",
+ "serde",
  "thiserror 2.0.17",
  "tokio",
  "tracing",

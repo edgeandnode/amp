@@ -21,7 +21,6 @@ pub struct Dataset {
     pub(crate) dependencies: BTreeMap<DepAlias, DepReference>,
     pub(crate) functions: Vec<Function>,
     pub(crate) reference: HashReference,
-    pub(crate) network: Option<String>,
     pub(crate) finalized_blocks_only: bool,
 }
 
@@ -30,12 +29,10 @@ impl Dataset {
     ///
     /// This is used by the `common::datasets_derived::dataset()` function to construct
     /// the Dataset after processing the manifest.
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         reference: HashReference,
         dependencies: BTreeMap<DepAlias, DepReference>,
         kind: DerivedDatasetKind,
-        network: Option<String>,
         start_block: Option<BlockNum>,
         finalized_blocks_only: bool,
         tables: Vec<Table>,
@@ -45,7 +42,6 @@ impl Dataset {
             reference,
             dependencies,
             kind,
-            network,
             start_block,
             finalized_blocks_only,
             tables,
@@ -99,10 +95,6 @@ impl datasets_common::dataset::Dataset for Dataset {
 
     fn tables(&self) -> &[Table] {
         &self.tables
-    }
-
-    fn network(&self) -> Option<&String> {
-        self.network.as_ref()
     }
 
     fn start_block(&self) -> Option<BlockNum> {

@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
 use amp_providers_registry::ProvidersRegistry;
@@ -18,9 +18,12 @@ use datasets_common::{
     hash::Hash, hash_reference::HashReference, manifest::Manifest as CommonManifest,
     reference::Reference,
 };
-use datasets_derived::Manifest as DerivedManifest;
-use datasets_raw::client::{BlockStreamer, BlockStreamerExt};
-use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
+use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
+use datasets_raw::{
+    client::{BlockStreamer, BlockStreamerExt},
+    manifest::RawDatasetManifest,
+};
+use evm_rpc_datasets::{Dataset as EvmRpcDataset, Manifest as EvmRpcManifest};
 use firehose_datasets::dataset::Manifest as FirehoseManifest;
 use monitoring::telemetry::metrics::Meter;
 use parking_lot::RwLock;
@@ -31,8 +34,7 @@ mod dataset_kind;
 mod error;
 
 pub use self::error::{
-    EthCallForDatasetError, GetAllDatasetsError, GetClientError, GetDatasetError,
-    GetDerivedManifestError,
+    EthCallForDatasetError, GetClientError, GetDatasetError, GetDerivedManifestError,
 };
 use crate::dataset_kind::{DatasetKind, UnsupportedKindError};
 
@@ -129,12 +131,16 @@ impl DatasetStore {
                 source,
             })?;
 
-        let kind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
-            GetDatasetError::UnsupportedKind {
-                reference: reference.clone(),
-                kind: err.kind,
-            }
-        })?;
+        let kind = manifest
+            .kind
+            .as_str()
+            .parse()
+            .map_err(
+                |err: UnsupportedKindError| GetDatasetError::UnsupportedKind {
+                    reference: reference.clone(),
+                    kind: err.kind,
+                },
+            )?;
 
         let dataset: Arc<dyn datasets_common::dataset::Dataset> = match kind {
             DatasetKind::EvmRpc => {
@@ -213,20 +219,6 @@ impl DatasetStore {
         };
 
         let manifest = manifest_content
-            .try_into_manifest::<CommonManifest>()
-            .map_err(GetDerivedManifestError::ManifestParseError)?;
-
-        let kind = DatasetKind::from_str(&manifest.kind).map_err(|err: UnsupportedKindError| {
-            GetDerivedManifestError::UnsupportedKind { kind: err.kind }
-        })?;
-
-        if kind != DatasetKind::Derived {
-            return Err(GetDerivedManifestError::UnsupportedKind {
-                kind: kind.to_string(),
-            });
-        }
-
-        let manifest = manifest_content
             .try_into_manifest::<DerivedManifest>()
             .map_err(GetDerivedManifestError::ManifestParseError)?;
 
@@ -250,25 +242,18 @@ impl DatasetStore {
         };
 
         let manifest = manifest_content
-            .try_into_manifest::<CommonManifest>()
-            .map_err(GetClientError::CommonManifestParseError)?;
+            .try_into_manifest::<RawDatasetManifest>()
+            .map_err(GetClientError::RawManifestParseError)?;
 
-        let kind: DatasetKind = manifest.kind.parse().map_err(|err: UnsupportedKindError| {
-            GetClientError::UnsupportedKind { kind: err.kind }
-        })?;
-        if !kind.is_raw() {
+        // Check it's a raw dataset kind (not derived)
+        if manifest.kind == DerivedDatasetKind {
             return Err(GetClientError::UnsupportedKind {
-                kind: manifest.kind,
+                kind: manifest.kind.to_string(),
             });
         }
 
-        let Some(network) = manifest.network else {
-            tracing::warn!(
-                dataset_kind = %kind,
-                "dataset is missing required 'network' field for raw dataset kind"
-            );
-            return Err(GetClientError::MissingNetwork);
-        };
+        let kind = manifest.kind;
+        let network = manifest.network;
 
         let client = self
             .providers_registry
@@ -287,7 +272,7 @@ impl DatasetStore {
         sql_table_ref_schema: &str,
         dataset: &dyn datasets_common::dataset::Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        if dataset.kind() != EvmRpcDatasetKind {
+        if !dataset.is::<EvmRpcDataset>() {
             return Ok(None);
         }
 
@@ -297,15 +282,11 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        let Some(network) = dataset.network() else {
-            tracing::warn!(
-                dataset = %format!("{:#}", dataset.reference()),
-                "dataset is missing required 'network' field for evm-rpc kind"
-            );
-            return Err(EthCallForDatasetError::MissingNetwork {
-                reference: dataset.reference().clone(),
-            });
-        };
+        let network = dataset
+            .tables()
+            .first()
+            .expect("EVM RPC Datasets MUST have tables")
+            .network();
 
         let provider = match self.providers_registry.create_evm_rpc_client(network).await {
             Ok(Some(provider)) => provider,
@@ -317,7 +298,7 @@ impl DatasetStore {
                 );
                 return Err(EthCallForDatasetError::ProviderNotFound {
                     dataset_kind: DatasetKind::EvmRpc.into(),
-                    network: network.clone(),
+                    network: network.to_string(),
                 });
             }
             Err(err) => {

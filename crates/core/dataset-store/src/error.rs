@@ -82,41 +82,9 @@ pub enum GetDatasetError {
     },
 }
 
-/// Errors that occur when getting all datasets from the dataset store
-#[derive(Debug, thiserror::Error)]
-pub enum GetAllDatasetsError {
-    /// Failed to list datasets from the metadata database
-    ///
-    /// This occurs when the database query to retrieve all dataset tags fails,
-    /// typically due to connection issues, query timeouts, or database errors.
-    #[error("Failed to list datasets from metadata database: {0}")]
-    ListDatasetsFromDb(#[source] metadata_db::Error),
-
-    /// Failed to load a specific dataset
-    ///
-    /// This occurs when loading an individual dataset from the list fails.
-    /// The dataset exists in the metadata database but cannot be loaded,
-    /// typically due to manifest retrieval/parse errors or missing manifest files.
-    #[error("Failed to load dataset '{namespace}/{name}@{version}'")]
-    LoadDataset {
-        namespace: String,
-        name: String,
-        version: String,
-        #[source]
-        source: GetDatasetError,
-    },
-}
-
 /// Errors specific to getting derived dataset manifest operations
 #[derive(Debug, thiserror::Error)]
 pub enum GetDerivedManifestError {
-    /// Failed to query manifest path from metadata database
-    ///
-    /// This occurs when attempting to retrieve the manifest file path associated
-    /// with the given hash from the metadata database.
-    #[error("Failed to query manifest path from metadata database")]
-    QueryManifestPath(#[source] metadata_db::Error),
-
     /// Failed to load manifest content from object store
     ///
     /// This occurs when the object store operation to fetch the manifest file fails,
@@ -128,23 +96,11 @@ pub enum GetDerivedManifestError {
     ///
     /// This occurs when:
     /// - The manifest file contains invalid JSON or TOML syntax
-    /// - The manifest structure doesn't match the expected schema
+    /// - The manifest structure doesn't match the expected derived dataset schema
+    /// - The dataset kind is not 'manifest' (for derived datasets)
     /// - Required fields are missing or have incorrect types
     #[error("Failed to parse manifest")]
     ManifestParseError(#[source] ManifestParseError),
-
-    /// The dataset kind is not SQL or Derived.
-    ///
-    /// This occurs when trying to get a dataset as a SQL dataset but the manifest
-    /// indicates a different kind (e.g., evm-rpc, firehose).
-    /// Only SQL and Derived dataset kinds can be retrieved as SQL datasets.
-    #[error(
-        "Dataset has unsupported kind '{kind}' for SQL dataset retrieval (expected 'sql' or 'derived')"
-    )]
-    UnsupportedKind { kind: String },
-
-    #[error("Manifest {0} is not registered")]
-    ManifestNotRegistered(Hash),
 
     #[error("Manifest {0} not found in the manifest store")]
     ManifestNotFound(Hash),
@@ -160,14 +116,14 @@ pub enum GetClientError {
     #[error("Failed to load manifest content from object store")]
     LoadManifestContent(#[source] amp_datasets_registry::error::GetManifestError),
 
-    /// Failed to parse the common manifest file content.
+    /// Failed to parse the raw manifest file content.
     ///
     /// This occurs when:
     /// - The manifest file contains invalid JSON or TOML syntax
-    /// - The manifest structure doesn't match the expected schema
-    /// - Required fields are missing or have incorrect types
-    #[error("Failed to parse common manifest for dataset")]
-    CommonManifestParseError(#[source] ManifestParseError),
+    /// - The manifest is missing the required 'network' field
+    /// - The manifest structure doesn't match the expected raw dataset schema
+    #[error("Failed to parse manifest for raw dataset")]
+    RawManifestParseError(#[source] ManifestParseError),
 
     /// The dataset kind is not a raw dataset type.
     ///
@@ -178,13 +134,6 @@ pub enum GetClientError {
         "Dataset has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc or firehose)"
     )]
     UnsupportedKind { kind: String },
-
-    /// Dataset is missing the required 'network' field.
-    ///
-    /// This occurs when a raw dataset definition (evm-rpc or firehose)
-    /// does not include the network field, which is required to determine the appropriate provider configuration.
-    #[error("Dataset is missing required 'network' field for raw dataset kind")]
-    MissingNetwork,
 
     /// Failed to create client for the dataset.
     ///
@@ -205,13 +154,6 @@ pub enum GetClientError {
 /// the eth_call user-defined function for EVM RPC datasets.
 #[derive(Debug, thiserror::Error)]
 pub enum EthCallForDatasetError {
-    /// Dataset is missing the required 'network' field.
-    ///
-    /// This occurs when an EVM RPC dataset definition does not include the network
-    /// field, which is required to determine the appropriate provider configuration.
-    #[error("Dataset '{reference}' is missing required 'network' field for EvmRpc kind")]
-    MissingNetwork { reference: HashReference },
-
     /// No provider configuration found for the dataset kind and network combination.
     ///
     /// This occurs when:

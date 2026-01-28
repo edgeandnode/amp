@@ -44,12 +44,6 @@ pub trait Dataset: DowncastSync {
     /// Returns the tables defined in this dataset.
     fn tables(&self) -> &[Table];
 
-    /// Returns the network this dataset is associated with, if applicable.
-    ///
-    /// For example, `"mainnet"`, `"sepolia"`, etc. Returns `None` for datasets
-    /// that are not network-specific.
-    fn network(&self) -> Option<&String>;
-
     /// Returns the starting block number for this dataset, if specified.
     ///
     /// When `Some`, extraction should begin from this block. When `None`, the default
