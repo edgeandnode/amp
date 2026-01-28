@@ -7,10 +7,10 @@ use std::collections::{BTreeMap, btree_map::Entry};
 
 use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{
-    func_name::ETH_CALL_FUNCTION_NAME, hash::Hash, hash_reference::HashReference,
-    partial_reference::PartialReference, reference::Reference, table_name::TableName,
+    hash::Hash, hash_reference::HashReference, partial_reference::PartialReference,
+    reference::Reference, table_name::TableName,
 };
-use datasets_derived::dataset::Dataset as DerivedDataset;
+use datasets_derived::{dataset::Dataset as DerivedDataset, func_name::ETH_CALL_FUNCTION_NAME};
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
