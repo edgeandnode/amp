@@ -1,14 +1,11 @@
 //! AMP Registry API client.
 
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use url::Url;
 
 use super::{
-    domain::{
-        DerivedManifest, FetchDatasetsParams, FetchDatasetsResponse, LastUpdatedBucket,
-        SearchDatasetsParams, SortDirection,
-    },
+    domain::{DerivedManifest, FetchDatasetsParams, FetchDatasetsResponse, SearchDatasetsParams},
     error::AmpRegistryError,
 };
 
@@ -73,16 +70,10 @@ impl AmpRegistryClient {
             query_params.push(("page", page.to_string()));
         }
         if let Some(sort_by) = params.sort_by {
-            query_params.push(("sort_by", sort_by));
+            query_params.push(("sort_by", sort_by.to_string()));
         }
         if let Some(direction) = params.direction {
-            query_params.push((
-                "direction",
-                match direction {
-                    SortDirection::Asc => "asc".to_string(),
-                    SortDirection::Desc => "desc".to_string(),
-                },
-            ));
+            query_params.push(("direction", direction.to_string()));
         }
         if let Some(keywords) = params.keywords {
             for keyword in keywords {
@@ -95,15 +86,7 @@ impl AmpRegistryClient {
             }
         }
         if let Some(last_updated) = params.last_updated {
-            query_params.push((
-                "last_updated",
-                match last_updated {
-                    LastUpdatedBucket::OneDay => "1 day".to_string(),
-                    LastUpdatedBucket::OneWeek => "1 week".to_string(),
-                    LastUpdatedBucket::OneMonth => "1 month".to_string(),
-                    LastUpdatedBucket::OneYear => "1 year".to_string(),
-                },
-            ));
+            query_params.push(("last_updated", last_updated.to_string()));
         }
 
         query_params
@@ -199,7 +182,7 @@ impl AmpRegistryClient {
             .await
             .map_err(AmpRegistryError::FetchOwnedDatasets)?;
 
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if response.status() == StatusCode::UNAUTHORIZED {
             return Err(AmpRegistryError::Unauthorized);
         }
 
@@ -242,7 +225,7 @@ impl AmpRegistryClient {
             .await
             .map_err(&make_err)?;
 
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if response.status() == StatusCode::UNAUTHORIZED {
             return Err(AmpRegistryError::Unauthorized);
         }
 
@@ -280,6 +263,7 @@ impl AmpRegistryClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::amp_registry::domain::{DatasetSortBy, LastUpdatedBucket, SortDirection};
 
     // ==========================================================================
     // Query param building tests
@@ -327,7 +311,7 @@ mod tests {
     fn build_fetch_query_params_with_sort_includes_sort_by_and_direction() {
         //* Given
         let params = FetchDatasetsParams {
-            sort_by: Some("updated_at".to_string()),
+            sort_by: Some(DatasetSortBy::UpdatedAt),
             direction: Some(SortDirection::Desc),
             ..Default::default()
         };

@@ -1,5 +1,6 @@
 use datasets_common::reference::Reference;
 
+/// Standard error responses when fetching datasets from the amp-registry-api.
 #[derive(Debug, thiserror::Error)]
 pub enum AmpRegistryError {
     /// The access token is invalid or expired.
