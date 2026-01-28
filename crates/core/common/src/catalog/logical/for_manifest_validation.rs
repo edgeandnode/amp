@@ -15,15 +15,11 @@ use std::{
 };
 
 use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
-use datasets_common::{
-    func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
-    hash::Hash,
-    hash_reference::HashReference,
-    table_name::TableName,
-};
+use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     dataset::Dataset as DerivedDataset,
     deps::{DepAlias, DepAliasOrSelfRef, SELF_REF_KEYWORD},
+    func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
     manifest::Function,
 };
 use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};

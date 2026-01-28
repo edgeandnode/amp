@@ -7,7 +7,6 @@ pub mod block_range;
 pub mod dataset;
 pub mod dataset_kind_str;
 pub mod fqn;
-pub mod func_name;
 pub mod hash;
 pub mod hash_reference;
 pub mod manifest;

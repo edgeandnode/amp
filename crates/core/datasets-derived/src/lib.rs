@@ -15,6 +15,7 @@
 pub mod dataset;
 mod dataset_kind;
 pub mod deps;
+pub mod func_name;
 pub mod function;
 pub mod manifest;
 pub mod sql_str;

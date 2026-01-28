@@ -22,12 +22,13 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{func_name::FuncName, hash_reference::HashReference, table_name::TableName};
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     deps::{
         DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, DepReference,
         HashOrVersion,
     },
+    func_name::FuncName,
     manifest::{Function, TableSchema},
 };
 use js_runtime::isolate_pool::IsolatePool;

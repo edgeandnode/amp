@@ -7,8 +7,11 @@ use datafusion::{
     error::DataFusionError,
     sql::{parser, parser::Statement},
 };
-use datasets_common::{func_name::FuncName, table_name::TableName};
-use datasets_derived::sql_str::SqlStr;
+use datasets_common::table_name::TableName;
+use datasets_derived::{
+    func_name::{FuncName, FuncNameError},
+    sql_str::SqlStr,
+};
 
 /// Parses a SQL string into a single DataFusion statement.
 ///
@@ -528,8 +531,8 @@ where
 /// This enum provides a type-safe representation of function references extracted from SQL queries,
 /// similar to DataFusion's [`TableReference`].
 ///
-/// Function names are validated using [`datasets_common::func_name::FuncName`] to ensure they conform to
-/// DataFusion UDF identifier rules. The validated names are stored in `Arc` for efficient cloning.
+/// Function names are validated using [`FuncName`] to ensure they conform to DataFusion UDF
+/// identifier rules. The validated names are stored in `Arc` for efficient cloning.
 ///
 /// Schema names are generic over type `T` which defaults to `String`. Custom types implementing
 /// `FromStr` can be used for validated schema names.
@@ -689,7 +692,7 @@ pub enum ResolveFunctionReferencesError<E = std::convert::Infallible> {
     InvalidFunctionName {
         function: String,
         #[source]
-        source: datasets_common::func_name::FuncNameError,
+        source: FuncNameError,
     },
 
     /// Schema name has invalid format
