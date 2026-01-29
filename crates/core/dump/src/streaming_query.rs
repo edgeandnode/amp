@@ -200,7 +200,7 @@ struct MicrobatchRange {
 
 struct SegmentStart {
     number: BlockNum,
-    prev_hash: Option<BlockHash>,
+    prev_hash: BlockHash,
 }
 
 impl From<BlockRow> for SegmentStart {
@@ -561,7 +561,7 @@ impl StreamingQuery {
             Some(prev) if self.blocks_table_contains(ctx, prev).await? => {
                 let segment_start = SegmentStart {
                     number: prev.number + 1,
-                    prev_hash: Some(prev.hash),
+                    prev_hash: prev.hash,
                 };
                 Ok(Some(StreamDirection::ForwardFrom(segment_start)))
             }
@@ -667,7 +667,7 @@ impl StreamingQuery {
                 .blocks_table_fetch(
                     &fork_ctx,
                     block.number.saturating_sub(1),
-                    block.prev_hash.as_ref(),
+                    Some(&block.prev_hash),
                 )
                 .await?;
         }
@@ -747,16 +747,24 @@ impl StreamingQuery {
             tracing::debug!("blocks table missing block {} {:?}", number, hash);
             return Ok(None);
         }
-        let get_hash_value = |column_name: &str| -> Option<BlockHash> {
-            let column =
-                as_fixed_size_binary_array(results.column_by_name(column_name).unwrap()).unwrap();
-            let bytes = column.iter().flatten().next();
-            bytes.map(|b| b.try_into().unwrap())
+        let get_hash_value = |column_name: &str| -> Result<BlockHash, BoxError> {
+            let column = results
+                .column_by_name(column_name)
+                .ok_or_else(|| format!("blocks table missing column: {column_name}"))?;
+            let column = as_fixed_size_binary_array(column)?;
+            column
+                .iter()
+                .flatten()
+                .next()
+                .and_then(|b| BlockHash::try_from(b).ok())
+                .ok_or_else(|| {
+                    format!("blocks table missing block hash value for column {column_name}").into()
+                })
         };
         Ok(Some(BlockRow {
             number,
-            hash: get_hash_value("hash").unwrap(),
-            prev_hash: get_hash_value("parent_hash"),
+            hash: get_hash_value("hash")?,
+            prev_hash: get_hash_value("parent_hash")?,
         }))
     }
 }
@@ -764,7 +772,7 @@ impl StreamingQuery {
 struct BlockRow {
     number: BlockNum,
     hash: BlockHash,
-    prev_hash: Option<BlockHash>,
+    prev_hash: BlockHash,
 }
 
 impl BlockRow {

@@ -106,8 +106,8 @@ impl SolanaExtractor {
         T: Stream<Item = Result<of1_client::DecodedSlot, BlockStreamError>>,
     {
         async_stream::stream! {
-            // Slots can be skipped, so we'll track the next expected slot and in the case of a
-            // mismatch, yield empty rows for the skipped slots.
+            // Slots can be skipped, so we'll track the next expected slot for switching to
+            // JSON-RPC.
             let mut expected_next_slot = start;
             let requested_range = start..=end;
 
@@ -131,17 +131,7 @@ impl SolanaExtractor {
                     return;
                 }
 
-                if current_slot != expected_next_slot {
-                    // NOTE: If `current_slot == end`, we don't yield an empty row for it since
-                    // we're about to yield the actual block rows for that slot.
-                    let end = std::cmp::min(current_slot, end);
-
-                    // Yield empty rows for skipped slots.
-                    for skipped_slot in expected_next_slot..end {
-                        yield tables::empty_db_rows(skipped_slot, &self.network).map_err(Into::into);
-                    }
-                }
-
+                // Don't emit rows for skipped slots.
                 yield tables::convert_slot_to_db_rows(non_empty_of1_slot(slot), &self.network).map_err(Into::into);
 
                 if current_slot == end {
@@ -178,9 +168,8 @@ impl SolanaExtractor {
                         yield tables::convert_slot_to_db_rows(non_empty_slot, &self.network).map_err(Into::into);
                     }
                     Err(e) => {
-                        if rpc_client::is_block_missing_err(&e) {
-                            yield tables::empty_db_rows(slot, &self.network).map_err(Into::into);
-                        } else {
+                        // If block is missing (skipped slot), don't emit any rows.
+                        if !rpc_client::is_block_missing_err(&e) {
                             yield Err(e.into());
                             return;
                         }

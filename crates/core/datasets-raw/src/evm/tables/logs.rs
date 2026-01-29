@@ -204,7 +204,7 @@ fn default_to_arrow() {
                 numbers: log.block_num..=log.block_num,
                 network: "test_network".parse().expect("valid network id"),
                 hash: log.block_hash.into(),
-                prev_hash: None,
+                prev_hash: Default::default(),
             })
             .unwrap()
     };

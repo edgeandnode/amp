@@ -131,8 +131,8 @@ max_rpc_calls_per_second = 50
 ### Slot Handling
 
 - Solana uses slots rather than sequential block numbers
-- Skipped slots (no block produced) yield empty rows
-- Maintains slot continuity in output data
+- Skipped slots (no block produced) do not produce any rows, creating gaps in the block number sequence
+- Chain integrity is maintained through hash-based validation where each block's `prev_hash` must match the previous block's hash
 
 ### Source Files
 
@@ -147,7 +147,6 @@ max_rpc_calls_per_second = 50
 - Archive mode can be controlled via `use_archive` config (`"auto"`, `"always"`, `"never"`)
 - Only HTTP/HTTPS RPC URLs supported (no WebSocket)
 - Uses finalized commitment level (not configurable)
-- Missing blocks yield empty rows, not errors
 
 ## References
 
