@@ -34,7 +34,7 @@ use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::BoxError;
 use datasets_common::reference::Reference;
-use worker::node_id::NodeId;
+use worker::{events::EventEmitter, node_id::NodeId};
 
 use super::fixtures::{
     AmpCli, Ampctl, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
@@ -59,6 +59,7 @@ pub struct TestCtxBuilder {
     providers_to_register: Vec<ProviderRegistration>,
     dataset_snapshots_to_preload: BTreeSet<String>,
     meter: Option<monitoring::telemetry::metrics::Meter>,
+    event_emitter: Option<Arc<dyn EventEmitter>>,
 }
 
 impl TestCtxBuilder {
@@ -72,6 +73,7 @@ impl TestCtxBuilder {
             providers_to_register: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
             meter: None,
+            event_emitter: None,
         }
     }
 
@@ -90,6 +92,32 @@ impl TestCtxBuilder {
     /// Use with `monitoring::test_utils::TestMetricsContext` to collect and validate metrics.
     pub fn with_meter(mut self, meter: monitoring::telemetry::metrics::Meter) -> Self {
         self.meter = Some(meter);
+        self
+    }
+
+    /// Inject an event emitter for the worker.
+    ///
+    /// This is useful for integration tests that want to capture worker events
+    /// by injecting a [`MockEventEmitter`](super::fixtures::MockEventEmitter).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mock_emitter = Arc::new(MockEventEmitter::new());
+    /// let ctx = TestCtxBuilder::new("my_test")
+    ///     .with_anvil_http()
+    ///     .with_event_emitter(mock_emitter.clone())
+    ///     .build()
+    ///     .await?;
+    ///
+    /// // Deploy dataset and run sync...
+    ///
+    /// // Check captured events
+    /// let progress_events = mock_emitter.progress_events();
+    /// assert!(progress_events.len() >= 95);
+    /// ```
+    pub fn with_event_emitter(mut self, emitter: Arc<dyn EventEmitter>) -> Self {
+        self.event_emitter = Some(emitter);
         self
     }
 
@@ -525,13 +553,14 @@ impl TestCtxBuilder {
             .test_name
             .parse()
             .expect("test name should be a valid WorkerNodeId");
-        let worker = DaemonWorker::new(
+        let worker = DaemonWorker::with_event_emitter(
             config,
             metadata_db.conn_pool().clone(),
             data_store,
             dataset_store,
             worker_meter,
             node_id,
+            self.event_emitter.clone(),
         )
         .await?;
 
@@ -545,6 +574,7 @@ impl TestCtxBuilder {
             daemon_controller_fixture: controller,
             daemon_worker_fixture: worker,
             anvil_fixture: anvil,
+            event_emitter: self.event_emitter,
         })
     }
 }
@@ -565,6 +595,7 @@ pub struct TestCtx {
     daemon_controller_fixture: DaemonController,
     daemon_worker_fixture: DaemonWorker,
     anvil_fixture: Option<Anvil>,
+    event_emitter: Option<Arc<dyn EventEmitter>>,
 }
 
 impl TestCtx {
@@ -612,6 +643,15 @@ impl TestCtx {
         self.anvil_fixture.as_ref().unwrap_or_else(|| {
             panic!("Anvil fixture not enabled - call with_anvil_ipc() on TestCtxBuilder")
         })
+    }
+
+    /// Get a reference to the event emitter if one was injected.
+    ///
+    /// Returns `None` if no event emitter was provided via `with_event_emitter()`.
+    /// Use this to access a [`MockEventEmitter`](super::fixtures::MockEventEmitter)
+    /// for asserting on captured events after a sync completes.
+    pub fn event_emitter(&self) -> Option<&Arc<dyn EventEmitter>> {
+        self.event_emitter.as_ref()
     }
 
     /// Create a new Flight client connected to this test environment's server.

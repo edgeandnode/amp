@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use amp_config::ParquetConfig;
+use amp_config::{ParquetConfig, WorkerEventsConfig};
 
 use crate::info::WorkerInfo;
 
@@ -34,6 +34,9 @@ pub struct Config {
 
     /// Worker build/version information for registration
     pub worker_info: WorkerInfo,
+
+    /// Optional event streaming configuration
+    pub events_config: WorkerEventsConfig,
 }
 
 impl Config {

@@ -9,6 +9,7 @@
 //! the metadata DB, and gracefully recovers jobs after restarts with periodic state reconciliation.
 
 pub mod config;
+pub mod events;
 pub mod info;
 pub mod job;
 pub mod node_id;

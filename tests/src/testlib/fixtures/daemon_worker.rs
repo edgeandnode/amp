@@ -12,7 +12,10 @@ use common::BoxError;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
-use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
+use worker::{
+    config::Config, events::EventEmitter, node_id::NodeId,
+    service::RuntimeError as WorkerRuntimeError,
+};
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///
@@ -42,6 +45,36 @@ impl DaemonWorker {
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self, BoxError> {
+        Self::with_event_emitter(
+            config,
+            metadata_db,
+            data_store,
+            dataset_store,
+            meter,
+            node_id,
+            None,
+        )
+        .await
+    }
+
+    /// Create and start a new Amp worker with an injected event emitter.
+    ///
+    /// This is useful for integration tests that want to capture worker events
+    /// by injecting a mock event emitter.
+    ///
+    /// # Parameters
+    ///
+    /// - `event_emitter`: If `Some`, uses the provided emitter. If `None`, creates
+    ///   an emitter based on the configuration (same as `new()`).
+    pub async fn with_event_emitter(
+        config: Arc<amp_config::Config>,
+        metadata_db: MetadataDb,
+        data_store: DataStore,
+        dataset_store: DatasetStore,
+        meter: Option<Meter>,
+        node_id: NodeId,
+        event_emitter: Option<Arc<dyn EventEmitter>>,
+    ) -> Result<Self, BoxError> {
         // Two-phase worker initialization
         let worker_config = worker_config_from_common(&config);
         let worker_fut = worker::service::new(
@@ -51,6 +84,7 @@ impl DaemonWorker {
             dataset_store.clone(),
             meter,
             node_id.clone(),
+            event_emitter,
         )
         .await
         .map_err(Box::new)?;
@@ -118,5 +152,6 @@ fn worker_config_from_common(config: &amp_config::Config) -> Config {
             commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
             build_date: Some(config.build_info.build_date.clone()),
         },
+        events_config: config.worker_events.clone(),
     }
 }

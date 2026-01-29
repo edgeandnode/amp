@@ -72,6 +72,8 @@ pub struct Config {
     pub keep_alive_interval: Option<u64>,
     /// Build information (version, commit SHA, timestamps)
     pub build_info: BuildInfo,
+    /// Worker event streaming configuration
+    pub worker_events: WorkerEventsConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +189,36 @@ pub struct ConfigFile {
     // Writer/Parquet configuration
     #[serde(default)]
     pub writer: ParquetConfig,
+
+    // Worker event streaming configuration
+    #[serde(default)]
+    pub worker_events: WorkerEventsConfig,
+}
+
+/// Configuration for worker event streaming.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WorkerEventsConfig {
+    /// Enable/disable event emission (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Kafka-specific configuration
+    pub kafka: Option<KafkaEventsConfig>,
+}
+
+fn default_kafka_topic() -> String {
+    "amp.worker.events".to_string()
+}
+
+/// Kafka configuration for worker events.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KafkaEventsConfig {
+    /// Kafka broker addresses (e.g., ["kafka-1:9092", "kafka-2:9092"])
+    pub brokers: Vec<String>,
+
+    /// Kafka topic name (default: "amp.worker.events")
+    #[serde(default = "default_kafka_topic")]
+    pub topic: String,
 }
 
 impl ConfigFile {
@@ -306,6 +338,7 @@ impl Config {
             poll_interval: config_file.poll_interval_secs.into(),
             build_info: build_info.into().unwrap_or_default(),
             keep_alive_interval: config_file.keep_alive_interval,
+            worker_events: config_file.worker_events,
         })
     }
 

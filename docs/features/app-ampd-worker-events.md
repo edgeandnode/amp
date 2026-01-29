@@ -126,7 +126,7 @@ All events share a common envelope:
 
 ```json
 {
-  "event_id": "uuid-v4",
+  "event_id": "uuid-v7",
   "event_type": "sync.progress",
   "event_version": "1.0",
   "timestamp": "2026-01-15T10:30:00Z",

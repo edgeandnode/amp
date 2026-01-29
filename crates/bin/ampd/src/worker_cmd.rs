@@ -54,6 +54,7 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
         dataset_store,
         meter,
         node_id,
+        None, // Use config-based event emitter
     )
     .await
     .map_err(Error::Init)?;
@@ -120,5 +121,6 @@ pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
             commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
             build_date: Some(config.build_info.build_date.clone()),
         },
+        events_config: config.worker_events.clone(),
     }
 }
