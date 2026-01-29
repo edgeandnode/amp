@@ -327,18 +327,28 @@ impl Config {
     /// Create a configuration with sensible defaults for solo/dev mode.
     ///
     /// This is used when no config file is provided. It creates a zero-config setup with:
-    /// - Persistent PostgreSQL database in `.amp-local/metadb/`
-    /// - Local filesystem stores in `.amp-local/` directory
+    /// - Persistent PostgreSQL database in `<amp_dir>/.amp/metadb/`
+    /// - Local filesystem stores in `<amp_dir>/.amp/` directory
     /// - Default service ports (1602, 1603, 1610)
     /// - Minimal memory limits (suitable for local development)
+    ///
+    /// # Arguments
+    ///
+    /// * `amp_dir` - Base directory for Amp data and configuration. All data is stored
+    ///   in `<amp_dir>/.amp/`. Defaults to current working directory if `.` is passed.
+    /// * `build_info` - Build information to include in the config.
     pub async fn default_for_solo(
+        amp_dir: impl Into<PathBuf>,
         build_info: impl Into<Option<BuildInfo>>,
     ) -> Result<Self, ConfigError> {
-        // Use a virtual path for config_path since there's no actual file
-        let config_path = PathBuf::from("<solo-mode-defaults>");
+        let amp_dir = amp_dir.into();
+        let amp_state_dir = amp_dir.join(".amp");
 
-        // Create database in .amp-local/metadb/ (persistent across restarts)
-        let metadb_data_dir = PathBuf::from(".amp-local/metadb");
+        // Use a virtual path for config_path since there's no actual file
+        let config_path = amp_state_dir.join("<solo-mode-defaults>");
+
+        // Create database in <amp_dir>/.amp/metadb/ (persistent across restarts)
+        let metadb_data_dir = amp_state_dir.join("metadb");
         let handle = global_metadata_db(metadb_data_dir)
             .await
             .map_err(ConfigError::PostgresStartup)?;
@@ -349,15 +359,18 @@ impl Config {
             auto_migrate: true,
         };
 
-        // Create local directories for data, providers, and manifests in .amp-local/
-        let data_store_url = ObjectStoreUrl::new_with_base(".amp-local/data", None)
-            .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        // Create local directories for data, providers, and manifests in <amp_dir>/.amp/
+        let data_store_url =
+            ObjectStoreUrl::new_with_base(amp_state_dir.join("data").to_string_lossy(), None)
+                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
-        let providers_store_url = ObjectStoreUrl::new_with_base(".amp-local/providers", None)
-            .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        let providers_store_url =
+            ObjectStoreUrl::new_with_base(amp_state_dir.join("providers").to_string_lossy(), None)
+                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
-        let manifests_store_url = ObjectStoreUrl::new_with_base(".amp-local/manifests", None)
-            .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        let manifests_store_url =
+            ObjectStoreUrl::new_with_base(amp_state_dir.join("manifests").to_string_lossy(), None)
+                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
         Ok(Self {
             data_store_url,
