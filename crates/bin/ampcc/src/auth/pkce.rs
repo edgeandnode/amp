@@ -71,7 +71,8 @@ impl PkceDeviceFlowClient {
             .json(&request_body)
             .timeout(std::time::Duration::from_secs(30))
             .send()
-            .await?;
+            .await
+            .map_err(AuthError::HttpError)?;
 
         let status = response.status();
 
@@ -86,7 +87,8 @@ impl PkceDeviceFlowClient {
             )));
         }
 
-        let auth_response: DeviceAuthorizationResponse = response.json().await?;
+        let auth_response: DeviceAuthorizationResponse =
+            response.json().await.map_err(AuthError::HttpError)?;
 
         Ok(PkceDeviceAuthorizationResult {
             response: auth_response,
@@ -116,7 +118,8 @@ impl PkceDeviceFlowClient {
             .get(&url)
             .timeout(std::time::Duration::from_secs(10))
             .send()
-            .await?;
+            .await
+            .map_err(AuthError::HttpError)?;
 
         let status = response.status();
 
@@ -134,7 +137,8 @@ impl PkceDeviceFlowClient {
             )));
         }
 
-        let polling_response: DeviceTokenPollingResponse = response.json().await?;
+        let polling_response: DeviceTokenPollingResponse =
+            response.json().await.map_err(AuthError::HttpError)?;
 
         match polling_response {
             DeviceTokenPollingResponse::Success(token) => Ok(Some(token)),

@@ -62,7 +62,8 @@ impl AuthClient {
             .json(&request_body)
             .timeout(std::time::Duration::from_secs(15))
             .send()
-            .await?;
+            .await
+            .map_err(AuthError::HttpError)?;
 
         let status = response.status();
 
@@ -92,7 +93,8 @@ impl AuthClient {
             )));
         }
 
-        let refresh_response: RefreshTokenResponse = response.json().await?;
+        let refresh_response: RefreshTokenResponse =
+            response.json().await.map_err(AuthError::HttpError)?;
 
         // Validate user ID matches
         if refresh_response.user.id != auth.user_id {

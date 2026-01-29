@@ -60,13 +60,5 @@ pub enum AuthError {
     RateLimited { retry_after: u64 },
     /// Generic HTTP Error occurred.
     #[error("HTTP request failed: {0}")]
-    HttpError(#[from] reqwest::Error),
-    /// Generic IO Error occurred.
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    /// Generic JSON Error Occurred.
-    ///
-    /// This would be when decoding the response JSON body from the device flow or refresh HTTP requests.
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    HttpError(#[source] reqwest::Error),
 }
