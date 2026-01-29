@@ -4,11 +4,11 @@
 //! databases in test environments. It handles the lifecycle of temporary PostgreSQL instances
 //! and connection pool management, ensuring proper cleanup and isolation between tests.
 
+use std::path::PathBuf;
+
 use metadata_db::{DEFAULT_POOL_SIZE, MetadataDb as MetadataDbConnPool};
 use metadata_db_postgres::service::Handle;
 use tokio::task::JoinHandle;
-
-use crate::testlib::debug::TESTS_KEEP_TEMP_DIRS;
 
 /// Fixture for managing temporary metadata databases in tests.
 ///
@@ -26,7 +26,7 @@ impl MetadataDb {
     ///
     /// Starts a temporary PostgreSQL instance with the default connection pool size.
     /// The database will be automatically shut down when the fixture is dropped.
-    /// Cleanup behavior is controlled by `TESTS_KEEP_TEMP_DIRS` environment variable.
+    /// Uses a unique temporary directory for each test to ensure isolation.
     pub async fn new() -> Self {
         Self::with_pool_size(DEFAULT_POOL_SIZE).await
     }
@@ -35,9 +35,21 @@ impl MetadataDb {
     ///
     /// Starts a temporary PostgreSQL instance with the specified connection pool size.
     /// The database will be automatically shut down when the fixture is dropped.
-    /// Cleanup behavior is controlled by `TESTS_KEEP_TEMP_DIRS` environment variable.
+    /// Uses a unique temporary directory for each test to ensure isolation.
     pub async fn with_pool_size(pool_size: u32) -> Self {
-        let (postgres_handle, service) = metadata_db_postgres::service::new(*TESTS_KEEP_TEMP_DIRS);
+        // Create a unique temp directory for this test's database
+        let temp_dir = std::env::temp_dir().join(format!("amp-test-metadb-{}", std::process::id()));
+        Self::with_data_dir(temp_dir, pool_size).await
+    }
+
+    /// Create and start a new temporary metadata database with a specific data directory.
+    ///
+    /// This allows tests to specify where the PostgreSQL data will be stored.
+    /// Useful for testing persistence or sharing databases between tests.
+    pub async fn with_data_dir(data_dir: PathBuf, pool_size: u32) -> Self {
+        let (postgres_handle, service) = metadata_db_postgres::service::new(data_dir)
+            .await
+            .expect("failed to start PostgreSQL for test");
 
         // Spawn the service to keep the database alive
         let task = tokio::spawn(service);
