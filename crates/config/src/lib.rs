@@ -19,6 +19,31 @@ use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::OnceCell;
 
+// ============================================================================
+// Directory Structure Constants
+// ============================================================================
+//
+// These constants define the standard `.amp/` directory structure used by
+// `ampd solo` and other Amp tools. All paths are relative to the amp_dir.
+
+/// Default state directory name (created inside amp_dir)
+pub const DEFAULT_STATE_DIRNAME: &str = ".amp";
+
+/// Default config file name (inside `.amp/`)
+pub const DEFAULT_CONFIG_FILENAME: &str = "config.toml";
+
+/// Default data directory name (inside `.amp/`) - stores Parquet files
+pub const DEFAULT_DATA_DIRNAME: &str = "data";
+
+/// Default providers directory name (inside `.amp/`) - stores provider configs
+pub const DEFAULT_PROVIDERS_DIRNAME: &str = "providers";
+
+/// Default manifests directory name (inside `.amp/`) - stores dataset manifests
+pub const DEFAULT_MANIFESTS_DIRNAME: &str = "manifests";
+
+/// Default metadata database directory name (inside `.amp/`) - stores PostgreSQL data
+pub const DEFAULT_METADB_DIRNAME: &str = "metadb";
+
 /// Global singleton metadata database instance
 ///
 /// This is a shared instance of the database that can be used by the config system.
@@ -244,6 +269,68 @@ pub enum ConfigError {
     InvalidAddress(String, String),
     #[error("Failed to start PostgreSQL: {0}")]
     PostgresStartup(#[source] metadata_db_postgres::PostgresError),
+    #[error("Failed to create directory {0}: {1}")]
+    DirectoryCreation(PathBuf, std::io::Error),
+}
+
+/// Ensures the `.amp/` directory structure exists for solo mode.
+///
+/// Creates the following directory structure if it doesn't exist:
+/// ```text
+/// <amp_dir>/
+/// └── .amp/
+///     ├── data/       # Dataset storage (Parquet files)
+///     ├── providers/  # Provider configuration files
+///     ├── manifests/  # Dataset manifest files
+///     └── metadb/     # PostgreSQL data directory
+/// ```
+///
+/// This function is idempotent - it's safe to call multiple times.
+/// Existing directories and their contents are preserved.
+///
+/// # Arguments
+///
+/// * `amp_dir` - Base directory where `.amp/` will be created
+///
+/// # Returns
+///
+/// Returns the path to the `.amp/` state directory on success.
+#[expect(clippy::result_large_err)]
+pub fn ensure_amp_directories(
+    amp_dir: impl AsRef<std::path::Path>,
+) -> Result<PathBuf, ConfigError> {
+    let amp_dir = amp_dir.as_ref();
+    let state_dir = amp_dir.join(DEFAULT_STATE_DIRNAME);
+
+    // Create the main .amp directory if needed
+    if !state_dir.exists() {
+        tracing::info!("Creating .amp directory at: {}", state_dir.display());
+        fs::create_dir_all(&state_dir)
+            .map_err(|e| ConfigError::DirectoryCreation(state_dir.clone(), e))?;
+    }
+
+    // Create subdirectories
+    let subdirs = [
+        (DEFAULT_DATA_DIRNAME, "data"),
+        (DEFAULT_PROVIDERS_DIRNAME, "providers"),
+        (DEFAULT_MANIFESTS_DIRNAME, "manifests"),
+        (DEFAULT_METADB_DIRNAME, "metadb"),
+    ];
+
+    for (dirname, description) in subdirs {
+        let dir_path = state_dir.join(dirname);
+        if !dir_path.exists() {
+            tracing::info!(
+                "Creating {} directory at: {}",
+                description,
+                dir_path.display()
+            );
+            fs::create_dir_all(&dir_path)
+                .map_err(|e| ConfigError::DirectoryCreation(dir_path, e))?;
+        }
+    }
+
+    Ok(state_dir)
 }
 
 impl Config {
@@ -350,6 +437,10 @@ impl Config {
     /// - Default service ports (1602, 1603, 1610)
     /// - Minimal memory limits (suitable for local development)
     ///
+    /// The `.amp/` directory structure is automatically created on first run if it
+    /// doesn't exist, including all required subdirectories (data, providers,
+    /// manifests, metadb).
+    ///
     /// # Arguments
     ///
     /// * `amp_dir` - Base directory for Amp data and configuration. All data is stored
@@ -360,13 +451,15 @@ impl Config {
         build_info: impl Into<Option<BuildInfo>>,
     ) -> Result<Self, ConfigError> {
         let amp_dir = amp_dir.into();
-        let amp_state_dir = amp_dir.join(".amp");
+
+        // Ensure the .amp/ directory structure exists (creates if needed)
+        let amp_state_dir = ensure_amp_directories(&amp_dir)?;
 
         // Use a virtual path for config_path since there's no actual file
         let config_path = amp_state_dir.join("<solo-mode-defaults>");
 
         // Create database in <amp_dir>/.amp/metadb/ (persistent across restarts)
-        let metadb_data_dir = amp_state_dir.join("metadb");
+        let metadb_data_dir = amp_state_dir.join(DEFAULT_METADB_DIRNAME);
         let handle = global_metadata_db(metadb_data_dir)
             .await
             .map_err(ConfigError::PostgresStartup)?;
@@ -377,18 +470,28 @@ impl Config {
             auto_migrate: true,
         };
 
-        // Create local directories for data, providers, and manifests in <amp_dir>/.amp/
-        let data_store_url =
-            ObjectStoreUrl::new_with_base(amp_state_dir.join("data").to_string_lossy(), None)
-                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        // Reference the directories created by ensure_amp_directories()
+        let data_store_url = ObjectStoreUrl::new_with_base(
+            amp_state_dir.join(DEFAULT_DATA_DIRNAME).to_string_lossy(),
+            None,
+        )
+        .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
-        let providers_store_url =
-            ObjectStoreUrl::new_with_base(amp_state_dir.join("providers").to_string_lossy(), None)
-                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        let providers_store_url = ObjectStoreUrl::new_with_base(
+            amp_state_dir
+                .join(DEFAULT_PROVIDERS_DIRNAME)
+                .to_string_lossy(),
+            None,
+        )
+        .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
-        let manifests_store_url =
-            ObjectStoreUrl::new_with_base(amp_state_dir.join("manifests").to_string_lossy(), None)
-                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+        let manifests_store_url = ObjectStoreUrl::new_with_base(
+            amp_state_dir
+                .join(DEFAULT_MANIFESTS_DIRNAME)
+                .to_string_lossy(),
+            None,
+        )
+        .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
 
         Ok(Self {
             data_store_url,
