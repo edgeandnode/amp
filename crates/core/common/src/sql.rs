@@ -751,7 +751,7 @@ fn all_function_refs(stmt: &Statement) -> Result<Vec<Vec<String>>, AllFunctionNa
     };
     let stmt = match stmt {
         Statement::Statement(statement) => statement,
-        Statement::CreateExternalTable(_) | Statement::CopyTo(_) => {
+        Statement::CreateExternalTable(_) | Statement::CopyTo(_) | Statement::Reset(_) => {
             return Err(AllFunctionNamesError::DmlNotSupported);
         }
         Statement::Explain(explain) => match explain.statement.as_ref() {

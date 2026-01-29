@@ -579,17 +579,19 @@ impl TableProvider for TableSnapshot {
 
         let parquet_file_reader_factory = Arc::clone(&self.reader_factory);
         let table_parquet_options = state.table_options().parquet.clone();
-        let file_source = ParquetSource::new(table_parquet_options)
-            .with_parquet_file_reader_factory(parquet_file_reader_factory)
-            .with_predicate(predicate)
-            .into();
+        let file_source = Arc::new(
+            ParquetSource::new(table_schema)
+                .with_table_parquet_options(table_parquet_options)
+                .with_parquet_file_reader_factory(parquet_file_reader_factory)
+                .with_predicate(predicate),
+        );
 
         let data_source = Arc::new(
-            FileScanConfigBuilder::new(object_store_url, table_schema, file_source)
+            FileScanConfigBuilder::new(object_store_url, file_source)
                 .with_file_groups(file_groups)
                 .with_limit(limit)
                 .with_output_ordering(output_ordering)
-                .with_projection_indices(projection.cloned())
+                .with_projection_indices(projection.cloned())?
                 .with_statistics(statistics)
                 .build(),
         );

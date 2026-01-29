@@ -135,9 +135,9 @@ zstd = "0.13.3"
 # Datafusion and Arrow crates
 arrow = "57"
 arrow-flight = { version = "57", features = ["flight-sql-experimental"] }
-datafusion = { version = "51", features = ["serde"] }
-datafusion-tracing = { version = "51" }
-datafusion-datasource = { version = "51" }
+datafusion = { version = "52", features = ["serde"] }
+datafusion-tracing = { version = "52" }
+datafusion-datasource = { version = "52" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
