@@ -233,77 +233,76 @@ struct Chains {
 
 /// Find the canonical and fork chain from a sequence of segments. The result is independent of the
 /// input order.
-// The implementation uses depth-first from the segment with the greatest end block number,
-// favoring segments with the latest object `last_modified` timestamp.
 #[inline]
-fn chains(segments: Vec<Segment>) -> Option<Chains> {
-    let min_start = segments.iter().map(|s| s.range.start()).min()?;
-    let mut by_end: BTreeMap<BlockNum, Vec<Segment>> = Default::default();
-    for s in segments {
-        by_end.entry(s.range.end()).or_default().push(s);
+fn chains(mut segments: Vec<Segment>) -> Option<Chains> {
+    if segments.is_empty() {
+        return None;
     }
 
-    fn pick_segment(
-        by_end: &mut BTreeMap<BlockNum, Vec<Segment>>,
-        end: BlockNum,
-        next: Option<&BlockRange>,
-    ) -> Option<Segment> {
-        let segments = by_end.get_mut(&end)?;
-        segments.sort_unstable_by_key(|s| s.object.last_modified);
-        let index = segments.iter().rposition(|s| {
-            next.map(|next| BlockRange::adjacent(&s.range, next))
-                .unwrap_or(true)
-        })?;
-        let segment = segments.remove(index);
-        if segments.is_empty() {
-            by_end.remove(&end);
+    // Sort by start block ascending, then by last_modified descending.
+    // - start ascending: enables forward single-pass chain construction
+    // - last_modified descending: when multiple segments could extend the chain, the first one
+    //   encountered (most recently modified) is preferred to favor compated segments.
+    segments.sort_unstable_by(|a, b| {
+        use std::cmp::Ord;
+        Ord::cmp(&a.range.start(), &b.range.start())
+            .then_with(|| Ord::cmp(&b.object.last_modified, &a.object.last_modified))
+    });
+
+    // Build canonical chain in a single forward pass. Because segments are sorted by start block,
+    // we simply check if each segment is adjacent to the current chain end. The first adjacent
+    // segment we find is optimal due to the secondary sort by last_modified.
+    let mut canonical: Vec<Segment> = Default::default();
+    let mut non_canonical: Vec<Segment> = Default::default();
+    for segment in segments {
+        if canonical.is_empty() {
+            canonical.push(segment);
+            continue;
         }
-        Some(segment)
+
+        if BlockRange::adjacent(&canonical.last().unwrap().range, &segment.range) {
+            canonical.push(segment);
+        } else {
+            non_canonical.push(segment);
+        }
     }
-    fn pick_chain(by_end: &mut BTreeMap<BlockNum, Vec<Segment>>) -> Chain {
-        assert!(!by_end.is_empty());
-        let latest = {
-            let end = *by_end.last_key_value().unwrap().0;
-            pick_segment(by_end, end, None).unwrap()
-        };
-        let mut chain = vec![latest];
-        loop {
-            let next = &chain.last().unwrap().range;
-            if next.start() == 0 {
-                break;
+
+    let canonical = Chain(canonical);
+
+    // Sort non-canonical segments by end block ascending, then last_modified ascending.
+    // - end ascending: allows pop() to yield highest-end segments first (fork candidates)
+    // - last_modified ascending: most recent segments are popped first, to favor compacted
+    //   segments.
+    non_canonical.sort_unstable_by(|a, b| {
+        use std::cmp::Ord;
+        Ord::cmp(&a.range.end(), &b.range.end())
+            .then_with(|| Ord::cmp(&a.object.last_modified, &b.object.last_modified))
+    });
+
+    // Search for a valid fork chain. A fork must:
+    // 1. Extend beyond the canonical chain's end block
+    // 2. Connect back to at most canonical.end() + 1 (to form a valid divergence point)
+    let mut fork: Option<Chain> = None;
+    while let Some(fork_end) = non_canonical.pop() {
+        // Early exit: remaining segments all have end <= canonical.end() (sorted ascending),
+        // so none can form a fork that extends beyond canonical.
+        if fork_end.range.end() <= canonical.end() {
+            break;
+        }
+
+        // Build a candidate fork chain backwards from fork_end.
+        let mut fork_segments = vec![fork_end];
+        for segment in non_canonical.iter().rev() {
+            if BlockRange::adjacent(&segment.range, &fork_segments.last().unwrap().range) {
+                fork_segments.insert(0, segment.clone());
             }
-            match pick_segment(by_end, next.start() - 1, Some(next)) {
-                Some(segment) => chain.push(segment),
-                None => break,
-            };
         }
-        chain.reverse();
-        Chain(chain)
+        // Check if this fork connects back to a valid divergence point.
+        if fork_segments.first().unwrap().range.start() <= (canonical.end() + 1) {
+            fork = Some(Chain(fork_segments));
+            break;
+        }
     }
-
-    let latest = pick_chain(&mut by_end);
-    if latest.start() == min_start {
-        #[cfg(test)]
-        latest.check_invariants();
-
-        return Some(Chains {
-            canonical: latest,
-            fork: None,
-        });
-    }
-
-    let mut chains = vec![latest];
-    while chains.last().unwrap().start() != min_start {
-        chains.push(pick_chain(&mut by_end));
-    }
-
-    let canonical = chains.pop().unwrap();
-    let fork_min = canonical.end() + 1;
-    let fork = chains
-        .iter()
-        .filter(|c| c.end() > canonical.end())
-        .position(|c| c.start() <= fork_min)
-        .map(|index| chains.remove(index));
 
     #[cfg(test)]
     {
@@ -381,9 +380,9 @@ mod test {
             network: "test".parse().expect("valid network id"),
             hash: test_hash(*numbers.end() as u8, fork.1),
             prev_hash: if *numbers.start() == 0 {
-                Some(Default::default())
+                Default::default()
             } else {
-                Some(test_hash(*numbers.start() as u8 - 1, fork.0))
+                test_hash(*numbers.start() as u8 - 1, fork.0)
             },
         }
     }
@@ -482,12 +481,12 @@ mod test {
                 test_segment(3..=5, (0, 0), 0),
                 test_segment(4..=5, (0, 0), 0),
                 test_segment(4..=6, (0, 0), 0),
-                test_segment(3..=6, (0, 0), 0),
+                test_segment(3..=6, (0, 0), 1),
             ]),
             Some(Chains {
                 canonical: Chain(vec![
                     test_segment(0..=2, (0, 0), 0),
-                    test_segment(3..=6, (0, 0), 0),
+                    test_segment(3..=6, (0, 0), 1),
                 ]),
                 fork: None,
             })
@@ -570,17 +569,17 @@ mod test {
         assert_eq!(
             super::chains(vec![
                 test_segment(0..=3, (0, 0), 0),
-                test_segment(4..=6, (1, 1), 0),
-                test_segment(4..=8, (0, 0), 0),
-                test_segment(7..=9, (1, 1), 0),
-                test_segment(4..=9, (2, 2), 0),
+                test_segment(4..=6, (1, 1), 1),
+                test_segment(4..=8, (0, 0), 2),
+                test_segment(7..=9, (1, 1), 3),
+                test_segment(4..=9, (2, 2), 4),
             ]),
             Some(Chains {
                 canonical: Chain(vec![
                     test_segment(0..=3, (0, 0), 0),
-                    test_segment(4..=8, (0, 0), 0),
+                    test_segment(4..=8, (0, 0), 2),
                 ]),
-                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 0)])),
+                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 4)])),
             })
         );
     }

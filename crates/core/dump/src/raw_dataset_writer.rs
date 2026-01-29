@@ -224,13 +224,11 @@ impl RawTableWriter {
         // A reorg is detected if the incoming block prev_hash does not match the hash of the
         // block range previously written. This means we need to split the segment to ensure all
         // blocks within a segment form a valid chain.
-        let reorg = match (
-            self.current_range.as_ref().map(|r| &r.hash),
-            table_rows.range.prev_hash.as_ref(),
-        ) {
-            (Some(a), Some(b)) => a != b,
-            _ => false,
-        };
+        let reorg = self
+            .current_range
+            .as_ref()
+            .map(|r| r.hash != table_rows.range.prev_hash)
+            .unwrap_or(false);
         // We also split the segment if we have reached the configured max `partition_size`.
         let partition_size_exceeded = self.current_file.as_ref().unwrap().bytes_written()
             >= self.opts.partition.0.bytes as usize;

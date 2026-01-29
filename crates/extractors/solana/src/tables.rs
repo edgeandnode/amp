@@ -49,12 +49,11 @@ pub(crate) fn convert_slot_to_db_rows(
     } = non_empty_slot;
 
     let range = BlockRange {
-        // Using the slot as a block number since we don't skip empty slots.
+        // Using the slot as a block number since some blocks do not have a block_height.
         numbers: slot..=slot,
         network: network.clone(),
         hash: blockhash.into(),
-        // Previous slot could be skipped, do not set prev_hash.
-        prev_hash: None,
+        prev_hash: prev_blockhash.into(),
     };
 
     let block_headers_row = {
@@ -119,59 +118,6 @@ pub(crate) fn convert_slot_to_db_rows(
         }
         builder
             .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
-
-    Ok(Rows::new(vec![
-        block_headers_row,
-        transactions_row,
-        messages_row,
-        instructions_row,
-    ]))
-}
-
-pub(crate) fn empty_db_rows(slot: Slot, network: &NetworkId) -> Result<Rows, RowConversionError> {
-    let range = BlockRange {
-        // Using the slot as a block number since we don't skip empty slots.
-        numbers: slot..=slot,
-        network: network.clone(),
-        hash: [0u8; 32].into(),
-        // Previous slot could be skipped, do not set prev_hash.
-        prev_hash: None,
-    };
-
-    let header = block_headers::BlockHeader {
-        slot,
-        parent_slot: slot.saturating_sub(1),
-        ..Default::default()
-    };
-
-    let block_headers_row = {
-        let mut builder = block_headers::BlockHeaderRowsBuilder::new();
-        builder.append(&header);
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
-
-    let transactions_row = {
-        let builder = transactions::TransactionRowsBuilder::with_capacity(0);
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
-
-    let messages_row = {
-        let builder = crate::tables::messages::MessageRowsBuilder::with_capacity(0);
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
-
-    let instructions_row = {
-        let builder = crate::tables::instructions::InstructionRowsBuilder::with_capacity(0);
-        builder
-            .build(range)
             .map_err(RowConversionError::TableBuild)?
     };
 
