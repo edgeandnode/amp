@@ -1131,7 +1131,6 @@ dependencies = [
  "amp-object-store",
  "amp-providers-registry",
  "clap",
- "common",
  "console-subscriber",
  "controller",
  "metadata-db",

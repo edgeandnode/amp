@@ -17,7 +17,6 @@ snmalloc = ["dep:snmalloc-rs"]
 amp-data-store = { path = "../../core/data-store" }
 amp-object-store = { path = "../../core/object-store" }
 clap.workspace = true
-common = { path = "../../core/common" }
 amp-config = { path = "../../config" }
 console-subscriber = { version = "0.5.0", default-features = false, optional = true }
 controller = { path = "../../services/controller" }

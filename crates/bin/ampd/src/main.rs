@@ -1,5 +1,4 @@
 use amp_config::Config;
-use common::BoxError;
 
 mod controller_cmd;
 mod migrate_cmd;
@@ -63,13 +62,13 @@ enum Command {
 async fn main() {
     if let Err(err) = main_inner().await {
         // Manually print the error so we can control the format.
-        let err = error_with_causes(&*err);
+        let err = error_with_causes(&err);
         eprintln!("Exiting with error: {err}");
         std::process::exit(1);
     }
 }
 
-async fn main_inner() -> Result<(), BoxError> {
+async fn main_inner() -> Result<(), Error> {
     // Initialize tokio-console subscriber if feature is enabled
     #[cfg(feature = "console-subscriber")]
     {
@@ -104,13 +103,17 @@ async fn main_inner() -> Result<(), BoxError> {
                 admin_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), true).await?;
+            let config = load_config(config_path.as_ref(), true)
+                .await
+                .map_err(Error::LoadConfig)?;
 
-            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) =
+                monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
             solo_cmd::run(config, meter, flight_server, jsonl_server, admin_server)
                 .await
-                .map_err(Into::into)
+                .map_err(Error::Solo)?;
+            Ok(())
         }
         Command::Server {
             mut flight_server,
@@ -122,52 +125,107 @@ async fn main_inner() -> Result<(), BoxError> {
                 jsonl_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false)
+                .await
+                .map_err(Error::LoadConfig)?;
             let addrs = config.addrs.clone();
 
-            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) =
+                monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
             server_cmd::run(config, meter, &addrs, flight_server, jsonl_server)
                 .await
-                .map_err(Into::into)
+                .map_err(Error::Server)?;
+            Ok(())
         }
         Command::Worker { node_id } => {
-            let node_id = node_id.parse()?;
+            let node_id = node_id.parse().map_err(Error::ParseNodeId)?;
 
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false)
+                .await
+                .map_err(Error::LoadConfig)?;
 
-            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) =
+                monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
             worker_cmd::run(config, meter, node_id)
                 .await
-                .map_err(Into::into)
+                .map_err(Error::Worker)?;
+            Ok(())
         }
         Command::Controller => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false)
+                .await
+                .map_err(Error::LoadConfig)?;
             let admin_api_addr = config.addrs.admin_api_addr;
 
-            let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, meter) =
+                monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
             controller_cmd::run(config, meter, admin_api_addr)
                 .await
-                .map_err(Into::into)
+                .map_err(Error::Controller)?;
+            Ok(())
         }
         Command::Migrate => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), false)
+                .await
+                .map_err(Error::LoadConfig)?;
 
-            let (_providers, _meter) = monitoring::init(config.opentelemetry.as_ref())?;
+            let (_providers, _meter) =
+                monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
-            migrate_cmd::run(config).await.map_err(Into::into)
+            migrate_cmd::run(config).await.map_err(Error::Migrate)?;
+            Ok(())
         }
     }
+}
+
+/// Top-level error type for the `ampd` binary.
+///
+/// Each variant wraps a command-specific error, providing a unified error type
+/// for the main entry point while preserving the full error chain.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Failed to load configuration.
+    #[error("Failed to load config: {0}")]
+    LoadConfig(#[source] LoadConfigError),
+
+    /// Failed to initialize monitoring/telemetry.
+    #[error("Failed to initialize monitoring: {0}")]
+    Monitoring(#[source] monitoring::telemetry::ExporterBuildError),
+
+    /// Failed to parse worker node ID.
+    #[error("Invalid worker node ID: {0}")]
+    ParseNodeId(#[source] worker::node_id::InvalidIdError),
+
+    /// Solo command failed.
+    #[error("Solo command failed: {0}")]
+    Solo(#[source] solo_cmd::Error),
+
+    /// Server command failed.
+    #[error("Server command failed: {0}")]
+    Server(#[source] server_cmd::Error),
+
+    /// Worker command failed.
+    #[error("Worker command failed: {0}")]
+    Worker(#[source] worker_cmd::Error),
+
+    /// Controller command failed.
+    #[error("Controller command failed: {0}")]
+    Controller(#[source] controller_cmd::Error),
+
+    /// Migrate command failed.
+    #[error("Migrate command failed: {0}")]
+    Migrate(#[source] migrate_cmd::Error),
 }
 
 async fn load_config(
     config_path: Option<&String>,
     allow_temp_db: bool,
-) -> Result<Config, BoxError> {
+) -> Result<Config, LoadConfigError> {
     let Some(config) = config_path else {
-        return Err("--config parameter is mandatory".into());
+        return Err(LoadConfigError::MissingConfigPath);
     };
 
     // Gather build info from environment variables set by vergen
@@ -178,8 +236,23 @@ async fn load_config(
         build_date: env!("VERGEN_BUILD_DATE").to_string(),
     };
 
-    let config = Config::load(config, true, None, allow_temp_db, build_info).await?;
+    let config = Config::load(config, true, None, allow_temp_db, build_info)
+        .await
+        .map_err(LoadConfigError::Config)?;
     Ok(config)
+}
+
+/// Error type for [`load_config`](crate::load_config).
+#[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
+pub enum LoadConfigError {
+    /// Config path argument is required but was not provided.
+    #[error("--config parameter is mandatory")]
+    MissingConfigPath,
+
+    /// Failed to load configuration from file.
+    #[error("Failed to load config: {0}")]
+    Config(#[source] amp_config::ConfigError),
 }
 
 /// Builds an error chain string from an error and its sources.

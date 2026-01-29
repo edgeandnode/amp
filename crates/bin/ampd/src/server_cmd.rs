@@ -6,7 +6,6 @@ use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
-use common::BoxError;
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 
@@ -84,7 +83,7 @@ pub async fn run(
         jsonl_at,
     )
     .await
-    .map_err(|err| Error::ServerStart(Box::new(err)))?;
+    .map_err(Error::ServerStart)?;
 
     if let Some(addr) = addrs.flight_addr {
         tracing::info!("Arrow Flight RPC server running at {}", addr);
@@ -132,14 +131,14 @@ pub enum Error {
     /// This occurs during the initialization phase when attempting to bind and
     /// start the Arrow Flight RPC and/or JSON Lines servers.
     #[error("Failed to start server: {0}")]
-    ServerStart(#[source] BoxError),
+    ServerStart(#[source] server::service::InitError),
 
     /// Query server encountered a runtime error.
     ///
     /// This occurs after the servers have started successfully but encounter
     /// an error during operation.
     #[error("Server runtime error: {0}")]
-    ServerRuntime(#[source] BoxError),
+    ServerRuntime(#[source] server::service::ServerRunError),
 }
 
 /// Convert common config to server-specific config
