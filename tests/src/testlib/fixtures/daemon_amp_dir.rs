@@ -1,18 +1,19 @@
-//! Daemon state directory management for test environments.
+//! Amp dir management for test environments.
 //!
-//! This module provides a standalone way to manage daemon state directories
+//! This module provides a standalone way to manage amp dir structures
 //! including config files, manifests, providers, and data directories.
 //! It is completely independent and can be used with any directory path.
 //!
 //! # Directory Structure
 //!
-//! The daemon state directory typically contains:
+//! The amp dir typically contains:
 //! ```text
 //! <root>/
 //! ├── config.toml       # Generated daemon configuration
 //! ├── manifests/        # Dataset manifest files (.json)
 //! ├── providers/        # Provider configuration files (.toml)
-//! └── data/             # Dataset storage and dataset snapshot reference data
+//! ├── data/             # Dataset storage and dataset snapshot reference data
+//! └── metadb/           # PostgreSQL metadata database files
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -22,8 +23,8 @@ use fs_err as fs;
 
 use crate::testlib::config;
 
-/// Default state directory name
-const DEFAULT_STATE_DIRNAME: &str = ".amp";
+/// Default amp dir name
+const AMP_DIR_NAME: &str = ".amp";
 
 /// Default config file name
 const DEFAULT_CONFIG_FILENAME: &str = "config.toml";
@@ -37,97 +38,111 @@ const DEFAULT_PROVIDERS_DIRNAME: &str = "providers";
 /// Default data directory name
 const DEFAULT_DATA_DIRNAME: &str = "data";
 
-/// Create a builder for configuring DaemonStateDir with custom paths.
+/// Default metadata database directory name
+const DEFAULT_METADB_DIRNAME: &str = "metadb";
+
+/// Create a builder for configuring [`DaemonAmpDir`] with custom paths.
 ///
 /// Use this function when you need to customize directory names or config file name.
-/// This is a convenience function that creates a new `DaemonStateDirBuilder` instance.
+/// This is a convenience function that creates a new [`DaemonAmpDirBuilder`] instance.
 ///
-/// The builder automatically appends the default state directory name (`.amp`) to the provided parent path.
-pub fn builder(parent: impl AsRef<Path>) -> DaemonStateDirBuilder {
-    DaemonStateDirBuilder::new(parent)
+/// The builder automatically appends the default amp dir name (`.amp`) to the provided parent path.
+pub fn builder(parent: impl AsRef<Path>) -> DaemonAmpDirBuilder {
+    DaemonAmpDirBuilder::new(parent)
 }
 
-/// Manages a daemon state directory with all daemon-related files and configurations.
+/// Manages an amp dir with all daemon-related files and configurations.
 ///
-/// This struct provides a standalone way to manage daemon state directories
+/// This struct provides a standalone way to manage amp dir structures
 /// independent of any temporary directory management. It can be used with any
-/// root directory path to create and manage the daemon state structure.
-pub struct DaemonStateDir {
+/// root directory path to create and manage the amp dir structure.
+pub struct DaemonAmpDir {
     root: PathBuf,
     config_file_path: PathBuf,
     manifests_dir_path: PathBuf,
     providers_dir_path: PathBuf,
     data_dir_path: PathBuf,
+    metadb_dir_path: PathBuf,
 }
 
-impl DaemonStateDir {
-    /// Create a new daemon state directory manager with the given parent directory.
+impl DaemonAmpDir {
+    /// Create a new amp dir manager with the given parent directory.
     ///
-    /// Creates a new `DaemonStateDir` instance that manages daemon state files within
+    /// Creates a new `DaemonAmpDir` instance that manages amp dir files within
     /// a `.amp/` subdirectory of the provided parent path. This is the standard constructor
-    /// for test environments that need daemon state management.
+    /// for test environments that need amp dir management.
     /// # Directory Structure
     ///
-    /// The created daemon state directory will have this structure:
+    /// The created amp dir will have this structure:
     /// ```text
     /// parent/
-    /// └── .amp/                    # Daemon state root directory
+    /// └── .amp/                    # Amp dir root directory
     ///     ├── config.toml          # Main daemon configuration file
     ///     ├── manifests/           # Dataset manifest files (.json) and SQL files
     ///     ├── providers/           # Provider configuration files (.toml)
-    ///     └── data/                # Dataset storage and blessed reference data
+    ///     ├── data/                # Dataset storage and blessed reference data
+    ///     └── metadb/              # PostgreSQL metadata database files
     /// ```
     ///
     /// For custom directory names or paths, use [`builder()`] instead.
     pub fn new(parent: impl AsRef<Path>) -> Self {
-        let root = parent.as_ref().join(DEFAULT_STATE_DIRNAME);
+        let root = parent.as_ref().join(AMP_DIR_NAME);
         Self {
             config_file_path: root.join(DEFAULT_CONFIG_FILENAME),
             manifests_dir_path: root.join(DEFAULT_MANIFESTS_DIRNAME),
             providers_dir_path: root.join(DEFAULT_PROVIDERS_DIRNAME),
             data_dir_path: root.join(DEFAULT_DATA_DIRNAME),
+            metadb_dir_path: root.join(DEFAULT_METADB_DIRNAME),
             root,
         }
     }
 
-    /// Get the root directory path for this daemon state.
+    /// Get the root directory path for this amp dir.
     ///
-    /// Returns the path where all daemon state files and directories are located.
+    /// Returns the path where all amp dir files and directories are located.
     pub fn root(&self) -> &Path {
         &self.root
     }
 
     /// Get the path to the config file.
     ///
-    /// Returns the full path to the config file within the daemon state directory.
+    /// Returns the full path to the config file within the amp dir.
     pub fn config_file(&self) -> &Path {
         &self.config_file_path
     }
 
     /// Get the manifests directory path.
     ///
-    /// Returns the full path to the manifests directory within the daemon state directory.
+    /// Returns the full path to the manifests directory within the amp dir.
     pub fn manifests_dir(&self) -> &Path {
         &self.manifests_dir_path
     }
 
     /// Get the providers directory path.
     ///
-    /// Returns the full path to the providers directory within the daemon state directory.
+    /// Returns the full path to the providers directory within the amp dir.
     pub fn providers_dir(&self) -> &Path {
         &self.providers_dir_path
     }
 
     /// Get the data directory path.
     ///
-    /// Returns the full path to the data directory within the daemon state directory.
+    /// Returns the full path to the data directory within the amp dir.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir_path
     }
 
+    /// Get the metadata database directory path.
+    ///
+    /// Returns the full path to the metadb directory within the amp dir.
+    /// This directory stores the PostgreSQL data files for the test's metadata database.
+    pub fn metadb_dir(&self) -> &Path {
+        &self.metadb_dir_path
+    }
+
     /// Write config file with the provided content.
     ///
-    /// Writes the given content to the config file in the daemon state directory.
+    /// Writes the given content to the config file in the amp dir.
     /// This method automatically creates the root directory if it doesn't exist.
     /// This method is type agnostic - it accepts any string content without handling serialization.
     pub fn write_config_file(&self, content: &str) -> Result<(), BoxError> {
@@ -146,7 +161,7 @@ impl DaemonStateDir {
 
     /// Create the dataset manifests directory with the specified name.
     ///
-    /// Creates the directory for storing dataset manifest files (.json) within the daemon state directory.
+    /// Creates the directory for storing dataset manifest files (.json) within the amp dir.
     /// Returns the path to the created directory.
     pub fn create_manifests_dir(&self) -> Result<(), BoxError> {
         let dir_path = &self.manifests_dir_path;
@@ -162,7 +177,7 @@ impl DaemonStateDir {
 
     /// Create the providers directory with the specified name.
     ///
-    /// Creates the directory for storing provider configuration files (.toml) within the daemon state directory.
+    /// Creates the directory for storing provider configuration files (.toml) within the amp dir.
     /// Returns the path to the created directory.
     pub fn create_providers_dir(&self) -> Result<(), BoxError> {
         let dir_path = &self.providers_dir_path;
@@ -175,7 +190,7 @@ impl DaemonStateDir {
 
     /// Create the data directory with the specified name.
     ///
-    /// Creates the directory for storing dataset data and dataset snapshot reference data within the daemon state directory.
+    /// Creates the directory for storing dataset data and dataset snapshot reference data within the amp dir.
     /// Returns the path to the created directory.
     pub fn create_data_dir(&self) -> Result<(), BoxError> {
         let dir_path = &self.data_dir_path;
@@ -186,10 +201,10 @@ impl DaemonStateDir {
         Ok(())
     }
 
-    /// Copy dataset snapshots to the daemon state data directory.
+    /// Copy dataset snapshots to the amp dir's data directory.
     ///
     /// This copies pre-validated reference datasets from the `tests/config/snapshots` directory
-    /// to the daemon state's data directory. Only the specifically requested datasets
+    /// to the amp dir's data directory. Only the specifically requested datasets
     /// are copied, maintaining the complete directory structure including revision folders.
     ///
     /// Dataset snapshots are used as baseline reference data for test comparisons.
@@ -234,29 +249,31 @@ impl DaemonStateDir {
     }
 }
 
-/// Builder for configuring DaemonStateDir with custom directory paths.
+/// Builder for configuring [`DaemonAmpDir`] with custom directory paths.
 ///
-/// Allows flexible configuration of daemon state directory structure including
+/// Allows flexible configuration of amp dir structure including
 /// custom paths for config file, manifests, providers, and data directories.
-pub struct DaemonStateDirBuilder {
+pub struct DaemonAmpDirBuilder {
     root: PathBuf,
     config_file: Option<String>,
     manifests_dir: Option<String>,
     providers_dir: Option<String>,
     data_dir: Option<String>,
+    metadb_dir: Option<String>,
 }
 
-impl DaemonStateDirBuilder {
+impl DaemonAmpDirBuilder {
     /// Create a new builder with the specified parent directory.
     ///
-    /// The builder automatically appends the default state directory name (`.amp`) to the provided parent path.
+    /// The builder automatically appends the default amp dir name (`.amp`) to the provided parent path.
     pub fn new(parent: impl AsRef<Path>) -> Self {
         Self {
-            root: parent.as_ref().join(DEFAULT_STATE_DIRNAME),
+            root: parent.as_ref().join(AMP_DIR_NAME),
             config_file: None,
             manifests_dir: None,
             providers_dir: None,
             data_dir: None,
+            metadb_dir: None,
         }
     }
 
@@ -284,8 +301,14 @@ impl DaemonStateDirBuilder {
         self
     }
 
-    /// Build the DaemonStateDir with the configured settings.
-    pub fn build(self) -> DaemonStateDir {
+    /// Set the metadb directory sub-path (defaults to "metadb").
+    pub fn metadb_dir(mut self, path: impl Into<String>) -> Self {
+        self.metadb_dir = Some(path.into());
+        self
+    }
+
+    /// Build the [`DaemonAmpDir`] with the configured settings.
+    pub fn build(self) -> DaemonAmpDir {
         let config_file = self
             .config_file
             .unwrap_or_else(|| DEFAULT_CONFIG_FILENAME.to_string());
@@ -298,12 +321,16 @@ impl DaemonStateDirBuilder {
         let data_dir = self
             .data_dir
             .unwrap_or_else(|| DEFAULT_DATA_DIRNAME.to_string());
+        let metadb_dir = self
+            .metadb_dir
+            .unwrap_or_else(|| DEFAULT_METADB_DIRNAME.to_string());
 
-        DaemonStateDir {
+        DaemonAmpDir {
             config_file_path: self.root.join(&config_file),
             manifests_dir_path: self.root.join(&manifests_dir),
             providers_dir_path: self.root.join(&providers_dir),
             data_dir_path: self.root.join(&data_dir),
+            metadb_dir_path: self.root.join(&metadb_dir),
             root: self.root,
         }
     }

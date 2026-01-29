@@ -972,11 +972,10 @@ dependencies = [
  "figment",
  "fs-err",
  "metadata-db",
- "metadata-db-postgres",
  "monitoring",
  "serde",
  "thiserror 2.0.18",
- "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1146,6 +1145,7 @@ dependencies = [
  "console-subscriber",
  "controller",
  "metadata-db",
+ "metadata-db-postgres",
  "monitoring",
  "server",
  "snmalloc-rs",
@@ -2476,9 +2476,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.54"
+version = "1.2.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6354c81bbfd62d9cfa9cb3c773c2b7b2a3a482d569de977fd0e961f6e7c00583"
+checksum = "47b26a0954ae34af09b50f0de26458fa95369a0d478d8236d3f93082b219bd29"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -4647,6 +4647,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_home"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7f84e12ccf0a7ddc17a6c41c93326024c42920d7ee630d04950e6926645c0fe"
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4870,9 +4876,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
+checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "finl_unicode"
@@ -5159,6 +5165,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf68cef89750956493a66a10f512b9e58d9db21f2a573c079c0bdf1207a54a7"
 dependencies = [
  "autocfg",
+ "tokio",
 ]
 
 [[package]]
@@ -6709,9 +6716,13 @@ dependencies = [
 name = "metadata-db-postgres"
 version = "0.1.0"
 dependencies = [
- "pgtemp",
+ "backon",
+ "fs-err",
+ "nix 0.30.1",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "which 8.0.0",
 ]
 
 [[package]]
@@ -13102,7 +13113,7 @@ dependencies = [
  "home",
  "miniz_oxide 0.7.4",
  "paste",
- "which",
+ "which 6.0.3",
 ]
 
 [[package]]
@@ -13451,6 +13462,17 @@ dependencies = [
  "either",
  "home",
  "rustix 0.38.44",
+ "winsafe",
+]
+
+[[package]]
+name = "which"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fabb953106c3c8eea8306e4393700d7657561cb43122571b172bbfb7c7ba1d"
+dependencies = [
+ "env_home",
+ "rustix 1.1.3",
  "winsafe",
 ]
 

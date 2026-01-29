@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use amp_config::Config;
 
 mod controller_cmd;
@@ -27,6 +29,10 @@ enum Command {
     /// Run Amp in local development mode with all services
     #[command(alias = "dev")]
     Solo {
+        /// Base directory for Amp data and configuration. Defaults to current working directory.
+        /// Configuration and data are stored in `<amp_dir>/.amp/`.
+        #[arg(long, env = "AMP_DIR")]
+        amp_dir: Option<PathBuf>,
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
@@ -92,6 +98,7 @@ async fn main_inner() -> Result<(), Error> {
 
     match command {
         Command::Solo {
+            amp_dir,
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
@@ -103,16 +110,23 @@ async fn main_inner() -> Result<(), Error> {
                 admin_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), true)
+            let (config, pg_fut) = load_solo_config(config_path.as_ref(), amp_dir)
                 .await
                 .map_err(Error::LoadConfig)?;
 
             let (_providers, meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
-            solo_cmd::run(config, meter, flight_server, jsonl_server, admin_server)
-                .await
-                .map_err(Error::Solo)?;
+            solo_cmd::run(
+                config,
+                pg_fut,
+                meter,
+                flight_server,
+                jsonl_server,
+                admin_server,
+            )
+            .await
+            .map_err(Error::Solo)?;
             Ok(())
         }
         Command::Server {
@@ -125,9 +139,7 @@ async fn main_inner() -> Result<(), Error> {
                 jsonl_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
+            let config = load_config(config_path.as_ref()).map_err(Error::LoadConfig)?;
             let addrs = config.addrs.clone();
 
             let (_providers, meter) =
@@ -141,9 +153,7 @@ async fn main_inner() -> Result<(), Error> {
         Command::Worker { node_id } => {
             let node_id = node_id.parse().map_err(Error::ParseNodeId)?;
 
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
+            let config = load_config(config_path.as_ref()).map_err(Error::LoadConfig)?;
 
             let (_providers, meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
@@ -154,9 +164,7 @@ async fn main_inner() -> Result<(), Error> {
             Ok(())
         }
         Command::Controller => {
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
+            let config = load_config(config_path.as_ref()).map_err(Error::LoadConfig)?;
             let admin_api_addr = config.addrs.admin_api_addr;
 
             let (_providers, meter) =
@@ -168,9 +176,7 @@ async fn main_inner() -> Result<(), Error> {
             Ok(())
         }
         Command::Migrate => {
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
+            let config = load_config(config_path.as_ref()).map_err(Error::LoadConfig)?;
 
             let (_providers, _meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
@@ -220,29 +226,79 @@ pub enum Error {
     Migrate(#[source] migrate_cmd::Error),
 }
 
-async fn load_config(
+/// Loads configuration for non-solo commands.
+///
+/// Requires a config file with a metadata DB URL. No managed PostgreSQL.
+#[expect(clippy::result_large_err)]
+fn load_config(config_path: Option<&String>) -> Result<Config, LoadConfigError> {
+    let build_info = build_info();
+
+    match config_path {
+        Some(path) => {
+            Config::load(path, true, None, None, build_info).map_err(LoadConfigError::Config)
+        }
+        None => Err(LoadConfigError::MissingConfigPath),
+    }
+}
+
+/// Loads configuration for solo mode with a managed PostgreSQL instance.
+///
+/// Starts a persistent PostgreSQL server in `<amp_dir>/.amp/metadb/` and returns
+/// both the config and the postgres background future. The caller must include
+/// the postgres future in its `select!` for structured concurrency.
+async fn load_solo_config(
     config_path: Option<&String>,
-    allow_temp_db: bool,
-) -> Result<Config, LoadConfigError> {
-    let Some(config) = config_path else {
-        return Err(LoadConfigError::MissingConfigPath);
+    amp_dir: Option<PathBuf>,
+) -> Result<(Config, solo_cmd::PostgresFuture), LoadConfigError> {
+    let build_info = build_info();
+
+    // Resolve the amp dir (CLI → env → cwd)
+    let amp_dir = amp_dir.unwrap_or_else(|| PathBuf::from("."));
+
+    // Ensure .amp/ directory structure exists and compute metadb path
+    let amp_dir_path =
+        amp_config::ensure_amp_directories(&amp_dir).map_err(LoadConfigError::Config)?;
+    let metadb_data_dir = amp_dir_path.join(amp_config::DEFAULT_METADB_DIRNAME);
+
+    // Start managed PostgreSQL — the caller owns this future
+    let (pg_handle, pg_fut) = metadata_db_postgres::service::new(metadb_data_dir)
+        .await
+        .map_err(LoadConfigError::PostgresStartup)?;
+    let db_url = pg_handle.url().to_string();
+
+    let config = match config_path {
+        Some(path) => {
+            // Config file exists — load it, using managed DB as fallback
+            Config::load(path, true, None, Some(&db_url), build_info)
+                .map_err(LoadConfigError::Config)?
+        }
+        None => {
+            // Check if config file exists in amp_dir/.amp/config.toml
+            let config_file_path = amp_dir.join(".amp").join("config.toml");
+            if config_file_path.exists() {
+                Config::load(&config_file_path, true, None, Some(&db_url), build_info)
+                    .map_err(LoadConfigError::Config)?
+            } else {
+                Config::default_for_solo(amp_dir, &db_url, build_info)
+                    .map_err(LoadConfigError::Config)?
+            }
+        }
     };
 
-    // Gather build info from environment variables set by vergen
-    let build_info = amp_config::BuildInfo {
+    Ok((config, Box::pin(pg_fut)))
+}
+
+/// Constructs build info from compile-time environment variables.
+fn build_info() -> amp_config::BuildInfo {
+    amp_config::BuildInfo {
         version: env!("VERGEN_GIT_DESCRIBE").to_string(),
         commit_sha: env!("VERGEN_GIT_SHA").to_string(),
         commit_timestamp: env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),
         build_date: env!("VERGEN_BUILD_DATE").to_string(),
-    };
-
-    let config = Config::load(config, true, None, allow_temp_db, build_info)
-        .await
-        .map_err(LoadConfigError::Config)?;
-    Ok(config)
+    }
 }
 
-/// Error type for [`load_config`](crate::load_config).
+/// Error type for config loading.
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::large_enum_variant)]
 pub enum LoadConfigError {
@@ -253,6 +309,10 @@ pub enum LoadConfigError {
     /// Failed to load configuration from file.
     #[error("Failed to load config: {0}")]
     Config(#[source] amp_config::ConfigError),
+
+    /// Failed to start the managed PostgreSQL instance for solo mode.
+    #[error("Failed to start PostgreSQL: {0}")]
+    PostgresStartup(#[source] metadata_db_postgres::PostgresError),
 }
 
 /// Builds an error chain string from an error and its sources.

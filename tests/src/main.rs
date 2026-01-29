@@ -163,8 +163,7 @@ async fn main() {
 
             // Load configuration and create necessary components
             let config = Arc::new(
-                Config::load(temp_config_file.path(), false, None, false, None)
-                    .await
+                Config::load(temp_config_file.path(), false, None, None, None)
                     .expect("Failed to load config"),
             );
             let data_store = DataStore::new(

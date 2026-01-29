@@ -7,18 +7,18 @@ use crate::{DEFAULT_REPO, config::Config, shell, ui};
 
 #[derive(Debug)]
 pub enum InitError {
-    AlreadyInitialized { install_dir: PathBuf },
+    AlreadyInitialized { amp_dir: PathBuf },
 }
 
 impl std::fmt::Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AlreadyInitialized { install_dir } => {
+            Self::AlreadyInitialized { amp_dir } => {
                 writeln!(f, "ampup is already initialized")?;
-                writeln!(f, "  Installation: {}", install_dir.display())?;
+                writeln!(f, "  Installation: {}", amp_dir.display())?;
                 writeln!(f)?;
                 writeln!(f, "  If you want to reinstall, remove the directory first:")?;
-                writeln!(f, "    rm -rf {}", install_dir.display())?;
+                writeln!(f, "    rm -rf {}", amp_dir.display())?;
             }
         }
         Ok(())
@@ -28,19 +28,19 @@ impl std::fmt::Display for InitError {
 impl std::error::Error for InitError {}
 
 pub async fn run(
-    install_dir: Option<PathBuf>,
+    amp_dir: Option<PathBuf>,
     no_modify_path: bool,
     no_install_latest: bool,
     github_token: Option<String>,
 ) -> Result<()> {
     // Create config to get all the paths
-    let config = Config::new(install_dir)?;
+    let config = Config::new(amp_dir)?;
     let ampup_path = config.ampup_binary_path();
 
     // Check if already initialized
     if ampup_path.exists() {
         return Err(InitError::AlreadyInitialized {
-            install_dir: config.amp_dir.clone(),
+            amp_dir: config.amp_dir.clone(),
         }
         .into());
     }

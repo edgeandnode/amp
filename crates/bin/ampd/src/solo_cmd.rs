@@ -10,8 +10,17 @@ use monitoring::telemetry::metrics::Meter;
 
 use crate::{controller_cmd, server_cmd, worker_cmd};
 
+/// Boxed future for the managed PostgreSQL service.
+///
+/// The solo command owns this future and includes it in its `select!` for
+/// structured concurrency. If postgres exits unexpectedly, the `select!`
+/// completes and the solo command shuts down.
+pub type PostgresFuture =
+    Pin<Box<dyn Future<Output = Result<(), metadata_db_postgres::PostgresError>> + Send>>;
+
 pub async fn run(
     config: CommonConfig,
+    pg_fut: PostgresFuture,
     meter: Option<Meter>,
     flight_server: bool,
     jsonl_server: bool,
@@ -127,11 +136,15 @@ pub async fn run(
     .await
     .map_err(Error::WorkerInit)?;
 
-    // Wait for worker, server, or controller to complete
+    // Wait for any service to complete. The postgres future is included as a
+    // select! branch for structured concurrency (IC-7): if postgres exits
+    // unexpectedly, the solo command detects it immediately rather than waiting
+    // for a query to fail.
     tokio::select! {biased;
         res = controller_fut => res.map_err(Error::ControllerRuntime)?,
         res = worker_fut => res.map_err(Error::WorkerRuntime)?,
         res = server_fut => res.map_err(Error::ServerRuntime)?,
+        res = pg_fut => res.map_err(Error::PostgresExited)?,
     }
 
     Ok(())
@@ -205,4 +218,12 @@ pub enum Error {
     /// This occurs when the worker process encounters an error during operation.
     #[error("Worker runtime error: {0}")]
     WorkerRuntime(#[source] worker::service::RuntimeError),
+
+    /// Managed PostgreSQL exited unexpectedly.
+    ///
+    /// This occurs when the managed PostgreSQL process terminates while the solo
+    /// command is still running. This is detected via the structured concurrency
+    /// pattern — the postgres future is a `select!` branch in the solo command.
+    #[error("PostgreSQL exited: {0}")]
+    PostgresExited(#[source] metadata_db_postgres::PostgresError),
 }
