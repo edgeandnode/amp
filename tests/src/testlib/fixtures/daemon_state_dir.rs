@@ -12,7 +12,8 @@
 //! ├── config.toml       # Generated daemon configuration
 //! ├── manifests/        # Dataset manifest files (.json)
 //! ├── providers/        # Provider configuration files (.toml)
-//! └── data/             # Dataset storage and dataset snapshot reference data
+//! ├── data/             # Dataset storage and dataset snapshot reference data
+//! └── metadb/           # PostgreSQL metadata database files
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -37,6 +38,9 @@ const DEFAULT_PROVIDERS_DIRNAME: &str = "providers";
 /// Default data directory name
 const DEFAULT_DATA_DIRNAME: &str = "data";
 
+/// Default metadata database directory name
+const DEFAULT_METADB_DIRNAME: &str = "metadb";
+
 /// Create a builder for configuring DaemonStateDir with custom paths.
 ///
 /// Use this function when you need to customize directory names or config file name.
@@ -58,6 +62,7 @@ pub struct DaemonStateDir {
     manifests_dir_path: PathBuf,
     providers_dir_path: PathBuf,
     data_dir_path: PathBuf,
+    metadb_dir_path: PathBuf,
 }
 
 impl DaemonStateDir {
@@ -75,7 +80,8 @@ impl DaemonStateDir {
     ///     ├── config.toml          # Main daemon configuration file
     ///     ├── manifests/           # Dataset manifest files (.json) and SQL files
     ///     ├── providers/           # Provider configuration files (.toml)
-    ///     └── data/                # Dataset storage and blessed reference data
+    ///     ├── data/                # Dataset storage and blessed reference data
+    ///     └── metadb/              # PostgreSQL metadata database files
     /// ```
     ///
     /// For custom directory names or paths, use [`builder()`] instead.
@@ -86,6 +92,7 @@ impl DaemonStateDir {
             manifests_dir_path: root.join(DEFAULT_MANIFESTS_DIRNAME),
             providers_dir_path: root.join(DEFAULT_PROVIDERS_DIRNAME),
             data_dir_path: root.join(DEFAULT_DATA_DIRNAME),
+            metadb_dir_path: root.join(DEFAULT_METADB_DIRNAME),
             root,
         }
     }
@@ -123,6 +130,14 @@ impl DaemonStateDir {
     /// Returns the full path to the data directory within the daemon state directory.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir_path
+    }
+
+    /// Get the metadata database directory path.
+    ///
+    /// Returns the full path to the metadb directory within the daemon state directory.
+    /// This directory stores the PostgreSQL data files for the test's metadata database.
+    pub fn metadb_dir(&self) -> &Path {
+        &self.metadb_dir_path
     }
 
     /// Write config file with the provided content.
@@ -244,6 +259,7 @@ pub struct DaemonStateDirBuilder {
     manifests_dir: Option<String>,
     providers_dir: Option<String>,
     data_dir: Option<String>,
+    metadb_dir: Option<String>,
 }
 
 impl DaemonStateDirBuilder {
@@ -257,6 +273,7 @@ impl DaemonStateDirBuilder {
             manifests_dir: None,
             providers_dir: None,
             data_dir: None,
+            metadb_dir: None,
         }
     }
 
@@ -284,6 +301,12 @@ impl DaemonStateDirBuilder {
         self
     }
 
+    /// Set the metadb directory sub-path (defaults to "metadb").
+    pub fn metadb_dir(mut self, path: impl Into<String>) -> Self {
+        self.metadb_dir = Some(path.into());
+        self
+    }
+
     /// Build the DaemonStateDir with the configured settings.
     pub fn build(self) -> DaemonStateDir {
         let config_file = self
@@ -298,12 +321,16 @@ impl DaemonStateDirBuilder {
         let data_dir = self
             .data_dir
             .unwrap_or_else(|| DEFAULT_DATA_DIRNAME.to_string());
+        let metadb_dir = self
+            .metadb_dir
+            .unwrap_or_else(|| DEFAULT_METADB_DIRNAME.to_string());
 
         DaemonStateDir {
             config_file_path: self.root.join(&config_file),
             manifests_dir_path: self.root.join(&manifests_dir),
             providers_dir_path: self.root.join(&providers_dir),
             data_dir_path: self.root.join(&data_dir),
+            metadb_dir_path: self.root.join(&metadb_dir),
             root: self.root,
         }
     }

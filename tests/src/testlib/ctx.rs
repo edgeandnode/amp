@@ -14,8 +14,9 @@
 //!     ├── config.toml               # Main config (dynamically generated)
 //!     ├── manifests/                # Dataset manifests directory (initially empty, registered via Admin API)
 //!     ├── providers/                # Provider configs directory (initially empty, registered via Admin API)
-//!     └── data/                     # Output directory (dataset snapshots copied if requested)
-//!         └── eth_mainnet/          # Dataset snapshot reference data with complete structure
+//!     ├── data/                     # Output directory (dataset snapshots copied if requested)
+//!     │   └── eth_mainnet/          # Dataset snapshot reference data with complete structure
+//!     └── metadb/                   # PostgreSQL metadata database files (isolated per test)
 //! ```
 //!
 //! # Key Features
@@ -295,8 +296,21 @@ impl TestCtxBuilder {
         // Load environment variables from .env file (if present)
         let _ = dotenvy::dotenv_override();
 
-        // Create temporary metadata database fixture
-        let metadata_db = MetadataDbFixture::new().await;
+        // Create temporary test directory first (needed for metadb path)
+        let test_dir = TestEnvDir::new(&self.test_name)?;
+        tracing::info!(
+            "Creating isolated test environment at: {}",
+            test_dir.path().display()
+        );
+
+        // Build DaemonStateDir with default paths (we'll use this for metadb path)
+        let daemon_state_dir_path = test_dir.path();
+        let daemon_state_dir_temp = daemon_state_dir_builder(daemon_state_dir_path).build();
+
+        // Create temporary metadata database fixture using the test's isolated metadb directory
+        let metadata_db =
+            MetadataDbFixture::with_data_dir(daemon_state_dir_temp.metadb_dir().to_path_buf())
+                .await;
 
         // Update daemon config with the temp database URL
         let daemon_config = DaemonConfigBuilder::from_config(&self.daemon_config)
@@ -306,17 +320,8 @@ impl TestCtxBuilder {
         // Serialize config content before moving daemon_config
         let config_content = daemon_config.serialize_to_toml();
 
-        // Create temporary test directory
-        let test_dir = TestEnvDir::new(&self.test_name)?;
-        tracing::info!(
-            "Creating isolated test environment at: {}",
-            test_dir.path().display()
-        );
-
-        let daemon_state_dir = test_dir.path();
-
-        // Build DaemonStateDir with extracted configuration
-        let daemon_state_dir = daemon_state_dir_builder(daemon_state_dir)
+        // Build final DaemonStateDir with extracted configuration from daemon_config
+        let daemon_state_dir = daemon_state_dir_builder(daemon_state_dir_path)
             .manifests_dir(daemon_config.dataset_manifests_path())
             .providers_dir(daemon_config.provider_configs_path())
             .data_dir(daemon_config.data_path())
