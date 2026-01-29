@@ -8,11 +8,14 @@ use serde::{Deserialize, Serialize};
 const AUTH_STORAGE_PATH: &str = ".amp/cache/amp_cli_auth";
 
 /// Auth credentials stored on disk at ~/.amp/cache/amp_cli_auth
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthStorage {
+    /// JWT access token for authenticated API requests.
     pub access_token: String,
+    /// Token for obtaining new access tokens when expired.
     pub refresh_token: String,
+    /// The authenticated user's unique identifier.
     pub user_id: String,
     /// Optional list of accounts (can be user IDs or wallet addresses)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21,6 +24,7 @@ pub struct AuthStorage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expiry: Option<i64>,
 }
+
 impl AuthStorage {
     /// Get the path to the auth storage file.
     fn storage_path() -> Option<PathBuf> {
@@ -140,7 +144,7 @@ impl DeviceAuthorizationRequest {
 }
 
 /// Response from POST /api/v1/device/authorize endpoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct DeviceAuthorizationResponse {
     /// Device verification code used for polling.
     pub device_code: String,
@@ -157,7 +161,7 @@ pub struct DeviceAuthorizationResponse {
 }
 
 /// Success response from GET /api/v1/device/token endpoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct DeviceTokenResponse {
     /// The access token for authenticated requests.
     pub access_token: String,
@@ -190,7 +194,7 @@ impl DeviceTokenResponse {
 /// `Success` must come first because it has more required fields than `Error`.
 /// If deserialization of `Success` fails (missing fields), it falls back to `Error`.
 /// Do not reorder these variants.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum DeviceTokenPollingResponse {
     /// Successfully received tokens (must be first - has more required fields).
@@ -200,7 +204,7 @@ pub enum DeviceTokenPollingResponse {
 }
 
 /// Error response from GET /api/v1/device/token endpoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct DeviceTokenErrorResponse {
     pub error: String,
 }

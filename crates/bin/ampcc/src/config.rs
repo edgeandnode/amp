@@ -5,38 +5,42 @@ use figment::{
 };
 use serde::Deserialize;
 
+/// CLI configuration with environment and file-based overrides.
 #[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct Config {
+    /// Local Arrow Flight gRPC query service URL.
     #[allow(dead_code)]
-    #[serde(default = "default_local_query_url")]
     pub local_query_url: String,
-    #[serde(default = "default_local_admin_url")]
+    /// Local admin API URL.
     pub local_admin_url: String,
-    #[serde(default = "default_registry_url")]
+    /// Dataset registry API URL.
     pub registry_url: String,
-    #[serde(default = "default_source")]
+    /// Default data source: "registry" or "local".
     pub default_source: String,
-    #[serde(default = "default_auth_url")]
+    /// Authentication service URL.
     pub auth_url: String,
 }
 
-fn default_local_query_url() -> String {
-    "grpc://localhost:1602".into()
-}
-fn default_local_admin_url() -> String {
-    "http://localhost:1610".into()
-}
-fn default_registry_url() -> String {
-    "https://api.registry.amp.staging.thegraph.com".into()
-}
-fn default_source() -> String {
-    "registry".into()
-}
-fn default_auth_url() -> String {
-    "https://auth.amp.thegraph.com".into()
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            local_query_url: "grpc://localhost:1602".to_string(),
+            local_admin_url: "http://localhost:1610".to_string(),
+            registry_url: "https://api.registry.amp.staging.thegraph.com".to_string(),
+            default_source: "registry".to_string(),
+            auth_url: "https://auth.amp.thegraph.com".to_string(),
+        }
+    }
 }
 
 impl Config {
+    /// Loads configuration from file and environment with precedence.
+    ///
+    /// Sources (highest to lowest precedence):
+    /// 1. Environment variables with `AMP_CC_` prefix
+    /// 2. Config file at `~/.config/ampcc/config.toml`
+    /// 3. Built-in defaults
     pub fn load() -> Result<Self> {
         let mut figment = Figment::new();
 
