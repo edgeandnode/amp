@@ -973,6 +973,7 @@ version = "0.1.0"
 dependencies = [
  "amp-object-store",
  "bytes",
+ "chrono",
  "datafusion",
  "datasets-common",
  "foyer",
