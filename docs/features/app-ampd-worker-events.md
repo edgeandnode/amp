@@ -23,6 +23,7 @@ Worker Event Streaming enables a **Push Model** where workers emit events to Kaf
 ## Key Concepts
 
 - **Push Model**: Event-driven architecture where workers proactively emit state changes to Kafka, rather than clients polling for updates
+- **Protobuf Encoding**: Events are encoded using Protocol Buffers for compact, schema-enforced messages
 - **Event Envelope**: Common wrapper around all events containing metadata like `event_id`, `event_type`, `timestamp`, and `source`
 - **At-Least-Once Delivery**: Events may be delivered multiple times; consumers must handle duplicates via `event_id` deduplication
 - **Idempotent Updates**: Progress events are snapshots of current state, not deltas - duplicate delivery is harmless
@@ -43,12 +44,14 @@ Workers emit events directly to Kafka as sync jobs progress:
 
 ### Event Types
 
-| Event Type       | Trigger                    | Purpose                    |
-| ---------------- | -------------------------- | -------------------------- |
-| `sync.started`   | Job begins extraction      | Track job lifecycle        |
-| `sync.progress`  | Segment committed          | Report block range updates |
-| `sync.completed` | Job finishes successfully  | Mark dataset as synced     |
-| `sync.failed`    | Job encounters fatal error | Trigger alerts             |
+| Event Type       | Trigger                      | Purpose                    |
+| ---------------- | ---------------------------- | -------------------------- |
+| `sync.started`   | Job begins extraction        | Track job lifecycle        |
+| `sync.progress`  | Progress percentage changes  | Report sync progress       |
+| `sync.completed` | Job finishes successfully    | Mark dataset as synced     |
+| `sync.failed`    | Job encounters fatal error   | Trigger alerts             |
+
+Progress events are emitted on meaningful status changes (e.g., percentage increments) rather than per-block to avoid excessive noise, especially for high-throughput chains like Solana.
 
 ### Partitioning
 
@@ -64,7 +67,17 @@ This ensures ordering per-table while allowing parallelism across tables.
 
 Uses [rskafka](https://github.com/influxdata/rskafka) - a pure Rust Kafka client with no C dependencies.
 
+### Failure Handling
+
+Event emission is a by-product of sync jobs - Kafka unavailability must not fail the job:
+
+- **Retry with exponential backoff**: 3 attempts, then 1s, 5s, 1min delays
+- **Log errors**: Record failures for debugging without blocking sync
+- **Fallback**: The [Job Progress API](admin-jobs-progress.md) remains available when events are disabled or Kafka is unavailable
+
 ## Configuration
+
+Event streaming is **opt-in** (disabled by default). When disabled, the [Job Progress API](admin-jobs-progress.md) remains available for polling sync status.
 
 ```toml
 [worker.events]
@@ -104,6 +117,8 @@ kafka-console-consumer \
 ```
 
 ## Event Reference
+
+Events are encoded using Protocol Buffers. Examples below are shown as JSON for readability.
 
 ### Event Envelope
 
