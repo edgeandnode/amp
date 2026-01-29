@@ -965,6 +965,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.17",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6729,7 +6730,7 @@ dependencies = [
 name = "metadata-db-postgres"
 version = "0.1.0"
 dependencies = [
- "pgtemp",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]

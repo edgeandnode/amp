@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::LazyLock, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
 use common::query_context::QueryEnv;
@@ -19,35 +19,62 @@ use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::OnceCell;
 
-/// Whether to keep the temporary directory after the database is dropped
-///
-/// This is set to `false` by default, but can be overridden by the `KEEP_TEMP_DIRS` environment
-/// variable.
-static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| {
-    std::env::var("KEEP_TEMP_DIRS")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false)
-});
+// ============================================================================
+// Directory Structure Constants
+// ============================================================================
+//
+// These constants define the standard `.amp/` directory structure used by
+// `ampd solo` and other Amp tools. All paths are relative to the amp_dir.
 
-/// Global singleton temporary metadata database instance
+/// Default state directory name (created inside amp_dir)
+pub const DEFAULT_STATE_DIRNAME: &str = ".amp";
+
+/// Default config file name (inside `.amp/`)
+pub const DEFAULT_CONFIG_FILENAME: &str = "config.toml";
+
+/// Default data directory name (inside `.amp/`) - stores Parquet files
+pub const DEFAULT_DATA_DIRNAME: &str = "data";
+
+/// Default providers directory name (inside `.amp/`) - stores provider configs
+pub const DEFAULT_PROVIDERS_DIRNAME: &str = "providers";
+
+/// Default manifests directory name (inside `.amp/`) - stores dataset manifests
+pub const DEFAULT_MANIFESTS_DIRNAME: &str = "manifests";
+
+/// Default metadata database directory name (inside `.amp/`) - stores PostgreSQL data
+pub const DEFAULT_METADB_DIRNAME: &str = "metadb";
+
+/// Global singleton metadata database instance
 ///
-/// This is a shared instance of the temporary database that can be used by the config system.
+/// This is a shared instance of the database that can be used by the config system.
 /// The service future is spawned automatically when the database is first accessed.
 static GLOBAL_METADATA_DB: OnceCell<Handle> = OnceCell::const_new();
 
-/// Gets or creates the global singleton temporary metadata database
+/// Gets or creates the global singleton metadata database
 ///
 /// Service is spawned automatically on first access. Used by config system
-/// for backward compatibility with the old `temp_metadata_db()` function.
-async fn global_metadata_db(keep: bool) -> &'static Handle {
-    GLOBAL_METADATA_DB
-        .get_or_init(|| async {
-            let (handle, fut) = metadata_db_postgres::service::new(keep);
-            // Spawn the service future to keep the database alive
-            tokio::spawn(fut);
-            handle
-        })
-        .await
+/// when no explicit metadata DB URL is configured.
+///
+/// The database is stored in a temporary directory that persists for the lifetime
+/// of the process. For persistent storage across restarts, use Task 1.3's
+/// implementation which derives the path from config.
+async fn global_metadata_db(
+    data_dir: PathBuf,
+) -> Result<&'static Handle, metadata_db_postgres::PostgresError> {
+    // Try to get existing handle first
+    if let Some(handle) = GLOBAL_METADATA_DB.get() {
+        return Ok(handle);
+    }
+
+    // Initialize new database
+    let (handle, fut) = metadata_db_postgres::service::new(data_dir).await?;
+    // Spawn the service future to keep the database alive
+    tokio::spawn(fut);
+
+    // Store and return
+    // Note: In case of race condition, get_or_init handles it
+    let _ = GLOBAL_METADATA_DB.set(handle);
+    Ok(GLOBAL_METADATA_DB.get().expect("just set"))
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +114,21 @@ fn default_pool_size() -> u32 {
 
 fn default_auto_migrate() -> bool {
     true
+}
+
+/// Default data directory: `.amp/data`
+fn default_data_dir() -> String {
+    ".amp/data".into()
+}
+
+/// Default providers directory: `.amp/providers`
+fn default_providers_dir() -> String {
+    ".amp/providers".into()
+}
+
+/// Default manifests directory: `.amp/manifests`
+fn default_manifests_dir() -> String {
+    ".amp/manifests".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,12 +180,14 @@ impl Default for BuildInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
     // Storage paths
-    /// Where the extracted datasets are stored.
+    /// Where the extracted datasets are stored (default: `.amp/data`)
+    #[serde(default = "default_data_dir")]
     data_dir: String,
-    /// Path to a providers directory. Each provider is configured as a separate toml file in this directory.
+    /// Path to a providers directory. Each provider is configured as a separate toml file in this directory (default: `.amp/providers`)
+    #[serde(default = "default_providers_dir")]
     providers_dir: String,
-    /// Path to a directory containing dataset manifest files.
-    #[serde(default, alias = "dataset_defs_dir")]
+    /// Path to a directory containing dataset manifest files (default: `.amp/manifests`)
+    #[serde(default = "default_manifests_dir", alias = "dataset_defs_dir")]
     manifests_dir: String,
 
     // Memory and performance
@@ -159,6 +203,7 @@ pub struct ConfigFile {
 
     // Operational timing
     /// Polling interval for new blocks during dump in seconds (default: 1.0)
+    #[serde(default)]
     pub poll_interval_secs: ConfigDuration<1>,
     /// Max interval for derived dataset dump microbatches in blocks (default: 100000)
     pub microbatch_max_interval: Option<u64>,
@@ -222,6 +267,70 @@ pub enum ConfigError {
     MetadataDb(PathBuf, metadata_db::Error),
     #[error("Invalid address format for {0}: {1}")]
     InvalidAddress(String, String),
+    #[error("Failed to start PostgreSQL: {0}")]
+    PostgresStartup(#[source] metadata_db_postgres::PostgresError),
+    #[error("Failed to create directory {0}: {1}")]
+    DirectoryCreation(PathBuf, std::io::Error),
+}
+
+/// Ensures the `.amp/` directory structure exists for solo mode.
+///
+/// Creates the following directory structure if it doesn't exist:
+/// ```text
+/// <amp_dir>/
+/// └── .amp/
+///     ├── data/       # Dataset storage (Parquet files)
+///     ├── providers/  # Provider configuration files
+///     ├── manifests/  # Dataset manifest files
+///     └── metadb/     # PostgreSQL data directory
+/// ```
+///
+/// This function is idempotent - it's safe to call multiple times.
+/// Existing directories and their contents are preserved.
+///
+/// # Arguments
+///
+/// * `amp_dir` - Base directory where `.amp/` will be created
+///
+/// # Returns
+///
+/// Returns the path to the `.amp/` state directory on success.
+#[expect(clippy::result_large_err)]
+pub fn ensure_amp_directories(
+    amp_dir: impl AsRef<std::path::Path>,
+) -> Result<PathBuf, ConfigError> {
+    let amp_dir = amp_dir.as_ref();
+    let state_dir = amp_dir.join(DEFAULT_STATE_DIRNAME);
+
+    // Create the main .amp directory if needed
+    if !state_dir.exists() {
+        tracing::info!("Creating .amp directory at: {}", state_dir.display());
+        fs::create_dir_all(&state_dir)
+            .map_err(|e| ConfigError::DirectoryCreation(state_dir.clone(), e))?;
+    }
+
+    // Create subdirectories
+    let subdirs = [
+        (DEFAULT_DATA_DIRNAME, "data"),
+        (DEFAULT_PROVIDERS_DIRNAME, "providers"),
+        (DEFAULT_MANIFESTS_DIRNAME, "manifests"),
+        (DEFAULT_METADB_DIRNAME, "metadb"),
+    ];
+
+    for (dirname, description) in subdirs {
+        let dir_path = state_dir.join(dirname);
+        if !dir_path.exists() {
+            tracing::info!(
+                "Creating {} directory at: {}",
+                description,
+                dir_path.display()
+            );
+            fs::create_dir_all(&dir_path)
+                .map_err(|e| ConfigError::DirectoryCreation(dir_path, e))?;
+        }
+    }
+
+    Ok(state_dir)
 }
 
 impl Config {
@@ -275,8 +384,19 @@ impl Config {
                 auto_migrate: config_file.metadata_db.auto_migrate,
             }
         } else if allow_temp_db {
+            // Derive metadata DB data directory from config path's parent
+            // Default to .amp/metadb/ next to the config file
+            let metadb_data_dir = config_path
+                .parent()
+                .map(|p| p.join(".amp").join("metadb"))
+                .unwrap_or_else(|| PathBuf::from(".amp/metadb"));
+
+            let handle = global_metadata_db(metadb_data_dir)
+                .await
+                .map_err(ConfigError::PostgresStartup)?;
+
             MetadataDbConfig {
-                url: Some(global_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string()),
+                url: Some(handle.url().to_string()),
                 pool_size: config_file.metadata_db.pool_size,
                 auto_migrate: config_file.metadata_db.auto_migrate,
             }
@@ -306,6 +426,90 @@ impl Config {
             poll_interval: config_file.poll_interval_secs.into(),
             build_info: build_info.into().unwrap_or_default(),
             keep_alive_interval: config_file.keep_alive_interval,
+        })
+    }
+
+    /// Create a configuration with sensible defaults for solo/dev mode.
+    ///
+    /// This is used when no config file is provided. It creates a zero-config setup with:
+    /// - Persistent PostgreSQL database in `<amp_dir>/.amp/metadb/`
+    /// - Local filesystem stores in `<amp_dir>/.amp/` directory
+    /// - Default service ports (1602, 1603, 1610)
+    /// - Minimal memory limits (suitable for local development)
+    ///
+    /// The `.amp/` directory structure is automatically created on first run if it
+    /// doesn't exist, including all required subdirectories (data, providers,
+    /// manifests, metadb).
+    ///
+    /// # Arguments
+    ///
+    /// * `amp_dir` - Base directory for Amp data and configuration. All data is stored
+    ///   in `<amp_dir>/.amp/`. Defaults to current working directory if `.` is passed.
+    /// * `build_info` - Build information to include in the config.
+    pub async fn default_for_solo(
+        amp_dir: impl Into<PathBuf>,
+        build_info: impl Into<Option<BuildInfo>>,
+    ) -> Result<Self, ConfigError> {
+        let amp_dir = amp_dir.into();
+
+        // Ensure the .amp/ directory structure exists (creates if needed)
+        let amp_state_dir = ensure_amp_directories(&amp_dir)?;
+
+        // Use a virtual path for config_path since there's no actual file
+        let config_path = amp_state_dir.join("<solo-mode-defaults>");
+
+        // Create database in <amp_dir>/.amp/metadb/ (persistent across restarts)
+        let metadb_data_dir = amp_state_dir.join(DEFAULT_METADB_DIRNAME);
+        let handle = global_metadata_db(metadb_data_dir)
+            .await
+            .map_err(ConfigError::PostgresStartup)?;
+
+        let metadata_db = MetadataDbConfig {
+            url: Some(handle.url().to_string()),
+            pool_size: DEFAULT_POOL_SIZE,
+            auto_migrate: true,
+        };
+
+        // Reference the directories created by ensure_amp_directories()
+        let data_store_url = ObjectStoreUrl::new_with_base(
+            amp_state_dir.join(DEFAULT_DATA_DIRNAME).to_string_lossy(),
+            None,
+        )
+        .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+
+        let providers_store_url = ObjectStoreUrl::new_with_base(
+            amp_state_dir
+                .join(DEFAULT_PROVIDERS_DIRNAME)
+                .to_string_lossy(),
+            None,
+        )
+        .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+
+        let manifests_store_url = ObjectStoreUrl::new_with_base(
+            amp_state_dir
+                .join(DEFAULT_MANIFESTS_DIRNAME)
+                .to_string_lossy(),
+            None,
+        )
+        .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?;
+
+        Ok(Self {
+            data_store_url,
+            providers_store_url,
+            manifests_store_url,
+            metadata_db,
+            max_mem_mb: 0,       // Unlimited
+            query_max_mem_mb: 0, // Unlimited per-query
+            spill_location: vec![],
+            microbatch_max_interval: 100_000,
+            server_microbatch_max_interval: 1_000,
+            parquet: ParquetConfig::default(),
+            opentelemetry: None,
+            addrs: Addrs::default(),
+            config_path,
+            poll_interval: Duration::from_secs(1),
+            build_info: build_info.into().unwrap_or_default(),
+            keep_alive_interval: Some(30),
         })
     }
 

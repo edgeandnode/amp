@@ -28,6 +28,10 @@ enum Command {
     /// Run Amp in local development mode with all services
     #[command(alias = "dev")]
     Solo {
+        /// Base directory for Amp data and configuration. Defaults to current working directory.
+        /// Configuration and data are stored in `<amp_dir>/.amp/`.
+        #[arg(long, env = "AMP_DIR")]
+        amp_dir: Option<std::path::PathBuf>,
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
@@ -93,6 +97,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
     match command {
         Command::Solo {
+            amp_dir,
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
@@ -104,7 +109,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 admin_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), true).await?;
+            let config = load_config(config_path.as_ref(), amp_dir, true).await?;
 
             let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
@@ -122,7 +127,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 jsonl_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), None, false).await?;
             let addrs = config.addrs.clone();
 
             let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
@@ -134,7 +139,7 @@ async fn main_inner() -> Result<(), BoxError> {
         Command::Worker { node_id } => {
             let node_id = node_id.parse()?;
 
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), None, false).await?;
 
             let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
@@ -143,7 +148,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 .map_err(Into::into)
         }
         Command::Controller => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), None, false).await?;
             let admin_api_addr = config.addrs.admin_api_addr;
 
             let (_providers, meter) = monitoring::init(config.opentelemetry.as_ref())?;
@@ -153,7 +158,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 .map_err(Into::into)
         }
         Command::Migrate => {
-            let config = load_config(config_path.as_ref(), false).await?;
+            let config = load_config(config_path.as_ref(), None, false).await?;
 
             let (_providers, _meter) = monitoring::init(config.opentelemetry.as_ref())?;
 
@@ -164,12 +169,9 @@ async fn main_inner() -> Result<(), BoxError> {
 
 async fn load_config(
     config_path: Option<&String>,
+    amp_dir: Option<std::path::PathBuf>,
     allow_temp_db: bool,
 ) -> Result<Config, BoxError> {
-    let Some(config) = config_path else {
-        return Err("--config parameter is mandatory".into());
-    };
-
     // Gather build info from environment variables set by vergen
     let build_info = amp_config::BuildInfo {
         version: env!("VERGEN_GIT_DESCRIBE").to_string(),
@@ -178,7 +180,25 @@ async fn load_config(
         build_date: env!("VERGEN_BUILD_DATE").to_string(),
     };
 
-    let config = Config::load(config, true, None, allow_temp_db, build_info).await?;
+    let config = match config_path {
+        Some(path) => Config::load(path, true, None, allow_temp_db, build_info).await?,
+        None => {
+            if !allow_temp_db {
+                return Err("--config parameter is mandatory for this mode".into());
+            }
+            // Check if config file exists in amp_dir/.amp/config.toml
+            let amp_dir = amp_dir.unwrap_or_else(|| std::path::PathBuf::from("."));
+            let config_file_path = amp_dir.join(".amp").join("config.toml");
+            if config_file_path.exists() {
+                // Load the config file from the amp_dir/.amp/ directory
+                Config::load(&config_file_path, true, None, allow_temp_db, build_info).await?
+            } else {
+                // Use defaults for solo mode with the specified amp_dir
+                Config::default_for_solo(amp_dir, build_info).await?
+            }
+        }
+    };
+
     Ok(config)
 }
 
