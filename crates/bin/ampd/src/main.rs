@@ -166,10 +166,6 @@ async fn load_config(
     config_path: Option<&String>,
     allow_temp_db: bool,
 ) -> Result<Config, BoxError> {
-    let Some(config) = config_path else {
-        return Err("--config parameter is mandatory".into());
-    };
-
     // Gather build info from environment variables set by vergen
     let build_info = amp_config::BuildInfo {
         version: env!("VERGEN_GIT_DESCRIBE").to_string(),
@@ -178,7 +174,16 @@ async fn load_config(
         build_date: env!("VERGEN_BUILD_DATE").to_string(),
     };
 
-    let config = Config::load(config, true, None, allow_temp_db, build_info).await?;
+    let config = match config_path {
+        Some(path) => Config::load(path, true, None, allow_temp_db, build_info).await?,
+        None => {
+            if !allow_temp_db {
+                return Err("--config parameter is mandatory for this mode".into());
+            }
+            Config::default_for_solo(build_info).await?
+        }
+    };
+
     Ok(config)
 }
 

@@ -6,11 +6,13 @@
 //! - Accepts explicit data directory paths
 //! - Reuses existing data directories (skips initdb if `PG_VERSION` exists)
 //! - Uses Unix sockets for connections (no port conflicts)
+//! - Detects and cleans up orphan processes from previous runs
+//! - Verifies database accepts connections before returning
 //!
 //! # Prerequisites
 //!
-//! PostgreSQL must be installed on the system with `initdb` and `postgres` binaries
-//! available in PATH.
+//! PostgreSQL must be installed on the system with `initdb`, `postgres`, and `pg_isready`
+//! binaries available in PATH.
 
 use std::{
     path::{Path, PathBuf},
@@ -32,6 +34,9 @@ const DEFAULT_READINESS_TIMEOUT_SECS: u64 = 30;
 
 /// Interval between readiness checks (milliseconds)
 const READINESS_CHECK_INTERVAL_MS: u64 = 100;
+
+/// Postmaster PID file name
+const POSTMASTER_PID_FILE: &str = "postmaster.pid";
 
 /// A running PostgreSQL server process
 ///
@@ -72,13 +77,30 @@ impl PostgresProcess {
     /// - PostgreSQL server fails to start
     /// - Server doesn't become ready within the timeout
     pub async fn start(data_dir: PathBuf) -> Result<Self, PostgresError> {
+        tracing::info!(
+            data_dir = %data_dir.display(),
+            "Starting PostgreSQL database service"
+        );
+
         // Ensure data directory exists with proper permissions
         ensure_data_dir(&data_dir).await?;
 
+        // Check for orphan postgres process and clean up if needed
+        cleanup_orphan_process(&data_dir).await?;
+
         // Initialize if needed (check for PG_VERSION)
-        if !is_initialized(&data_dir).await {
+        let is_fresh = !is_initialized(&data_dir).await;
+        if is_fresh {
             init_data_dir(&data_dir).await?;
+        } else {
+            tracing::info!(
+                data_dir = %data_dir.display(),
+                "Reusing existing PostgreSQL data directory"
+            );
         }
+
+        // Log PostgreSQL version
+        log_postgres_version().await;
 
         // Start the postgres server
         let child = start_postgres(&data_dir).await?;
@@ -92,8 +114,15 @@ impl PostgresProcess {
             connection_url,
         };
 
-        // Wait for server to be ready
+        // Wait for server to be ready (socket file + accepting connections)
         process.wait_for_ready().await?;
+
+        tracing::info!(
+            data_dir = %process.data_dir.display(),
+            url = %process.connection_url,
+            fresh_database = is_fresh,
+            "PostgreSQL database ready"
+        );
 
         Ok(process)
     }
@@ -114,8 +143,9 @@ impl PostgresProcess {
 
     /// Waits for the PostgreSQL server to become ready
     ///
-    /// This checks for the socket file to appear, indicating the server
-    /// is accepting connections.
+    /// This checks:
+    /// 1. Socket file appears in the data directory
+    /// 2. `pg_isready` confirms the server is accepting connections
     async fn wait_for_ready(&mut self) -> Result<(), PostgresError> {
         let socket_path = self.data_dir.join(SOCKET_FILENAME);
         let timeout = Duration::from_secs(DEFAULT_READINESS_TIMEOUT_SECS);
@@ -124,7 +154,8 @@ impl PostgresProcess {
 
         tracing::debug!(
             socket_path = %socket_path.display(),
-            "Waiting for PostgreSQL socket"
+            timeout_secs = DEFAULT_READINESS_TIMEOUT_SECS,
+            "Waiting for PostgreSQL to accept connections"
         );
 
         loop {
@@ -139,14 +170,16 @@ impl PostgresProcess {
                 });
             }
 
-            // Check if socket file exists
+            // Check if socket file exists first (faster than pg_isready)
             if socket_path.exists() {
-                tracing::info!(
-                    socket_path = %socket_path.display(),
-                    elapsed_ms = start.elapsed().as_millis() as u64,
-                    "PostgreSQL server is ready"
-                );
-                return Ok(());
+                // Verify server is actually accepting connections
+                if check_connection_ready(&self.data_dir).await {
+                    tracing::debug!(
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        "PostgreSQL is accepting connections"
+                    );
+                    return Ok(());
+                }
             }
 
             // Check timeout
@@ -384,6 +417,174 @@ async fn start_postgres(data_dir: &Path) -> Result<Child, PostgresError> {
         .map_err(|err| PostgresError::StartFailed { source: err })?;
 
     Ok(child)
+}
+
+/// Checks for and cleans up any orphan PostgreSQL process from a previous run
+///
+/// An orphan process can occur if the previous ampd instance crashed without
+/// shutting down PostgreSQL properly. This function:
+/// 1. Checks for postmaster.pid file
+/// 2. If found, reads the PID and checks if process is still running
+/// 3. If running, terminates the orphan process
+/// 4. Cleans up stale socket and pid files
+async fn cleanup_orphan_process(data_dir: &Path) -> Result<(), PostgresError> {
+    let pid_path = data_dir.join(POSTMASTER_PID_FILE);
+    let socket_path = data_dir.join(SOCKET_FILENAME);
+
+    if !pid_path.exists() {
+        return Ok(());
+    }
+
+    // Read the PID from postmaster.pid (first line)
+    let pid_content = match tokio::fs::read_to_string(&pid_path).await {
+        Ok(content) => content,
+        Err(err) => {
+            tracing::debug!(
+                path = %pid_path.display(),
+                error = %err,
+                "Failed to read postmaster.pid, attempting cleanup"
+            );
+            // Try to remove stale files anyway
+            let _ = tokio::fs::remove_file(&pid_path).await;
+            let _ = tokio::fs::remove_file(&socket_path).await;
+            return Ok(());
+        }
+    };
+
+    let Some(pid_str) = pid_content.lines().next() else {
+        tracing::debug!("Empty postmaster.pid file, cleaning up");
+        let _ = tokio::fs::remove_file(&pid_path).await;
+        let _ = tokio::fs::remove_file(&socket_path).await;
+        return Ok(());
+    };
+
+    let pid: u32 = match pid_str.trim().parse() {
+        Ok(pid) => pid,
+        Err(_) => {
+            tracing::debug!(
+                pid_str = pid_str,
+                "Invalid PID in postmaster.pid, cleaning up stale files"
+            );
+            let _ = tokio::fs::remove_file(&pid_path).await;
+            let _ = tokio::fs::remove_file(&socket_path).await;
+            return Ok(());
+        }
+    };
+
+    // Check if process is still running using kill -0
+    let process_exists = Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .output()
+        .await
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+
+    if process_exists {
+        tracing::warn!(
+            pid = pid,
+            data_dir = %data_dir.display(),
+            "Detected orphan PostgreSQL process, terminating"
+        );
+
+        // Send SIGTERM to orphan process
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .output()
+            .await;
+
+        // Wait briefly for process to exit
+        for _ in 0..50 {
+            // 5 seconds max
+            sleep(Duration::from_millis(100)).await;
+            let still_running = Command::new("kill")
+                .arg("-0")
+                .arg(pid.to_string())
+                .output()
+                .await
+                .map(|output| output.status.success())
+                .unwrap_or(false);
+
+            if !still_running {
+                tracing::info!(pid = pid, "Orphan PostgreSQL process terminated");
+                break;
+            }
+        }
+
+        // Force kill if still running
+        let still_running = Command::new("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .output()
+            .await
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+
+        if still_running {
+            tracing::warn!(pid = pid, "Orphan process not responding, force killing");
+            let _ = Command::new("kill")
+                .arg("-9")
+                .arg(pid.to_string())
+                .output()
+                .await;
+            sleep(Duration::from_millis(100)).await;
+        }
+    } else {
+        tracing::debug!(
+            pid = pid,
+            "Stale postmaster.pid found (process not running), cleaning up"
+        );
+    }
+
+    // Clean up stale files
+    let _ = tokio::fs::remove_file(&pid_path).await;
+    let _ = tokio::fs::remove_file(&socket_path).await;
+
+    Ok(())
+}
+
+/// Checks if PostgreSQL is accepting connections using pg_isready
+///
+/// Returns true if the server is ready to accept connections, false otherwise.
+async fn check_connection_ready(data_dir: &Path) -> bool {
+    let pg_isready_path = match find_binary("pg_isready").await {
+        Ok(path) => path,
+        Err(_) => {
+            // Fall back to socket existence check if pg_isready not found
+            tracing::debug!("pg_isready not found, using socket check only");
+            return data_dir.join(SOCKET_FILENAME).exists();
+        }
+    };
+
+    let output = Command::new(&pg_isready_path)
+        .arg("-h")
+        .arg(data_dir)
+        .arg("-q") // Quiet mode, exit status only
+        .output()
+        .await;
+
+    match output {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Logs the PostgreSQL version for diagnostics
+async fn log_postgres_version() {
+    let postgres_path = match find_binary("postgres").await {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+
+    let output = Command::new(&postgres_path).arg("--version").output().await;
+
+    if let Ok(output) = output
+        && output.status.success()
+    {
+        let version = String::from_utf8_lossy(&output.stdout);
+        tracing::info!(version = %version.trim(), "PostgreSQL version");
+    }
 }
 
 /// Builds a PostgreSQL connection URL using Unix socket
