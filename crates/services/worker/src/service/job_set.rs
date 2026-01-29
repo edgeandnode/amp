@@ -3,8 +3,8 @@ use std::{
     future::Future,
 };
 
-use common::BoxError;
-use tokio::task::{AbortHandle, Id as TaskId, JoinSet};
+use dump::Error as DumpError;
+use tokio::task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet};
 
 use crate::job::JobId;
 
@@ -26,7 +26,7 @@ pub struct JobSet {
     task_id_to_job_id: HashMap<TaskId, JobId>,
 
     /// The set of jobs that are spawned and managed by the worker.
-    jobs: JoinSet<Result<(), BoxError>>,
+    jobs: JoinSet<Result<(), DumpError>>,
 }
 
 impl JobSet {
@@ -38,7 +38,7 @@ impl JobSet {
     pub(super) fn spawn(
         &mut self,
         job_id: JobId,
-        job_fut: impl Future<Output = Result<(), BoxError>> + Send + 'static,
+        job_fut: impl Future<Output = Result<(), DumpError>> + Send + 'static,
     ) {
         let handle = self.jobs.spawn(job_fut);
 
@@ -99,7 +99,7 @@ impl JobSet {
             // The job was aborted
             Err(err) if err.is_cancelled() => (job_id, Err(JoinError::Aborted)),
             // The job panicked
-            Err(err) => (job_id, Err(JoinError::Panicked(err.into()))),
+            Err(err) => (job_id, Err(JoinError::Panicked(err))),
         };
 
         Some(next)
@@ -111,11 +111,11 @@ impl JobSet {
 pub enum JoinError {
     /// The job failed
     #[error("Job failed: {0}")]
-    Failed(BoxError),
+    Failed(DumpError),
     /// The job was aborted
     #[error("Job was aborted")]
     Aborted,
     /// The job panicked
     #[error("Job panicked: {0}")]
-    Panicked(BoxError),
+    Panicked(TokioJoinError),
 }
