@@ -138,49 +138,91 @@ mod tests {
     }
 
     #[test]
-    fn test_needs_refresh_no_expiry() {
-        // No expiry set should trigger refresh
+    fn needs_refresh_with_no_expiry_returns_true() {
+        //* Given
         let auth = make_auth_storage(None);
-        assert!(AuthClient::needs_refresh(&auth));
+
+        //* When
+        let result = AuthClient::needs_refresh(&auth);
+
+        //* Then
+        assert!(result, "no expiry set should trigger refresh");
     }
 
     #[test]
-    fn test_needs_refresh_expired() {
-        // Token that expired 1 hour ago
+    fn needs_refresh_with_expired_token_returns_true() {
+        //* Given
         let now = Utc::now().timestamp();
         let auth = make_auth_storage(Some(now - 3600));
-        assert!(AuthClient::needs_refresh(&auth));
+
+        //* When
+        let result = AuthClient::needs_refresh(&auth);
+
+        //* Then
+        assert!(result, "token expired 1 hour ago should trigger refresh");
     }
 
     #[test]
-    fn test_needs_refresh_expiring_soon() {
-        // Token expiring in 2 minutes (within 5 minute threshold)
+    fn needs_refresh_with_token_expiring_soon_returns_true() {
+        //* Given
         let now = Utc::now().timestamp();
         let auth = make_auth_storage(Some(now + 120));
-        assert!(AuthClient::needs_refresh(&auth));
+
+        //* When
+        let result = AuthClient::needs_refresh(&auth);
+
+        //* Then
+        assert!(
+            result,
+            "token expiring in 2 minutes (within threshold) should trigger refresh"
+        );
     }
 
     #[test]
-    fn test_needs_refresh_at_threshold() {
-        // Token expiring in exactly 5 minutes (at threshold boundary)
+    fn needs_refresh_at_threshold_boundary_returns_true() {
+        //* Given
         let now = Utc::now().timestamp();
         let auth = make_auth_storage(Some(now + REFRESH_THRESHOLD_SECS));
-        assert!(AuthClient::needs_refresh(&auth));
+
+        //* When
+        let result = AuthClient::needs_refresh(&auth);
+
+        //* Then
+        assert!(
+            result,
+            "token expiring at exactly 5 minutes should trigger refresh"
+        );
     }
 
     #[test]
-    fn test_needs_refresh_valid_token() {
-        // Token expiring in 1 hour (well beyond threshold)
+    fn needs_refresh_with_valid_token_returns_false() {
+        //* Given
         let now = Utc::now().timestamp();
         let auth = make_auth_storage(Some(now + 3600));
-        assert!(!AuthClient::needs_refresh(&auth));
+
+        //* When
+        let result = AuthClient::needs_refresh(&auth);
+
+        //* Then
+        assert!(
+            !result,
+            "token expiring in 1 hour should not trigger refresh"
+        );
     }
 
     #[test]
-    fn test_needs_refresh_just_beyond_threshold() {
-        // Token expiring in 5 minutes + 1 second (just beyond threshold)
+    fn needs_refresh_just_beyond_threshold_returns_false() {
+        //* Given
         let now = Utc::now().timestamp();
         let auth = make_auth_storage(Some(now + REFRESH_THRESHOLD_SECS + 1));
-        assert!(!AuthClient::needs_refresh(&auth));
+
+        //* When
+        let result = AuthClient::needs_refresh(&auth);
+
+        //* Then
+        assert!(
+            !result,
+            "token expiring in 5 minutes + 1 second should not trigger refresh"
+        );
     }
 }

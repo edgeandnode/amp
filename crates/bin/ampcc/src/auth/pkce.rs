@@ -176,38 +176,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_code_verifier_length() {
+    fn generate_code_verifier_returns_43_char_string() {
+        //* When
         let verifier = generate_code_verifier();
-        // 32 bytes base64url encoded = 43 characters
-        assert_eq!(verifier.len(), 43);
+
+        //* Then
+        assert_eq!(
+            verifier.len(),
+            43,
+            "32 bytes base64url encoded should be 43 characters"
+        );
     }
 
     #[test]
-    fn test_code_verifier_uniqueness() {
+    fn generate_code_verifier_produces_unique_values() {
+        //* When
         let v1 = generate_code_verifier();
         let v2 = generate_code_verifier();
-        assert_ne!(v1, v2);
+
+        //* Then
+        assert_ne!(v1, v2, "consecutive verifiers should be unique");
     }
 
     #[test]
-    fn test_code_challenge_deterministic() {
+    fn generate_code_challenge_with_same_input_returns_same_output() {
+        //* Given
         let verifier = "test_verifier_string";
+
+        //* When
         let c1 = generate_code_challenge(verifier);
         let c2 = generate_code_challenge(verifier);
-        assert_eq!(c1, c2);
+
+        //* Then
+        assert_eq!(
+            c1, c2,
+            "challenge should be deterministic for same verifier"
+        );
     }
 
     #[test]
-    fn test_code_challenge_format() {
+    fn generate_code_challenge_returns_valid_base64url_format() {
+        //* Given
         let verifier = generate_code_verifier();
+
+        //* When
         let challenge = generate_code_challenge(&verifier);
-        // SHA256 = 32 bytes, base64url encoded = 43 characters
-        assert_eq!(challenge.len(), 43);
-        // Should only contain URL-safe base64 characters
+
+        //* Then
+        assert_eq!(
+            challenge.len(),
+            43,
+            "SHA256 (32 bytes) base64url encoded should be 43 characters"
+        );
         assert!(
             challenge
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "challenge should only contain URL-safe base64 characters"
         );
     }
 }

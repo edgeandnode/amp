@@ -28,15 +28,13 @@ use crate::{
 pub const DEFAULT_PAGE_SIZE: i64 = 50;
 
 /// Input mode for the application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Search,
 }
 
 /// Active pane for focus tracking.
-/// In Local mode: Header -> Datasets -> Jobs -> Workers -> Detail -> Header
-/// In Registry mode: Header -> Datasets -> Manifest -> Schema -> Header
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivePane {
     Header,
@@ -93,7 +91,7 @@ impl ActivePane {
 }
 
 /// What content is displayed in the detail pane.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ContentView {
     /// Dataset manifest and schema (existing behavior)
     Dataset,
@@ -151,7 +149,7 @@ pub enum LoadedManifest {
 }
 
 /// Status of the device flow authentication.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DeviceFlowStatus {
     /// Waiting for user to confirm (press Enter to open browser).
     AwaitingConfirmation,
@@ -168,7 +166,7 @@ pub enum DeviceFlowStatus {
 }
 
 /// State for the device flow authentication process.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DeviceFlowState {
     /// User code to display/copy.
     pub user_code: String,
@@ -222,7 +220,7 @@ impl DatasetEntry {
 }
 
 /// Result of loading datasets from a source, including the total count.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DatasetsResult {
     /// The list of datasets.
     pub datasets: Vec<DatasetEntry>,
@@ -297,7 +295,7 @@ pub enum SelectedItem {
 }
 
 /// Column information for inspect view.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ColumnInfo {
     pub name: String,
     pub arrow_type: String,
@@ -305,14 +303,14 @@ pub struct ColumnInfo {
 }
 
 /// Table schema for inspect view.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TableSchema {
     pub name: String,
     pub columns: Vec<ColumnInfo>,
 }
 
 /// Result of inspecting a dataset manifest.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InspectResult {
     pub tables: Vec<TableSchema>,
 }

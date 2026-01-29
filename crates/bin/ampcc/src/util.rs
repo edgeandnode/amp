@@ -51,36 +51,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shorten_short_string() {
-        assert_eq!(shorten("hello"), "hello");
-        assert_eq!(shorten("exactly18chars!!!"), "exactly18chars!!!");
+    fn shorten_with_short_string_returns_unchanged() {
+        //* Given
+        let short = "hello";
+        let exactly_18 = "exactly18chars!!!";
+
+        //* When
+        let result_short = shorten(short);
+        let result_18 = shorten(exactly_18);
+
+        //* Then
+        assert_eq!(result_short, "hello", "short strings should be unchanged");
+        assert_eq!(
+            result_18, "exactly18chars!!!",
+            "strings <= 18 chars should be unchanged"
+        );
     }
 
     #[test]
-    fn test_shorten_long_string() {
+    fn shorten_with_long_string_returns_truncated() {
+        //* Given
         let long = "0x742d35Cc6634C0532925a3b844Bc9e7595f8fE71";
-        assert_eq!(shorten(long), "0x742d...f8fE71");
+
+        //* When
+        let result = shorten(long);
+
+        //* Then
+        assert_eq!(
+            result, "0x742d...f8fE71",
+            "long strings should be truncated to first6...last6"
+        );
     }
 
     #[test]
-    fn test_is_evm_address_valid() {
-        // Valid lowercase address
-        assert!(is_evm_address("0x742d35cc6634c0532925a3b844bc9e7595f8fe71"));
-        // Valid checksummed address
-        assert!(is_evm_address("0x742d35Cc6634C0532925a3b844Bc9e7595f8fE71"));
-        // Valid all zeros
-        assert!(is_evm_address("0x0000000000000000000000000000000000000000"));
+    fn is_evm_address_with_valid_addresses_returns_true() {
+        //* Given
+        let lowercase = "0x742d35cc6634c0532925a3b844bc9e7595f8fe71";
+        let checksummed = "0x742d35Cc6634C0532925a3b844Bc9e7595f8fE71";
+        let all_zeros = "0x0000000000000000000000000000000000000000";
+
+        //* When + Then
+        assert!(
+            is_evm_address(lowercase),
+            "valid lowercase address should be accepted"
+        );
+        assert!(
+            is_evm_address(checksummed),
+            "valid checksummed address should be accepted"
+        );
+        assert!(
+            is_evm_address(all_zeros),
+            "valid all-zeros address should be accepted"
+        );
     }
 
     #[test]
-    fn test_is_evm_address_invalid() {
-        // Not an EVM address format
-        assert!(!is_evm_address("did:privy:cmfd6bf6u006vjx0b7xb2eybx"));
-        // Too short
-        assert!(!is_evm_address("0x123"));
-        // Missing 0x prefix
-        assert!(!is_evm_address("742d35Cc6634C0532925a3b844Bc9e7595f8fE71"));
-        // Empty string
-        assert!(!is_evm_address(""));
+    fn is_evm_address_with_invalid_formats_returns_false() {
+        //* Given
+        let not_evm = "did:privy:cmfd6bf6u006vjx0b7xb2eybx";
+        let too_short = "0x123";
+        let missing_prefix = "742d35Cc6634C0532925a3b844Bc9e7595f8fE71";
+        let empty = "";
+
+        //* When + Then
+        assert!(
+            !is_evm_address(not_evm),
+            "non-EVM format should be rejected"
+        );
+        assert!(
+            !is_evm_address(too_short),
+            "too short address should be rejected"
+        );
+        assert!(
+            !is_evm_address(missing_prefix),
+            "address without 0x prefix should be rejected"
+        );
+        assert!(!is_evm_address(empty), "empty string should be rejected");
     }
 }
