@@ -63,6 +63,56 @@ git checkout -b feature/your-feature-name
 git checkout -b fix/bug-description
 ```
 
+### 2. Format Code
+
+Format your code before committing:
+
+```bash
+# Format all Rust code
+just fmt
+
+# Check formatting without making changes
+just fmt-check
+
+# Format TypeScript code
+just fmt-ts
+```
+
+### 3. Check and Lint
+
+Run compilation checks and clippy linter:
+
+```bash
+# Check Rust code compiles
+just check
+
+# Run clippy linter (fix all warnings)
+just clippy
+
+# Check a specific crate
+just check-crate <crate-name>
+just clippy-crate <crate-name>
+```
+
+### 4. Run Tests
+
+```bash
+# Run all tests (unit + integration)
+just test
+
+# Run unit tests only
+just test-unit
+
+# Run integration tests only
+just test-it
+```
+
+**Note:** For faster test execution, install [cargo-nextest](https://nexte.st/):
+
+```bash
+cargo install --locked cargo-nextest@^0.9
+```
+
 ## Contributor License Agreement
 
 **Before your first contribution can be merged, you must sign our Contributor License Agreement (CLA).**
@@ -122,6 +172,36 @@ returning millions of rows.
 
 Closes #123
 ```
+
+## Coding Standards
+
+Follow the coding patterns and standards documented in [`docs/code/`](docs/code/). Key patterns include:
+
+- **Error handling**: Proper use of `Result<T, E>` and error types
+- **Module structure**: Correct module organization and visibility
+- **Type design**: Appropriate use of newtypes, enums, and type aliases
+
+All code must pass `just fmt-check` and `just clippy` with zero warnings.
+
+## Submitting Changes
+
+Please do not merge `main` into your branch as you develop your pull request. Instead, rebase your branch on top of the latest `main` if your pull request branch is long-lived.
+
+We try to keep the history of the `main` branch linear and avoid merge commits.
+
+### Using Claude Code
+
+Contributors using [Claude Code](https://claude.ai/claude-code) can leverage project-specific skills in `.claude/skills/`:
+
+| Skill | Purpose |
+|-------|---------|
+| `/code-format` | Format Rust and TypeScript code |
+| `/code-check` | Run compilation checks and clippy |
+| `/code-test` | Run unit and integration tests |
+| `/code-review` | Review code changes |
+| `/commit` | Generate commit messages |
+| `/code-pattern-discovery` | Load coding patterns |
+| `/feature-discovery` | Load feature documentation |
 
 ## License
 
