@@ -2,9 +2,8 @@
 
 use std::{future::Future, sync::Arc};
 
-use common::BoxError;
 use datasets_common::hash_reference::HashReference;
-use dump::{Ctx, metrics::MetricsRegistry};
+use dump::{Ctx, Error as DumpError, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
 use crate::{
@@ -19,7 +18,7 @@ pub(super) fn new(
     job_ctx: WorkerJobCtx,
     job_id: JobId,
     job_desc: JobDescriptor,
-) -> impl Future<Output = Result<(), BoxError>> {
+) -> impl Future<Output = Result<(), DumpError>> {
     let (end_block, max_writers, reference, dataset_kind) = match job_desc {
         JobDescriptor::Dump {
             end_block,
@@ -63,6 +62,5 @@ pub(super) fn new(
         )
         .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
         .await
-        .map_err(|err| err.into())
     }
 }
