@@ -36,7 +36,7 @@ pub async fn new(
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
     jsonl_at: impl Into<Option<SocketAddr>>,
-) -> Result<(BoundAddrs, impl Future<Output = Result<(), BoxError>>), InitError> {
+) -> Result<(BoundAddrs, impl Future<Output = Result<(), ServerRunError>>), InitError> {
     // Create the internal service instance
     let service =
         flight::Service::create(config, data_store, metadata_db, dataset_store, meter).await?;
@@ -49,7 +49,7 @@ pub async fn new(
             .map_err(InitError::Flight)?,
         None => (
             None,
-            Box::pin(std::future::pending::<Result<(), BoxError>>()) as _,
+            Box::pin(std::future::pending::<Result<(), ServerRunError>>()) as _,
         ),
     };
 
@@ -61,7 +61,7 @@ pub async fn new(
             .map_err(InitError::Jsonl)?,
         None => (
             None,
-            Box::pin(std::future::pending::<Result<(), BoxError>>()) as _,
+            Box::pin(std::future::pending::<Result<(), ServerRunError>>()) as _,
         ),
     };
 
@@ -89,6 +89,12 @@ pub async fn new(
 
     Ok((addrs, fut))
 }
+
+/// Runtime error for the server future returned by [`new`].
+///
+/// This error occurs when the Arrow Flight or JSON Lines server encounters
+/// an unexpected error during operation (after successful initialization).
+pub type ServerRunError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {
