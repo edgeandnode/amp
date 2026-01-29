@@ -62,9 +62,17 @@ impl FileMetadata {
 
         let size = object_size.unwrap_or_default() as u64;
 
+        // Extract created_at from ParquetMeta to use as last_modified.
+        // Segments are created once and never modified, so created_at is appropriate.
+        let last_modified = {
+            let this = &parquet_meta.created_at;
+            chrono::DateTime::from_timestamp(this.0.as_secs() as i64, this.0.subsec_nanos())
+                .unwrap_or_default()
+        };
+
         let object_meta = ObjectMeta {
             location,
-            last_modified: Default::default(),
+            last_modified,
             size,
             e_tag,
             version,

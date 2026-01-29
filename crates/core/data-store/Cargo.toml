@@ -7,6 +7,7 @@ license-file.workspace = true
 [dependencies]
 amp-object-store = { path = "../object-store" }
 bytes.workspace = true
+chrono.workspace = true
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 foyer = "0.22"

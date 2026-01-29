@@ -344,9 +344,26 @@ impl DataStore {
             .map_ok(move |row| {
                 let location = table_path.child(row.file_name.as_str());
                 let size = row.object_size.unwrap_or_default() as u64;
+
+                // Extract created_at from ParquetMeta to use as last_modified.
+                // Segments are created once and never modified, so created_at is appropriate.
+                #[derive(serde::Deserialize)]
+                struct Timestamp {
+                    created_at: std::time::Duration,
+                }
+                let last_modified = serde_json::from_value::<Timestamp>(row.metadata.clone())
+                    .ok()
+                    .and_then(|t| {
+                        chrono::DateTime::from_timestamp(
+                            t.created_at.as_secs() as i64,
+                            t.created_at.subsec_nanos(),
+                        )
+                    })
+                    .unwrap_or_default();
+
                 let object_meta = ObjectMeta {
                     location,
-                    last_modified: Default::default(),
+                    last_modified,
                     size,
                     e_tag: row.object_e_tag,
                     version: row.object_version,
