@@ -13,7 +13,19 @@ use reqwest::Client as HttpClient;
 use tokio::sync::mpsc::UnboundedSender;
 use url::Url;
 
-use crate::{action::Action, auth::AuthStorage, config::Config, registry::RegistryClient};
+use crate::{
+    action::Action,
+    amp_registry::{
+        AmpRegistryClient, DatasetDto, DatasetVersionDto, DerivedManifest, FetchDatasetsParams,
+        SearchDatasetsParams,
+    },
+    auth::AuthStorage,
+    config::Config,
+    error::AmpccError,
+};
+
+/// Default page size for paginated API requests.
+pub const DEFAULT_PAGE_SIZE: i64 = 50;
 
 /// Input mode for the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,8 +50,8 @@ pub enum ActivePane {
 
 impl ActivePane {
     /// Cycle to the next pane.
-    /// Local mode: Header -> Datasets -> Jobs -> Workers -> Detail -> Header
-    /// Registry mode: Header -> Datasets -> Manifest -> Schema -> Header
+    /// Local mode: Header -> Datasets -> Jobs -> Workers -> Manifest -> Schema -> Header
+    /// Registry mode: Header -> Datasets -> Detail -> Manifest -> Schema -> Header
     pub fn next(self, is_local: bool) -> Self {
         match self {
             ActivePane::Header => ActivePane::Datasets,
@@ -47,35 +59,35 @@ impl ActivePane {
                 if is_local {
                     ActivePane::Jobs
                 } else {
-                    ActivePane::Manifest
+                    ActivePane::Detail
                 }
             }
             ActivePane::Jobs => ActivePane::Workers,
             ActivePane::Workers => ActivePane::Manifest,
+            ActivePane::Detail => ActivePane::Manifest,
             ActivePane::Manifest => ActivePane::Schema,
-            ActivePane::Schema => ActivePane::Detail,
-            ActivePane::Detail => ActivePane::Header,
+            ActivePane::Schema => ActivePane::Header,
         }
     }
 
     /// Cycle to the previous pane.
-    /// Local mode: Header -> Detail -> Workers -> Jobs -> Datasets -> Header
-    /// Registry mode: Header -> Schema -> Manifest -> Datasets -> Header
+    /// Local mode: Header -> Schema -> Manifest -> Workers -> Jobs -> Datasets -> Header
+    /// Registry mode: Header -> Schema -> Manifest -> Detail -> Datasets -> Header
     pub fn prev(self, is_local: bool) -> Self {
         match self {
-            ActivePane::Header => {
-                if is_local {
-                    ActivePane::Detail
-                } else {
-                    ActivePane::Schema
-                }
-            }
+            ActivePane::Header => ActivePane::Schema,
             ActivePane::Datasets => ActivePane::Header,
             ActivePane::Jobs => ActivePane::Datasets,
             ActivePane::Workers => ActivePane::Jobs,
-            ActivePane::Manifest => ActivePane::Datasets,
+            ActivePane::Detail => ActivePane::Datasets,
+            ActivePane::Manifest => {
+                if is_local {
+                    ActivePane::Workers
+                } else {
+                    ActivePane::Detail
+                }
+            }
             ActivePane::Schema => ActivePane::Manifest,
-            ActivePane::Detail => ActivePane::Workers,
         }
     }
 }
@@ -107,6 +119,35 @@ impl DataSource {
             DataSource::Registry => "Registry",
         }
     }
+}
+
+/// Filter for dataset listing (Registry mode only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DatasetsFilter {
+    /// All public datasets.
+    #[default]
+    All,
+    /// Datasets owned by the authenticated user.
+    Owned,
+}
+
+impl DatasetsFilter {
+    /// Toggle to the next filter value.
+    pub fn toggle(self) -> Self {
+        match self {
+            DatasetsFilter::All => DatasetsFilter::Owned,
+            DatasetsFilter::Owned => DatasetsFilter::All,
+        }
+    }
+}
+
+/// Loaded manifest from either local admin API or AMP registry.
+#[derive(Debug)]
+pub enum LoadedManifest {
+    /// Manifest from local admin API (JSON format).
+    LocalAdminApi(serde_json::Value),
+    /// Manifest from AMP registry (typed DerivedManifest).
+    AmpRegistry(DerivedManifest),
 }
 
 /// Status of the device flow authentication.
@@ -162,6 +203,8 @@ pub struct DatasetEntry {
     pub name: String,
     pub latest_version: Option<String>,
     pub description: Option<String>,
+    pub keywords: Option<Vec<String>>,
+    pub indexing_chains: Vec<String>,
     pub versions: Option<Vec<VersionEntry>>,
     pub expanded: bool,
 }
@@ -174,6 +217,62 @@ impl DatasetEntry {
             format!("{}/{} @{}", self.namespace, self.name, version)
         } else {
             format!("{}/{}", self.namespace, self.name)
+        }
+    }
+}
+
+/// Result of loading datasets from a source, including the total count.
+#[derive(Debug, Clone)]
+pub struct DatasetsResult {
+    /// The list of datasets.
+    pub datasets: Vec<DatasetEntry>,
+    /// Total count of datasets from the API (for paginated results).
+    pub total_count: i64,
+}
+
+impl From<DatasetDto> for DatasetEntry {
+    fn from(dto: DatasetDto) -> Self {
+        // Get the latest version tag for comparison
+        let latest_version_tag = dto
+            .latest_version
+            .as_ref()
+            .map(|v| v.version_tag.to_string());
+
+        DatasetEntry {
+            namespace: dto.namespace.to_string(),
+            name: dto.name.to_string(),
+            latest_version: latest_version_tag.clone(),
+            description: dto.description,
+            keywords: dto.keywords,
+            indexing_chains: dto.indexing_chains,
+            versions: dto.versions.map(|versions: Vec<DatasetVersionDto>| {
+                // Reverse the versions (they come in created_at ASC, we want newest first)
+                let mut reversed: Vec<_> = versions.into_iter().map(VersionEntry::from).collect();
+                reversed.reverse();
+
+                // Mark the latest version based on matching version_tag
+                // If latest_version is None, mark the first item (newest by created_at)
+                for (i, entry) in reversed.iter_mut().enumerate() {
+                    entry.is_latest = match &latest_version_tag {
+                        Some(tag) => entry.version_tag == *tag,
+                        None => i == 0,
+                    };
+                }
+
+                reversed
+            }),
+            expanded: false,
+        }
+    }
+}
+
+impl From<DatasetVersionDto> for VersionEntry {
+    fn from(dto: DatasetVersionDto) -> Self {
+        VersionEntry {
+            version_tag: dto.version_tag.to_string(),
+            status: dto.status.to_string(),
+            created_at: dto.created_at,
+            is_latest: false, // Set by caller based on position
         }
     }
 }
@@ -219,7 +318,7 @@ pub struct InspectResult {
 }
 
 impl InspectResult {
-    /// Parse a manifest JSON to extract schema information.
+    /// Parse a manifest JSON to extract schema information (for local admin API).
     pub fn from_manifest(manifest: &serde_json::Value) -> Option<Self> {
         let tables_obj = manifest.get("tables")?.as_object()?;
         let mut tables = Vec::new();
@@ -251,6 +350,53 @@ impl InspectResult {
                 columns,
             });
         }
+
+        // Sort tables by name for consistent display
+        tables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Some(InspectResult { tables })
+    }
+
+    /// Parse schema information from a typed DerivedManifest (for AMP registry).
+    pub fn from_derived_manifest(manifest: &DerivedManifest) -> Option<Self> {
+        match manifest {
+            DerivedManifest::Manifest(m) => {
+                Self::from_tables_iter(m.tables.iter().map(|(k, v)| (k.as_ref(), &v.schema)))
+            }
+            DerivedManifest::EvmRpc(m) => {
+                Self::from_tables_iter(m.tables.iter().map(|(k, v)| (k.as_str(), &v.schema)))
+            }
+            DerivedManifest::Firehose(m) => {
+                Self::from_tables_iter(m.tables.iter().map(|(k, v)| (k.as_str(), &v.schema)))
+            }
+        }
+    }
+
+    /// Extract schema information from an iterator of (table_name, table_schema) pairs.
+    ///
+    /// This is the shared implementation for all manifest types since they all
+    /// use the same `datasets_common::manifest::TableSchema` structure.
+    fn from_tables_iter<'a>(
+        tables_iter: impl Iterator<Item = (&'a str, &'a datasets_common::manifest::TableSchema)>,
+    ) -> Option<Self> {
+        let mut tables: Vec<TableSchema> = tables_iter
+            .map(|(name, table_schema)| {
+                let columns = table_schema
+                    .arrow
+                    .fields
+                    .iter()
+                    .map(|field| ColumnInfo {
+                        name: field.name.clone(),
+                        arrow_type: format!("{:?}", field.type_),
+                        nullable: field.nullable,
+                    })
+                    .collect();
+                TableSchema {
+                    name: name.to_string(),
+                    columns,
+                }
+            })
+            .collect();
 
         // Sort tables by name for consistent display
         tables.sort_by(|a, b| a.name.cmp(&b.name));
@@ -381,7 +527,7 @@ pub struct App {
 
     // Clients
     pub local_client: Arc<Client>,
-    pub registry_client: RegistryClient,
+    pub amp_registry_client: Arc<AmpRegistryClient>,
 
     // Auth state
     pub auth_state: Option<AuthStorage>,
@@ -389,6 +535,7 @@ pub struct App {
 
     // Data source
     pub current_source: DataSource,
+    pub datasets_filter: DatasetsFilter,
 
     // UI state
     pub should_quit: bool,
@@ -399,6 +546,7 @@ pub struct App {
     // Dataset state
     pub datasets: Vec<DatasetEntry>,
     pub filtered_datasets: Vec<DatasetEntry>,
+    pub datasets_total_count: Option<i64>,
     pub selected_index: usize,
 
     // For expanded datasets, track which version is selected
@@ -420,7 +568,7 @@ pub struct App {
     pub last_refresh: Instant,
 
     // Manifest state (for Dataset content view)
-    pub current_manifest: Option<serde_json::Value>,
+    pub current_manifest: Option<LoadedManifest>,
     pub current_inspect: Option<InspectResult>,
 
     // Loading state
@@ -454,11 +602,10 @@ impl App {
         config: Config,
         action_tx: UnboundedSender<Action>,
         http_client: HttpClient,
+        amp_registry_client: Arc<AmpRegistryClient>,
     ) -> Result<Self> {
         let admin_url = Url::parse(&config.local_admin_url).context("invalid admin URL")?;
         let local_client = Arc::new(Client::new(admin_url));
-
-        let registry_client = RegistryClient::new(config.registry_url.clone());
 
         let default_source = if config.default_source == "local" {
             DataSource::Local
@@ -471,16 +618,18 @@ impl App {
             action_tx,
             http_client,
             local_client,
-            registry_client,
+            amp_registry_client,
             auth_state: None,
             auth_device_flow: None,
             current_source: default_source,
+            datasets_filter: DatasetsFilter::default(),
             should_quit: false,
             input_mode: InputMode::Normal,
             active_pane: ActivePane::Datasets,
             search_query: String::new(),
             datasets: Vec::new(),
             filtered_datasets: Vec::new(),
+            datasets_total_count: None,
             selected_index: 0,
             selected_version_indices: HashMap::new(),
             jobs: Vec::new(),
@@ -675,9 +824,9 @@ impl App {
     /// Fetch datasets from local admin API.
     ///
     /// This is an associated function that can be called from spawn tasks.
-    pub async fn fetch_local_datasets(client: &admin_client::Client) -> Result<Vec<DatasetEntry>> {
+    pub async fn fetch_local_datasets(client: &Client) -> Result<DatasetsResult> {
         let response = client.datasets().list_all().await?;
-        Ok(response
+        let datasets: Vec<DatasetEntry> = response
             .datasets
             .into_iter()
             .map(|d| DatasetEntry {
@@ -685,32 +834,60 @@ impl App {
                 name: d.name.to_string(),
                 latest_version: d.latest_version.map(|v| v.to_string()),
                 description: None,
+                keywords: None,
+                indexing_chains: Vec::new(),
                 versions: None,
                 expanded: false,
             })
-            .collect())
+            .collect();
+        let total_count = datasets.len() as i64;
+        Ok(DatasetsResult {
+            datasets,
+            total_count,
+        })
     }
 
-    /// Fetch datasets from the registry.
+    /// Fetch datasets from the AMP registry.
     ///
     /// This is an associated function that can be called from spawn tasks.
+    /// Supports filtering by owned datasets when authenticated.
     pub async fn fetch_registry_datasets(
-        client: &crate::registry::RegistryClient,
-    ) -> Result<Vec<DatasetEntry>> {
+        client: &AmpRegistryClient,
+        filter: DatasetsFilter,
+        access_token: Option<&str>,
+    ) -> Result<DatasetsResult, AmpccError> {
         let mut all_datasets = Vec::new();
-        let mut page = 1;
+        let mut page = 1i64;
+        let mut total_count = 0i64;
 
         loop {
-            let response = client.list_datasets(page).await?;
-            for d in response.datasets {
-                all_datasets.push(DatasetEntry {
-                    namespace: d.namespace,
-                    name: d.name,
-                    latest_version: d.latest_version.and_then(|v| v.version_tag),
-                    description: d.description,
-                    versions: None,
-                    expanded: false,
-                });
+            let params = FetchDatasetsParams {
+                page: Some(page),
+                limit: Some(DEFAULT_PAGE_SIZE),
+                ..Default::default()
+            };
+
+            let response = match filter {
+                DatasetsFilter::All => client
+                    .fetch_datasets(Some(params))
+                    .await
+                    .map_err(AmpccError::FetchRegistryDatasets)?,
+                DatasetsFilter::Owned => {
+                    let token = access_token.ok_or(AmpccError::Unauthenticated)?;
+                    client
+                        .fetch_owned_datasets(Some(params), token)
+                        .await
+                        .map_err(AmpccError::FetchRegistryDatasets)?
+                }
+            };
+
+            // Capture total_count from the first page response
+            if page == 1 {
+                total_count = response.total_count;
+            }
+
+            for dto in response.datasets {
+                all_datasets.push(DatasetEntry::from(dto));
             }
 
             if !response.has_next_page {
@@ -719,28 +896,71 @@ impl App {
             page += 1;
         }
 
-        Ok(all_datasets)
+        Ok(DatasetsResult {
+            datasets: all_datasets,
+            total_count,
+        })
     }
 
-    /// Fetch versions for a dataset from the registry.
+    /// Search datasets from the AMP registry using full-text search.
     ///
     /// This is an associated function that can be called from spawn tasks.
-    pub async fn fetch_registry_versions(
-        client: &crate::registry::RegistryClient,
-        namespace: &str,
-        name: &str,
-    ) -> Result<Vec<VersionEntry>> {
-        let versions = client.get_versions(namespace, name).await?;
-        Ok(versions
-            .into_iter()
-            .enumerate()
-            .map(|(i, v)| VersionEntry {
-                version_tag: v.version_tag,
-                status: v.status,
-                created_at: v.created_at,
-                is_latest: i == 0,
-            })
-            .collect())
+    /// Supports filtering by owned datasets when authenticated.
+    pub async fn search_registry_datasets(
+        client: &AmpRegistryClient,
+        query: &str,
+        filter: DatasetsFilter,
+        access_token: Option<&str>,
+    ) -> Result<DatasetsResult, AmpccError> {
+        let mut all_datasets = Vec::new();
+        let mut page = 1i64;
+        let mut total_count = 0i64;
+
+        loop {
+            let params = SearchDatasetsParams {
+                search: query.to_string(),
+                page: Some(page),
+                limit: Some(DEFAULT_PAGE_SIZE),
+            };
+
+            let response = match filter {
+                DatasetsFilter::All => client
+                    .search_datasets(params)
+                    .await
+                    .map_err(|err| AmpccError::SearchRegistryDatasets(query.to_string(), err))?,
+                DatasetsFilter::Owned => {
+                    let token = access_token.ok_or(AmpccError::Unauthenticated)?;
+                    client
+                        .search_owned_datasets(params, token)
+                        .await
+                        .map_err(|err| AmpccError::SearchRegistryDatasets(query.to_string(), err))?
+                }
+            };
+
+            // Capture total_count from the first page response
+            if page == 1 {
+                total_count = response.total_count;
+            }
+
+            for dto in response.datasets {
+                all_datasets.push(DatasetEntry::from(dto));
+            }
+
+            if !response.has_next_page {
+                break;
+            }
+            page += 1;
+        }
+
+        Ok(DatasetsResult {
+            datasets: all_datasets,
+            total_count,
+        })
+    }
+
+    /// Get access token from auth state if available.
+    pub fn get_access_token(&self) -> Option<String> {
+        self.auth_state.as_ref().map(|a| a.access_token.clone())
     }
 
     /// Check if the current source is Local.
@@ -944,38 +1164,6 @@ impl App {
         }
     }
 
-    /// Fetch manifest for a specific dataset version.
-    #[allow(dead_code)]
-    pub async fn fetch_manifest(
-        &self,
-        namespace: &str,
-        name: &str,
-        version: &str,
-    ) -> Result<Option<serde_json::Value>> {
-        match self.current_source {
-            DataSource::Local => {
-                use datasets_common::{reference::Reference, revision::Revision};
-                let revision: Revision = version
-                    .parse()
-                    .map_err(|e| anyhow::anyhow!("invalid revision: {}", e))?;
-                let reference = Reference::new(namespace.parse()?, name.parse()?, revision);
-                let manifest = self
-                    .local_client
-                    .datasets()
-                    .get_manifest(&reference)
-                    .await?;
-                Ok(manifest)
-            }
-            DataSource::Registry => {
-                let manifest = self
-                    .registry_client
-                    .get_manifest(namespace, name, version)
-                    .await?;
-                Ok(Some(manifest))
-            }
-        }
-    }
-
     /// Check if the application is still running.
     pub fn is_running(&self) -> bool {
         !self.should_quit
@@ -1050,8 +1238,18 @@ impl App {
             }
 
             Action::ToggleExpand => {
-                // This needs async - will be handled by spawning a task
-                // For now, mark as needing implementation
+                // Toggle expand/collapse for the selected dataset.
+                // Note: First-time expansion (when versions haven't been loaded yet)
+                // is handled by spawn_toggle_expand which fetches versions asynchronously
+                // and sends VersionsLoaded to set expanded=true.
+                if let Some((dataset_idx, version_idx)) =
+                    self.index_to_position(self.selected_index)
+                    && version_idx.is_none()
+                    && let Some(dataset) = self.filtered_datasets.get_mut(dataset_idx)
+                    && dataset.versions.is_some()
+                {
+                    dataset.expanded = !dataset.expanded;
+                }
             }
 
             Action::EnterDetail => match self.active_pane {
@@ -1124,17 +1322,34 @@ impl App {
 
             Action::SearchInput(c) => {
                 self.search_query.push(c);
-                self.update_search();
+                // Only filter in-memory for Local mode; Registry waits for Enter
+                if self.current_source == DataSource::Local {
+                    self.update_search();
+                }
             }
 
             Action::SearchBackspace => {
                 self.search_query.pop();
-                self.update_search();
+                // Only filter in-memory for Local mode; Registry waits for Enter
+                if self.current_source == DataSource::Local {
+                    self.update_search();
+                }
             }
 
             Action::SearchSubmit => {
                 self.input_mode = InputMode::Normal;
-                self.send_action(Action::LoadManifest);
+                // For Registry mode with a search query, use API search
+                if self.current_source == DataSource::Registry && !self.search_query.is_empty() {
+                    self.send_action(Action::SearchDatasets);
+                } else {
+                    // For Local or empty search, use in-memory filtering
+                    self.send_action(Action::LoadManifest);
+                }
+            }
+
+            Action::ClearSearch => {
+                self.search_query.clear();
+                self.send_action(Action::RefreshDatasets);
             }
 
             // Datasets
@@ -1143,10 +1358,31 @@ impl App {
                 // Spawns async task to refresh datasets handled by handle_async_action
             }
 
+            Action::SearchDatasets => {
+                // API search for Registry mode
+                self.start_loading("Searching datasets...");
+                // Spawns async task to search datasets handled by handle_async_action
+            }
+
+            Action::ToggleDatasetsFilter => {
+                // Only toggle filter in Registry mode
+                if self.current_source == DataSource::Registry {
+                    // Require authentication for owned datasets
+                    if self.datasets_filter == DatasetsFilter::All && self.auth_state.is_none() {
+                        self.error_message =
+                            Some("Login required to view owned datasets (Ctrl+L)".to_string());
+                    } else {
+                        self.datasets_filter = self.datasets_filter.toggle();
+                        self.send_action(Action::RefreshDatasets);
+                    }
+                }
+            }
+
             Action::DatasetsLoaded(result) => {
                 match result {
-                    Ok(datasets) => {
-                        self.datasets = datasets;
+                    Ok(datasets_result) => {
+                        self.datasets = datasets_result.datasets;
+                        self.datasets_total_count = Some(datasets_result.total_count);
                         self.update_search();
                         self.send_action(Action::LoadManifest);
                     }
@@ -1181,11 +1417,28 @@ impl App {
                 // Spawns async task to load manifest handled by handle_async_action
             }
 
-            Action::ManifestLoaded(manifest) => {
+            Action::ManifestLoadedLocalAdminApi(manifest) => {
                 self.reset_scroll();
                 self.current_inspect = manifest.as_ref().and_then(InspectResult::from_manifest);
-                self.current_manifest = manifest;
+                self.current_manifest = manifest.map(LoadedManifest::LocalAdminApi);
                 self.content_view = ContentView::Dataset;
+                self.stop_loading();
+            }
+
+            Action::ManifestLoadedAmpRegistry(result) => {
+                self.reset_scroll();
+                match result {
+                    Ok(manifest) => {
+                        self.current_inspect = InspectResult::from_derived_manifest(&manifest);
+                        self.current_manifest = Some(LoadedManifest::AmpRegistry(manifest));
+                        self.content_view = ContentView::Dataset;
+                    }
+                    Err(e) => {
+                        self.error_message = Some(e);
+                        self.current_manifest = None;
+                        self.current_inspect = None;
+                    }
+                }
                 self.stop_loading();
             }
 
@@ -1252,13 +1505,7 @@ impl App {
             Action::AuthCheckOnStartup => {}
 
             Action::AuthStateLoaded(auth) => {
-                // Update registry client with the loaded auth token
-                if let Some(ref a) = auth {
-                    self.registry_client = RegistryClient::with_token(
-                        self.config.registry_url.clone(),
-                        Some(a.access_token.clone()),
-                    );
-                }
+                // Token is passed per-method to AmpRegistryClient, no need to rebuild
                 self.auth_state = auth;
             }
 
@@ -1273,9 +1520,11 @@ impl App {
                 let _ = AuthStorage::clear();
                 self.auth_state = None;
                 self.auth_device_flow = None;
-                // Rebuild registry client without explicit token (falls back to env var)
-                self.registry_client =
-                    RegistryClient::with_token(self.config.registry_url.clone(), None);
+                // Reset filter to All since user is no longer authenticated
+                if self.datasets_filter == DatasetsFilter::Owned {
+                    self.datasets_filter = DatasetsFilter::All;
+                    self.send_action(Action::RefreshDatasets);
+                }
             }
 
             Action::AuthDeviceFlowPending {
@@ -1346,11 +1595,7 @@ impl App {
 
             Action::AuthDeviceFlowComplete(auth) => {
                 let _ = auth.save();
-                // Update registry client with new auth token
-                self.registry_client = RegistryClient::with_token(
-                    self.config.registry_url.clone(),
-                    Some(auth.access_token.clone()),
-                );
+                // Token is passed per-method to AmpRegistryClient, no need to rebuild
                 self.auth_state = Some(auth);
                 self.auth_device_flow = None;
             }
@@ -1372,19 +1617,17 @@ impl App {
             Action::AuthRefreshComplete(result) => match result {
                 Ok(auth) => {
                     let _ = auth.save();
-                    // Update registry client with refreshed token
-                    self.registry_client = RegistryClient::with_token(
-                        self.config.registry_url.clone(),
-                        Some(auth.access_token.clone()),
-                    );
+                    // Token is passed per-method to AmpRegistryClient, no need to rebuild
                     self.auth_state = Some(auth);
                 }
                 Err(_) => {
                     let _ = AuthStorage::clear();
                     self.auth_state = None;
-                    // Rebuild registry client without explicit token (falls back to env var)
-                    self.registry_client =
-                        RegistryClient::with_token(self.config.registry_url.clone(), None);
+                    // Reset filter to All since user is no longer authenticated
+                    if self.datasets_filter == DatasetsFilter::Owned {
+                        self.datasets_filter = DatasetsFilter::All;
+                        self.send_action(Action::RefreshDatasets);
+                    }
                 }
             },
 

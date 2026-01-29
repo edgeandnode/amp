@@ -2,10 +2,11 @@
 
 use std::{
     io,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
@@ -13,19 +14,23 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use datasets_common::{name::Name, namespace::Namespace, revision::Revision};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use reqwest::Client as HttpClient;
 use tokio::sync::mpsc;
+use url::Url;
 
 mod action;
+mod amp_registry;
 mod app;
 mod auth;
 mod config;
-mod registry;
+mod error;
 mod ui;
 mod util;
 
 use action::Action;
+use amp_registry::AmpRegistryClient;
 use app::{ActivePane, App, ContentView, DataSource, DeviceFlowStatus, InputMode};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -42,11 +47,15 @@ async fn main() -> Result<()> {
     // Create shared HTTP client
     let http_client = HttpClient::new();
 
+    // Create AMP registry client
+    let registry_url = Url::parse(&config.registry_url).context("invalid registry URL")?;
+    let amp_registry_client = Arc::new(AmpRegistryClient::new(http_client.clone(), registry_url));
+
     // Create action channel
     let (action_tx, action_rx) = mpsc::unbounded_channel::<Action>();
 
     // Create app
-    let mut app = App::new(config, action_tx.clone(), http_client)?;
+    let mut app = App::new(config, action_tx.clone(), http_client, amp_registry_client)?;
 
     // Setup terminal
     enable_raw_mode()?;
@@ -230,6 +239,9 @@ fn handle_normal_mode_key(app: &App, key: event::KeyEvent) -> Action {
             _ => Action::RefreshDatasets,
         },
 
+        // Filter toggle (Registry mode only)
+        KeyCode::Char('f') => Action::ToggleDatasetsFilter,
+
         // Stop job
         KeyCode::Char('s') => {
             if app.active_pane == ActivePane::Jobs
@@ -277,6 +289,15 @@ fn handle_normal_mode_key(app: &App, key: event::KeyEvent) -> Action {
                 Action::AuthLogout
             } else {
                 Action::AuthLogin
+            }
+        }
+
+        // Clear search (only when search is active)
+        KeyCode::Esc => {
+            if !app.search_query.is_empty() {
+                Action::ClearSearch
+            } else {
+                Action::None
             }
         }
 
@@ -421,6 +442,7 @@ fn handle_async_action(app: &App, action: &Action) {
         Action::SwitchToLocal => spawn_switch_source(app, DataSource::Local),
         Action::SwitchToRegistry => spawn_switch_source(app, DataSource::Registry),
         Action::ToggleExpand => spawn_toggle_expand(app),
+        Action::SearchDatasets => spawn_search_datasets(app),
         Action::AuthCheckOnStartup => spawn_check_auth(app),
         Action::AuthLogin => spawn_start_device_flow(app),
         Action::AuthDeviceFlowPoll {
@@ -440,18 +462,42 @@ fn handle_async_action(app: &App, action: &Action) {
 fn spawn_fetch_datasets(app: &App) {
     let tx = app.action_tx.clone();
     let local_client = app.local_client.clone();
-    let registry_client = app.registry_client.clone();
+    let registry_client = app.amp_registry_client.clone();
     let source = app.current_source;
+    let filter = app.datasets_filter;
+    let access_token = app.get_access_token();
 
     tokio::spawn(async move {
         let result = match source {
             DataSource::Local => App::fetch_local_datasets(&local_client)
                 .await
                 .map_err(|e| e.to_string()),
-            DataSource::Registry => App::fetch_registry_datasets(&registry_client)
-                .await
-                .map_err(|e| e.to_string()),
+            DataSource::Registry => {
+                App::fetch_registry_datasets(&registry_client, filter, access_token.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())
+            }
         };
+        let _ = tx.send(Action::DatasetsLoaded(result));
+    });
+}
+
+fn spawn_search_datasets(app: &App) {
+    let tx = app.action_tx.clone();
+    let registry_client = app.amp_registry_client.clone();
+    let filter = app.datasets_filter;
+    let access_token = app.get_access_token();
+    let query = app.search_query.clone();
+
+    tokio::spawn(async move {
+        let result = App::search_registry_datasets(
+            &registry_client,
+            &query,
+            filter,
+            access_token.as_deref(),
+        )
+        .await
+        .map_err(|e| e.to_string());
         let _ = tx.send(Action::DatasetsLoaded(result));
     });
 }
@@ -468,14 +514,14 @@ fn spawn_fetch_manifest(app: &App) {
         DataSource::Local => {
             let client = app.local_client.clone();
             tokio::spawn(async move {
-                use datasets_common::{reference::Reference, revision::Revision};
+                use datasets_common::reference::Reference;
                 let revision: Option<Revision> = version.parse().ok();
                 match (namespace.parse(), name.parse(), revision) {
                     (Ok(ns), Ok(n), Some(rev)) => {
                         let reference = Reference::new(ns, n, rev);
                         match client.datasets().get_manifest(&reference).await {
                             Ok(manifest) => {
-                                let _ = tx.send(Action::ManifestLoaded(manifest));
+                                let _ = tx.send(Action::ManifestLoadedLocalAdminApi(manifest));
                             }
                             Err(e) => {
                                 let _ = tx.send(Action::Error(format!("Failed to fetch: {}", e)));
@@ -483,20 +529,45 @@ fn spawn_fetch_manifest(app: &App) {
                         }
                     }
                     _ => {
-                        let _ = tx.send(Action::ManifestLoaded(None));
+                        let _ = tx.send(Action::ManifestLoadedLocalAdminApi(None));
                     }
                 }
             });
         }
         DataSource::Registry => {
-            let client = app.registry_client.clone();
+            let client = app.amp_registry_client.clone();
             tokio::spawn(async move {
-                match client.get_manifest(&namespace, &name, &version).await {
+                let ns: Namespace = match namespace.parse() {
+                    Ok(ns) => ns,
+                    Err(e) => {
+                        let _ = tx.send(Action::Error(format!("Invalid namespace: {}", e)));
+                        return;
+                    }
+                };
+                let n: Name = match name.parse() {
+                    Ok(n) => n,
+                    Err(e) => {
+                        let _ = tx.send(Action::Error(format!("Invalid name: {}", e)));
+                        return;
+                    }
+                };
+                let rev: Revision = match version.parse() {
+                    Ok(rev) => rev,
+                    Err(e) => {
+                        let _ = tx.send(Action::Error(format!("Invalid revision: {}", e)));
+                        return;
+                    }
+                };
+
+                match client.fetch_dataset_version_manifest(ns, n, rev).await {
                     Ok(manifest) => {
-                        let _ = tx.send(Action::ManifestLoaded(Some(manifest)));
+                        let _ = tx.send(Action::ManifestLoadedAmpRegistry(Ok(manifest)));
                     }
                     Err(e) => {
-                        let _ = tx.send(Action::Error(format!("Failed to fetch: {}", e)));
+                        let _ = tx.send(Action::ManifestLoadedAmpRegistry(Err(format!(
+                            "Failed to fetch: {}",
+                            e
+                        ))));
                     }
                 }
             });
@@ -667,29 +738,16 @@ fn spawn_toggle_expand(app: &App) {
         return;
     }
 
-    // Need to fetch versions
+    // This code path is reached when `dataset.versions` is None, meaning:
+    // - Local mode: Admin API doesn't provide version details, only version strings
+    // - Registry mode: Dataset had no versions in API response (edge case)
+    //
+    // We send empty versions to trigger expand. The VersionsLoaded action will
+    // set `versions = Some(vec![])` and `expanded = true`.
     let tx = app.action_tx.clone();
-    let registry_client = app.registry_client.clone();
-    let namespace = dataset.namespace.clone();
-    let name = dataset.name.clone();
-    let source = app.current_source;
-
-    tokio::spawn(async move {
-        let result = match source {
-            DataSource::Local => {
-                // Local doesn't have version listing
-                Ok(Vec::new())
-            }
-            DataSource::Registry => {
-                App::fetch_registry_versions(&registry_client, &namespace, &name)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
-        };
-        let _ = tx.send(Action::VersionsLoaded {
-            dataset_index: dataset_idx,
-            versions: result,
-        });
+    let _ = tx.send(Action::VersionsLoaded {
+        dataset_index: dataset_idx,
+        versions: Ok(Vec::new()),
     });
 }
 

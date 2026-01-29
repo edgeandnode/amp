@@ -11,12 +11,15 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, Wrap,
     },
 };
 
 use crate::{
-    app::{ActivePane, App, ContentView, DataSource, InputMode, InspectResult},
+    app::{
+        ActivePane, App, ContentView, DataSource, DatasetsFilter, InputMode, InspectResult,
+        LoadedManifest, SelectedItem,
+    },
     util::get_account_display,
 };
 
@@ -461,7 +464,12 @@ fn draw_datasets_section(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let title = format!("Datasets ({})", app.filtered_datasets.len());
+    // Use total_count from API when available, otherwise fall back to filtered count
+    let count = app
+        .datasets_total_count
+        .map(|c| c as usize)
+        .unwrap_or(app.filtered_datasets.len());
+    let title = format!("Datasets ({})", count);
     let border_style = if app.active_pane == ActivePane::Datasets {
         Theme::border_focused()
     } else {
@@ -645,7 +653,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let title = format!("Datasets ({})", app.filtered_datasets.len());
+    // Use total_count from API when available, otherwise fall back to filtered count
+    let count = app
+        .datasets_total_count
+        .map(|c| c as usize)
+        .unwrap_or(app.filtered_datasets.len());
+    let title = format!("Datasets ({})", count);
     let border_style = if app.active_pane == ActivePane::Datasets {
         Theme::border_focused()
     } else {
@@ -671,17 +684,35 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
 fn draw_content(f: &mut Frame, app: &mut App, area: Rect) {
     match &app.content_view {
         ContentView::Dataset => {
-            // Split content vertically: Manifest (60%) | Inspect (40%)
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Percentage(60), // Manifest
-                    Constraint::Percentage(40), // Inspect
-                ])
-                .split(area);
+            if app.current_source == DataSource::Registry {
+                // Registry mode: Split content vertically into three panes
+                // Details (30%) | Manifest (50%) | Schema (20%)
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(30), // Details
+                        Constraint::Percentage(50), // Manifest
+                        Constraint::Percentage(20), // Schema
+                    ])
+                    .split(area);
 
-            draw_manifest(f, app, chunks[0]);
-            draw_inspect(f, app, chunks[1]);
+                draw_details(f, app, chunks[0]);
+                draw_manifest(f, app, chunks[1]);
+                draw_inspect(f, app, chunks[2]);
+            } else {
+                // Local mode: Split content vertically into two panes
+                // Manifest (60%) | Schema (40%)
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(60), // Manifest
+                        Constraint::Percentage(40), // Schema
+                    ])
+                    .split(area);
+
+                draw_manifest(f, app, chunks[0]);
+                draw_inspect(f, app, chunks[1]);
+            }
         }
         ContentView::Job(job) => {
             draw_job_detail(f, app, job.clone(), area);
@@ -917,6 +948,106 @@ fn truncate_node_id(node_id: &str, max_len: usize) -> String {
     }
 }
 
+/// Draw the dataset details pane (Registry mode only).
+fn draw_details(f: &mut Frame, app: &mut App, area: Rect) {
+    let border_style = if app.active_pane == ActivePane::Detail {
+        Theme::border_focused()
+    } else {
+        Theme::border_unfocused()
+    };
+
+    let block = Block::default()
+        .title("Details")
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Get the currently selected dataset
+    let lines: Vec<Line> = if let Some(selected) = app.get_selected_item() {
+        let dataset_index = match &selected {
+            SelectedItem::Dataset { index, .. } => *index,
+            SelectedItem::Version { dataset_index, .. } => *dataset_index,
+        };
+
+        if let Some(dataset) = app.filtered_datasets.get(dataset_index) {
+            let mut lines = Vec::new();
+
+            // Namespace
+            lines.push(Line::from(vec![
+                Span::styled("Namespace: ", Theme::text_secondary()),
+                Span::styled(dataset.namespace.clone(), Theme::text_primary()),
+            ]));
+
+            // Name
+            lines.push(Line::from(vec![
+                Span::styled("Name: ", Theme::text_secondary()),
+                Span::styled(dataset.name.clone(), Theme::text_primary()),
+            ]));
+
+            // Description
+            if let Some(desc) = &dataset.description {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled(
+                    "Description: ",
+                    Theme::text_secondary(),
+                )]));
+                lines.push(Line::from(Span::styled(
+                    desc.clone(),
+                    Theme::text_primary(),
+                )));
+            }
+
+            // Tags (keywords)
+            if let Some(keywords) = &dataset.keywords
+                && !keywords.is_empty()
+            {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled("Tags: ", Theme::text_secondary()),
+                    Span::styled(keywords.join(", "), Theme::text_primary()),
+                ]));
+            }
+
+            // Chains (indexing_chains)
+            if !dataset.indexing_chains.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled("Chains: ", Theme::text_secondary()),
+                    Span::styled(dataset.indexing_chains.join(", "), Theme::text_primary()),
+                ]));
+            }
+
+            lines
+        } else {
+            vec![Line::from(Span::styled(
+                "Select a dataset to view details",
+                Theme::text_secondary(),
+            ))]
+        }
+    } else {
+        vec![Line::from(Span::styled(
+            "Select a dataset to view details",
+            Theme::text_secondary(),
+        ))]
+    };
+
+    let line_count = lines.len();
+
+    // Update content length for scroll bounds
+    app.detail_content_length = line_count;
+    app.detail_scroll_state = app.detail_scroll_state.content_length(line_count);
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((app.detail_scroll, 0));
+
+    f.render_widget(paragraph, area);
+
+    // Render scrollbar
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+    f.render_stateful_widget(scrollbar, area, &mut app.detail_scroll_state);
+}
+
 /// Draw the manifest pane.
 fn draw_manifest(f: &mut Frame, app: &mut App, area: Rect) {
     let border_style = if app.active_pane == ActivePane::Manifest {
@@ -1037,8 +1168,19 @@ fn dedent_sql(sql: &str) -> String {
     result.join("\n").trim().to_string()
 }
 
-/// Format JSON manifest into readable lines.
-fn format_manifest(manifest: &serde_json::Value) -> Vec<Line<'static>> {
+/// Format loaded manifest into readable lines.
+///
+/// Converts all manifest types to JSON for consistent field access during formatting.
+/// This avoids duplicating the formatting logic for each DerivedManifest variant.
+/// The serialization overhead is minimal since this only runs when displaying a manifest.
+fn format_manifest(loaded: &LoadedManifest) -> Vec<Line<'static>> {
+    let manifest = match loaded {
+        LoadedManifest::LocalAdminApi(json) => json.clone(),
+        LoadedManifest::AmpRegistry(derived) => {
+            serde_json::to_value(derived).unwrap_or(serde_json::Value::Null)
+        }
+    };
+
     let mut lines = Vec::new();
     const SEPARATOR: &str = "────────────────────────────────────";
 
@@ -1232,22 +1374,49 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         )
     } else {
         let source_hint = match app.current_source {
-            DataSource::Local => "[1]Local [2]Registry",
-            DataSource::Registry => "[1]Local [2]Registry",
+            DataSource::Local => "[1]Local [2]Registry".to_string(),
+            DataSource::Registry => {
+                // Show filter status in Registry mode
+                let filter_label = match app.datasets_filter {
+                    DatasetsFilter::All => "All",
+                    DatasetsFilter::Owned => "My Datasets",
+                };
+                format!("[1]Local [2]Registry ({})", filter_label)
+            }
         };
 
         // Context-sensitive keybindings based on active pane
-        let context_keys = match app.active_pane {
-            ActivePane::Jobs => "[s] Stop [d] Delete [r] Refresh",
-            ActivePane::Workers => "[r] Refresh",
-            ActivePane::Datasets => "[Enter] Expand [r] Refresh",
-            ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => "[Ctrl+u/d] Scroll",
-            ActivePane::Header => "[Tab] Navigate",
+        let context_keys: String = match app.active_pane {
+            ActivePane::Jobs => "[s] Stop [d] Delete [r] Refresh".to_string(),
+            ActivePane::Workers => "[r] Refresh".to_string(),
+            ActivePane::Datasets => {
+                if app.current_source == DataSource::Registry {
+                    // Show what filter will switch TO
+                    let filter_hint = match app.datasets_filter {
+                        DatasetsFilter::All => "[f] My Datasets",
+                        DatasetsFilter::Owned => "[f] All Datasets",
+                    };
+                    format!("[Enter] Expand [r] Refresh {}", filter_hint)
+                } else {
+                    "[Enter] Expand [r] Refresh".to_string()
+                }
+            }
+            ActivePane::Manifest | ActivePane::Schema | ActivePane::Detail => {
+                "[Ctrl+u/d] Scroll".to_string()
+            }
+            ActivePane::Header => "[Tab] Navigate".to_string(),
+        };
+
+        // Add clear search hint if search is active
+        let search_hint = if !app.search_query.is_empty() {
+            format!(" | [Esc] Clear \"{}\"", app.search_query)
+        } else {
+            String::new()
         };
 
         format!(
-            "{} | {} | '/' search | 'j/k' nav | Tab cycle | 'q' quit",
-            source_hint, context_keys
+            "{} | {} | '/' search | 'j/k' nav | Tab cycle | 'q' quit{}",
+            source_hint, context_keys, search_hint
         )
     };
 

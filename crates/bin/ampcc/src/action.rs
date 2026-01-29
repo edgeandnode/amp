@@ -9,7 +9,7 @@ use admin_client::{
 };
 use worker::job::JobId;
 
-use crate::{app::DataSource, auth::AuthStorage};
+use crate::{amp_registry::DerivedManifest, app::DataSource, auth::AuthStorage};
 
 /// Actions that can be dispatched to mutate application state.
 #[derive(Debug)]
@@ -77,14 +77,23 @@ pub enum Action {
     /// Submit search (exit search mode and refresh).
     SearchSubmit,
 
+    /// Clear search query and refresh datasets.
+    ClearSearch,
+
     // ========================================================================
     // Dataset Actions
     // ========================================================================
     /// Trigger dataset refresh.
     RefreshDatasets,
 
+    /// Search datasets using API (Registry mode only).
+    SearchDatasets,
+
+    /// Toggle datasets filter (All/Owned) in Registry mode.
+    ToggleDatasetsFilter,
+
     /// Datasets loaded from source.
-    DatasetsLoaded(Result<Vec<crate::app::DatasetEntry>, String>),
+    DatasetsLoaded(Result<crate::app::DatasetsResult, String>),
 
     /// Dataset versions loaded.
     VersionsLoaded {
@@ -98,8 +107,11 @@ pub enum Action {
     /// Load manifest for selected dataset.
     LoadManifest,
 
-    /// Manifest loaded.
-    ManifestLoaded(Option<serde_json::Value>),
+    /// Manifest loaded from local admin API (JSON format).
+    ManifestLoadedLocalAdminApi(Option<serde_json::Value>),
+
+    /// Manifest loaded from AMP registry (typed DerivedManifest).
+    ManifestLoadedAmpRegistry(Result<DerivedManifest, String>),
 
     // ========================================================================
     // Jobs Actions (Local mode)
