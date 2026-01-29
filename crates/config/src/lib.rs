@@ -91,6 +91,21 @@ fn default_auto_migrate() -> bool {
     true
 }
 
+/// Default data directory: `.amp/data`
+fn default_data_dir() -> String {
+    ".amp/data".into()
+}
+
+/// Default providers directory: `.amp/providers`
+fn default_providers_dir() -> String {
+    ".amp/providers".into()
+}
+
+/// Default manifests directory: `.amp/manifests`
+fn default_manifests_dir() -> String {
+    ".amp/manifests".into()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetadataDbConfig {
     /// Database connection URL
@@ -140,12 +155,14 @@ impl Default for BuildInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
     // Storage paths
-    /// Where the extracted datasets are stored.
+    /// Where the extracted datasets are stored (default: `.amp/data`)
+    #[serde(default = "default_data_dir")]
     data_dir: String,
-    /// Path to a providers directory. Each provider is configured as a separate toml file in this directory.
+    /// Path to a providers directory. Each provider is configured as a separate toml file in this directory (default: `.amp/providers`)
+    #[serde(default = "default_providers_dir")]
     providers_dir: String,
-    /// Path to a directory containing dataset manifest files.
-    #[serde(default, alias = "dataset_defs_dir")]
+    /// Path to a directory containing dataset manifest files (default: `.amp/manifests`)
+    #[serde(default = "default_manifests_dir", alias = "dataset_defs_dir")]
     manifests_dir: String,
 
     // Memory and performance
@@ -161,6 +178,7 @@ pub struct ConfigFile {
 
     // Operational timing
     /// Polling interval for new blocks during dump in seconds (default: 1.0)
+    #[serde(default)]
     pub poll_interval_secs: ConfigDuration<1>,
     /// Max interval for derived dataset dump microbatches in blocks (default: 100000)
     pub microbatch_max_interval: Option<u64>,
