@@ -12,8 +12,9 @@ use common::{
         },
     },
     parquet::{
-        arrow::AsyncArrowWriter, errors::ParquetError,
-        file::metadata::KeyValue, file::properties::WriterProperties as ParquetWriterProperties,
+        arrow::AsyncArrowWriter,
+        errors::ParquetError,
+        file::{metadata::KeyValue, properties::WriterProperties as ParquetWriterProperties},
     },
 };
 use metadata_db::{
