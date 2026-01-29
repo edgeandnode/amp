@@ -18,7 +18,7 @@ use common::{
     },
 };
 use datafusion::{
-    datasource::physical_plan::{FileMeta, ParquetFileReaderFactory},
+    datasource::{listing::PartitionedFile, physical_plan::ParquetFileReaderFactory},
     error::DataFusionError,
     execution::SendableRecordBatchStream,
     physical_plan::{metrics::ExecutionPlanMetricsSet, stream::RecordBatchStreamAdapter},
@@ -53,7 +53,7 @@ impl CompactionFile {
         let file_id = segment.id;
         let range = segment.range.clone();
 
-        let mut file_meta = FileMeta::from(segment.object.clone());
+        let mut file_meta = PartitionedFile::from(segment.object.clone());
 
         file_meta.extensions = Some(Arc::new(file_id));
 

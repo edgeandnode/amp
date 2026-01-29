@@ -4,7 +4,7 @@ use amp_data_store::{CachedParquetData, DataStore};
 use bytes::Bytes;
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    datasource::physical_plan::{FileMeta, ParquetFileMetrics, ParquetFileReaderFactory},
+    datasource::physical_plan::{ParquetFileMetrics, ParquetFileReaderFactory},
     error::{DataFusionError, Result as DataFusionResult},
     parquet::{
         arrow::{
@@ -16,6 +16,7 @@ use datafusion::{
     },
     physical_plan::metrics::ExecutionPlanMetricsSet,
 };
+use datafusion_datasource::PartitionedFile;
 use futures::future::BoxFuture;
 use metadata_db::{LocationId, files::FileId};
 
@@ -41,18 +42,19 @@ impl ParquetFileReaderFactory for AmpReaderFactory {
     fn create_reader(
         &self,
         partition_index: usize,
-        file_meta: FileMeta,
+        partitioned_file: PartitionedFile,
         _metadata_size_hint: Option<usize>,
         metrics: &ExecutionPlanMetricsSet,
     ) -> DataFusionResult<Box<dyn AsyncFileReader + Send>> {
-        let path = file_meta.location();
+        let file_meta = &partitioned_file.object_meta;
+        let path = &file_meta.location;
         let file_metrics = ParquetFileMetrics::new(partition_index, path.as_ref(), metrics);
         let inner = self
             .store
             .create_file_reader_from_path(path.clone())
-            .with_file_size(file_meta.object_meta.size);
+            .with_file_size(file_meta.size);
         let location_id = self.location_id;
-        let file_id = file_meta
+        let file_id = partitioned_file
             .extensions
             .ok_or(DataFusionError::Execution(format!(
                 "FileMeta missing extensions for location_id: {}",

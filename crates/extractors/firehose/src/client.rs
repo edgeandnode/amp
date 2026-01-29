@@ -138,7 +138,6 @@ pub struct AuthInterceptor {
 }
 
 impl AuthInterceptor {
-    #[expect(clippy::result_large_err)]
     pub fn new(token: Option<String>) -> Result<Self, Error> {
         Ok(AuthInterceptor {
             token: token

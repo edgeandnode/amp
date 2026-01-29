@@ -12,8 +12,9 @@ use common::{
         },
     },
     parquet::{
-        arrow::AsyncArrowWriter, errors::ParquetError,
-        file::properties::WriterProperties as ParquetWriterProperties, format::KeyValue,
+        arrow::AsyncArrowWriter,
+        errors::ParquetError,
+        file::{metadata::KeyValue, properties::WriterProperties as ParquetWriterProperties},
     },
 };
 use metadata_db::{
@@ -143,7 +144,7 @@ impl ParquetFileWriter {
             self.filename,
             range.start(),
             range.end(),
-            meta.num_rows,
+            meta.file_metadata().num_rows(),
         );
 
         let object_meta = self

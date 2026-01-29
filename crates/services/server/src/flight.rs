@@ -26,7 +26,7 @@ use common::{
         self,
         array::RecordBatch,
         datatypes::SchemaRef,
-        ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
+        ipc::writer::{CompressionContext, DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
     },
     catalog::{
         logical::{
@@ -178,7 +178,11 @@ impl Service {
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
         let query_start_time = std::time::Instant::now();
-        let schema: SchemaRef = plan.schema().as_ref().clone().into();
+        let schema = {
+            let schema = plan.schema();
+            let schema: &arrow::datatypes::Schema = schema.as_ref().as_ref();
+            Arc::new(schema.clone())
+        };
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
@@ -596,7 +600,7 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     let ipc_opts = &Default::default();
     let mut dictionary_tracker = DictionaryTracker::new(true);
     let encoded = IpcDataGenerator::default().schema_to_bytes_with_dictionary_tracker(
-        &schema.into(),
+        schema.as_ref(),
         &mut dictionary_tracker,
         ipc_opts,
     );
@@ -736,6 +740,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
             // (arrow-flight's FlightDataEncoderBuilder filters them out)
             stream! {
                 let mut dictionary_tracker = DictionaryTracker::new(true);
+                let mut compression_context = CompressionContext::default();
 
                 // Send schema first
                 let schema_message = FlightData::from(SchemaAsIpc::new(&schema, &IpcWriteOptions::default()));
@@ -753,7 +758,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                 while let Some(result) = non_incremental_stream.next().await {
                     match result {
                         Ok(batch) => {
-                            match encode_record_batch(batch, Some(&data_metadata), &mut dictionary_tracker) {
+                            match encode_record_batch(batch, Some(&data_metadata), &mut dictionary_tracker, &mut compression_context) {
                                 Ok(encoded) => {
                                     for message in encoded {
                                         yield Ok(message);
@@ -779,7 +784,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                     "ranges": &block_ranges,
                     "ranges_complete": true,
                 });
-                match encode_record_batch(empty_batch, Some(&completion_metadata), &mut dictionary_tracker) {
+                match encode_record_batch(empty_batch, Some(&completion_metadata), &mut dictionary_tracker, &mut compression_context) {
                     Ok(encoded) => {
                         for message in encoded {
                             yield Ok(message);
@@ -799,6 +804,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
         } => {
             stream! {
         let mut dictionary_tracker = DictionaryTracker::new(true);
+        let mut compression_context = CompressionContext::default();
         let mut ranges: Vec<BlockRange> = Default::default();
         let mut first_message = true;
         while let Some(result) = incremental_stream.next().await {
@@ -824,7 +830,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                             "ranges": &ranges,
                             "ranges_complete": false,
                         });
-                        match encode_record_batch(batch, Some(&app_metadata), &mut dictionary_tracker) {
+                        match encode_record_batch(batch, Some(&app_metadata), &mut dictionary_tracker, &mut compression_context) {
                             Ok(encoded) => {
                                 for message in encoded {
                                     yield Ok(message);
@@ -844,7 +850,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                             "ranges": &ranges,
                             "ranges_complete": true,
                         });
-                        match encode_record_batch(empty_batch, Some(&app_metadata), &mut dictionary_tracker) {
+                        match encode_record_batch(empty_batch, Some(&app_metadata), &mut dictionary_tracker, &mut compression_context) {
                             Ok(encoded) => {
                                 for message in encoded {
                                     yield Ok(message);
@@ -866,11 +872,11 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
     }
 }
 
-#[expect(clippy::result_large_err)]
 pub fn encode_record_batch(
     batch: RecordBatch,
     app_metadata: Option<&serde_json::Value>,
     dictionary_tracker: &mut DictionaryTracker,
+    compression_context: &mut CompressionContext,
 ) -> Result<Vec<FlightData>, Status> {
     let ipc = IpcDataGenerator::default();
     let options = IpcWriteOptions::default();
@@ -879,7 +885,7 @@ pub fn encode_record_batch(
 
     for batch in split_batch_for_grpc_response(batch, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES) {
         let (encoded_dictionaries, encoded_batch) = ipc
-            .encoded_batch(&batch, dictionary_tracker, &options)
+            .encode(&batch, dictionary_tracker, &options, compression_context)
             .map_err(FlightError::from)?;
         for encoded_dictionary in encoded_dictionaries {
             encoded.push(encoded_dictionary.into());

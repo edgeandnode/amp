@@ -62,6 +62,7 @@ impl JsUdf {
         let signature = Signature {
             type_signature: TypeSignature::Exact(input_types),
             volatility: Volatility::Immutable,
+            parameter_names: None,
         };
 
         // Create UDF name based on whether schema is provided
