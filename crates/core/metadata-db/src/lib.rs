@@ -70,10 +70,11 @@ pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
 /// Similar to [`connect_pool`], but allows control over whether migrations run automatically.
 #[instrument(skip_all, err)]
 pub async fn connect_pool_with_config(
-    url: &str,
+    url: impl AsRef<str>,
     size: u32,
     auto_migrate: bool,
 ) -> Result<MetadataDb, Error> {
+    let url = url.as_ref();
     let pool = db::ConnPool::connect(url, size).await?;
     if auto_migrate {
         pool.run_migrations().await?;

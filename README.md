@@ -108,7 +108,8 @@ This will run the metadata DB at `postgresql://postgres:postgres@localhost:5432/
 Update your config file to include it:
 
 ```toml
-metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
+[metadata_db]
+url = "postgresql://postgres:postgres@localhost:5432/amp"
 ```
 
 ### ampd server

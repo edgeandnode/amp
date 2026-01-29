@@ -17,7 +17,7 @@ pub struct Config {
     pub poll_interval: Duration,
 
     /// Keep-alive interval for streaming queries
-    pub keep_alive_interval: Option<u64>,
+    pub keep_alive_interval: u64,
 
     /// Maximum memory usage for DataFusion query environment (in MB)
     pub max_mem_mb: usize,

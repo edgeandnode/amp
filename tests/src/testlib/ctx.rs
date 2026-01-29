@@ -10,12 +10,13 @@
 //!
 //! ```text
 //! test__<test-name>__<rand-id>/
-//! └── .amp/                         # Daemon state directory
+//! └── .amp/                         # Amp dir
 //!     ├── config.toml               # Main config (dynamically generated)
 //!     ├── manifests/                # Dataset manifests directory (initially empty, registered via Admin API)
 //!     ├── providers/                # Provider configs directory (initially empty, registered via Admin API)
-//!     └── data/                     # Output directory (dataset snapshots copied if requested)
-//!         └── eth_mainnet/          # Dataset snapshot reference data with complete structure
+//!     ├── data/                     # Output directory (dataset snapshots copied if requested)
+//!     │   └── eth_mainnet/          # Dataset snapshot reference data with complete structure
+//!     └── metadb/                   # PostgreSQL metadata database files (isolated per test)
 //! ```
 //!
 //! # Key Features
@@ -29,7 +30,7 @@
 
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
-use amp_config::Config;
+use amp_config::build_info;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::BoxError;
@@ -37,9 +38,9 @@ use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
 
 use super::fixtures::{
-    AmpCli, Ampctl, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
-    DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, MetadataDb as MetadataDbFixture,
-    builder as daemon_state_dir_builder,
+    AmpCli, Ampctl, Anvil, DaemonAmpDir, DaemonConfig, DaemonConfigBuilder, DaemonController,
+    DaemonServer, DaemonWorker, FlightClient, JsonlClient, MetadataDb as MetadataDbFixture,
+    builder as daemon_amp_dir_builder,
 };
 use crate::testlib::{
     config::{read_manifest_fixture, read_provider_fixture},
@@ -295,8 +296,20 @@ impl TestCtxBuilder {
         // Load environment variables from .env file (if present)
         let _ = dotenvy::dotenv_override();
 
-        // Create temporary metadata database fixture
-        let metadata_db = MetadataDbFixture::new().await;
+        // Create temporary test directory first (needed for metadb path)
+        let test_dir = TestEnvDir::new(&self.test_name)?;
+        tracing::info!(
+            "Creating isolated test environment at: {}",
+            test_dir.path().display()
+        );
+
+        // Build DaemonAmpDir with default paths (we'll use this for metadb path)
+        let daemon_amp_dir_path = test_dir.path();
+        let daemon_amp_dir_temp = daemon_amp_dir_builder(daemon_amp_dir_path).build();
+
+        // Create temporary metadata database fixture using the test's isolated metadb directory
+        let metadata_db =
+            MetadataDbFixture::with_data_dir(daemon_amp_dir_temp.metadb_dir().to_path_buf()).await;
 
         // Update daemon config with the temp database URL
         let daemon_config = DaemonConfigBuilder::from_config(&self.daemon_config)
@@ -306,43 +319,39 @@ impl TestCtxBuilder {
         // Serialize config content before moving daemon_config
         let config_content = daemon_config.serialize_to_toml();
 
-        // Create temporary test directory
-        let test_dir = TestEnvDir::new(&self.test_name)?;
-        tracing::info!(
-            "Creating isolated test environment at: {}",
-            test_dir.path().display()
-        );
-
-        let daemon_state_dir = test_dir.path();
-
-        // Build DaemonStateDir with extracted configuration
-        let daemon_state_dir = daemon_state_dir_builder(daemon_state_dir)
+        // Build final DaemonAmpDir with extracted configuration from daemon_config
+        let daemon_amp_dir = daemon_amp_dir_builder(daemon_amp_dir_path)
             .manifests_dir(daemon_config.dataset_manifests_path())
             .providers_dir(daemon_config.provider_configs_path())
             .data_dir(daemon_config.data_path())
             .build();
 
-        // Write config file to the daemon state dir (i.e., `.amp/` dir)
+        // Write config file to the amp dir (i.e., `.amp/` dir)
         // Create required daemon subdirectories
-        daemon_state_dir.write_config_file(&config_content)?;
-        daemon_state_dir.create_providers_dir()?;
-        daemon_state_dir.create_manifests_dir()?;
-        daemon_state_dir.create_data_dir()?;
+        daemon_amp_dir.write_config_file(&config_content)?;
+        daemon_amp_dir.create_providers_dir()?;
+        daemon_amp_dir.create_manifests_dir()?;
+        daemon_amp_dir.create_data_dir()?;
 
-        // Preload test resources in the daemon state dir as requested
+        // Preload test resources in the amp dir as requested
         if !self.dataset_snapshots_to_preload.is_empty() {
             tracing::info!(
                 "Preloading dataset snapshots: {:?}",
                 self.dataset_snapshots_to_preload
             );
-            daemon_state_dir
+            daemon_amp_dir
                 .preload_dataset_snapshots(&self.dataset_snapshots_to_preload)
                 .await?;
         }
 
-        // Load the config from our temporary directory
-        let config =
-            Arc::new(Config::load(daemon_state_dir.config_file(), false, None, true, None).await?);
+        // Load the config from our temporary directory.
+        // The config file contains the metadata DB URL from the test fixture,
+        // so no managed_db_url fallback is needed.
+        let config = amp_config::load_config(
+            daemon_amp_dir.config_file(),
+            amp_config::no_defaults_override(),
+        )?;
+        let config = Arc::new(config);
 
         let data_store = DataStore::new(
             metadata_db.conn_pool().clone(),
@@ -418,7 +427,9 @@ impl TestCtxBuilder {
         .await?;
 
         // Start controller (Admin API) with shared dataset_store
+        let build_info = build_info::unknown();
         let controller = DaemonController::new(
+            build_info.clone(),
             config.clone(),
             metadata_db.conn_pool().clone(),
             datasets_registry,
@@ -526,6 +537,7 @@ impl TestCtxBuilder {
             .parse()
             .expect("test name should be a valid WorkerNodeId");
         let worker = DaemonWorker::new(
+            build_info,
             config,
             metadata_db.conn_pool().clone(),
             data_store,
@@ -539,7 +551,7 @@ impl TestCtxBuilder {
         Ok(TestCtx {
             test_name: self.test_name,
             test_dir,
-            daemon_state_dir,
+            daemon_amp_dir,
             _metadata_db_fixture: metadata_db,
             daemon_server_fixture: server,
             daemon_controller_fixture: controller,
@@ -558,7 +570,7 @@ pub struct TestCtx {
     test_name: String,
     test_dir: TestEnvDir,
 
-    daemon_state_dir: DaemonStateDir,
+    daemon_amp_dir: DaemonAmpDir,
 
     _metadata_db_fixture: MetadataDbFixture,
     daemon_server_fixture: DaemonServer,
@@ -575,7 +587,7 @@ impl TestCtx {
 
     /// Get the path to the config.toml file.
     pub fn config_file(&self) -> &Path {
-        self.daemon_state_dir.config_file()
+        self.daemon_amp_dir.config_file()
     }
 
     /// Get a reference to the temporary config directory.
@@ -583,9 +595,9 @@ impl TestCtx {
         &self.test_dir
     }
 
-    /// Get a reference to the daemon state directory.
-    pub fn daemon_state_dir(&self) -> &DaemonStateDir {
-        &self.daemon_state_dir
+    /// Get a reference to the daemon amp dir.
+    pub fn daemon_amp_dir(&self) -> &DaemonAmpDir {
+        &self.daemon_amp_dir
     }
 
     /// Get a reference to the [`DaemonServer`] fixture.

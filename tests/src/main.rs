@@ -52,7 +52,7 @@ use std::{
     time::Duration,
 };
 
-use amp_config::Config;
+use amp_config::build_info;
 use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetStore, GetDatasetError};
 use amp_datasets_registry::{
@@ -162,11 +162,12 @@ async fn main() {
             );
 
             // Load configuration and create necessary components
-            let config = Arc::new(
-                Config::load(temp_config_file.path(), false, None, false, None)
-                    .await
-                    .expect("Failed to load config"),
-            );
+            let config = amp_config::load_config(
+                temp_config_file.path(),
+                amp_config::no_defaults_override(),
+            )
+            .expect("Failed to load config");
+            let config = Arc::new(config);
             let data_store = DataStore::new(
                 sysdb.conn_pool().clone(),
                 config.data_store_url.clone(),
@@ -198,7 +199,9 @@ async fn main() {
             };
 
             // Start controller for Admin API access during dependency restoration
+            let build_info = build_info::unknown();
             let controller = DaemonController::new(
+                build_info.clone(),
                 config.clone(),
                 sysdb.conn_pool().clone(),
                 datasets_registry,
@@ -212,6 +215,7 @@ async fn main() {
 
             // Start a worker to handle dump jobs
             let _worker = DaemonWorker::new(
+                build_info,
                 config.clone(),
                 sysdb.conn_pool().clone(),
                 data_store.clone(),

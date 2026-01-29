@@ -46,12 +46,12 @@ impl DaemonServer {
         enable_jsonl: bool,
     ) -> Result<Self, BoxError> {
         let flight_at = if enable_flight {
-            Some(config.addrs.flight_addr)
+            Some(config.server_addrs.flight_addr)
         } else {
             None
         };
         let jsonl_at = if enable_jsonl {
-            Some(config.addrs.jsonl_addr)
+            Some(config.server_addrs.jsonl_addr)
         } else {
             None
         };

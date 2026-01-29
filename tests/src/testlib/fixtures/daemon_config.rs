@@ -75,12 +75,17 @@ impl DaemonConfig {
             max_mem_mb: u32,
             microbatch_max_interval: u64,
             #[serde(skip_serializing_if = "Option::is_none")]
-            metadata_db_url: Option<String>,
+            metadata_db: Option<MetadataDbSection>,
             flight_addr: String,
             jsonl_addr: String,
             registry_service_addr: String,
             admin_api_addr: String,
             writer: WriterConfig,
+        }
+
+        #[derive(serde::Serialize)]
+        struct MetadataDbSection {
+            url: String,
         }
 
         #[derive(serde::Serialize)]
@@ -106,7 +111,10 @@ impl DaemonConfig {
             data_dir: self.data_dir.clone(),
             max_mem_mb: self.max_mem_mb,
             microbatch_max_interval: self.microbatch_max_interval,
-            metadata_db_url: self.metadata_db_url.clone(),
+            metadata_db: self
+                .metadata_db_url
+                .clone()
+                .map(|url| MetadataDbSection { url }),
             flight_addr: self.flight_addr.clone(),
             jsonl_addr: self.jsonl_addr.clone(),
             registry_service_addr: self.registry_service_addr.clone(),

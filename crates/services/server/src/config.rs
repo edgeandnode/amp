@@ -9,7 +9,7 @@ pub struct Config {
     /// Maximum interval for streaming server microbatches (in blocks)
     pub server_microbatch_max_interval: u64,
     /// Keep-alive interval for streaming server (in seconds)
-    pub keep_alive_interval: Option<u64>,
+    pub keep_alive_interval: u64,
     /// Maximum memory the server can use (in MB, 0 = unlimited)
     pub max_mem_mb: usize,
     /// Per-query memory limit (in MB, 0 = unlimited)

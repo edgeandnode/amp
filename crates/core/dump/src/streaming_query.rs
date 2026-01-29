@@ -283,7 +283,7 @@ pub struct StreamingQuery {
     table_updates: TableUpdates,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
-    keep_alive_interval: Option<u64>,
+    keep_alive_interval: u64,
     destination: Option<Arc<PhysicalTable>>,
     preserve_block_num: bool,
     network: NetworkId,
@@ -313,7 +313,7 @@ impl StreamingQuery {
         multiplexer_handle: &NotificationMultiplexerHandle,
         destination: Option<Arc<PhysicalTable>>,
         microbatch_max_interval: u64,
-        keep_alive_interval: Option<u64>,
+        keep_alive_interval: u64,
     ) -> Result<StreamingQueryHandle, SpawnError> {
         let (tx, rx) = mpsc::channel(10);
 
@@ -432,17 +432,13 @@ impl StreamingQuery {
                 plan
             };
 
-            let mut stream = if let Some(keep_alive_interval) = self.keep_alive_interval {
-                let keep_alive_interval = keep_alive_interval.max(30);
-                let schema = Arc::new(plan.schema().as_arrow().clone());
-                keep_alive_stream(
-                    ctx.execute_plan(plan, false).await?,
-                    schema,
-                    keep_alive_interval,
-                )
-            } else {
-                ctx.execute_plan(plan, false).await?
-            };
+            let keep_alive_interval = self.keep_alive_interval.max(30);
+            let schema = Arc::new(plan.schema().as_arrow().clone());
+            let mut stream = keep_alive_stream(
+                ctx.execute_plan(plan, false).await?,
+                schema,
+                keep_alive_interval,
+            );
 
             // Send start message for this microbatch
             let _ = self

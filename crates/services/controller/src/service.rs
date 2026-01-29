@@ -1,6 +1,7 @@
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use admin_api::ctx::Ctx;
+use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
@@ -17,7 +18,7 @@ use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
 use tokio::{net::TcpListener, time::MissedTickBehavior};
 use tower_http::cors::CorsLayer;
 
-use crate::{config::Config, scheduler::Scheduler};
+use crate::scheduler::Scheduler;
 
 /// Reconciliation interval for failed job retries
 ///
@@ -33,7 +34,7 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 /// Returns the bound socket address and a future that runs the server with graceful shutdown.
 #[allow(clippy::too_many_arguments)]
 pub async fn new(
-    config: Arc<Config>,
+    build_info: BuildInfo,
     metadata_db: MetadataDb,
     datasets_registry: DatasetsRegistry,
     providers_registry: ProvidersRegistry,
@@ -51,7 +52,7 @@ pub async fn new(
         dataset_store,
         scheduler: scheduler.clone(),
         data_store,
-        build_info: config.build_info.clone(),
+        build_info,
     };
 
     // Create controller router with health check endpoint

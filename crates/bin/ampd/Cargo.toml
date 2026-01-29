@@ -24,11 +24,12 @@ amp-dataset-store = { path = "../../core/dataset-store" }
 amp-datasets-registry = { path = "../../core/datasets-registry" }
 amp-providers-registry = { path = "../../core/providers-registry" }
 metadata-db = { path = "../../core/metadata-db" }
+metadata-db-postgres = { path = "../../services/metadata-db-postgres" }
 monitoring = { path = "../../core/monitoring" }
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 worker = { path = "../../services/worker" }
 

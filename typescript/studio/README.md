@@ -41,7 +41,8 @@ docker compose up -d
 data_dir = "data/"
 providers_dir = "providers/"
 manifests_dir = "manifest-schemas/"
-metadata_db_url = "postgresql://postgres:postgres@localhost:5432/amp"
+[metadata_db]
+url = "postgresql://postgres:postgres@localhost:5432/amp"
 ```
 
 4. Create necessary directories, also in repo root

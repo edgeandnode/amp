@@ -67,6 +67,12 @@ admin_addr = "0.0.0.0:1610"
 export AMP_CONFIG_ADMIN_ADDR="0.0.0.0:1610"
 ```
 
+### CLI Requirements and Directory Defaults
+
+`ampd controller` requires `--config` (or `AMP_CONFIG`) to be provided. Default `data`, `providers`, and `manifests` directory paths are resolved relative to the config file's parent directory only when the config file does not specify those paths. When the config file specifies `data_dir`, `providers_dir`, or `manifests_dir`, those values are used directly.
+
+This command does not create directories itself; it relies on the configured paths and any downstream components to create or validate storage locations as needed.
+
 ## Usage
 
 ```bash

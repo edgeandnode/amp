@@ -1,8 +1,13 @@
-# Sample of a configuration. Copy this file and edit it. Set the environment variable `AMP_CONFIG`
-# to its location. See the CONFIG.md for more context.
+# Sample of a configuration. Copy this file and edit it.
+#
+# For `ampd solo`: place this file at `.amp/config.toml` for auto-discovery,
+# or pass `--config <path>` / set the `AMP_CONFIG` env var explicitly.
+# For other commands (`server`, `worker`, `controller`): `--config` or `AMP_CONFIG` is required.
+#
+# See config.md for more context.
 #
 # Note that using a config file is not mandatory. You can alternatively provide some or all values
-# through env vars. See the 'Using env vars' section of CONFIG.md for how to do this.
+# through env vars. See the 'Using env vars' section of config.md for how to do this.
 #
 # When using filesystem paths, any relative paths will be resolved from the directory of this file.
 
@@ -12,14 +17,14 @@
 
 # Storage paths
 # Where the extracted datasets are stored.
-data_dir = "<config_dir/data>"
+data_dir = "data"
 
 # Path to a providers directory. Each provider is configured as a separate toml file in this
 # directory. Dataset definitions will reference providers by a relative path to this directory.
-providers_dir = "<config_dir/providers>"
+providers_dir = "providers"
 
 # Path to a directory containing dataset manifest files.
-manifests_dir = "<config_dir/manifests>"
+manifests_dir = "manifests"
 
 # Memory and performance
 # max_mem_mb = 0            # Global memory limit for all queries in MB. 0 means unlimited (default: 0)
@@ -30,6 +35,7 @@ manifests_dir = "<config_dir/manifests>"
 # poll_interval_secs = 1.0                 # Polling interval for new blocks during dump in seconds (default: 1.0)
 # microbatch_max_interval = 100000         # Max interval for derived dataset dump microbatches in blocks (default: 100000)
 # server_microbatch_max_interval = 1000    # Max interval for streaming server microbatches in blocks (default: 1000)
+# keep_alive_interval = 30                 # Keep-alive interval for streaming server in seconds (default: 30, minimum: 30)
 
 # Service addresses
 # flight_addr = "0.0.0.0:1602"      # Arrow Flight RPC server address (default: "0.0.0.0:1602")
@@ -41,9 +47,12 @@ manifests_dir = "<config_dir/manifests>"
 # ================================
 
 # Database configuration
-# If not set, a temporary postgres DB will be provided.
-# To opt out of this default behavior, set `ALLOW_TEMP_DB` to `false` in the environment.
-# By default, temporary DBs will be created and persisted in the OS temp directory.
+# The `url` field is REQUIRED for all commands (server, worker, controller, migrate).
+# Solo mode automatically provides a managed PostgreSQL URL by default. You can
+# optionally provide your own database URL (via this config file or the
+# AMP_CONFIG_METADATA_DB__URL environment variable) to use an external database
+# instead, which skips the managed PostgreSQL startup. The managed instance is
+# initialized and persisted in `.amp/metadb/`, enabling zero-config solo mode operation.
 [metadata_db]
 url = "postgres://<pg_url>"
 # pool_size = 10       # Size of the connection pool (default: 10)
@@ -75,9 +84,6 @@ url = "postgres://<pg_url>"
 # overflow = "1"         # Overflow multiplier: 1x target size (default: "1"), can use "1.5" for 1.5x, etc.
 # bytes = 2147483648     # Target bytes per file - 2GB (default: 2147483648)
 # rows = 0               # Target rows per file, 0 means no limit (default: 0)
-# Note: nozzle dump command may optionally override bytes if partition_size_mb is provided
-# or if the NOZZLE_PARTITION_SIZE_MB env var is set.
-
 # File compactor
 [writer.compactor]
 # active = false                  # Enable or disable the compactor (default: false)

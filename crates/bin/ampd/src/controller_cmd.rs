@@ -1,20 +1,28 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
-use amp_config::Config as CommonConfig;
+use amp_config::{Config as CommonConfig, MetadataDbConfig, build_info::BuildInfo};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
-use controller::config::Config;
 use monitoring::telemetry::metrics::Meter;
 
 /// Run the controller service (Admin API server)
-pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> Result<(), Error> {
-    let metadata_db = config
-        .metadata_db()
-        .await
-        .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
+pub async fn run(
+    build_info: BuildInfo,
+    config: CommonConfig,
+    metadata_db_config: &MetadataDbConfig,
+    meter: Option<Meter>,
+    at: SocketAddr,
+) -> Result<(), Error> {
+    let metadata_db = metadata_db::connect_pool_with_config(
+        &metadata_db_config.url,
+        metadata_db_config.pool_size,
+        metadata_db_config.auto_migrate,
+    )
+    .await
+    .map_err(Error::MetadataDbConnection)?;
 
     let data_store = DataStore::new(
         metadata_db.clone(),
@@ -45,11 +53,8 @@ pub async fn run(config: CommonConfig, meter: Option<Meter>, at: SocketAddr) -> 
     };
     let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
 
-    // Convert to controller-specific config
-    let controller_config = config_from_common(&config);
-
     let (addr, server) = controller::service::new(
-        Arc::new(controller_config),
+        build_info,
         metadata_db,
         datasets_registry,
         providers_registry,
@@ -75,8 +80,8 @@ pub enum Error {
     ///
     /// This occurs when the controller cannot establish a connection to the
     /// PostgreSQL metadata database.
-    #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<amp_config::ConfigError>),
+    #[error("Failed to connect to metadata database")]
+    MetadataDbConnection(#[source] metadata_db::Error),
 
     /// Failed to create data store
     ///
@@ -109,11 +114,4 @@ pub enum Error {
     /// encounters an error during operation.
     #[error("Controller runtime error: {0}")]
     Runtime(#[source] controller::service::ServerError),
-}
-
-/// Convert common config to controller-specific config
-pub fn config_from_common(config: &CommonConfig) -> Config {
-    Config {
-        build_info: config.build_info.clone(),
-    }
 }

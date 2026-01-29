@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use amp_config::{Addrs, Config as CommonConfig};
+use amp_config::{Config as CommonConfig, MetadataDbConfig, server::ServerAddrs};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
@@ -11,15 +11,19 @@ use server::config::Config as ServerConfig;
 
 pub async fn run(
     config: CommonConfig,
+    metadata_db_config: &MetadataDbConfig,
     meter: Option<Meter>,
-    addrs: &Addrs,
+    addrs: &ServerAddrs,
     flight_server: bool,
     jsonl_server: bool,
 ) -> Result<(), Error> {
-    let metadata_db = config
-        .metadata_db()
-        .await
-        .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
+    let metadata_db = metadata_db::connect_pool_with_config(
+        &metadata_db_config.url,
+        metadata_db_config.pool_size,
+        metadata_db_config.auto_migrate,
+    )
+    .await
+    .map_err(Error::MetadataDbConnection)?;
 
     let data_store = DataStore::new(
         metadata_db.clone(),
@@ -105,8 +109,8 @@ pub enum Error {
     ///
     /// This occurs when the server cannot establish a connection to the
     /// PostgreSQL metadata database.
-    #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<amp_config::ConfigError>),
+    #[error("Failed to connect to metadata database")]
+    MetadataDbConnection(#[source] metadata_db::Error),
 
     /// Failed to create data store
     ///

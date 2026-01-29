@@ -1,4 +1,4 @@
-use amp_config::Config;
+use amp_config::{Config, MetadataDbConfig, build_info::BuildInfo};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
@@ -7,11 +7,20 @@ use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use monitoring::telemetry::metrics::Meter;
 use worker::node_id::NodeId;
 
-pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Result<(), Error> {
-    let metadata_db = config
-        .metadata_db()
-        .await
-        .map_err(|err| Error::MetadataDbConnection(Box::new(err)))?;
+pub async fn run(
+    build_info: BuildInfo,
+    config: Config,
+    metadata_db_config: &MetadataDbConfig,
+    meter: Option<Meter>,
+    node_id: NodeId,
+) -> Result<(), Error> {
+    let metadata_db = metadata_db::connect_pool_with_config(
+        &metadata_db_config.url,
+        metadata_db_config.pool_size,
+        metadata_db_config.auto_migrate,
+    )
+    .await
+    .map_err(Error::MetadataDbConnection)?;
 
     let data_store = DataStore::new(
         metadata_db.clone(),
@@ -44,7 +53,7 @@ pub async fn run(config: Config, meter: Option<Meter>, node_id: NodeId) -> Resul
     let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
 
     // Convert common config to worker-specific config
-    let worker_config = config_from_common(&config);
+    let worker_config = config_from_common(&config, &build_info);
 
     // Initialize the worker (setup phase)
     let worker_fut = worker::service::new(
@@ -69,8 +78,8 @@ pub enum Error {
     ///
     /// This occurs when the worker cannot establish a connection to the
     /// PostgreSQL metadata database.
-    #[error("Failed to connect to metadata database: {0}")]
-    MetadataDbConnection(#[source] Box<amp_config::ConfigError>),
+    #[error("Failed to connect to metadata database")]
+    MetadataDbConnection(#[source] metadata_db::Error),
 
     /// Failed to create data store
     ///
@@ -105,7 +114,10 @@ pub enum Error {
 }
 
 /// Convert config::Config to worker::config::Config
-pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
+pub(crate) fn config_from_common(
+    config: &Config,
+    build_info: &BuildInfo,
+) -> worker::config::Config {
     worker::config::Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,
@@ -115,10 +127,10 @@ pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
         worker_info: worker::info::WorkerInfo {
-            version: Some(config.build_info.version.clone()),
-            commit_sha: Some(config.build_info.commit_sha.clone()),
-            commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
-            build_date: Some(config.build_info.build_date.clone()),
+            version: Some(build_info.version.clone()),
+            commit_sha: Some(build_info.commit_sha.clone()),
+            commit_timestamp: Some(build_info.commit_timestamp.clone()),
+            build_date: Some(build_info.build_date.clone()),
         },
     }
 }

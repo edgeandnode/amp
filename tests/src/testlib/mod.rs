@@ -56,10 +56,10 @@ pub mod fixtures {
     mod anvil;
     mod cli;
     mod contract_artifact;
+    mod daemon_amp_dir;
     mod daemon_config;
     mod daemon_controller;
     mod daemon_server;
-    mod daemon_state_dir;
     mod daemon_worker;
     mod flight_client;
     mod jsonl_client;
@@ -72,10 +72,10 @@ pub mod fixtures {
     pub use anvil::*;
     pub use cli::*;
     pub use contract_artifact::*;
+    pub use daemon_amp_dir::*;
     pub use daemon_config::*;
     pub use daemon_controller::*;
     pub use daemon_server::*;
-    pub use daemon_state_dir::*;
     pub use daemon_worker::*;
     pub use flight_client::*;
     pub use jsonl_client::*;
