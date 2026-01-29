@@ -10,6 +10,7 @@
 
 pub mod build_info;
 pub mod config;
+pub mod events;
 pub mod job;
 pub mod node_id;
 pub mod service;

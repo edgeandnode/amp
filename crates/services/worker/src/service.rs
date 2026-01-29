@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
@@ -30,6 +30,7 @@ use self::{
 use crate::{
     build_info::BuildInfo,
     config::Config,
+    events::{EventEmitter, NoOpEmitter},
     job::{Job, JobAction, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
@@ -46,6 +47,16 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 ///   listener setup, and bootstrap. Errors in this phase are returned as [`InitError`].
 /// - **Phase 2 (Runtime)**: Main event loop handling heartbeats, job notifications,
 ///   job results, and reconciliation. Errors in this phase are returned as [`RuntimeError`].
+///
+/// # Event Emitter Injection
+///
+/// The `event_emitter` parameter allows injecting a custom [`EventEmitter`] implementation.
+/// This is primarily useful for testing, where a mock emitter can be injected to capture
+/// events during integration tests.
+///
+/// - If `Some(emitter)` is provided, it will be used directly.
+/// - If `None` is provided, an emitter will be created based on the configuration
+///   (either [`KafkaEventEmitter`] if events are enabled, or [`NoOpEmitter`] otherwise).
 pub async fn new(
     config: Config,
     build_info: impl Into<BuildInfo>,
@@ -54,6 +65,7 @@ pub async fn new(
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     node_id: NodeId,
+    event_emitter: Option<Arc<dyn EventEmitter>>,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
     let build_info = build_info.into();
 
@@ -80,6 +92,48 @@ pub async fn new(
     // Create notification multiplexer
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
+    // Use injected event emitter or create one based on configuration
+    let event_emitter: Arc<dyn EventEmitter> = match event_emitter {
+        Some(emitter) => {
+            tracing::info!("Using injected event emitter");
+            emitter
+        }
+        None => {
+            // Create emitter based on configuration
+            if config.events_config.enabled {
+                match &config.events_config.kafka {
+                    Some(kafka_config) => {
+                        let kafka_cfg = kafka_client::KafkaConfig::new(
+                            kafka_config.brokers.clone(),
+                            kafka_config.topic.clone(),
+                        );
+                        match kafka_client::KafkaProducer::new(&kafka_cfg).await {
+                            Ok(producer) => {
+                                tracing::info!("Kafka event streaming enabled");
+                                Arc::new(crate::events::KafkaEventEmitter::new(
+                                    Arc::new(producer),
+                                    node_id.clone(),
+                                ))
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to create Kafka producer, events disabled");
+                                Arc::new(NoOpEmitter)
+                            }
+                        }
+                    }
+                    None => {
+                        tracing::warn!(
+                            "Events enabled but no Kafka config provided, events disabled"
+                        );
+                        Arc::new(NoOpEmitter)
+                    }
+                }
+            } else {
+                Arc::new(NoOpEmitter)
+            }
+        }
+    };
+
     // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state
     // from the last known state.
     //
@@ -102,6 +156,7 @@ pub async fn new(
             data_store,
             notification_multiplexer,
             meter,
+            event_emitter,
         },
     );
 
@@ -218,6 +273,13 @@ pub(crate) struct WorkerJobCtx {
     pub data_store: DataStore,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,
+    pub event_emitter: Arc<dyn EventEmitter>,
+}
+
+/// Metadata tracked for running jobs to support event emission.
+struct JobMeta {
+    dataset_info: crate::events::DatasetInfo,
+    start_time: std::time::Instant,
 }
 
 pub struct Worker {
@@ -225,6 +287,8 @@ pub struct Worker {
     queue: JobQueue,
     job_ctx: WorkerJobCtx,
     job_set: JobSet,
+    /// Tracks metadata for running jobs to support event emission.
+    job_meta: HashMap<JobId, JobMeta>,
 }
 
 impl Worker {
@@ -236,6 +300,7 @@ impl Worker {
             queue,
             job_ctx,
             job_set: JobSet::default(),
+            job_meta: HashMap::new(),
         }
     }
 
@@ -291,9 +356,26 @@ impl Worker {
         job_id: JobId,
         result: Result<(), JobSetJoinError>,
     ) -> Result<(), JobResultError> {
+        // Get job metadata for event emission (remove since job is done)
+        let job_meta = self.job_meta.remove(&job_id);
+
         match result {
             Ok(()) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job completed successfully");
+
+                // Emit sync.completed event
+                if let Some(meta) = &job_meta {
+                    self.job_ctx
+                        .event_emitter
+                        .emit_sync_completed(crate::events::SyncCompletedEvent {
+                            job_id: *job_id,
+                            dataset: meta.dataset_info.clone(),
+                            table_name: "all".to_string(),
+                            final_block: 0, // TODO: get actual final block from job result
+                            duration_millis: meta.start_time.elapsed().as_millis() as u64,
+                        })
+                        .await;
+                }
 
                 // Mark the job as COMPLETED (retry on failure)
                 self.queue
@@ -307,6 +389,20 @@ impl Worker {
             Err(JobSetJoinError::Failed(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job failed");
 
+                // Emit sync.failed event
+                if let Some(meta) = &job_meta {
+                    self.job_ctx
+                        .event_emitter
+                        .emit_sync_failed(crate::events::SyncFailedEvent {
+                            job_id: *job_id,
+                            dataset: meta.dataset_info.clone(),
+                            table_name: "all".to_string(),
+                            error_message: err.to_string(),
+                            error_type: Some("Failed".to_string()),
+                        })
+                        .await;
+                }
+
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
                     JobResultError::MarkFailedFailed {
@@ -318,6 +414,20 @@ impl Worker {
             Err(JobSetJoinError::Aborted) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job cancelled");
 
+                // Emit sync.completed event for graceful abort (not failed)
+                if let Some(meta) = &job_meta {
+                    self.job_ctx
+                        .event_emitter
+                        .emit_sync_completed(crate::events::SyncCompletedEvent {
+                            job_id: *job_id,
+                            dataset: meta.dataset_info.clone(),
+                            table_name: "all".to_string(),
+                            final_block: 0,
+                            duration_millis: meta.start_time.elapsed().as_millis() as u64,
+                        })
+                        .await;
+                }
+
                 // Mark the job as STOPPED (retry on failure)
                 self.queue.mark_job_stopped(job_id).await.map_err(|error| {
                     JobResultError::MarkStoppedFailed {
@@ -328,6 +438,20 @@ impl Worker {
             }
             Err(JobSetJoinError::Panicked(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job panicked");
+
+                // Emit sync.failed event
+                if let Some(meta) = &job_meta {
+                    self.job_ctx
+                        .event_emitter
+                        .emit_sync_failed(crate::events::SyncFailedEvent {
+                            job_id: *job_id,
+                            dataset: meta.dataset_info.clone(),
+                            table_name: "all".to_string(),
+                            error_message: err.to_string(),
+                            error_type: Some("Panicked".to_string()),
+                        })
+                        .await;
+                }
 
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
@@ -413,6 +537,37 @@ impl Worker {
         let job_id = job.id;
         let job_desc: crate::job::JobDescriptor =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
+
+        // Track job metadata for event emission
+        let dataset_info = crate::events::DatasetInfo {
+            namespace: job_desc.dataset_namespace().to_string(),
+            name: job_desc.dataset_name().to_string(),
+            manifest_hash: job_desc.manifest_hash().to_string(),
+        };
+        self.job_meta.insert(
+            job_id,
+            JobMeta {
+                dataset_info: dataset_info.clone(),
+                start_time: std::time::Instant::now(),
+            },
+        );
+
+        // Emit sync.started event
+        self.job_ctx
+            .event_emitter
+            .emit_sync_started(crate::events::SyncStartedEvent {
+                job_id: *job_id,
+                dataset: dataset_info,
+                table_name: "all".to_string(), // TODO: emit per-table when progress events are added
+                start_block: None,
+                end_block: match &job_desc {
+                    crate::job::JobDescriptor::Dump { end_block, .. } => match end_block {
+                        dump::EndBlock::Absolute(block) => Some(*block),
+                        _ => None,
+                    },
+                },
+            })
+            .await;
 
         let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc);
 

@@ -193,9 +193,17 @@ pub struct ConfigFile {
     // Writer/Parquet configuration
     #[serde(default)]
     pub writer: ParquetConfig,
+
+    // Worker event streaming configuration
+    #[serde(default)]
+    pub worker_events: crate::WorkerEventsConfig,
 }
 
 impl ConfigFile {
+    /// Returns the worker events configuration.
+    pub fn worker_events(&self) -> &crate::WorkerEventsConfig {
+        &self.worker_events
+    }
     /// Returns the data directory path where Parquet files are stored.
     pub fn data_dir(&self) -> &str {
         &self.data_dir

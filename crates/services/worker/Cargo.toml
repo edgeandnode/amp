@@ -6,17 +6,21 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../../core/data-store" }
+async-trait.workspace = true
 backon.workspace = true
 chrono.workspace = true
 amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
+kafka-client = { path = "../../clients/kafka" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
+prost.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+uuid = { workspace = true, features = ["v7"] }

@@ -1,5 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
+use amp_config::WorkerEventsConfig;
 use dump::ParquetConfig;
 
 /// Configuration specific to the worker service
@@ -29,6 +30,9 @@ pub struct Config {
 
     /// Parquet file configuration
     pub parquet: ParquetConfig,
+
+    /// Optional event streaming configuration
+    pub events_config: WorkerEventsConfig,
 }
 
 impl Config {

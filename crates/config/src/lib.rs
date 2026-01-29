@@ -87,6 +87,9 @@ fn resolve_config(
         source,
     })?;
 
+    // Extract worker_events before moving other fields
+    let worker_events = config_file.worker_events().clone();
+
     Ok(Config {
         data_store_url: store_urls.data,
         providers_store_url: store_urls.providers,
@@ -103,6 +106,7 @@ fn resolve_config(
         config_path,
         poll_interval: config_file.poll_interval_secs.into(),
         keep_alive_interval: config_file.keep_alive_interval,
+        worker_events,
     })
 }
 
@@ -219,6 +223,48 @@ pub struct Config {
     pub poll_interval: Duration,
     /// Keep-alive interval for streaming server (in seconds).
     pub keep_alive_interval: u64,
+    /// Worker event streaming configuration.
+    pub worker_events: WorkerEventsConfig,
+}
+
+/// Configuration for worker event streaming.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct WorkerEventsConfig {
+    /// Enable/disable event emission (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Kafka-specific configuration
+    pub kafka: Option<KafkaEventsConfig>,
+}
+
+fn default_kafka_topic() -> String {
+    "amp.worker.events".to_string()
+}
+
+/// Kafka configuration for worker events.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct KafkaEventsConfig {
+    /// Kafka broker addresses (e.g., ["kafka-1:9092", "kafka-2:9092"])
+    pub brokers: Vec<String>,
+
+    /// Kafka topic name (default: "amp.worker.events")
+    #[serde(default = "default_kafka_topic")]
+    pub topic: String,
+
+    /// SASL authentication mechanism (optional)
+    /// Supported values: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"
+    pub sasl_mechanism: Option<String>,
+
+    /// SASL username (required if sasl_mechanism is set)
+    pub sasl_username: Option<String>,
+
+    /// SASL password (required if sasl_mechanism is set)
+    pub sasl_password: Option<String>,
+
+    /// Enable TLS encryption (default: false)
+    #[serde(default)]
+    pub tls_enabled: bool,
 }
 
 impl Config {

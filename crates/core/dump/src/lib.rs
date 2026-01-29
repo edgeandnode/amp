@@ -16,6 +16,7 @@ pub mod config;
 mod derived_dataset;
 pub mod metrics;
 mod parquet_writer;
+pub mod progress;
 mod raw_dataset;
 mod raw_dataset_writer;
 pub mod streaming_query;
@@ -29,6 +30,7 @@ pub use self::{
         SizeLimitConfig,
     },
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+    progress::{NoOpProgressCallback, ProgressCallback, ProgressCallbackExt, ProgressUpdate},
 };
 use crate::{
     compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit},
@@ -109,6 +111,8 @@ pub struct Ctx {
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     /// Optional job-specific metrics registry
     pub metrics: Option<Arc<MetricsRegistry>>,
+    /// Optional progress callback for reporting dump progress
+    pub progress_callback: Option<Arc<dyn ProgressCallback>>,
 }
 
 #[derive(Debug, Clone)]

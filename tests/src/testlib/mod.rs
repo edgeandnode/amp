@@ -65,6 +65,7 @@ pub mod fixtures {
     mod flight_client;
     mod jsonl_client;
     mod metadata_db;
+    mod mock_event_emitter;
     mod package;
     mod snapshot_ctx;
 
@@ -81,6 +82,7 @@ pub mod fixtures {
     pub use flight_client::*;
     pub use jsonl_client::*;
     pub use metadata_db::*;
+    pub use mock_event_emitter::*;
     pub use package::*;
     pub use snapshot_ctx::*;
 }

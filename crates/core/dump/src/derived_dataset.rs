@@ -135,6 +135,7 @@ use crate::{
         CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
         ParquetFileWriterOutput, commit_metadata,
     },
+    progress::ProgressUpdate,
     streaming_query::{
         QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
@@ -792,6 +793,14 @@ async fn dump_sql_query(
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
+    // Track progress for event emission
+    let mut files_count: u64 = 0;
+    let mut total_size_bytes: u64 = 0;
+    let mut last_emitted_percent: usize = 0;
+
+    // Calculate total blocks for percentage calculation (if end block is known)
+    let total_blocks = end.map(|e| if e > start { e - start } else { 1 });
+
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
@@ -831,6 +840,10 @@ async fn dump_sql_query(
                     .await
                     .map_err(DumpSqlQueryError::CloseFile)?;
 
+                // Track progress stats
+                files_count += 1;
+                total_size_bytes += object_meta.size;
+
                 commit_metadata(
                     &ctx.metadata_db,
                     parquet_meta,
@@ -843,6 +856,36 @@ async fn dump_sql_query(
                 .map_err(DumpSqlQueryError::CommitMetadata)?;
 
                 compactor.try_run().map_err(DumpSqlQueryError::Compactor)?;
+
+                // Emit progress event on 1% increments (or every microbatch if no end block)
+                if let Some(ref callback) = ctx.progress_callback {
+                    let should_emit = if let Some(total) = total_blocks {
+                        // Calculate percentage and emit on 1% increments
+                        let blocks_done = microbatch_end.saturating_sub(start);
+                        let current_percent =
+                            ((blocks_done as f64 / total as f64) * 100.0) as usize;
+                        if current_percent > last_emitted_percent {
+                            last_emitted_percent = current_percent;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        // No end block (continuous mode) - emit on each microbatch
+                        true
+                    };
+
+                    if should_emit {
+                        callback.on_progress(ProgressUpdate {
+                            table_name: table_name.clone(),
+                            start_block: start,
+                            current_block: microbatch_end,
+                            end_block: end, // None in continuous mode
+                            files_count,
+                            total_size_bytes,
+                        });
+                    }
+                }
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;

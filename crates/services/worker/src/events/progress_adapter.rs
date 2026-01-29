@@ -1,0 +1,74 @@
+//! Progress callback adapter for bridging dump crate progress to event emitter.
+//!
+//! This module provides a [`WorkerProgressCallback`] that implements the dump crate's
+//! [`dump::ProgressCallback`] trait and forwards progress updates to the worker's
+//! [`EventEmitter`] for Kafka streaming.
+
+use std::sync::Arc;
+
+use dump::ProgressUpdate;
+
+use super::{DatasetInfo, EventEmitter, ProgressInfo, SyncProgressEvent};
+use crate::job::JobId;
+
+/// Adapter that bridges dump crate progress callbacks to worker event emission.
+///
+/// This struct implements [`dump::ProgressCallback`] and translates progress updates
+/// into [`SyncProgressEvent`]s that are sent to the configured [`EventEmitter`].
+pub struct WorkerProgressCallback {
+    job_id: JobId,
+    dataset_info: DatasetInfo,
+    event_emitter: Arc<dyn EventEmitter>,
+}
+
+impl WorkerProgressCallback {
+    /// Creates a new progress callback adapter.
+    pub fn new(
+        job_id: JobId,
+        dataset_info: DatasetInfo,
+        event_emitter: Arc<dyn EventEmitter>,
+    ) -> Self {
+        Self {
+            job_id,
+            dataset_info,
+            event_emitter,
+        }
+    }
+}
+
+impl dump::ProgressCallback for WorkerProgressCallback {
+    fn on_progress(&self, update: ProgressUpdate) {
+        // Calculate percentage only if we have an end block (not in continuous mode)
+        let percentage = update.end_block.map(|end_block| {
+            let total_blocks = end_block.saturating_sub(update.start_block) + 1;
+            let blocks_done = update.current_block.saturating_sub(update.start_block) + 1;
+            if total_blocks > 0 {
+                ((blocks_done as f64 / total_blocks as f64) * 100.0).min(100.0) as u8
+            } else {
+                0
+            }
+        });
+
+        let event = SyncProgressEvent {
+            job_id: *self.job_id,
+            dataset: self.dataset_info.clone(),
+            table_name: update.table_name.to_string(),
+            progress: ProgressInfo {
+                start_block: update.start_block,
+                current_block: update.current_block,
+                end_block: update.end_block,
+                percentage,
+                files_count: update.files_count,
+                total_size_bytes: update.total_size_bytes,
+            },
+        };
+
+        // Clone the emitter and spawn an async task to emit the event.
+        // This is necessary because ProgressCallback::on_progress is synchronous
+        // but EventEmitter::emit_sync_progress is asynchronous.
+        let emitter = Arc::clone(&self.event_emitter);
+        tokio::spawn(async move {
+            emitter.emit_sync_progress(event).await;
+        });
+    }
+}

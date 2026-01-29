@@ -83,10 +83,10 @@ use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
     sync::{
-        Arc, RwLock,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use amp_data_store::DataStore;
@@ -112,6 +112,7 @@ use crate::{
     check::consistency_check,
     compaction::AmpCompactor,
     metrics,
+    progress::{ProgressCallback, ProgressUpdate},
     raw_dataset_writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError},
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
@@ -322,6 +323,9 @@ pub async fn dump(
             compactors_by_table,
             metrics.as_ref(),
             &tables,
+            start,
+            end,
+            latest_block,
         )
         .await?;
     }
@@ -487,6 +491,12 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
     metrics: Option<&Arc<metrics::MetricsRegistry>>,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    // The job's actual start block (from dataset definition), used for progress events
+    job_start_block: BlockNum,
+    // The job's actual end block (resolved), used for progress events. None for continuous mode.
+    job_end_block: Option<BlockNum>,
+    // Current chain head block, used for percentage calculation in continuous mode
+    chain_head: BlockNum,
 ) -> Result<(), Error> {
     tracing::info!(
         "dumping ranges {}",
@@ -501,16 +511,20 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     let missing_dataset_ranges =
         split_and_partition(missing_dataset_ranges, max_writers as u64, 2000);
 
-    let total_blocks_to_cover = missing_dataset_ranges
-        .iter()
-        .flatten()
-        .map(|r| r.clone().count())
-        .sum::<usize>();
+    // Extract table names for progress reporting
+    let table_names: Vec<TableName> = tables.iter().map(|(t, _)| t.table_name().clone()).collect();
 
+    // Use the job's actual start/end blocks for progress events (not the missing ranges).
+    // This ensures consumers see the overall job progress, not just progress through remaining work.
+    // For continuous mode, chain_head is used instead of job_end_block for percentage calculation.
     let progress_reporter = Arc::new(ProgressReporter {
-        overall_blocks_covered: AtomicUsize::new(0),
-        total_blocks_to_cover,
-        last_log_time: RwLock::new(Instant::now()),
+        last_logged_percent: AtomicUsize::new(0),
+        last_emitted_percent: AtomicUsize::new(0),
+        progress_callback: ctx.progress_callback.clone(),
+        table_names,
+        job_start_block,
+        job_end_block,
+        chain_head,
     });
 
     let writers = missing_dataset_ranges
@@ -569,25 +583,70 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
 }
 
 struct ProgressReporter {
-    overall_blocks_covered: AtomicUsize,
-    total_blocks_to_cover: usize,
-    last_log_time: RwLock<Instant>,
+    /// Last percentage that was logged (for throttling log output)
+    last_logged_percent: AtomicUsize,
+    /// Last percentage that triggered a callback (for 1% increment events)
+    last_emitted_percent: AtomicUsize,
+    /// Optional progress callback for external event streaming
+    progress_callback: Option<Arc<dyn ProgressCallback>>,
+    /// Table names for progress reporting
+    table_names: Vec<TableName>,
+    /// The job's actual start block (from dataset definition)
+    job_start_block: BlockNum,
+    /// The job's actual end block (resolved). None for continuous mode.
+    job_end_block: Option<BlockNum>,
+    /// Current chain head block, used for percentage calculation in continuous mode
+    chain_head: BlockNum,
 }
 
 impl ProgressReporter {
     /// Signal to the progress reporter that another block has been covered.
-    fn block_covered(&self) {
-        let overall_blocks_covered = self.overall_blocks_covered.fetch_add(1, Ordering::SeqCst) + 1;
-        let now = Instant::now();
-        let last_log_time = *self.last_log_time.read().unwrap();
-        if now.duration_since(last_log_time) >= Duration::from_secs(15) {
-            let percent_covered =
-                (overall_blocks_covered as f64 / self.total_blocks_to_cover as f64) * 100.0;
-            tracing::info!(
-                "overall progress: {overall_blocks_covered}/{} blocks ({percent_covered:.2}%)",
-                self.total_blocks_to_cover
-            );
-            *self.last_log_time.write().unwrap() = now;
+    fn block_covered(&self, current_block: BlockNum) {
+        // Calculate current percentage based on chain head position.
+        // For bounded jobs: percentage = (current - start) / (end - start) * 100
+        // For continuous jobs: percentage = (current - start) / (chain_head - start) * 100
+        let effective_end = self.job_end_block.unwrap_or(self.chain_head);
+        let total_range = effective_end.saturating_sub(self.job_start_block) + 1;
+        let blocks_done = current_block.saturating_sub(self.job_start_block) + 1;
+        let current_percent = if total_range > 0 {
+            ((blocks_done as f64 / total_range as f64) * 100.0).min(100.0) as usize
+        } else {
+            0
+        };
+
+        // Log progress when percentage increases (throttled to avoid spam)
+        let last_logged = self.last_logged_percent.load(Ordering::SeqCst);
+        if current_percent > last_logged {
+            // Only log every 5% to avoid excessive logging
+            if current_percent / 5 > last_logged / 5 {
+                tracing::info!(
+                    "overall progress: {blocks_done}/{total_range} blocks ({current_percent}%)",
+                );
+            }
+            self.last_logged_percent
+                .store(current_percent, Ordering::SeqCst);
+        }
+
+        // Emit progress callback on every 1% increment
+        if let Some(ref callback) = self.progress_callback {
+            let last_emitted = self.last_emitted_percent.load(Ordering::SeqCst);
+            if current_percent > last_emitted {
+                // Emit for each table
+                for table_name in &self.table_names {
+                    callback.on_progress(ProgressUpdate {
+                        table_name: table_name.clone(),
+                        start_block: self.job_start_block,
+                        current_block,
+                        end_block: self.job_end_block,
+                        // File and byte counts are tracked at the writer level and
+                        // reported via metrics. Progress callbacks focus on block progress.
+                        files_count: 0,
+                        total_size_bytes: 0,
+                    });
+                }
+                self.last_emitted_percent
+                    .store(current_percent, Ordering::SeqCst);
+            }
         }
     }
 }
@@ -744,12 +803,15 @@ impl<S: BlockStreamer> DumpPartition<S> {
         .map_err(RunRangeError::CreateWriter)?;
 
         let mut stream = std::pin::pin!(stream);
+        let mut last_block_num: BlockNum = *range.start();
         while let Some(dataset_rows) = stream.try_next().await.map_err(RunRangeError::ReadStream)? {
             for table_rows in dataset_rows {
+                let block_num = table_rows.block_num();
+                last_block_num = block_num;
+
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
                     let table_name = table_rows.table.name();
-                    let block_num = table_rows.block_num();
                     let physical_table = self
                         .catalog
                         .tables()
@@ -769,7 +831,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
                     .map_err(RunRangeError::Write)?;
             }
 
-            self.progress_reporter.block_covered();
+            self.progress_reporter.block_covered(last_block_num);
         }
 
         // Close the last part file for each table, checking for any errors.
@@ -833,6 +895,214 @@ pub enum RunRangeError {
 
 #[cfg(test)]
 mod test {
+    use std::sync::{Arc, Mutex, atomic::AtomicUsize};
+
+    use datasets_common::table_name::TableName;
+
+    use super::ProgressReporter;
+    use crate::progress::{ProgressCallback, ProgressUpdate};
+
+    /// A mock progress callback that records all progress updates.
+    struct MockProgressCallback {
+        updates: Mutex<Vec<ProgressUpdate>>,
+    }
+
+    impl MockProgressCallback {
+        fn new() -> Self {
+            Self {
+                updates: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn get_updates(&self) -> Vec<ProgressUpdate> {
+            self.updates.lock().unwrap().clone()
+        }
+    }
+
+    impl ProgressCallback for MockProgressCallback {
+        fn on_progress(&self, update: ProgressUpdate) {
+            tracing::info!(
+                table = %update.table_name,
+                start_block = update.start_block,
+                current_block = update.current_block,
+                "[PROGRESS] block_covered"
+            );
+            self.updates.lock().unwrap().push(update);
+        }
+    }
+
+    #[test]
+    fn progress_reporter_emits_at_every_one_percent() {
+        // Initialize logging so we can see the events
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("info")
+            .with_test_writer()
+            .try_init();
+
+        // Given: A ProgressReporter with 100 total blocks (1 block = 1%)
+        let callback = Arc::new(MockProgressCallback::new());
+        let table_name: TableName = "blocks".parse().unwrap();
+
+        let reporter = ProgressReporter {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emitted_percent: AtomicUsize::new(0),
+            progress_callback: Some(callback.clone()),
+            table_names: vec![table_name.clone()],
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process all 100 blocks (block numbers 0-99)
+        for block in 0..100u64 {
+            reporter.block_covered(block);
+        }
+
+        // Then: Should have emitted ~100 progress updates (1% to 100%)
+        let updates = callback.get_updates();
+
+        // We expect approximately 100 updates (one per percentage point)
+        // Some small variance is acceptable due to integer division in percentage calc
+        assert!(
+            updates.len() >= 95 && updates.len() <= 100,
+            "Expected ~100 progress updates (1% to 100%), got {}",
+            updates.len()
+        );
+
+        // Verify updates have correct metadata
+        for update in &updates {
+            assert_eq!(update.table_name, table_name);
+            assert_eq!(update.start_block, 0);
+            assert_eq!(update.end_block, Some(99));
+        }
+
+        // Verify first and last updates are at expected percentages
+        let first_block = updates.first().unwrap().current_block;
+        let last_block = updates.last().unwrap().current_block;
+        assert!(
+            first_block <= 1,
+            "First update should be at ~1%, got block {}",
+            first_block
+        );
+        assert!(
+            last_block >= 98,
+            "Last update should be at ~100%, got block {}",
+            last_block
+        );
+    }
+
+    #[test]
+    fn progress_reporter_emits_for_multiple_tables() {
+        // Given: A ProgressReporter with multiple tables
+        let callback = Arc::new(MockProgressCallback::new());
+        let tables: Vec<TableName> = vec![
+            "blocks".parse().unwrap(),
+            "transactions".parse().unwrap(),
+            "logs".parse().unwrap(),
+        ];
+
+        let reporter = ProgressReporter {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emitted_percent: AtomicUsize::new(0),
+            progress_callback: Some(callback.clone()),
+            table_names: tables.clone(),
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process 10 blocks (10%)
+        for block in 0..10 {
+            reporter.block_covered(block);
+        }
+
+        // Then: Should have 10 updates per table * 3 tables = 30 updates
+        let updates = callback.get_updates();
+        assert_eq!(
+            updates.len(),
+            30, // 10% * 3 tables
+            "Expected 30 progress updates (10% * 3 tables), got {}",
+            updates.len()
+        );
+
+        // Verify each percentage has updates for all 3 tables
+        for pct in 1..=10 {
+            let pct_updates: Vec<_> = updates
+                .iter()
+                .filter(|u| {
+                    let block_pct = ((u.current_block + 1) as f64 / 100.0 * 100.0) as u64;
+                    block_pct == pct
+                })
+                .collect();
+            assert_eq!(
+                pct_updates.len(),
+                3,
+                "Expected 3 table updates at {}%, got {}",
+                pct,
+                pct_updates.len()
+            );
+        }
+    }
+
+    #[test]
+    fn progress_reporter_no_callback_no_updates() {
+        // Given: A ProgressReporter with no callback
+        let reporter = ProgressReporter {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emitted_percent: AtomicUsize::new(0),
+            progress_callback: None,
+            table_names: vec!["blocks".parse().unwrap()],
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process all 100 blocks
+        for block in 0..100 {
+            reporter.block_covered(block);
+        }
+
+        // Then: No crash, no updates (callback is None)
+        // This just verifies the code handles None gracefully
+    }
+
+    #[test]
+    fn progress_reporter_large_block_range() {
+        // Given: A ProgressReporter with 10,000 blocks
+        let callback = Arc::new(MockProgressCallback::new());
+        let table_name: TableName = "blocks".parse().unwrap();
+
+        let reporter = ProgressReporter {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emitted_percent: AtomicUsize::new(0),
+            progress_callback: Some(callback.clone()),
+            table_names: vec![table_name],
+            job_start_block: 1000, // Non-zero start block
+            job_end_block: Some(10999),
+            chain_head: 10999,
+        };
+
+        // When: Process all 10,000 blocks
+        for block in 1000..11000 {
+            reporter.block_covered(block);
+        }
+
+        // Then: Should have 100 progress updates (1% to 100%)
+        let updates = callback.get_updates();
+        assert_eq!(
+            updates.len(),
+            100,
+            "Expected 100 progress updates (1% to 100%), got {}",
+            updates.len()
+        );
+
+        // Verify job_start_block and job_end_block are preserved in updates
+        for update in &updates {
+            assert_eq!(update.start_block, 1000);
+            assert_eq!(update.end_block, Some(10999));
+        }
+    }
+
     #[test]
     fn split_and_partition() {
         assert_eq!(
