@@ -53,18 +53,20 @@ Keep feature docs focused and concise. CLAUDE.md should NOT hardcode feature lis
 name: "feature-name-kebab-case"
 description: "A one line short description of the feature/functionality"
 type: "meta|feature|component"
+status: "stable|experimental|unstable|development"
 components: "prefix:name,prefix:name"
 ---
 ```
 
 ### Field Requirements
 
-| Field | Required | Format | Description |
-|-------|----------|--------|-------------|
-| `name` | YES | kebab-case | Unique identifier matching filename (minus .md) |
-| `description` | YES | Single line, succinct | Discovery-optimized description (see guidelines below) |
-| `type` | YES | `meta`, `feature`, or `component` | Document classification (see Type Definitions below) |
-| `components` | YES | Prefixed, comma-separated | Related crates/modules with type prefix |
+| Field         | Required | Format                            | Description                                                         |
+|---------------|----------|-----------------------------------|---------------------------------------------------------------------|
+| `name`        | YES      | kebab-case                        | Unique identifier matching filename (minus .md)                     |
+| `description` | YES      | Single line, succinct             | Discovery-optimized description (see guidelines below)              |
+| `type`        | YES      | `meta`, `feature`, or `component` | Document classification (see Type Definitions below)                |
+| `status`      | YES      | enum                              | Maturity level: `stable`, `experimental`, `unstable`, `development` |
+| `components`  | YES      | Prefixed, comma-separated         | Related crates/modules with type prefix                             |
 
 ### Type Definitions
 
@@ -92,15 +94,43 @@ components: "prefix:name,prefix:name"
 - MUST include Implementation section with source files
 - May link to related components, features, and parent meta docs
 
+### Status Definitions
+
+The `status` field indicates the maturity and stability level of a feature:
+
+| Status         | Work-in-Progress | Quality                   | Notes                                                                                |
+|----------------|------------------|---------------------------|--------------------------------------------------------------------------------------|
+| `stable`       | Production Ready | GA (General Availability) | Breaking changes require deprecation cycle; fully tested and documented              |
+| `experimental` | Minor            | Dev Preview               | Functional but API may change between releases; suitable for evaluation              |
+| `unstable`     | Active           | Alpha                     | Implemented but has sharp edges or incomplete areas; expect significant changes      |
+| `development`  | Heavy            | N/A                       | Not implemented or under active design; details may change or feature may be removed |
+
+#### State Progression
+
+Features progress through maturity states:
+
+```
+development ─> unstable ─> experimental ─> stable
+```
+
+**Progression Criteria:**
+
+- **development → unstable**: Core functionality implemented, basic tests pass
+- **unstable → experimental**: API stabilizing, documentation complete, integration tests pass
+- **experimental → stable**: Production testing complete, no breaking changes planned
+
+**Regression
+**: Features may regress if critical bugs are found, significant refactoring is needed, or API redesign becomes necessary.
+
 ### Component Prefixes (MANDATORY)
 
 Components MUST use one of these prefixes:
 
-| Prefix | Usage | Example |
-|--------|-------|---------|
-| `crate:` | Library crates in `crates/` | `crate:common`, `crate:metadata-db` |
-| `service:` | Service crates in `crates/services/` | `service:server`, `service:worker` |
-| `app:` | Binary crates in `crates/bin/` | `app:ampd` |
+| Prefix     | Usage                                | Example                             | 
+|------------|--------------------------------------|-------------------------------------|
+| `crate:`   | Library crates in `crates/`          | `crate:common`, `crate:metadata-db` |
+| `service:` | Service crates in `crates/services/` | `service:server`, `service:worker`  |
+| `app:`     | Binary crates in `crates/bin/`       | `app:ampd`                          |
 
 **Example:**
 ```yaml
@@ -353,6 +383,7 @@ Use this template when creating new feature docs:
 name: "{{feature-name-kebab-case}}"
 description: "{{What it explains + when to load it, third person, no period}}"
 type: "{{meta|feature|component}}"
+status: "{{stable|experimental|unstable|dev}}"
 components: "{{prefix:name,prefix:name - use crate:, service:, or app:}}"
 ---
 
@@ -474,6 +505,7 @@ Before committing feature documentation:
 - [ ] Valid YAML frontmatter with opening and closing `---`
 - [ ] `name` is kebab-case and matches filename (minus .md)
 - [ ] `type` is one of: `meta`, `feature`, `component`
+- [ ] `status` is one of: `stable`, `experimental`, `unstable`, `development`
 - [ ] `description` explains what it covers and when to load it (no ending period)
 - [ ] `components` uses prefixes: `crate:`, `service:`, or `app:`
 
