@@ -67,11 +67,11 @@ Implement a zero-configuration, persistent PostgreSQL metadata database for
 |----------------------------------------------------|-----------------------------------|----------|--------------|
 | pgtemp cannot reuse existing data dirs             | Need custom postgres management   | Phase 1  | ✅ Understood |
 | Need pgtemp replacement in `metadata-db-postgres`  | Cannot persist data across runs   | Phase 1  | ✅ Task 1.1  |
-| No graceful shutdown/error handling for postgres   | Orphan processes, poor UX         | Phase 1  | 🔴 Task 1.2  |
-| Config system doesn't pass data_dir to metadata_db | Can't specify persistent location | Phase 1  | ⬚ Task 1.3   |
-| `--config` is mandatory in `main.rs`               | Cannot run zero-config            | Phase 2  | ⬚ Task 2.1   |
-| `ConfigFile` fields lack defaults                  | Must specify all paths            | Phase 2  | ⬚ Task 2.2   |
-| No auto-creation of `.amp/` directory structure    | Manual setup required             | Phase 2  | ⬚ Task 2.3   |
+| No graceful shutdown/error handling for postgres   | Orphan processes, poor UX         | Phase 1  | ✅ Task 1.2  |
+| Config system doesn't pass data_dir to metadata_db | Can't specify persistent location | Phase 1  | ✅ Task 1.3  |
+| `--config` is mandatory in `main.rs`               | Cannot run zero-config            | Phase 2  | ✅ Task 2.1  |
+| `ConfigFile` fields lack defaults                  | Must specify all paths            | Phase 2  | ✅ Task 2.2  |
+| No auto-creation of `.amp/` directory structure    | Manual setup required             | Phase 2  | ✅ Task 2.3  |
 
 ---
 
@@ -252,92 +252,112 @@ Phase 2 as it requires changes outside the metadata-db-postgres crate.
 
 **Goal**: `ampd solo` works with no `--config` argument and no config file.
 
-#### 2.1 Make config file optional for solo mode
+#### 2.1 ✅ COMPLETE: Make config file optional for solo mode
 
-**Current State** (from gap analysis):
+**Status**: COMPLETE (2026-01-29)
 
-- `Command::Solo` at `main.rs:26-40` has NO `--amp-dir` argument, only server flags
-- `load_config()` at `main.rs:169-171` returns hard error "mandatory" when config_path is None
-- `Config::load()` at `lib.rs:233-238` requires `impl Into<PathBuf>` (NOT optional)
+**Implementation Summary**:
 
-**Changes Required**:
+- [x] Added `--amp-dir <PATH>` CLI argument to `Command::Solo` in `main.rs:30-34`:
+    - Supports `AMP_DIR` environment variable
+    - Defaults to current working directory when not specified
 
-- [ ] Add `--amp-dir <PATH>` CLI argument to `Command::Solo` in `main.rs:26-40`:
-    ```rust
-    #[arg(long, env = "AMP_DIR")]
-    amp_dir: Option<PathBuf>,
-    ```
-- [ ] Update `load_config()` at `main.rs:165-180`:
-    - Accept optional `amp_dir` parameter
-    - When `allow_temp_db=true` and `config_path=None`:
-        - Check if `<amp_dir>/.amp/config.toml` exists
-        - If exists: load it
-        - If not exists: use in-memory defaults
-    - Remove "mandatory" error for solo mode
-- [ ] Modify `Config::load()` signature to accept `Option<impl Into<PathBuf>>`
-- [ ] Create default `ConfigFile` when file path is None:
-    ```rust
-    ConfigFile {
-        data_dir: ".amp/data".into(),
-        providers_dir: ".amp/providers".into(),
-        manifests_dir: ".amp/manifests".into(),
-        poll_interval_secs: ConfigDuration::new(60),
-        // ... other fields use their defaults
-    }
-    ```
-- [ ] Handle path resolution when no config file (use amp_dir as base)
-- **Acceptance**:
+- [x] Updated `load_config()` at `main.rs:170-203`:
+    - Added `amp_dir` parameter
+    - Auto-discovers `<amp_dir>/.amp/config.toml` when present
+    - Falls back to `Config::default_for_solo(amp_dir)` when no config file
+
+- [x] Updated `Config::default_for_solo()` at `lib.rs:340-393`:
+    - Now accepts `amp_dir` parameter
+    - Stores all data in `<amp_dir>/.amp/` subdirectories:
+        - `metadb/` for PostgreSQL data
+        - `data/` for parquet files
+        - `providers/` for provider configs
+        - `manifests/` for dataset manifests
+
+**Note**: `Config::load()` signature was NOT changed (not needed for this task).
+
+- **Acceptance**: ✅
     - `ampd solo` starts without `--config` argument, uses `./.amp/` by default
     - `ampd solo --amp-dir /path/to/project` uses `/path/to/project/.amp/`
     - `AMP_DIR=/path/to/project ampd solo` uses `/path/to/project/.amp/`
     - If `.amp/config.toml` exists, it is automatically loaded without `--config` flag
 - **Files**: `crates/bin/ampd/src/main.rs`, `crates/config/src/lib.rs`
-- **Depends on**: Phase 1 complete
+- **Depends on**: Phase 1 complete ✅
 
-#### 2.2 Define sensible defaults for all paths
+#### 2.2 ✅ COMPLETE: Define sensible defaults for all paths
 
-**Current State** (from gap analysis at `lib.rs:138-190`):
+**Status**: COMPLETE (2026-01-29)
 
-| Field                | Has `#[serde(default)]`? | Current Default      |
-|----------------------|--------------------------|----------------------|
-| `data_dir`           | ❌ NO                     | **REQUIRED in TOML** |
-| `providers_dir`      | ❌ NO                     | **REQUIRED in TOML** |
-| `poll_interval_secs` | ❌ NO                     | **REQUIRED in TOML** |
-| `manifests_dir`      | ✅ YES                    | Empty string `""`    |
-| `max_mem_mb`         | ✅ YES                    | `0`                  |
-| `metadata_db`        | ✅ YES                    | Has Default impl     |
+**Implementation Summary**:
 
-**Changes Required**:
+- [x] Added `default_data_dir()` returning `.amp/data`
+- [x] Added `default_providers_dir()` returning `.amp/providers`
+- [x] Added `default_manifests_dir()` returning `.amp/manifests`
+- [x] Added `#[serde(default = "default_*")]` to path fields in `ConfigFile`
+- [x] Added `#[serde(default)]` to `poll_interval_secs` (uses `ConfigDuration<1>::default()` = 1 second)
+- [x] Metadata DB data already defaults to `.amp/metadb/` (from Task 1.3)
 
-- [ ] Add default functions for required ConfigFile fields:
-    - `fn default_data_dir() -> String { ".amp/data".into() }`
-    - `fn default_providers_dir() -> String { ".amp/providers".into() }`
-    - `fn default_poll_interval_secs() -> ConfigDuration<1> { ConfigDuration::new(60) }`
-- [ ] Add `#[serde(default = "default_*")]` to these fields in `ConfigFile` struct
-- [ ] Default metadata DB data to `.amp/metadb/data/` (in 1.3 wiring)
-- [ ] Fix `manifests_dir` default to `.amp/manifests/` (currently empty string)
-- **Acceptance**: All paths resolve to `.amp/` subdirectories by default
-- **Files**: `crates/config/src/lib.rs:138-190`
+**Updated State** (at `lib.rs:155-182`):
 
-#### 2.3 Auto-create directory structure on first run
+| Field                | Has `#[serde(default)]`? | Default Value      |
+|----------------------|--------------------------|--------------------|
+| `data_dir`           | ✅ YES                    | `.amp/data`        |
+| `providers_dir`      | ✅ YES                    | `.amp/providers`   |
+| `poll_interval_secs` | ✅ YES                    | 1 second           |
+| `manifests_dir`      | ✅ YES                    | `.amp/manifests`   |
+| `max_mem_mb`         | ✅ YES                    | `0`                |
+| `metadata_db`        | ✅ YES                    | Has Default impl   |
 
-- [ ] Resolve base directory from `--amp-dir` / `AMP_DIR` / cwd (see 2.1)
-- [ ] Add shared constants to `config` crate (e.g., `DEFAULT_STATE_DIRNAME = ".amp"`)
-- [ ] Create `<base>/.amp/` directory if it doesn't exist
-- [ ] Create subdirectories: `data/`, `providers/`, `manifests/`, `metadb/data/`
-- [ ] Log directory creation with `tracing::info!("Created .amp directory at: {}", path)`
-- **Acceptance**: No manual directory creation required; directories created at resolved location
-- **Files**: `crates/config/src/lib.rs`
+- **Acceptance**: ✅ All paths resolve to `.amp/` subdirectories by default
+- **Files**: `crates/config/src/lib.rs:94-107`, `crates/config/src/lib.rs:155-182`
 
-#### 2.4 Update E2E test framework for `--amp-dir`
+#### 2.3 ✅ COMPLETE: Auto-create directory structure on first run
 
-- [ ] Update test fixtures to pass `--amp-dir` pointing to test case temp directory
-- [ ] Ensure each test case gets isolated `.amp/` directory inside its temp dir
-- [ ] Update `daemon_state_dir.rs` fixtures to use new `--amp-dir` argument
-- [ ] Remove any test-specific workarounds for config file requirements
-- **Acceptance**: E2E tests use `--amp-dir <temp_dir>` for isolation; no shared state between tests
-- **Files**: `tests/src/testlib/fixtures/daemon_state_dir.rs`, related test fixtures
-- **Depends on**: 2.1
+**Status**: COMPLETE (2026-01-29)
+
+**Implementation Summary**:
+
+- [x] Resolve base directory from `--amp-dir` / `AMP_DIR` / cwd (already done in 2.1)
+- [x] Add shared constants to `config` crate:
+    - `DEFAULT_STATE_DIRNAME = ".amp"`
+    - `DEFAULT_CONFIG_FILENAME = "config.toml"`
+    - `DEFAULT_DATA_DIRNAME = "data"`
+    - `DEFAULT_PROVIDERS_DIRNAME = "providers"`
+    - `DEFAULT_MANIFESTS_DIRNAME = "manifests"`
+    - `DEFAULT_METADB_DIRNAME = "metadb"`
+- [x] Implement `ensure_amp_directories()` function for idempotent directory creation
+- [x] Create `<base>/.amp/` directory if it doesn't exist
+- [x] Create subdirectories: `data/`, `providers/`, `manifests/`, `metadb/`
+- [x] Log directory creation with `tracing::info!`
+- [x] Add `DirectoryCreation` error variant to `ConfigError`
+- [x] Integrate into `Config::default_for_solo()`
+
+- **Acceptance**: ✅ No manual directory creation required; directories created at resolved location
+- **Files**: `crates/config/src/lib.rs`, `crates/config/Cargo.toml`
+
+#### 2.4 ✅ COMPLETE: Update E2E test framework for isolated metadb per test
+
+**Status**: COMPLETE (2026-01-29)
+
+**Implementation Summary**:
+
+The E2E test framework embeds daemon components directly (not via CLI), so `--amp-dir` isn't
+applicable. Instead, isolation is achieved by storing each test's metadata database in its
+own `.amp/metadb/` directory.
+
+- [x] Add `metadb_dir` field and accessor to `DaemonStateDir`
+- [x] Add `with_data_dir()` method to `MetadataDb` fixture for path injection
+- [x] Update `TestCtxBuilder` to create metadb in test's isolated `.amp/metadb/`
+- [x] Update documentation to reflect new directory structure
+
+**Note**: The original task mentioned `--amp-dir` CLI argument, but the test framework embeds
+daemon components directly rather than spawning `ampd solo` as a process. The isolation goal
+is achieved by ensuring each test's PostgreSQL data lives in its test-specific temp directory.
+
+- **Acceptance**: ✅ Each test gets isolated `.amp/metadb/` directory; no shared state between tests
+- **Files**: `tests/src/testlib/fixtures/daemon_state_dir.rs`, `tests/src/testlib/fixtures/metadata_db.rs`, `tests/src/testlib/ctx.rs`
+- **Depends on**: 2.1 ✅
 
 ---
 
@@ -354,12 +374,22 @@ Phase 2 as it requires changes outside the metadata-db-postgres crate.
 4. **1.3** ✅ COMPLETE - Wire persistence into config system
     - Config crate updated, test fixtures updated, `KEEP_TEMP_DIRS` removed
 
-**Phase 2: Zero-Config Experience** (current focus)
+**Phase 2: Zero-Config Experience** ✅ COMPLETE
 
-5. **2.1** 🔴 NEXT - Make config file optional for solo mode (add `--amp-dir` CLI option)
-6. **2.2** ⬚ PENDING - Define sensible defaults for all config paths
-7. **2.3** ⬚ PENDING - Auto-create `.amp/` directory structure on first run
-8. **2.4** ⬚ PENDING - Update E2E test framework for `--amp-dir` isolation
+5. **2.1** ✅ COMPLETE - Make config file optional for solo mode (add `--amp-dir` CLI option)
+    - Added `--amp-dir` CLI argument with `AMP_DIR` env support
+    - Auto-discovers `.amp/config.toml` when present
+    - Updated `Config::default_for_solo()` to use provided base directory
+6. **2.2** ✅ COMPLETE - Define sensible defaults for all config paths
+    - Added serde defaults for `data_dir`, `providers_dir`, `manifests_dir`, `poll_interval_secs`
+    - All paths now default to `.amp/` subdirectories
+7. **2.3** ✅ COMPLETE - Auto-create `.amp/` directory structure on first run
+    - Added shared constants for directory names
+    - Implemented `ensure_amp_directories()` function
+    - Integrated directory creation into `Config::default_for_solo()`
+8. **2.4** ✅ COMPLETE - Update E2E test framework for isolated metadb per test
+    - Added `metadb_dir` to `DaemonStateDir` for test isolation
+    - `TestCtxBuilder` now stores metadb in test's `.amp/metadb/`
 
 ---
 
