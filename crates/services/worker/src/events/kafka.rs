@@ -12,6 +12,27 @@ use super::{
 };
 use crate::node_id::NodeId;
 
+/// Event type discriminator for worker events.
+#[derive(Debug, Clone, Copy)]
+enum EventType {
+    Started,
+    Progress,
+    Completed,
+    Failed,
+}
+
+impl EventType {
+    /// Returns the string representation used in the event envelope.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "sync.started",
+            Self::Progress => "sync.progress",
+            Self::Completed => "sync.completed",
+            Self::Failed => "sync.failed",
+        }
+    }
+}
+
 /// Kafka-based event emitter.
 ///
 /// Sends worker events to a Kafka topic using protobuf encoding.
@@ -32,10 +53,10 @@ impl KafkaEventEmitter {
     /// Sends an event to Kafka.
     ///
     /// Logs errors but does not fail - events are best-effort.
-    async fn emit(&self, event_type: &str, partition_key: &str, event: proto::WorkerEvent) {
+    async fn emit(&self, event_type: EventType, partition_key: &str, event: proto::WorkerEvent) {
         let mut buf = Vec::with_capacity(event.encoded_len());
         if let Err(e) = event.encode(&mut buf) {
-            tracing::error!(error = %e, event_type, "Failed to encode event");
+            tracing::error!(error = %e, event_type = event_type.as_str(), "Failed to encode event");
             return;
         }
 
@@ -43,7 +64,7 @@ impl KafkaEventEmitter {
             // Log but don't fail - events are best-effort
             tracing::warn!(
                 error = %e,
-                event_type,
+                event_type = event_type.as_str(),
                 partition_key,
                 "Failed to send event to Kafka (event dropped)"
             );
@@ -51,10 +72,10 @@ impl KafkaEventEmitter {
     }
 
     /// Creates the event envelope with common metadata.
-    fn create_envelope(&self, event_type: &str) -> proto::WorkerEvent {
+    fn create_envelope(&self, event_type: EventType) -> proto::WorkerEvent {
         proto::WorkerEvent {
             event_id: uuid::Uuid::now_v7().to_string(),
-            event_type: event_type.to_string(),
+            event_type: event_type.as_str().to_string(),
             event_version: "1.0".to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             source: Some(proto::EventSource {
@@ -69,33 +90,34 @@ impl KafkaEventEmitter {
 impl EventEmitter for KafkaEventEmitter {
     async fn emit_sync_started(&self, event: SyncStartedEvent) {
         let partition_key = event.dataset.partition_key(&event.table_name);
-        let mut envelope = self.create_envelope("sync.started");
+        let mut envelope = self.create_envelope(EventType::Started);
         envelope.payload = Some(proto::worker_event::Payload::SyncStarted(
             proto::SyncStarted {
                 job_id: event.job_id,
                 dataset: Some(proto::DatasetInfo {
-                    namespace: event.dataset.namespace,
-                    name: event.dataset.name,
-                    manifest_hash: event.dataset.manifest_hash,
+                    namespace: event.dataset.namespace.to_string(),
+                    name: event.dataset.name.to_string(),
+                    manifest_hash: event.dataset.manifest_hash.to_string(),
                 }),
                 table_name: event.table_name,
                 start_block: event.start_block,
                 end_block: event.end_block,
             },
         ));
-        self.emit("sync.started", &partition_key, envelope).await;
+        self.emit(EventType::Started, &partition_key, envelope)
+            .await;
     }
 
     async fn emit_sync_progress(&self, event: SyncProgressEvent) {
         let partition_key = event.dataset.partition_key(&event.table_name);
-        let mut envelope = self.create_envelope("sync.progress");
+        let mut envelope = self.create_envelope(EventType::Progress);
         envelope.payload = Some(proto::worker_event::Payload::SyncProgress(
             proto::SyncProgress {
                 job_id: event.job_id,
                 dataset: Some(proto::DatasetInfo {
-                    namespace: event.dataset.namespace,
-                    name: event.dataset.name,
-                    manifest_hash: event.dataset.manifest_hash,
+                    namespace: event.dataset.namespace.to_string(),
+                    name: event.dataset.name.to_string(),
+                    manifest_hash: event.dataset.manifest_hash.to_string(),
                 }),
                 table_name: event.table_name,
                 progress: Some(proto::ProgressInfo {
@@ -108,44 +130,46 @@ impl EventEmitter for KafkaEventEmitter {
                 }),
             },
         ));
-        self.emit("sync.progress", &partition_key, envelope).await;
+        self.emit(EventType::Progress, &partition_key, envelope)
+            .await;
     }
 
     async fn emit_sync_completed(&self, event: SyncCompletedEvent) {
         let partition_key = event.dataset.partition_key(&event.table_name);
-        let mut envelope = self.create_envelope("sync.completed");
+        let mut envelope = self.create_envelope(EventType::Completed);
         envelope.payload = Some(proto::worker_event::Payload::SyncCompleted(
             proto::SyncCompleted {
                 job_id: event.job_id,
                 dataset: Some(proto::DatasetInfo {
-                    namespace: event.dataset.namespace,
-                    name: event.dataset.name,
-                    manifest_hash: event.dataset.manifest_hash,
+                    namespace: event.dataset.namespace.to_string(),
+                    name: event.dataset.name.to_string(),
+                    manifest_hash: event.dataset.manifest_hash.to_string(),
                 }),
                 table_name: event.table_name,
                 final_block: event.final_block,
                 duration_millis: event.duration_millis,
             },
         ));
-        self.emit("sync.completed", &partition_key, envelope).await;
+        self.emit(EventType::Completed, &partition_key, envelope)
+            .await;
     }
 
     async fn emit_sync_failed(&self, event: SyncFailedEvent) {
         let partition_key = event.dataset.partition_key(&event.table_name);
-        let mut envelope = self.create_envelope("sync.failed");
+        let mut envelope = self.create_envelope(EventType::Failed);
         envelope.payload = Some(proto::worker_event::Payload::SyncFailed(
             proto::SyncFailed {
                 job_id: event.job_id,
                 dataset: Some(proto::DatasetInfo {
-                    namespace: event.dataset.namespace,
-                    name: event.dataset.name,
-                    manifest_hash: event.dataset.manifest_hash,
+                    namespace: event.dataset.namespace.to_string(),
+                    name: event.dataset.name.to_string(),
+                    manifest_hash: event.dataset.manifest_hash.to_string(),
                 }),
                 table_name: event.table_name,
                 error_message: event.error_message,
                 error_type: event.error_type,
             },
         ));
-        self.emit("sync.failed", &partition_key, envelope).await;
+        self.emit(EventType::Failed, &partition_key, envelope).await;
     }
 }
