@@ -13,6 +13,7 @@
 //! let config = KafkaConfig::new(
 //!     vec!["localhost:9092".to_string()],
 //!     "amp.worker.events",
+//!     16, // partitions
 //! );
 //!
 //! let producer = KafkaProducer::new(&config).await?;

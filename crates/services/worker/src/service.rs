@@ -106,6 +106,7 @@ pub async fn new(
                         let kafka_cfg = kafka_client::KafkaConfig::new(
                             kafka_config.brokers.clone(),
                             kafka_config.topic.clone(),
+                            kafka_config.partitions,
                         );
                         match kafka_client::KafkaProducer::new(&kafka_cfg).await {
                             Ok(producer) => {
