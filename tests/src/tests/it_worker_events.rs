@@ -501,40 +501,66 @@ async fn test_e2e_anvil_sync_emits_lifecycle_events() {
     let progress_events = mock_emitter.progress_events();
     let completed_events = mock_emitter.completed_events();
 
-    // Should have exactly one started event
+    // anvil_rpc has 3 tables (blocks, transactions, logs), so we expect 3 events of each type
+    // Events are emitted per-table to ensure partition affinity for consumers
+    let expected_tables = 3;
+
+    // Should have one started event per table
     assert_eq!(
         started_events.len(),
-        1,
-        "Should have exactly 1 started event, got {}",
+        expected_tables,
+        "Should have {} started events (one per table), got {}",
+        expected_tables,
         started_events.len()
     );
 
-    // Should have a completed event
+    // Should have one completed event per table
     assert_eq!(
         completed_events.len(),
-        1,
-        "Should have exactly 1 completed event, got {}",
+        expected_tables,
+        "Should have {} completed events (one per table), got {}",
+        expected_tables,
         completed_events.len()
     );
 
     // Should have some progress events (the exact number depends on block count and tables)
-    // With 2000 blocks, the percentage-based throttling should reduce event frequency
+    // With 2000 blocks and 1% throttling, we expect ~100 events per table = ~300 total
     tracing::info!(
         "Captured {} progress events from real sync",
         progress_events.len()
     );
 
-    // Verify the started event has correct metadata
-    let started = &started_events[0];
-    assert_eq!(started.job_id, *job_id);
-    assert_eq!(started.dataset.namespace, "_");
-    assert_eq!(started.dataset.name, "anvil_rpc");
-    assert_eq!(started.end_block, Some(2000));
+    // Verify all tables are represented in started events
+    let started_tables: std::collections::HashSet<_> = started_events
+        .iter()
+        .map(|e| e.table_name.as_str())
+        .collect();
+    assert!(
+        started_tables.contains("blocks"),
+        "Missing started event for blocks table"
+    );
+    assert!(
+        started_tables.contains("transactions"),
+        "Missing started event for transactions table"
+    );
+    assert!(
+        started_tables.contains("logs"),
+        "Missing started event for logs table"
+    );
 
-    // Verify the completed event
-    let completed = &completed_events[0];
-    assert_eq!(completed.job_id, *job_id);
-    assert!(completed.duration_millis > 0, "Duration should be positive");
+    // Verify started events have correct metadata
+    for started in &started_events {
+        assert_eq!(started.job_id, *job_id);
+        assert_eq!(started.dataset.namespace, "_");
+        assert_eq!(started.dataset.name, "anvil_rpc");
+        assert_eq!(started.end_block, Some(2000));
+    }
+
+    // Verify completed events have correct metadata
+    for completed in &completed_events {
+        assert_eq!(completed.job_id, *job_id);
+        assert!(completed.duration_millis > 0, "Duration should be positive");
+    }
 
     // Log summary
     tracing::info!(
