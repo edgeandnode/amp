@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use dump::{ProgressCallback, ProgressUpdate};
 use monitoring::logging;
 use worker::{
@@ -17,6 +18,19 @@ use worker::{
     job::JobId,
 };
 
+/// Test hash constant (64 hex characters).
+const TEST_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+const TEST_HASH_2: &str = "0000000000000000000000000000000000000000000000000000000000000002";
+
+/// Helper to create a test DatasetInfo.
+fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> DatasetInfo {
+    DatasetInfo {
+        namespace: namespace.parse::<Namespace>().unwrap(),
+        name: name.parse::<Name>().unwrap(),
+        manifest_hash: hash.parse::<Hash>().unwrap(),
+    }
+}
+
 use crate::testlib::fixtures::MockEventEmitter;
 
 /// Test that WorkerProgressCallback correctly forwards progress updates to the event emitter.
@@ -26,11 +40,7 @@ async fn test_progress_callback_forwards_to_emitter() {
 
     // Given
     let emitter = Arc::new(MockEventEmitter::new());
-    let dataset_info = DatasetInfo {
-        namespace: "test".to_string(),
-        name: "dataset".to_string(),
-        manifest_hash: "abc123".to_string(),
-    };
+    let dataset_info = test_dataset_info("test", "dataset", TEST_HASH);
 
     let job_id = JobId::try_from(1i64).unwrap();
     let callback = WorkerProgressCallback::new(job_id, dataset_info, emitter.clone());
@@ -84,11 +94,7 @@ async fn test_progress_percentages_calculation() {
         emitter
             .emit_sync_progress(SyncProgressEvent {
                 job_id: 1,
-                dataset: DatasetInfo {
-                    namespace: "test".to_string(),
-                    name: "dataset".to_string(),
-                    manifest_hash: "abc123".to_string(),
-                },
+                dataset: test_dataset_info("test", "dataset", TEST_HASH),
                 table_name: "blocks".to_string(),
                 progress: ProgressInfo {
                     start_block: 0,
@@ -119,11 +125,7 @@ async fn test_started_events_recorded() {
     emitter
         .emit_sync_started(SyncStartedEvent {
             job_id: 42,
-            dataset: DatasetInfo {
-                namespace: "ethereum".to_string(),
-                name: "mainnet".to_string(),
-                manifest_hash: "hash123".to_string(),
-            },
+            dataset: test_dataset_info("ethereum", "mainnet", TEST_HASH),
             table_name: "blocks".to_string(),
             start_block: Some(1000),
             end_block: Some(2000),
@@ -153,11 +155,7 @@ async fn test_completed_events_recorded() {
     emitter
         .emit_sync_completed(SyncCompletedEvent {
             job_id: 42,
-            dataset: DatasetInfo {
-                namespace: "ethereum".to_string(),
-                name: "mainnet".to_string(),
-                manifest_hash: "hash123".to_string(),
-            },
+            dataset: test_dataset_info("ethereum", "mainnet", TEST_HASH),
             table_name: "blocks".to_string(),
             final_block: 2000,
             duration_millis: 5000,
@@ -184,11 +182,7 @@ async fn test_failed_events_recorded() {
     emitter
         .emit_sync_failed(SyncFailedEvent {
             job_id: 42,
-            dataset: DatasetInfo {
-                namespace: "ethereum".to_string(),
-                name: "mainnet".to_string(),
-                manifest_hash: "hash123".to_string(),
-            },
+            dataset: test_dataset_info("ethereum", "mainnet", TEST_HASH),
             table_name: "blocks".to_string(),
             error_message: "Connection timeout".to_string(),
             error_type: Some("NetworkError".to_string()),
@@ -212,11 +206,7 @@ async fn test_full_job_lifecycle_events() {
 
     // Given
     let emitter = Arc::new(MockEventEmitter::new());
-    let dataset = DatasetInfo {
-        namespace: "test".to_string(),
-        name: "dataset".to_string(),
-        manifest_hash: "abc123".to_string(),
-    };
+    let dataset = test_dataset_info("test", "dataset", TEST_HASH);
 
     // When - simulate a complete job lifecycle
     emitter
@@ -274,11 +264,7 @@ async fn test_mock_emitter_clear() {
     emitter
         .emit_sync_started(SyncStartedEvent {
             job_id: 1,
-            dataset: DatasetInfo {
-                namespace: "test".to_string(),
-                name: "dataset".to_string(),
-                manifest_hash: "abc123".to_string(),
-            },
+            dataset: test_dataset_info("test", "dataset", TEST_HASH),
             table_name: "blocks".to_string(),
             start_block: Some(0),
             end_block: Some(100),
@@ -303,11 +289,7 @@ async fn test_continuous_ingestion_events() {
 
     // Given
     let emitter = Arc::new(MockEventEmitter::new());
-    let dataset = DatasetInfo {
-        namespace: "test".to_string(),
-        name: "stream".to_string(),
-        manifest_hash: "def456".to_string(),
-    };
+    let dataset = test_dataset_info("test", "stream", TEST_HASH_2);
 
     // When - simulate continuous ingestion (no end_block)
     emitter
@@ -366,11 +348,7 @@ async fn test_multiple_tables_emit_separate_events() {
     let job_id = JobId::try_from(1i64).unwrap();
     let callback = WorkerProgressCallback::new(
         job_id,
-        DatasetInfo {
-            namespace: "test".to_string(),
-            name: "dataset".to_string(),
-            manifest_hash: "abc123".to_string(),
-        },
+        test_dataset_info("test", "dataset", TEST_HASH),
         emitter.clone(),
     );
 

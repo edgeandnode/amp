@@ -35,9 +35,9 @@ pub(super) fn new(
                 manifest_hash.clone(),
             );
             let dataset_info = DatasetInfo {
-                namespace: dataset_namespace.to_string(),
-                name: dataset_name.to_string(),
-                manifest_hash: manifest_hash.to_string(),
+                namespace: dataset_namespace.clone(),
+                name: dataset_name.clone(),
+                manifest_hash: manifest_hash.clone(),
             };
             (
                 end_block,

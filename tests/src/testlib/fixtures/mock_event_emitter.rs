@@ -190,9 +190,22 @@ impl EventEmitter for MockEventEmitter {
 
 #[cfg(test)]
 mod tests {
+    use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
     use worker::events::{DatasetInfo, ProgressInfo};
 
     use super::*;
+
+    /// Test hash constant (64 hex characters).
+    const TEST_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+
+    /// Helper to create a test DatasetInfo.
+    fn test_dataset_info() -> DatasetInfo {
+        DatasetInfo {
+            namespace: "test".parse::<Namespace>().unwrap(),
+            name: "dataset".parse::<Name>().unwrap(),
+            manifest_hash: TEST_HASH.parse::<Hash>().unwrap(),
+        }
+    }
 
     #[tokio::test]
     async fn test_mock_emitter_records_events() {
@@ -201,11 +214,7 @@ mod tests {
         emitter
             .emit_sync_started(SyncStartedEvent {
                 job_id: 1,
-                dataset: DatasetInfo {
-                    namespace: "test".to_string(),
-                    name: "dataset".to_string(),
-                    manifest_hash: "abc123".to_string(),
-                },
+                dataset: test_dataset_info(),
                 table_name: "blocks".to_string(),
                 start_block: Some(0),
                 end_block: Some(100),
@@ -215,11 +224,7 @@ mod tests {
         emitter
             .emit_sync_progress(SyncProgressEvent {
                 job_id: 1,
-                dataset: DatasetInfo {
-                    namespace: "test".to_string(),
-                    name: "dataset".to_string(),
-                    manifest_hash: "abc123".to_string(),
-                },
+                dataset: test_dataset_info(),
                 table_name: "blocks".to_string(),
                 progress: ProgressInfo {
                     start_block: 0,
@@ -235,11 +240,7 @@ mod tests {
         emitter
             .emit_sync_completed(SyncCompletedEvent {
                 job_id: 1,
-                dataset: DatasetInfo {
-                    namespace: "test".to_string(),
-                    name: "dataset".to_string(),
-                    manifest_hash: "abc123".to_string(),
-                },
+                dataset: test_dataset_info(),
                 table_name: "blocks".to_string(),
                 final_block: 100,
                 duration_millis: 5000,
@@ -262,11 +263,7 @@ mod tests {
             emitter
                 .emit_sync_progress(SyncProgressEvent {
                     job_id: 1,
-                    dataset: DatasetInfo {
-                        namespace: "test".to_string(),
-                        name: "dataset".to_string(),
-                        manifest_hash: "abc123".to_string(),
-                    },
+                    dataset: test_dataset_info(),
                     table_name: "blocks".to_string(),
                     progress: ProgressInfo {
                         start_block: 0,

@@ -1,14 +1,16 @@
 //! Event types for worker event streaming.
 
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
+
 /// Information about a dataset.
 #[derive(Debug, Clone)]
 pub struct DatasetInfo {
     /// Dataset namespace (e.g., "ethereum")
-    pub namespace: String,
+    pub namespace: Namespace,
     /// Dataset name (e.g., "mainnet")
-    pub name: String,
+    pub name: Name,
     /// Manifest hash
-    pub manifest_hash: String,
+    pub manifest_hash: Hash,
 }
 
 impl DatasetInfo {
