@@ -112,7 +112,9 @@ use crate::{
     check::consistency_check,
     compaction::AmpCompactor,
     metrics,
-    progress::{ProgressCallback, ProgressUpdate},
+    progress::{
+        ProgressCallback, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
     raw_dataset_writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError},
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
@@ -248,95 +250,141 @@ pub async fn dump(
     let mut timer = tokio::time::interval(ctx.config.poll_interval);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // Emit sync.started event for each table
+    if let Some(ref callback) = ctx.progress_callback {
+        for (table, _) in &tables {
+            callback.on_sync_started(SyncStartedInfo {
+                table_name: table.table_name().clone(),
+                start_block: dataset.start_block(),
+                end_block: end,
+            });
+        }
+    }
+
     // In order to resolve reorgs in the same block as they are detected, we run the
     // `dump_ranges` procedure in a loop.
     //
     // To reduce RPC polling of `latest_block`, we wait on `timer` when we know the
     // next iteration would have no work to do unless there is a new block.
-    loop {
-        let Some(latest_block) = client
-            .latest_block(finalized_blocks_only)
-            .await
-            .map_err(Error::LatestBlock)?
-        else {
-            // No data to dump, wait for more data
-            timer.tick().await;
-            continue;
-        };
-        if latest_block < start {
-            // Start not yet reached, wait for more data
-            timer.tick().await;
-            continue;
-        }
-
-        let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
-            Default::default();
-
-        let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> = Default::default();
-
-        for (table, compactor) in &tables {
-            let end = match end {
-                None => latest_block,
-                Some(end) => BlockNum::min(end, latest_block),
-            };
-            let missing_ranges = table
-                .missing_ranges(start..=end)
+    //
+    // We wrap the loop in a block to handle errors and emit failure events.
+    let dump_result: Result<(), Error> = async {
+        loop {
+            let Some(latest_block) = client
+                .latest_block(finalized_blocks_only)
                 .await
-                .map_err(Error::MissingRanges)?;
-            let table_name = table.table_name();
-            missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
-            compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
-        }
-
-        // Use the union of missing table block ranges.
-        let missing_dataset_ranges = {
-            let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
-                .values()
-                .flatten()
-                .cloned()
-                .collect();
-            merge_ranges(ranges)
-        };
-
-        // If there are no ranges then there is no more work to do, check dump end condition.
-        if missing_dataset_ranges.is_empty() {
-            // If we've reached the configured end block, stop completely and return.
-            if let Some(end) = end
-                && end <= latest_block
-            {
-                break;
-            } else {
-                // Otherwise, wait for more data.
+                .map_err(Error::LatestBlock)?
+            else {
+                // No data to dump, wait for more data
+                timer.tick().await;
+                continue;
+            };
+            if latest_block < start {
+                // Start not yet reached, wait for more data
                 timer.tick().await;
                 continue;
             }
-        }
 
-        dump_ranges(
-            missing_dataset_ranges,
-            max_writers,
-            &client,
-            &ctx,
-            &catalog,
-            parquet_opts.clone(),
-            missing_ranges_by_table,
-            compactors_by_table,
-            metrics.as_ref(),
-            &tables,
-            start,
-            end,
-            latest_block,
-        )
-        .await?;
+            let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
+                Default::default();
+
+            let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> =
+                Default::default();
+
+            for (table, compactor) in &tables {
+                let end = match end {
+                    None => latest_block,
+                    Some(end) => BlockNum::min(end, latest_block),
+                };
+                let missing_ranges = table
+                    .missing_ranges(start..=end)
+                    .await
+                    .map_err(Error::MissingRanges)?;
+                let table_name = table.table_name();
+                missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
+                compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
+            }
+
+            // Use the union of missing table block ranges.
+            let missing_dataset_ranges = {
+                let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
+                    .values()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                merge_ranges(ranges)
+            };
+
+            // If there are no ranges then there is no more work to do, check dump end condition.
+            if missing_dataset_ranges.is_empty() {
+                // If we've reached the configured end block, stop completely and return.
+                if let Some(end) = end
+                    && end <= latest_block
+                {
+                    break;
+                } else {
+                    // Otherwise, wait for more data.
+                    timer.tick().await;
+                    continue;
+                }
+            }
+
+            dump_ranges(
+                missing_dataset_ranges,
+                max_writers,
+                &client,
+                &ctx,
+                &catalog,
+                parquet_opts.clone(),
+                missing_ranges_by_table,
+                compactors_by_table,
+                metrics.as_ref(),
+                &tables,
+                start,
+                end,
+                latest_block,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    .await;
+
+    // Handle dump errors by emitting failure events for each table
+    if let Err(ref err) = dump_result {
+        if let Some(ref callback) = ctx.progress_callback {
+            let error_message = err.to_string();
+            for (table, _) in &tables {
+                callback.on_sync_failed(SyncFailedInfo {
+                    table_name: table.table_name().clone(),
+                    error_message: error_message.clone(),
+                    error_type: Some("DumpError".to_string()),
+                });
+            }
+        }
+        return dump_result;
     }
 
     // Record dump duration on successful completion
+    let duration_millis = dump_start_time.elapsed().as_millis() as u64;
     if let Some(ref metrics) = metrics {
-        let duration_millis = dump_start_time.elapsed().as_millis() as f64;
         for (table, _compactor) in &tables {
             let table_name = table.table_name().to_string();
             let job_id = table_name.clone();
-            metrics.record_dump_duration(duration_millis, table_name, job_id);
+            metrics.record_dump_duration(duration_millis as f64, table_name, job_id);
+        }
+    }
+
+    // Emit sync.completed event for each table
+    if let Some(ref callback) = ctx.progress_callback {
+        // The final block is the configured end block (we only exit the loop when we reach it)
+        let final_block = end.expect("dump loop only exits when end block is reached");
+        for (table, _) in &tables {
+            callback.on_sync_completed(SyncCompletedInfo {
+                table_name: table.table_name().clone(),
+                final_block,
+                duration_millis,
+            });
         }
     }
 

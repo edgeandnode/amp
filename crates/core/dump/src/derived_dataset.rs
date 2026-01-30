@@ -135,7 +135,7 @@ use crate::{
         CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
         ParquetFileWriterOutput, commit_metadata,
     },
-    progress::ProgressUpdate,
+    progress::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
     streaming_query::{
         QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
@@ -547,13 +547,27 @@ async fn dump_table(
                 ResolvedEndBlock::Block(block) => Some(block),
             };
 
+            // Emit sync.started event now that we have resolved start/end blocks
+            if let Some(ref callback) = ctx.progress_callback {
+                callback.on_sync_started(SyncStartedInfo {
+                    table_name: table.table_name().clone(),
+                    start_block: Some(start),
+                    end_block: end,
+                });
+            }
+
+            // Track start time for duration calculation
+            let table_dump_start = Instant::now();
+
             let latest_range = table
                 .canonical_chain()
                 .await
                 .map_err(DumpTableSpawnError::CanonicalChain)?
                 .map(|c| c.last().clone());
             let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(&[r]));
-            dump_sql_query(
+
+            // Execute the dump, capturing any errors for sync.failed event
+            let dump_result = dump_sql_query(
                 &ctx,
                 &env,
                 &catalog,
@@ -568,8 +582,31 @@ async fn dump_table(
                 &ctx.notification_multiplexer,
                 metrics.clone(),
             )
-            .await
-            .map_err(DumpTableSpawnError::DumpSqlQuery)?;
+            .await;
+
+            // Handle dump result and emit appropriate lifecycle event
+            if let Err(ref err) = dump_result {
+                if let Some(ref callback) = ctx.progress_callback {
+                    callback.on_sync_failed(SyncFailedInfo {
+                        table_name: table.table_name().clone(),
+                        error_message: err.to_string(),
+                        error_type: Some("DerivedDumpError".to_string()),
+                    });
+                }
+                return dump_result.map_err(DumpTableSpawnError::DumpSqlQuery);
+            }
+
+            // Emit sync.completed event for bounded jobs only
+            // (continuous jobs never complete, they just keep syncing)
+            if let Some(final_block) = end
+                && let Some(ref callback) = ctx.progress_callback
+            {
+                callback.on_sync_completed(SyncCompletedInfo {
+                    table_name: table.table_name().clone(),
+                    final_block,
+                    duration_millis: table_dump_start.elapsed().as_millis() as u64,
+                });
+            }
 
             Ok(())
         }

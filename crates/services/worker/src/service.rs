@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
@@ -276,19 +276,11 @@ pub(crate) struct WorkerJobCtx {
     pub event_emitter: Arc<dyn EventEmitter>,
 }
 
-/// Metadata tracked for running jobs to support event emission.
-struct JobMeta {
-    dataset_info: crate::events::DatasetInfo,
-    start_time: std::time::Instant,
-}
-
 pub struct Worker {
     node_id: NodeId,
     queue: JobQueue,
     job_ctx: WorkerJobCtx,
     job_set: JobSet,
-    /// Tracks metadata for running jobs to support event emission.
-    job_meta: HashMap<JobId, JobMeta>,
 }
 
 impl Worker {
@@ -300,7 +292,6 @@ impl Worker {
             queue,
             job_ctx,
             job_set: JobSet::default(),
-            job_meta: HashMap::new(),
         }
     }
 
@@ -351,31 +342,18 @@ impl Worker {
     ///
     /// This method is called when a job in the job set completes, fails, or is aborted.
     /// It updates the job status in the Metadata DB.
+    ///
+    /// Note: Lifecycle events (sync.started, sync.completed, sync.failed) are now emitted
+    /// per-table from the dump layer where table names are known. This ensures partition
+    /// key consistency with sync.progress events.
     async fn handle_job_result(
         &mut self,
         job_id: JobId,
         result: Result<(), JobSetJoinError>,
     ) -> Result<(), JobResultError> {
-        // Get job metadata for event emission (remove since job is done)
-        let job_meta = self.job_meta.remove(&job_id);
-
         match result {
             Ok(()) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job completed successfully");
-
-                // Emit sync.completed event
-                if let Some(meta) = &job_meta {
-                    self.job_ctx
-                        .event_emitter
-                        .emit_sync_completed(crate::events::SyncCompletedEvent {
-                            job_id: *job_id,
-                            dataset: meta.dataset_info.clone(),
-                            table_name: "all".to_string(),
-                            final_block: 0, // TODO: get actual final block from job result
-                            duration_millis: meta.start_time.elapsed().as_millis() as u64,
-                        })
-                        .await;
-                }
 
                 // Mark the job as COMPLETED (retry on failure)
                 self.queue
@@ -389,20 +367,6 @@ impl Worker {
             Err(JobSetJoinError::Failed(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job failed");
 
-                // Emit sync.failed event
-                if let Some(meta) = &job_meta {
-                    self.job_ctx
-                        .event_emitter
-                        .emit_sync_failed(crate::events::SyncFailedEvent {
-                            job_id: *job_id,
-                            dataset: meta.dataset_info.clone(),
-                            table_name: "all".to_string(),
-                            error_message: err.to_string(),
-                            error_type: Some("Failed".to_string()),
-                        })
-                        .await;
-                }
-
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
                     JobResultError::MarkFailedFailed {
@@ -414,20 +378,6 @@ impl Worker {
             Err(JobSetJoinError::Aborted) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job cancelled");
 
-                // Emit sync.completed event for graceful abort (not failed)
-                if let Some(meta) = &job_meta {
-                    self.job_ctx
-                        .event_emitter
-                        .emit_sync_completed(crate::events::SyncCompletedEvent {
-                            job_id: *job_id,
-                            dataset: meta.dataset_info.clone(),
-                            table_name: "all".to_string(),
-                            final_block: 0,
-                            duration_millis: meta.start_time.elapsed().as_millis() as u64,
-                        })
-                        .await;
-                }
-
                 // Mark the job as STOPPED (retry on failure)
                 self.queue.mark_job_stopped(job_id).await.map_err(|error| {
                     JobResultError::MarkStoppedFailed {
@@ -438,20 +388,6 @@ impl Worker {
             }
             Err(JobSetJoinError::Panicked(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job panicked");
-
-                // Emit sync.failed event
-                if let Some(meta) = &job_meta {
-                    self.job_ctx
-                        .event_emitter
-                        .emit_sync_failed(crate::events::SyncFailedEvent {
-                            job_id: *job_id,
-                            dataset: meta.dataset_info.clone(),
-                            table_name: "all".to_string(),
-                            error_message: err.to_string(),
-                            error_type: Some("Panicked".to_string()),
-                        })
-                        .await;
-                }
 
                 // Mark the job as FAILED (retry on failure)
                 self.queue.mark_job_failed(job_id).await.map_err(|error| {
@@ -538,36 +474,9 @@ impl Worker {
         let job_desc: crate::job::JobDescriptor =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
-        // Track job metadata for event emission
-        let dataset_info = crate::events::DatasetInfo {
-            namespace: job_desc.dataset_namespace().to_string(),
-            name: job_desc.dataset_name().to_string(),
-            manifest_hash: job_desc.manifest_hash().to_string(),
-        };
-        self.job_meta.insert(
-            job_id,
-            JobMeta {
-                dataset_info: dataset_info.clone(),
-                start_time: std::time::Instant::now(),
-            },
-        );
-
-        // Emit sync.started event
-        self.job_ctx
-            .event_emitter
-            .emit_sync_started(crate::events::SyncStartedEvent {
-                job_id: *job_id,
-                dataset: dataset_info,
-                table_name: "all".to_string(), // TODO: emit per-table when progress events are added
-                start_block: None,
-                end_block: match &job_desc {
-                    crate::job::JobDescriptor::Dump { end_block, .. } => match end_block {
-                        dump::EndBlock::Absolute(block) => Some(*block),
-                        _ => None,
-                    },
-                },
-            })
-            .await;
+        // Note: sync.started/completed/failed events are now emitted per-table from
+        // the dump layer where table names are known, ensuring partition key consistency
+        // with sync.progress events.
 
         let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc);
 
