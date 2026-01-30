@@ -1,0 +1,40 @@
+# Basic Solana local extraction test using Surfpool
+#
+# This spec demonstrates all 3 Surfpool YAML step types:
+# - surfpool: Validate Surfpool fixture is available
+# - surfpool_send: Send SOL transfer transactions
+# - surfpool_advance: Wait for slot advancement
+#
+# It mirrors the Anvil-based streaming-join-anvil.yaml pattern but targets
+# Solana extraction via a local Surfpool node backed by LiteSVM.
+
+# Initialize Surfpool fixture (validates test context has Surfpool configured)
+- surfpool: {}
+
+# Send initial SOL transfers to create on-chain activity.
+# Each transfer produces rows in all 4 Solana tables:
+# block_headers, transactions, messages, instructions.
+- name: send_initial_transfers
+  surfpool_send: 3
+
+# Wait for Surfpool to advance past the slots containing our transactions
+- name: advance_to_slot_5
+  surfpool_advance: 5
+
+# Dump extracted Solana data up to slot 5
+- name: dump_initial
+  dataset: _/solana_local@0.0.0
+  end: 5
+
+# Send more transfers to create additional on-chain activity
+- name: send_more_transfers
+  surfpool_send: 2
+
+# Wait for further slot advancement
+- name: advance_to_slot_10
+  surfpool_advance: 10
+
+# Dump incremental data up to slot 10
+- name: dump_incremental
+  dataset: _/solana_local@0.0.0
+  end: 10
