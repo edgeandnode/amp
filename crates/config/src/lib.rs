@@ -221,6 +221,10 @@ fn default_kafka_topic() -> String {
     "amp.worker.events".to_string()
 }
 
+fn default_kafka_partitions() -> u32 {
+    16
+}
+
 /// Kafka configuration for worker events.
 #[derive(Debug, Clone, Deserialize)]
 pub struct KafkaEventsConfig {
@@ -230,6 +234,13 @@ pub struct KafkaEventsConfig {
     /// Kafka topic name (default: "amp.worker.events")
     #[serde(default = "default_kafka_topic")]
     pub topic: String,
+
+    /// Number of partitions for the Kafka topic (default: 16)
+    ///
+    /// This should match the actual partition count of your Kafka topic.
+    /// Used for consistent partition key hashing.
+    #[serde(default = "default_kafka_partitions")]
+    pub partitions: u32,
 }
 
 impl ConfigFile {

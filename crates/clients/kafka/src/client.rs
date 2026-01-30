@@ -52,6 +52,7 @@ impl BackoffBuilder for FixedDelayBackoff {
 pub struct KafkaProducer {
     client: Arc<Client>,
     topic: String,
+    partitions: u32,
 }
 
 impl KafkaProducer {
@@ -69,6 +70,7 @@ impl KafkaProducer {
         Ok(Self {
             client: Arc::new(client),
             topic: config.topic.clone(),
+            partitions: config.partitions,
         })
     }
 
@@ -131,13 +133,13 @@ impl KafkaProducer {
 
     /// Computes the partition for a given key using consistent hashing.
     ///
-    /// Assumes 16 partitions (adjust based on topic configuration).
+    /// The partition count is configured via `KafkaConfig::partitions`.
     fn partition_for_key(&self, key: &str) -> i32 {
         // Simple hash-based partition selection
         let hash: u32 = key
             .bytes()
             .fold(0u32, |acc, b| acc.wrapping_add(u32::from(b)));
-        (hash % 16) as i32
+        (hash % self.partitions) as i32
     }
 }
 

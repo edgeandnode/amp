@@ -93,13 +93,15 @@ enabled = true
 [worker.events.kafka]
 brokers = ["kafka-1:9092", "kafka-2:9092"]
 topic = "amp.worker.events"
+partitions = 16
 ```
 
-| Setting         | Default               | Description                   |
-| --------------- | --------------------- | ----------------------------- |
-| `enabled`       | `false`               | Enable/disable event emission |
-| `kafka.brokers` | -                     | Kafka broker addresses        |
-| `kafka.topic`   | `"amp.worker.events"` | Kafka topic name              |
+| Setting            | Default               | Description                                         |
+| ------------------ | --------------------- | --------------------------------------------------- |
+| `enabled`          | `false`               | Enable/disable event emission                       |
+| `kafka.brokers`    | -                     | Kafka broker addresses                              |
+| `kafka.topic`      | `"amp.worker.events"` | Kafka topic name                                    |
+| `kafka.partitions` | `16`                  | Number of partitions (must match actual topic config) |
 
 ## Usage
 
@@ -112,6 +114,7 @@ enabled = true
 [worker.events.kafka]
 brokers = ["localhost:9092"]
 topic = "amp.worker.events"
+partitions = 16  # Must match actual topic partition count
 ```
 
 ### Consuming Events
