@@ -53,9 +53,9 @@ Executes read-only contract calls via JSON-RPC.
 **Important:** eth_call requires dataset qualification. Always use the format `"namespace/name@revision".eth_call(...)` where the dataset identifier specifies which blockchain network and provider configuration to use. For example: `"edgeandnode/mainnet@0.0.1".eth_call(...)`.
 
 **Arguments:**
-- `from` (FixedSizeBinary(20)): Sender address (optional, can be NULL)
+- `from` (FixedSizeBinary(20) or NULL): Sender address (optional, can pass NULL directly)
 - `to` (FixedSizeBinary(20)): Target contract address (required)
-- `input` (Binary): Encoded function call data (use `evm_encode_params` to build)
+- `input` (Binary or NULL): Encoded function call data (use `evm_encode_params` to build, or NULL for no-argument calls)
 - `block` (Utf8): Block number or tag ("latest", "pending", "earliest", or integer string)
 
 **Returns:** A struct with two fields:
@@ -154,6 +154,20 @@ FROM (
 WHERE result.message IS NULL
 ```
 
+### Call with NULL Input Data
+
+Call a contract without any input data.
+
+```sql
+SELECT
+    "edgeandnode/mainnet@0.0.1".eth_call(
+        NULL,
+        evm_encode_hex('0x0000000000000000000000000000000000000000'),
+        NULL,
+        'latest'
+    ) as result
+```
+
 ### Common Patterns
 
 Handle reverted calls gracefully since `eth_call` returns errors in the result struct rather than failing the query.
@@ -216,9 +230,10 @@ WHERE result.message IS NOT NULL
 
 - Requires Ethereum JSON-RPC endpoint configured
 - Requires dataset qualification (`"namespace/name@revision".eth_call`)
-- `to` address is required (cannot be NULL)
+- `to` address is required (cannot be NULL, must be FixedSizeBinary(20))
 - `block` is required (cannot be NULL)
-- `from` parameter: NULL cannot be directly passed for `evm_encode_hex` results. Use `arrow_cast(evm_encode_hex(...) AS FixedSizeBinary(20))` when the address might be NULL, or pass NULL directly as a literal.
+- `from` must be NULL or FixedSizeBinary(20) - other types will produce an error
+- `input` must be NULL or Binary - other types will produce an error
 - Network latency affects query performance
 - Rate limits may apply depending on RPC provider
 - Large result sets with many eth_calls may timeout
