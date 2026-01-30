@@ -152,6 +152,6 @@ fn worker_config_from_common(config: &amp_config::Config) -> Config {
             commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
             build_date: Some(config.build_info.build_date.clone()),
         },
-        events_config: config.worker_events.clone(),
+        events_config: config.worker.events.clone(),
     }
 }

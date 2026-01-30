@@ -30,7 +30,10 @@ pub use self::{
         SizeLimitConfig,
     },
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
-    progress::{NoOpProgressCallback, ProgressCallback, ProgressCallbackExt, ProgressUpdate},
+    progress::{
+        NoOpProgressCallback, ProgressCallback, ProgressCallbackExt, ProgressUpdate,
+        SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
 };
 use crate::{
     compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit},

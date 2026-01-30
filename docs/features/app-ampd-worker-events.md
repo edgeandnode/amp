@@ -51,7 +51,14 @@ Workers emit events directly to Kafka as sync jobs progress:
 | `sync.completed` | Job finishes successfully    | Mark dataset as synced     |
 | `sync.failed`    | Job encounters fatal error   | Trigger alerts             |
 
-Progress events are emitted on meaningful status changes (e.g., percentage increments) rather than per-block to avoid excessive noise, especially for high-throughput chains like Solana.
+#### Progress Throttling
+
+Progress events are emitted on **1% increments** rather than per-block to avoid excessive noise, especially for high-throughput chains like Solana. For continuous jobs (no end block), progress events are emitted on each microbatch completion since percentage cannot be calculated.
+
+#### Continuous vs Bounded Jobs
+
+- **Bounded jobs** (with a configured end block): Emit all lifecycle events (`sync.started`, `sync.progress`, `sync.completed`, `sync.failed`)
+- **Continuous jobs** (no end block): Emit `sync.started`, `sync.progress`, and `sync.failed`, but **never emit `sync.completed`** since they sync indefinitely
 
 ### Partitioning
 

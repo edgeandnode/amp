@@ -72,8 +72,8 @@ pub struct Config {
     pub keep_alive_interval: Option<u64>,
     /// Build information (version, commit SHA, timestamps)
     pub build_info: BuildInfo,
-    /// Worker event streaming configuration
-    pub worker_events: WorkerEventsConfig,
+    /// Worker configuration (includes event streaming)
+    pub worker: WorkerConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -190,9 +190,20 @@ pub struct ConfigFile {
     #[serde(default)]
     pub writer: ParquetConfig,
 
-    // Worker event streaming configuration
+    // Worker configuration (includes event streaming)
     #[serde(default)]
-    pub worker_events: WorkerEventsConfig,
+    pub worker: WorkerConfig,
+}
+
+/// Worker configuration section.
+///
+/// Contains worker-specific settings including event streaming.
+/// Corresponds to `[worker]` section in config file.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WorkerConfig {
+    /// Event streaming configuration (Kafka)
+    #[serde(default)]
+    pub events: WorkerEventsConfig,
 }
 
 /// Configuration for worker event streaming.
@@ -338,7 +349,7 @@ impl Config {
             poll_interval: config_file.poll_interval_secs.into(),
             build_info: build_info.into().unwrap_or_default(),
             keep_alive_interval: config_file.keep_alive_interval,
-            worker_events: config_file.worker_events,
+            worker: config_file.worker,
         })
     }
 

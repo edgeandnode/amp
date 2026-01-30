@@ -6,9 +6,12 @@
 
 use std::sync::Arc;
 
-use dump::ProgressUpdate;
+use dump::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo};
 
-use super::{DatasetInfo, EventEmitter, ProgressInfo, SyncProgressEvent};
+use super::{
+    DatasetInfo, EventEmitter, ProgressInfo, SyncCompletedEvent, SyncFailedEvent,
+    SyncProgressEvent, SyncStartedEvent,
+};
 use crate::job::JobId;
 
 /// Adapter that bridges dump crate progress callbacks to worker event emission.
@@ -69,6 +72,51 @@ impl dump::ProgressCallback for WorkerProgressCallback {
         let emitter = Arc::clone(&self.event_emitter);
         tokio::spawn(async move {
             emitter.emit_sync_progress(event).await;
+        });
+    }
+
+    fn on_sync_started(&self, info: SyncStartedInfo) {
+        let event = SyncStartedEvent {
+            job_id: *self.job_id,
+            dataset: self.dataset_info.clone(),
+            table_name: info.table_name.to_string(),
+            start_block: info.start_block,
+            end_block: info.end_block,
+        };
+
+        let emitter = Arc::clone(&self.event_emitter);
+        tokio::spawn(async move {
+            emitter.emit_sync_started(event).await;
+        });
+    }
+
+    fn on_sync_completed(&self, info: SyncCompletedInfo) {
+        let event = SyncCompletedEvent {
+            job_id: *self.job_id,
+            dataset: self.dataset_info.clone(),
+            table_name: info.table_name.to_string(),
+            final_block: info.final_block,
+            duration_millis: info.duration_millis,
+        };
+
+        let emitter = Arc::clone(&self.event_emitter);
+        tokio::spawn(async move {
+            emitter.emit_sync_completed(event).await;
+        });
+    }
+
+    fn on_sync_failed(&self, info: SyncFailedInfo) {
+        let event = SyncFailedEvent {
+            job_id: *self.job_id,
+            dataset: self.dataset_info.clone(),
+            table_name: info.table_name.to_string(),
+            error_message: info.error_message,
+            error_type: info.error_type,
+        };
+
+        let emitter = Arc::clone(&self.event_emitter);
+        tokio::spawn(async move {
+            emitter.emit_sync_failed(event).await;
         });
     }
 }
