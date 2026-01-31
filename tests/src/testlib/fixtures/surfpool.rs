@@ -36,19 +36,6 @@ pub struct Surfpool {
 }
 
 impl Surfpool {
-    /// Check whether the `surfpool` binary is available in PATH.
-    ///
-    /// Returns `true` if `surfpool --version` executes successfully, `false` otherwise.
-    /// Use this to skip tests gracefully when the binary is not installed.
-    pub fn is_available() -> bool {
-        Command::new("surfpool")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-    }
-
     /// Create a new Surfpool fixture.
     ///
     /// Allocates a free port, spawns `surfpool start --ci --port <port> --offline` as

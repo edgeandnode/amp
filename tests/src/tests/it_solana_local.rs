@@ -9,18 +9,11 @@ use std::time::Duration;
 use datasets_common::reference::Reference;
 use monitoring::logging;
 
-use crate::testlib::{ctx::TestCtxBuilder, fixtures::Surfpool, helpers as test_helpers};
+use crate::testlib::{ctx::TestCtxBuilder, helpers as test_helpers};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn solana_local_extraction_produces_data_in_all_tables() {
     logging::init();
-
-    if !Surfpool::is_available() {
-        eprintln!(
-            "SKIPPED: surfpool binary not found in PATH. Install with: brew install txtx/taps/surfpool (macOS) or from source."
-        );
-        return;
-    }
 
     //* Given — a test environment with Surfpool and Solana manifest
     let test_ctx = TestCtxBuilder::new("solana_local")
