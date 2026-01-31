@@ -31,7 +31,7 @@ canonical: /docs/guides/install-ampup
 
 ---
 
-# Get Stared 
+# Get Started 
 
 ## Prerequisite
 
@@ -40,74 +40,67 @@ canonical: /docs/guides/install-ampup
 
 ## 1. Install System Dependencies 
 
-These tools help compile and build Amp from source.
+These tools are required to compile and build Amp from source.
 
-Install required build tools and libraries:
+Install the dependencies for your operating system:
+
+**Debian/Ubuntu**
 
 ```bash 
 sudo apt update -y
-sudo apt install cmake build-essential pkg-config libssl-dev curl -y
+sudo apt install -y cmake build-essential pkg-config libssl-dev curl
+```
+
+**macOS (Homebrew)**
+```bash
+brew install cmake pkg-config openssl curl
+```
+
+Requires Xcode Command Line Tools:
+```bash
+xcode-select --install
+```
+
+**Arch Linux (pacman)**
+```bash
+sudo pacman -S --needed cmake base-devel pkgconf openssl curl
+```
+
+**Red Hat-based Linux (rpm)**
+
+```bash
+sudo yum install -y cmake gcc gcc-c++ make pkgconfig openssl-devel curl
+```
+
+**Fedora Linux (dnf)**
+```bash
+sudo dnf install -y cmake gcc gcc-c++ make pkg-config openssl-devel curl
 ```
 
 **What this does**: Updates your package list and installs compilation tools and security libraries.
-
 --- 
 
 ## 2. Install Docker
 
-Docker runs isolated containers for PostgreSQL and other services Amp needs.
+Install Docker
 
-Add Docker's official GPG key and repository:
+1. Follow Docker’s official installation guide for your OS: 
+https://docs.docker.com/engine/install
 
-```bash
-sudo apt-get update
-sudo apt-get install ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-```
+2. Linux users: complete Docker’s post-install steps
+https://docs.docker.com/engine/install/linux-postinstall/
 
-Add Docker repository to apt sources:
+Verify:
 
 ```bash
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt-get update
+docker run hello-world
 ```
-
-Install Docker packages:
-
-```bash
-sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-```
-
-Verify Docker installation:
-
-```bash
-sudo docker run hello-world
-```
-
-Grant Your User Docker Permissions:
-
-
-```bash
-sudo usermod -aG docker $USER
-```
-
-> **Important**: Log out and log back in (or restart your terminal) for this change to take effect. You can verify by running: 
-    >
-    ```bash
-    groups
-    ```
-You should see `docker` in the list. 
 
 ---
 
 ## 3. Install `ampup`
 
-The `ampup` tool simplifies Amp installation and management.
+The `ampup` tool is the easiest and fastest way to install Amp. By default, it downloads prebuilt binaries, so you don’t need to build anything from source.
 
 Install `ampup` (includes `ampd` and `ampctl`):
 
@@ -116,16 +109,20 @@ curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
 source ~/.bashrc
 ```
 
-**What this does**: Downloads and installs `ampup`, `ampd` (Amp daemon), and `ampctl` (Amp control tool).
+**What this does**: Downloads and installs the Amp tooling and adds it to your PATH..
 
 
-Install or update Amp components:
+Install Amp (prebuilt binaries):
 
 ```bash
 ampup install
 ```
 
-Build Amp:
+**What this does**: Downloads and installs the latest precompiled Amp binaries for your system. This is the recommended approach for beginners and most users. You do not need to build Amp from source unless you are developing Amp itself or testing unreleased changes.
+
+(Optional) Build Amp from source:
+
+Only required if you are contributing to Amp or need a custom build.
 
 ```bash
 ampup build
@@ -135,7 +132,7 @@ ampup build
 
 ---
 
-## 4. Configure PostSQL Database 
+## 4. Configure PostgresSQL Database 
 
 Amp uses PostgreSQL to store data. You'll run it in a Docker container.
 
@@ -225,7 +222,7 @@ Tell Amp where to find its configuration file:
 export AMP_CONFIG="$(pwd)/config.toml"
 ```
 
-**Important for beginners**: This only works in your current terminal session. To make it permanent, add it to your ~/.bashrc:
+**Important for beginners**: This only works in your current terminal session. To make it permanent, add it to your `~/.bashrc`:
 
 Verify the configuration:
 
@@ -271,7 +268,7 @@ Generate a manifest:
 ampctl manifest generate \
   --kind evm-rpc \
   --network mainnet \
-  --out ./configuration/manifests/evm_rpc.json
+  --out ./configuration/.manifests/evm_rpc.json
 ```
 
 Get the dataset hash: 
