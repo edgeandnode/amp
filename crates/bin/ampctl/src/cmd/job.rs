@@ -2,6 +2,7 @@
 
 pub mod inspect;
 pub mod list;
+pub mod progress;
 pub mod prune;
 pub mod rm;
 pub mod stop;
@@ -31,6 +32,10 @@ pub enum Commands {
     /// Prune jobs by status filter
     #[command(after_help = include_str!("job/prune__after_help.md"))]
     Prune(prune::Args),
+
+    /// Get progress information for a job's tables
+    #[command(after_help = include_str!("job/progress__after_help.md"))]
+    Progress(progress::Args),
 }
 
 /// Execute the job command with the given subcommand.
@@ -41,6 +46,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Stop(args) => stop::run(args).await?,
         Commands::Rm(args) => rm::run(args).await?,
         Commands::Prune(args) => prune::run(args).await?,
+        Commands::Progress(args) => progress::run(args).await?,
     }
     Ok(())
 }

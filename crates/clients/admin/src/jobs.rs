@@ -2,6 +2,8 @@
 //!
 //! Provides methods for interacting with the `/jobs` endpoints of the admin API.
 
+use std::collections::BTreeMap;
+
 use monitoring::logging;
 use worker::job::JobId;
 
@@ -43,6 +45,13 @@ fn job_delete_by_id(id: &JobId) -> String {
 /// DELETE `/jobs`
 fn jobs_delete() -> &'static str {
     "jobs"
+}
+
+/// Build URL path for getting job progress.
+///
+/// GET `/jobs/{id}/progress`
+fn job_progress(id: &JobId) -> String {
+    format!("jobs/{id}/progress")
 }
 
 /// Client for jobs-related API operations.
@@ -502,6 +511,106 @@ impl<'a> JobsClient<'a> {
             }
         }
     }
+
+    /// Get progress for a job's tables.
+    ///
+    /// GETs from `/jobs/{id}/progress` endpoint.
+    ///
+    /// Returns `None` if the job does not exist (404).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GetProgressError`] for network errors, API errors (400/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(job_id = %id))]
+    pub async fn get_progress(&self, id: &JobId) -> Result<Option<JobProgress>, GetProgressError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&job_progress(id))
+            .expect("valid URL");
+
+        tracing::debug!("Sending GET request for job progress");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|err| GetProgressError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let progress: JobProgress = response.json().await.map_err(|err| {
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse progress response");
+                    GetProgressError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to parse response: {}", err),
+                    }
+                })?;
+                Ok(Some(progress))
+            }
+            404 => {
+                tracing::debug!("Job not found");
+                Ok(None)
+            }
+            400 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    GetProgressError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    GetProgressError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_JOB_ID" => Err(GetProgressError::InvalidJobId(error_response.into())),
+                    "GET_JOB_ERROR" => Err(GetProgressError::GetJobError(error_response.into())),
+                    "GET_TABLES_ERROR" => {
+                        Err(GetProgressError::GetTablesError(error_response.into()))
+                    }
+                    "GET_DATASET_ERROR" => {
+                        Err(GetProgressError::GetDatasetError(error_response.into()))
+                    }
+                    "GET_ACTIVE_REVISION_ERROR" => Err(GetProgressError::GetActiveRevisionError(
+                        error_response.into(),
+                    )),
+                    "SNAPSHOT_TABLE_ERROR" => {
+                        Err(GetProgressError::SnapshotTableError(error_response.into()))
+                    }
+                    _ => Err(GetProgressError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(GetProgressError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Response body for GET /jobs endpoint.
@@ -568,6 +677,30 @@ impl std::str::FromStr for JobStatusFilter {
             _ => Err(format!("invalid status filter: {}", s)),
         }
     }
+}
+
+/// Response for GET /jobs/{id}/progress endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct JobProgress {
+    /// Job ID
+    pub job_id: i64,
+    /// Current job status
+    pub job_status: String,
+    /// Progress for each table written by this job
+    pub tables: BTreeMap<String, TableProgress>,
+}
+
+/// Progress information for a single table.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableProgress {
+    /// Highest block number synced (None if no data yet)
+    pub current_block: Option<i64>,
+    /// Lowest block number synced (None if no data yet)
+    pub start_block: Option<i64>,
+    /// Number of Parquet files written
+    pub files_count: i64,
+    /// Total size of all Parquet files in bytes
+    pub total_size_bytes: i64,
 }
 
 /// Errors that can occur when listing jobs.
@@ -743,6 +876,44 @@ pub enum DeleteByStatusError {
     /// - Connection pool is exhausted or unavailable
     #[error("failed to delete jobs by status")]
     DeleteJobsByStatusError(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when getting job progress.
+#[derive(Debug, thiserror::Error)]
+pub enum GetProgressError {
+    /// The job ID in the URL path is invalid (400, INVALID_JOB_ID)
+    ///
+    /// This occurs when the ID cannot be parsed as a valid JobId.
+    #[error("invalid job ID")]
+    InvalidJobId(#[source] ApiError),
+
+    /// Failed to retrieve job from scheduler (500, GET_JOB_ERROR)
+    #[error("failed to get job")]
+    GetJobError(#[source] ApiError),
+
+    /// Failed to get tables by writer (500, GET_TABLES_ERROR)
+    #[error("failed to get tables")]
+    GetTablesError(#[source] ApiError),
+
+    /// Failed to get dataset definition (500, GET_DATASET_ERROR)
+    #[error("failed to get dataset")]
+    GetDatasetError(#[source] ApiError),
+
+    /// Failed to get active table revision (500, GET_ACTIVE_REVISION_ERROR)
+    #[error("failed to get active revision")]
+    GetActiveRevisionError(#[source] ApiError),
+
+    /// Failed to snapshot physical table (500, SNAPSHOT_TABLE_ERROR)
+    #[error("failed to snapshot table")]
+    SnapshotTableError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
