@@ -67,7 +67,7 @@
 
 - name: eth_call
   query: |
-    SELECT eth_rpc.eth_call(from, to, input, arrow_cast(block_num,'Utf8')) AS call
+    SELECT eth_rpc.eth_call(from, to, input, block_num) AS call
     FROM eth_rpc.transactions
     WHERE tx_index = 2
   results: |
@@ -110,7 +110,7 @@
                 evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
                 'balanceOf(address account)'
             ),
-            arrow_cast(block_num,'Utf8')
+            block_num
         ) as result from eth_rpc.blocks limit 1
     )
     SELECT
@@ -145,7 +145,7 @@
                 evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
                 'balanceOf(address account)'
             ),
-            arrow_cast(block_num,'Utf8')
+            block_num
         ) as result from eth_rpc.blocks limit 1
     )
     SELECT
@@ -164,7 +164,7 @@
                 evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
                 'balanceOf(address account)'
             ),
-            arrow_cast(block_num,'Utf8')
+            block_num
         ) as result from eth_rpc.blocks limit 1
     )
     SELECT
@@ -180,7 +180,7 @@
             NULL,
             evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
             arrow_cast(1234, 'Int64'),
-            arrow_cast(block_num,'Utf8')
+            block_num
         ) as result from eth_rpc.blocks limit 1
     )
     SELECT
@@ -207,6 +207,63 @@
     FROM test
   failure: |
     'block' is not a valid block number or tag
+
+- name: eth_call_integer_block_number
+  query: |
+    with test as(
+        SELECT eth_rpc.eth_call(
+            NULL,
+            evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+            evm_encode_params(
+                evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+                'balanceOf(address account)'
+            ),
+            20000000
+        ) as result from eth_rpc.blocks limit 1
+    )
+    SELECT
+        result.data as balance
+    FROM test
+  results: |
+    [{"balance": "0000000000000000000000000000000000000000000000289a2fefd80e131526"}]
+
+- name: eth_call_negative_block_number
+  query: |
+    with test as(
+        SELECT eth_rpc.eth_call(
+            NULL,
+            evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+            evm_encode_params(
+                evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+                'balanceOf(address account)'
+            ),
+            -1
+        ) as result from eth_rpc.blocks limit 1
+    )
+    SELECT
+        result.data as balance
+    FROM test
+  failure: |
+    block number cannot be negative: -1
+
+- name: eth_call_null_block_number
+  query: |
+    with test as(
+        SELECT eth_rpc.eth_call(
+            NULL,
+            evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+            evm_encode_params(
+                evm_encode_hex('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+                'balanceOf(address account)'
+            ),
+            NULL
+        ) as result from eth_rpc.blocks limit 1
+    )
+    SELECT
+        result.data as balance
+    FROM test
+  failure: |
+    'block' is not a valid block number or tag: Null
 
 - name: evm_decode_params
   query: |
