@@ -5,7 +5,7 @@ use datasets_common::network_id::NetworkId;
 use metadata_db::files::FileId;
 use object_store::ObjectMeta;
 
-use crate::{BlockNum, BlockRange, BoxError, block_range_intersection};
+use crate::{BlockNum, BlockRange, block_range_intersection};
 
 /// A watermark representing a specific block in the chain.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -30,6 +30,13 @@ impl From<&BlockRange> for Watermark {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResumeWatermark(pub BTreeMap<NetworkId, Watermark>);
 
+/// Error when extracting a watermark for a specific network from a ResumeWatermark
+///
+/// This occurs when the ResumeWatermark does not contain an entry for the requested network.
+#[derive(Debug, thiserror::Error)]
+#[error("expected resume watermark for network '{0}'")]
+pub struct WatermarkNotFoundError(pub NetworkId);
+
 impl ResumeWatermark {
     /// Create a ResumeWatermark from a slice of BlockRanges.
     pub fn from_ranges(ranges: &[BlockRange]) -> Self {
@@ -41,12 +48,12 @@ impl ResumeWatermark {
     }
 
     /// Extract the watermark for a specific network.
-    pub fn to_watermark(self, network: &NetworkId) -> Result<Watermark, BoxError> {
+    pub fn to_watermark(self, network: &NetworkId) -> Result<Watermark, WatermarkNotFoundError> {
         self.0
             .into_iter()
             .find(|(n, _)| n == network)
             .map(|(_, w)| w)
-            .ok_or_else(|| format!("Expected resume watermark for network '{network}'").into())
+            .ok_or_else(|| WatermarkNotFoundError(network.clone()))
     }
 }
 

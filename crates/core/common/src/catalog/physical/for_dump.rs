@@ -7,7 +7,7 @@ use amp_data_store::DataStore;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 
 use crate::catalog::{
-    dataset_access::DatasetAccess,
+    dataset_access::{DatasetAccess, GetDatasetError},
     logical::LogicalCatalog,
     physical::{Catalog, PhysicalTable},
 };
@@ -122,6 +122,6 @@ pub enum CreateCatalogError {
         /// The hash reference of the dataset
         dataset: HashReference,
         #[source]
-        source: crate::BoxError,
+        source: GetDatasetError,
     },
 }

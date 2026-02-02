@@ -64,7 +64,7 @@ impl PlanningContext {
             crate::query_context::create_catalog_schema(&ctx, table.sql_table_ref_schema());
             let planning_table = PlanningTable(table.clone());
             ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
-                .map_err(|e| Error::DatasetError(e.into()))?;
+                .map_err(Error::DatasetError)?;
         }
         self.register_udfs(&ctx);
         Ok(ctx)

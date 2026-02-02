@@ -12,13 +12,13 @@ use datafusion::{
         EmptyRelation, Join as JoinStruct, LogicalPlan, TableScan, Union as UnionStruct,
     },
     prelude::{col, lit},
+    sql::TableReference,
 };
 use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    BlockNum, BoxError, SPECIAL_BLOCK_NUM, catalog::physical::TableSnapshot,
-    plan_visitors::NonIncrementalOp,
+    BlockNum, SPECIAL_BLOCK_NUM, catalog::physical::TableSnapshot, plan_visitors::NonIncrementalOp,
 };
 
 /// Assuming that output table has been synced up to `start - 1`, and that the input tables are immutable (all of our tables currently are), this will return the _incremental version_ of `plan` that computes the microbatch `[start, end]`.
@@ -45,7 +45,7 @@ pub fn incrementalize_plan(
     plan: LogicalPlan,
     start: BlockNum,
     end: BlockNum,
-) -> Result<LogicalPlan, BoxError> {
+) -> Result<LogicalPlan, DataFusionError> {
     let mut incrementalizer = Incrementalizer::new(start, end);
     let plan = plan.rewrite(&mut incrementalizer)?.data;
     Ok(plan)
@@ -197,12 +197,15 @@ fn constrain_by_range(
     delta_start: u64,
     delta_end: u64,
     range: RelationRange,
-) -> Result<TableScan, BoxError> {
+) -> Result<TableScan, ConstrainByRangeError> {
     if table_scan.source.table_type() != TableType::Base
         || table_scan.source.get_logical_plan().is_some()
     {
         // These should not exist in an streamable and optimized plan.
-        return Err(format!("non-base table found: {:?}", table_scan).into());
+        return Err(ConstrainByRangeError(
+            table_scan.table_name,
+            table_scan.source.table_type(),
+        ));
     }
 
     let predicate = {
@@ -218,6 +221,20 @@ fn constrain_by_range(
 
     table_scan.filters.push(predicate);
     Ok(table_scan)
+}
+
+/// Error when constraining a table scan by range
+///
+/// This occurs when attempting to constrain a table scan that is not a base table.
+/// Base tables are required for range-based filtering to work correctly.
+#[derive(Debug, thiserror::Error)]
+#[error("non-base table found: {0:?}")]
+struct ConstrainByRangeError(TableReference, TableType);
+
+impl From<ConstrainByRangeError> for DataFusionError {
+    fn from(e: ConstrainByRangeError) -> Self {
+        DataFusionError::External(e.into())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

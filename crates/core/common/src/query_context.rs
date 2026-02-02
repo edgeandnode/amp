@@ -37,7 +37,7 @@ use thiserror::Error;
 use tracing::{field, instrument};
 
 use crate::{
-    BlockNum, BlockRange, BoxError, arrow,
+    BlockNum, BlockRange, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
@@ -48,41 +48,187 @@ use crate::{
         extract_table_references_from_plan, forbid_duplicate_field_names,
         forbid_underscore_prefixed_aliases,
     },
-    sql::TableReference,
+    sql::{TableReference, TableReferenceConversionError},
 };
 
 pub fn default_catalog_name() -> ScalarValue {
     ScalarValue::Utf8(Some("amp".to_string()))
 }
 
+/// Errors that occur during query context operations
+///
+/// This error type covers failures in SQL parsing, query planning, execution,
+/// and catalog operations within the query context.
 #[derive(Error, Debug)]
 pub enum Error {
+    /// Failed to extract table references from a logical query plan
+    ///
+    /// This occurs when traversing the logical plan to identify all referenced
+    /// tables fails. The system needs to know which tables are referenced in
+    /// order to compute common synced block ranges across all tables.
+    ///
+    /// Possible causes:
+    /// - Malformed or corrupted logical plan structure
+    /// - Internal DataFusion error during plan traversal
+    /// - Unexpected plan node types that cannot be processed
+    #[error("failed to extract table references from plan")]
+    ExtractTableReferences(#[source] DataFusionError),
+
+    /// Failed to convert a DataFusion table reference to the project's format
+    ///
+    /// This occurs when converting DataFusion's `TableReference` into the
+    /// project's validated `TableReference<String>` type. The conversion
+    /// validates table names and schema identifiers.
+    ///
+    /// Possible causes:
+    /// - Invalid table name that doesn't conform to identifier rules
+    /// - Schema name cannot be parsed or validated
+    /// - Catalog-qualified reference (3-part name) which is not supported
+    /// - Table name contains invalid characters
+    #[error("failed to convert table reference")]
+    TableReferenceConversion(#[source] TableReferenceConversionError),
+
+    /// Query plan violates system constraints
+    ///
+    /// This occurs when a query plan contains operations that are not allowed
+    /// in the current context. The query context enforces read-only access
+    /// and reserves certain naming conventions for internal use.
+    ///
+    /// Possible causes:
+    /// - DDL operations (CREATE, DROP, ALTER) in a read-only context
+    /// - DML operations (INSERT, UPDATE, DELETE) in a read-only context
+    /// - Column aliases starting with underscore (`_`) which are reserved
+    ///   for special columns like `_block_num`
+    ///
+    /// This is typically a user error that requires modifying the query.
     #[error("invalid plan")]
     InvalidPlan(#[source] DataFusionError),
 
+    /// Failed during query planning phase
+    ///
+    /// This occurs during SQL-to-logical-plan conversion, logical plan
+    /// optimization, physical plan creation, or plan validation. This is
+    /// a general-purpose error for plan manipulation failures.
+    ///
+    /// Possible causes:
+    /// - SQL syntax is valid but semantically incorrect (e.g., type mismatch)
+    /// - Referenced columns do not exist in the schema
+    /// - Optimizer rule failure during logical optimization
+    /// - Physical plan creation failure (e.g., unsupported operation)
+    /// - Duplicate field names in the output schema
+    /// - Stream execution initialization failure
+    ///
+    /// Some causes indicate user error (bad query), while others may indicate
+    /// internal issues or unsupported operations.
     #[error("planning error: {0}")]
     PlanningError(#[source] DataFusionError),
 
+    /// Failed during query execution phase
+    ///
+    /// This occurs after planning completes successfully, during the actual
+    /// execution of the query when materializing record batches from the
+    /// result stream.
+    ///
+    /// Possible causes:
+    /// - I/O error reading parquet files from storage
+    /// - Memory allocation failure during batch processing
+    /// - Data corruption in source files
+    /// - Network interruption when accessing remote storage
+    /// - Timeout during long-running operations
+    ///
+    /// This error may be transient (network issues) or permanent (data corruption).
     #[error("query execution error")]
     ExecutionError(#[source] DataFusionError),
 
-    /// Signals a problem with the dataset configuration.
+    /// Failed to register a dataset table with the query context
+    ///
+    /// This occurs when attempting to register a table snapshot with
+    /// DataFusion's session context. Tables must be registered before
+    /// they can be queried.
+    ///
+    /// Possible causes:
+    /// - Schema mismatch between table metadata and actual data
+    /// - Table with the same name already exists in the context
+    /// - Invalid table configuration or metadata
+    /// - Object store registration failure
     #[error("dataset error")]
-    DatasetError(#[source] BoxError),
+    DatasetError(#[source] DataFusionError),
 
-    /// Failed to create catalog snapshot
+    /// Failed to create a catalog snapshot from the physical catalog
+    ///
+    /// This occurs during `QueryContext` initialization when creating
+    /// snapshots of physical tables. The snapshot captures the current
+    /// state of synced data including canonical chain information.
+    ///
+    /// Possible causes:
+    /// - Failed to fetch segment metadata from the data store
+    /// - Failed to compute canonical blockchain chain (reorg handling)
+    /// - Database connection issues when querying metadata
+    /// - Inconsistent state between metadata and actual data files
+    ///
+    /// This error prevents query context creation and requires investigation
+    /// of the catalog and data store state.
     #[error("failed to create catalog snapshot")]
     CatalogSnapshot(#[source] crate::catalog::physical::FromCatalogError),
 
+    /// Failed during metadata table operations
+    ///
+    /// This occurs when querying or operating on internal metadata tables.
+    /// Metadata tables provide system information about the query context.
+    ///
+    /// Possible causes:
+    /// - Internal metadata table schema mismatch
+    /// - Metadata table registration failure
+    /// - Query against metadata table failed
     #[error("meta table error")]
     MetaTableError(#[source] DataFusionError),
 
+    /// Failed to parse SQL query string
+    ///
+    /// This occurs during the initial SQL parsing phase before any planning
+    /// begins. The SQL string could not be parsed into a valid statement.
+    ///
+    /// Possible causes:
+    /// - Invalid SQL syntax (typos, missing keywords, unbalanced parentheses)
+    /// - Empty SQL input (no statements provided)
+    /// - Multiple SQL statements in a single query string (not supported)
+    /// - Unsupported SQL dialect features
+    ///
+    /// This is a user error that requires fixing the SQL query.
     #[error("SQL parse error")]
     SqlParseError(#[source] crate::sql::ParseSqlError),
 
+    /// Failed to configure DataFusion session
+    ///
+    /// This occurs during `QueryContext` initialization when configuring
+    /// the DataFusion session from environment variables. DataFusion supports
+    /// various tuning parameters via environment variables.
+    ///
+    /// Possible causes:
+    /// - Invalid environment variable value for a DataFusion setting
+    /// - Malformed configuration string
+    /// - Unsupported configuration option
+    ///
+    /// Check environment variables like `DATAFUSION_OPTIMIZER_*` and
+    /// `DATAFUSION_EXECUTION_*` for invalid values.
     #[error("DataFusion configuration error")]
     ConfigError(#[source] DataFusionError),
 
+    /// Referenced table does not exist in the catalog
+    ///
+    /// This occurs when a query references a table that is not registered
+    /// in the current query context's catalog. The table name is valid but
+    /// the table itself is not available.
+    ///
+    /// Possible causes:
+    /// - Typo in the table name
+    /// - Table exists but is not synced (no data available)
+    /// - Table was removed or renamed
+    /// - Insufficient permissions to access the table
+    /// - Table is in a different schema than expected
+    ///
+    /// This is typically a user error. Verify the table name and ensure
+    /// the table has synced data.
     #[error("table not found: {0}")]
     TableNotFoundError(TableReference),
 }
@@ -248,8 +394,7 @@ impl QueryContext {
         let ctx = SessionContext::new_with_state(state);
 
         for table in self.catalog.table_snapshots() {
-            register_table(&ctx, table.clone(), &self.store)
-                .map_err(|err| Error::DatasetError(err.into()))?;
+            register_table(&ctx, table.clone(), &self.store).map_err(Error::DatasetError)?;
         }
 
         self.register_udfs(&ctx);
@@ -314,10 +459,14 @@ impl QueryContext {
     ///
     /// Returns an empty Vec if any referenced table has no synced data.
     #[instrument(skip_all, err)]
-    pub async fn common_ranges(&self, plan: &LogicalPlan) -> Result<Vec<BlockRange>, BoxError> {
+    pub async fn common_ranges(&self, plan: &LogicalPlan) -> Result<Vec<BlockRange>, Error> {
         let mut ranges_by_network: BTreeMap<NetworkId, BlockRange> = BTreeMap::new();
-        for df_table_ref in extract_table_references_from_plan(plan)? {
-            let table_ref: TableReference<String> = df_table_ref.try_into()?;
+        for df_table_ref in
+            extract_table_references_from_plan(plan).map_err(Error::ExtractTableReferences)?
+        {
+            let table_ref: TableReference<String> = df_table_ref
+                .try_into()
+                .map_err(Error::TableReferenceConversion)?;
             let Some(table_range) = self.get_table(&table_ref)?.synced_range() else {
                 // If any table has no synced data, return empty ranges
                 return Ok(vec![]);
@@ -349,7 +498,7 @@ impl QueryContext {
     pub async fn max_end_blocks(
         &self,
         plan: &LogicalPlan,
-    ) -> Result<BTreeMap<NetworkId, BlockNum>, BoxError> {
+    ) -> Result<BTreeMap<NetworkId, BlockNum>, Error> {
         Ok(self
             .common_ranges(plan)
             .await?

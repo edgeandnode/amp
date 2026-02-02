@@ -21,7 +21,6 @@ use self::parquet::{PARQUET_METADATA_KEY, ParquetMeta};
 pub use self::size::{
     Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt,
 };
-use crate::BoxError;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -41,7 +40,7 @@ impl FileMetadata {
     pub fn from_row_with_table_path(
         row: FileMetadataRow,
         table_path: &Path,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, FromRowError> {
         let FileMetadataRow {
             id: file_id,
             location_id,
@@ -58,7 +57,7 @@ impl FileMetadata {
         // should be like "dataset/table/revision_id/filename.parquet".
         let location = table_path.child(file_name.as_str());
 
-        let parquet_meta: ParquetMeta = serde_json::from_value(metadata)?;
+        let parquet_meta: ParquetMeta = serde_json::from_value(metadata).map_err(FromRowError)?;
 
         let size = object_size.unwrap_or_default() as u64;
 
@@ -102,6 +101,11 @@ impl TryFrom<PhyTableRevisionFileMetadata> for FileMetadata {
         })
     }
 }
+
+/// Error when creating FileMetadata from a database row
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to parse file metadata from database row")]
+pub struct FromRowError(#[source] serde_json::Error);
 
 #[instrument(skip(object_meta, store), err)]
 pub async fn extract_footer_bytes_from_file(

@@ -29,7 +29,6 @@ pub use self::{
 };
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
-pub type BoxResult<T> = Result<T, BoxError>;
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;

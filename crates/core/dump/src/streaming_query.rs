@@ -18,7 +18,7 @@ use common::{
         physical::{Catalog, PhysicalTable},
     },
     incrementalizer::incrementalize_plan,
-    metadata::segments::Segment,
+    metadata::segments::{Segment, WatermarkNotFoundError},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
     query_context::QueryEnv,
     sql_str::SqlStr,
@@ -129,7 +129,7 @@ pub enum SpawnError {
     /// This prevents the query from resuming at the correct position and may
     /// require starting from scratch or using a different resume point.
     #[error("failed to convert resume watermark")]
-    ConvertResumeWatermark(#[source] BoxError),
+    ConvertResumeWatermark(#[source] WatermarkNotFoundError),
 }
 
 /// Awaits any update for tables in a query context catalog.
