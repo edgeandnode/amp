@@ -6360,6 +6360,7 @@ version = "0.1.0"
 dependencies = [
  "backon",
  "chrono",
+ "monitoring",
  "prost",
  "prost-build",
  "rskafka",

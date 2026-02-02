@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use kafka_client::{KafkaProducer, proto};
+use monitoring::logging;
 use prost::Message;
 
 use super::{
@@ -56,17 +57,23 @@ impl KafkaEventEmitter {
     async fn emit(&self, event_type: EventType, partition_key: &str, event: proto::WorkerEvent) {
         let mut buf = Vec::with_capacity(event.encoded_len());
         if let Err(e) = event.encode(&mut buf) {
-            tracing::error!(error = %e, event_type = event_type.as_str(), "Failed to encode event");
+            tracing::error!(
+                event_type = event_type.as_str(),
+                error = %e,
+                error_source = logging::error_source(&e),
+                "failed to encode event"
+            );
             return;
         }
 
         if let Err(e) = self.producer.send(partition_key, &buf).await {
             // Log but don't fail - events are best-effort
             tracing::warn!(
-                error = %e,
                 event_type = event_type.as_str(),
                 partition_key,
-                "Failed to send event to Kafka (event dropped)"
+                error = %e,
+                error_source = logging::error_source(&e),
+                "failed to send event to Kafka (event dropped)"
             );
         }
     }
