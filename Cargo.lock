@@ -6358,6 +6358,7 @@ dependencies = [
 name = "kafka-client"
 version = "0.1.0"
 dependencies = [
+ "amp-config",
  "backon",
  "chrono",
  "monitoring",

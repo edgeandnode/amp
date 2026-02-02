@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+amp-config = { path = "../../config" }
 backon.workspace = true
 chrono.workspace = true
 monitoring = { path = "../../core/monitoring" }

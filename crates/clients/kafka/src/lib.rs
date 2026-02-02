@@ -8,13 +8,14 @@
 //! # Example
 //!
 //! ```ignore
-//! use kafka_client::{KafkaConfig, KafkaProducer};
+//! use amp_config::KafkaEventsConfig;
+//! use kafka_client::KafkaProducer;
 //!
-//! let config = KafkaConfig::new(
-//!     vec!["localhost:9092".to_string()],
-//!     "amp.worker.events",
-//!     16, // partitions
-//! );
+//! let config = KafkaEventsConfig {
+//!     brokers: vec!["localhost:9092".to_string()],
+//!     topic: "amp.worker.events".to_string(),
+//!     partitions: 16,
+//! };
 //!
 //! let producer = KafkaProducer::new(&config).await?;
 //!
@@ -23,10 +24,8 @@
 //! ```
 
 mod client;
-mod config;
 mod error;
 pub mod proto;
 
 pub use client::KafkaProducer;
-pub use config::KafkaConfig;
 pub use error::Error;

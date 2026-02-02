@@ -2,6 +2,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use amp_config::KafkaEventsConfig;
 use backon::{BackoffBuilder, Retryable};
 use monitoring::logging;
 use rskafka::{
@@ -12,7 +13,7 @@ use rskafka::{
     record::Record,
 };
 
-use crate::{config::KafkaConfig, error::Error};
+use crate::error::Error;
 
 /// Fixed delay backoff policy: 1s, 5s, 60s.
 ///
@@ -62,7 +63,7 @@ impl KafkaProducer {
     /// # Errors
     ///
     /// Returns an error if the connection to the Kafka brokers fails.
-    pub async fn new(config: &KafkaConfig) -> Result<Self, Error> {
+    pub async fn new(config: &KafkaEventsConfig) -> Result<Self, Error> {
         let client = ClientBuilder::new(config.brokers.clone())
             .build()
             .await
@@ -135,7 +136,7 @@ impl KafkaProducer {
 
     /// Computes the partition for a given key using consistent hashing.
     ///
-    /// The partition count is configured via `KafkaConfig::partitions`.
+    /// The partition count is configured via `KafkaEventsConfig::partitions`.
     fn partition_for_key(&self, key: &str) -> i32 {
         // Simple hash-based partition selection
         let hash: u32 = key
