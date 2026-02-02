@@ -86,7 +86,7 @@ Read the full content of matched pattern docs using the Read tool.
 - Type design: "rust-type-design"
 - Logging: "logging"
 - Documentation: "documentation"
-- Testing: "testing-patterns"
+- Testing: "test-functions", "test-files", "test-strategy"
 
 **Architectural Patterns** (`type: arch`):
 - Service patterns: "services-pattern"
@@ -106,7 +106,7 @@ Read the full content of matched pattern docs using the Read tool.
 - User asks "how do I handle errors?" -> match `name: "rust-error-handling"`
 - User asks "module organization" -> match `name: "rust-modules"`
 - User working in `admin-api` crate -> match `scope: "crate:admin-api"`
-- User asks "how to write tests?" -> match `name: "testing-patterns"`
+- User asks "how to write tests?" -> match "test-functions", "test-files", or "test-strategy"
 
 ### Semantic Matches (Using "Load when" Triggers)
 
@@ -143,7 +143,7 @@ Load multiple pattern docs when:
 
 - **Before editing code**: Load relevant core patterns (error-handling, modules, type-design)
 - **Before adding logs**: Load logging pattern
-- **Before writing tests**: Load testing-patterns
+- **Before writing tests**: Load test-functions, test-files, test-strategy
 - **Before documenting**: Load documentation pattern
 - **When creating crates**: Load cargo-workspace-patterns
 - **When creating services**: Load services-pattern
@@ -185,8 +185,8 @@ Load multiple pattern docs when:
 
 1. Run the discovery command to extract pattern metadata
 2. Match "test" against pattern descriptions
-3. Find match: `testing-patterns` with trigger "Load when writing tests"
-4. Load `docs/code/testing-patterns.md`
+3. Find matches: test-functions, test-files, test-strategy
+4. Load `docs/code/test-functions.md` (and related test pattern docs as needed)
 5. Guide test implementation following patterns
 
 ### Example 4: Creating a New Service

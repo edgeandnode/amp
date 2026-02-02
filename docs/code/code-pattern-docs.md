@@ -51,7 +51,8 @@ Fundamental coding patterns applicable across the entire codebase.
 - `error-reporting` - Error type design
 - `logging` - Structured logging
 - `documentation` - Rustdoc patterns
-- `testing-patterns` - Test structure
+- `test-functions` - Test naming and structure
+- `test-files` - Test file placement
 
 **Scope:** Always `global`
 
