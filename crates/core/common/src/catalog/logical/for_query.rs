@@ -14,9 +14,10 @@ use datasets_derived::{dataset::Dataset as DerivedDataset, func_name::ETH_CALL_F
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
-    BoxError,
     catalog::{
-        dataset_access::DatasetAccess,
+        dataset_access::{
+            DatasetAccess, EthCallForDatasetError, GetDatasetError, ResolveRevisionError,
+        },
         logical::{LogicalCatalog, LogicalTable},
     },
     sql::{FunctionReference, TableReference},
@@ -285,7 +286,7 @@ pub enum ResolveTablesError {
         /// The dataset reference that failed to resolve
         reference: Reference,
         #[source]
-        source: BoxError,
+        source: ResolveRevisionError,
     },
 
     /// Failed to load dataset from the dataset store.
@@ -301,7 +302,7 @@ pub enum ResolveTablesError {
         /// The hash reference of the dataset that failed to load
         reference: HashReference,
         #[source]
-        source: BoxError,
+        source: GetDatasetError,
     },
 
     /// Table not found in dataset.
@@ -334,7 +335,7 @@ pub enum ResolveUdfsError {
         /// The dataset reference that failed to resolve
         reference: Reference,
         #[source]
-        source: BoxError,
+        source: ResolveRevisionError,
     },
 
     /// Failed to load dataset from the dataset store.
@@ -350,7 +351,7 @@ pub enum ResolveUdfsError {
         /// The hash reference of the dataset that failed to load
         reference: HashReference,
         #[source]
-        source: BoxError,
+        source: GetDatasetError,
     },
 
     /// Failed to create ETH call UDF for dataset referenced in function name.
@@ -364,7 +365,7 @@ pub enum ResolveUdfsError {
         /// The hash reference of the dataset for which eth_call UDF creation failed
         reference: HashReference,
         #[source]
-        source: BoxError,
+        source: EthCallForDatasetError,
     },
 
     /// eth_call function not available for dataset.

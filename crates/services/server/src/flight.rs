@@ -196,10 +196,7 @@ impl Service {
             .map_err(Error::CoreError)?;
             let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
 
-            let block_ranges = ctx
-                .common_ranges(&plan)
-                .await
-                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+            let block_ranges = ctx.common_ranges(&plan).await.map_err(Error::CoreError)?;
 
             for range in &block_ranges {
                 tracing::debug!(
@@ -1008,6 +1005,12 @@ impl Error {
             Error::CoreError(CoreError::ExecutionError(_)) => "CORE_EXECUTION_ERROR",
             Error::CoreError(CoreError::MetaTableError(_)) => "META_TABLE_ERROR",
             Error::CoreError(CoreError::TableNotFoundError(_)) => "TABLE_NOT_FOUND_ERROR",
+            Error::CoreError(CoreError::ExtractTableReferences(_)) => {
+                "EXTRACT_TABLE_REFERENCES_ERROR"
+            }
+            Error::CoreError(CoreError::TableReferenceConversion(_)) => {
+                "TABLE_REFERENCE_CONVERSION_ERROR"
+            }
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
             Error::TicketEncodingError(_) => "TICKET_ENCODING_ERROR",
@@ -1041,7 +1044,9 @@ impl IntoResponse for Error {
                 | CoreError::ConfigError(_)
                 | CoreError::PlanningError(_)
                 | CoreError::ExecutionError(_)
-                | CoreError::MetaTableError(_),
+                | CoreError::MetaTableError(_)
+                | CoreError::ExtractTableReferences(_)
+                | CoreError::TableReferenceConversion(_),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::CoreError(CoreError::TableNotFoundError(_)) => StatusCode::NOT_FOUND,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -1085,6 +1090,8 @@ impl From<Error> for Status {
             Error::CoreError(CoreError::CatalogSnapshot(_)) => Status::internal(message),
             Error::CoreError(CoreError::ConfigError(_)) => Status::internal(message),
             Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(message),
+            Error::CoreError(CoreError::ExtractTableReferences(_)) => Status::internal(message),
+            Error::CoreError(CoreError::TableReferenceConversion(_)) => Status::internal(message),
 
             Error::CoreError(
                 CoreError::PlanningError(df)

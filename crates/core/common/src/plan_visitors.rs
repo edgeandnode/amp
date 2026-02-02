@@ -17,7 +17,7 @@ use datafusion::{
 };
 
 use crate::{
-    BoxError, SPECIAL_BLOCK_NUM,
+    SPECIAL_BLOCK_NUM,
     incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
 };
 
@@ -338,7 +338,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
 
 pub fn extract_table_references_from_plan(
     plan: &LogicalPlan,
-) -> Result<Vec<TableReference>, BoxError> {
+) -> Result<Vec<TableReference>, DataFusionError> {
     let mut refs = BTreeSet::new();
 
     plan.apply(|node| {

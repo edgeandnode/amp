@@ -1,6 +1,6 @@
 use std::{ops::Range, sync::Arc};
 
-use amp_data_store::{CachedParquetData, DataStore};
+use amp_data_store::{CachedParquetData, DataStore, GetCachedMetadataError};
 use bytes::Bytes;
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -20,8 +20,6 @@ use datafusion_datasource::PartitionedFile;
 use futures::future::BoxFuture;
 use metadata_db::{LocationId, files::FileId};
 
-use crate::BoxError;
-
 #[derive(Debug, Clone)]
 pub struct AmpReaderFactory {
     pub location_id: LocationId,
@@ -30,11 +28,13 @@ pub struct AmpReaderFactory {
 }
 
 impl AmpReaderFactory {
-    pub async fn get_cached_metadata(&self, file: FileId) -> Result<CachedParquetData, BoxError> {
+    pub async fn get_cached_metadata(
+        &self,
+        file: FileId,
+    ) -> Result<CachedParquetData, GetCachedMetadataError> {
         self.store
             .get_cached_parquet_metadata(file, self.schema.clone())
             .await
-            .map_err(|err| -> BoxError { err.into() })
     }
 }
 
