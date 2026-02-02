@@ -3,6 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use backon::{BackoffBuilder, Retryable};
+use monitoring::logging;
 use rskafka::{
     client::{
         Client, ClientBuilder,
@@ -115,8 +116,9 @@ impl KafkaProducer {
         .notify(|err, dur| {
             tracing::warn!(
                 error = %err,
-                retry_in_secs = dur.as_secs_f32(),
-                "Kafka send failed, retrying"
+                error_source = logging::error_source(&err),
+                "Kafka send failed. Retrying in {:.1}s",
+                dur.as_secs_f32()
             );
         })
         .await?;
