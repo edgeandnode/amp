@@ -2,6 +2,7 @@
 name: "app-ampd-worker-events"
 description: "Worker event streaming via Kafka for real-time sync progress updates. Load when asking about push-based sync notifications, event emission, or Kafka integration"
 type: feature
+status: experimental
 components: "service:worker,crate:kafka"
 ---
 
@@ -16,6 +17,7 @@ Worker Event Streaming enables a **Push Model** where workers emit events to Kaf
 1. [Key Concepts](#key-concepts)
 2. [Architecture](#architecture)
 3. [Configuration](#configuration)
+   - [Prerequisites](#prerequisites)
 4. [Usage](#usage)
 5. [Event Reference](#event-reference)
 6. [References](#references)
@@ -102,6 +104,21 @@ partitions = 16
 | `kafka.brokers`    | -                     | Kafka broker addresses                              |
 | `kafka.topic`      | `"amp.worker.events"` | Kafka topic name                                    |
 | `kafka.partitions` | `16`                  | Number of partitions (must match actual topic config) |
+
+### Prerequisites
+
+The Kafka topic must be created by the operator before enabling event streaming. Amp does not auto-create topics.
+
+```bash
+# Example: Create topic with Kafka CLI
+kafka-topics --create \
+  --bootstrap-server localhost:9092 \
+  --topic amp.worker.events \
+  --partitions 16 \
+  --replication-factor 3
+```
+
+If the topic doesn't exist, event sends will retry then log a warning and drop the event. Events are best-effort and do not block sync jobs.
 
 ## Usage
 
