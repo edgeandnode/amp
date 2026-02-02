@@ -7,20 +7,18 @@
 use std::sync::Arc;
 
 use dump::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo};
+use kafka_client::proto;
 
-use super::{
-    DatasetInfo, EventEmitter, ProgressInfo, SyncCompletedEvent, SyncFailedEvent,
-    SyncProgressEvent, SyncStartedEvent,
-};
+use super::EventEmitter;
 use crate::job::JobId;
 
 /// Adapter that bridges dump crate progress callbacks to worker event emission.
 ///
 /// This struct implements [`dump::ProgressCallback`] and translates progress updates
-/// into [`SyncProgressEvent`]s that are sent to the configured [`EventEmitter`].
+/// into proto events that are sent to the configured [`EventEmitter`].
 pub struct WorkerProgressCallback {
     job_id: JobId,
-    dataset_info: DatasetInfo,
+    dataset_info: proto::DatasetInfo,
     event_emitter: Arc<dyn EventEmitter>,
 }
 
@@ -28,7 +26,7 @@ impl WorkerProgressCallback {
     /// Creates a new progress callback adapter.
     pub fn new(
         job_id: JobId,
-        dataset_info: DatasetInfo,
+        dataset_info: proto::DatasetInfo,
         event_emitter: Arc<dyn EventEmitter>,
     ) -> Self {
         Self {
@@ -46,24 +44,24 @@ impl dump::ProgressCallback for WorkerProgressCallback {
             let total_blocks = end_block.saturating_sub(update.start_block) + 1;
             let blocks_done = update.current_block.saturating_sub(update.start_block) + 1;
             if total_blocks > 0 {
-                ((blocks_done as f64 / total_blocks as f64) * 100.0).min(100.0) as u8
+                ((blocks_done as f64 / total_blocks as f64) * 100.0).min(100.0) as u32
             } else {
                 0
             }
         });
 
-        let event = SyncProgressEvent {
+        let event = proto::SyncProgress {
             job_id: *self.job_id,
-            dataset: self.dataset_info.clone(),
+            dataset: Some(self.dataset_info.clone()),
             table_name: update.table_name.to_string(),
-            progress: ProgressInfo {
+            progress: Some(proto::ProgressInfo {
                 start_block: update.start_block,
                 current_block: update.current_block,
                 end_block: update.end_block,
                 percentage,
                 files_count: update.files_count,
                 total_size_bytes: update.total_size_bytes,
-            },
+            }),
         };
 
         // Clone the emitter and spawn an async task to emit the event.
@@ -76,9 +74,9 @@ impl dump::ProgressCallback for WorkerProgressCallback {
     }
 
     fn on_sync_started(&self, info: SyncStartedInfo) {
-        let event = SyncStartedEvent {
+        let event = proto::SyncStarted {
             job_id: *self.job_id,
-            dataset: self.dataset_info.clone(),
+            dataset: Some(self.dataset_info.clone()),
             table_name: info.table_name.to_string(),
             start_block: info.start_block,
             end_block: info.end_block,
@@ -91,9 +89,9 @@ impl dump::ProgressCallback for WorkerProgressCallback {
     }
 
     fn on_sync_completed(&self, info: SyncCompletedInfo) {
-        let event = SyncCompletedEvent {
+        let event = proto::SyncCompleted {
             job_id: *self.job_id,
-            dataset: self.dataset_info.clone(),
+            dataset: Some(self.dataset_info.clone()),
             table_name: info.table_name.to_string(),
             final_block: info.final_block,
             duration_millis: info.duration_millis,
@@ -106,9 +104,9 @@ impl dump::ProgressCallback for WorkerProgressCallback {
     }
 
     fn on_sync_failed(&self, info: SyncFailedInfo) {
-        let event = SyncFailedEvent {
+        let event = proto::SyncFailed {
             job_id: *self.job_id,
-            dataset: self.dataset_info.clone(),
+            dataset: Some(self.dataset_info.clone()),
             table_name: info.table_name.to_string(),
             error_message: info.error_message,
             error_type: info.error_type,

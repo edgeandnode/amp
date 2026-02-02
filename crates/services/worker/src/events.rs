@@ -6,12 +6,7 @@
 mod emitter;
 mod kafka;
 mod progress_adapter;
-mod types;
 
 pub use emitter::{EventEmitter, NoOpEmitter};
 pub use kafka::KafkaEventEmitter;
 pub use progress_adapter::WorkerProgressCallback;
-pub use types::{
-    DatasetInfo, ProgressInfo, SyncCompletedEvent, SyncFailedEvent, SyncProgressEvent,
-    SyncStartedEvent,
-};

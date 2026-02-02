@@ -41,6 +41,7 @@ firehose-datasets = { path = "../crates/extractors/firehose" }
 fs-err.workspace = true
 futures.workspace = true
 indoc.workspace = true
+kafka-client = { path = "../crates/clients/kafka" }
 metadata-db = { path = "../crates/core/metadata-db" }
 metadata-db-postgres = { path = "../crates/services/metadata-db-postgres" }
 monitoring = { path = "../crates/core/monitoring" }
