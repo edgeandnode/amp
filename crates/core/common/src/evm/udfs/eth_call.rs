@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use datafusion::{
     arrow::{
         array::{
-            Array, ArrayBuilder, BinaryArray, BinaryBuilder, FixedSizeBinaryArray, StringArray,
-            StringBuilder, StructBuilder,
+            Array, ArrayBuilder, BinaryArray, BinaryBuilder, FixedSizeBinaryArray, Int64Array,
+            StringArray, StringBuilder, StructBuilder, UInt64Array,
         },
         datatypes::{DataType, Field, Fields},
     },
@@ -26,6 +26,8 @@ use datafusion::{
     },
 };
 use itertools::izip;
+
+use crate::plan;
 
 type TransactionRequest = <Ethereum as alloy::network::Network>::TransactionRequest;
 
@@ -53,7 +55,7 @@ type TransactionRequest = <Ethereum as alloy::network::Network>::TransactionRequ
 /// * `from` - `FixedSizeBinary(20)` sender address (optional, can be NULL)
 /// * `to` - `FixedSizeBinary(20)` target contract address (required)
 /// * `input` - `Binary` encoded function call data (optional)
-/// * `block` - `Utf8` block number or tag ("latest", "pending", "earliest", or integer)
+/// * `block` - `Utf8` or `UInt64` or `Int64` block number or tag ("latest", "pending", "earliest")
 ///
 /// # Returns
 ///
@@ -191,31 +193,63 @@ impl AsyncScalarUDFImpl for EthCall {
             DataType::Binary => input_data.as_any().downcast_ref::<BinaryArray>().unwrap(),
             _ => return plan_err!("{}: input data is not a valid data", name),
         };
-        // block: Required, only accepts block number or tag as string
-        let block = match block.data_type() {
-            DataType::Utf8 => block.as_any().downcast_ref::<StringArray>().unwrap(),
-            _ => return plan_err!("{}: 'block' is not a valid block number or tag", name),
+        // block: Required, accepts block number (UInt64/Int64) or tag (string)
+        let parse_block_str = |s: &str| -> Result<BlockNumberOrTag, DataFusionError> {
+            u64::from_str(s)
+                .map(BlockNumberOrTag::Number)
+                .or_else(|_| BlockNumberOrTag::from_str(s))
+                .map_err(|_| {
+                    plan!("block is not a valid integer, \"0x\" prefixed hex integer, or tag")
+                })
+        };
+
+        let block_null_err = || plan!("'block' is NULL");
+        let downcast_err = |expected| plan!("Failed to downcast block to {}", expected);
+
+        let blocks: Vec<BlockNumberOrTag> = match block.data_type() {
+            DataType::Utf8 => block
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| downcast_err("StringArray"))?
+                .iter()
+                .map(|b| parse_block_str(b.ok_or_else(block_null_err)?))
+                .collect::<Result<_, _>>()?,
+            DataType::UInt64 => block
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .ok_or_else(|| downcast_err("UInt64Array"))?
+                .iter()
+                .map(|b| b.ok_or_else(block_null_err).map(BlockNumberOrTag::Number))
+                .collect::<Result<_, _>>()?,
+            DataType::Int64 => block
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(|| downcast_err("Int64Array"))?
+                .iter()
+                .map(|b| {
+                    b.ok_or_else(block_null_err).and_then(|n| {
+                        if n < 0 {
+                            plan_err!("block number cannot be negative: {}", n)
+                        } else {
+                            Ok(BlockNumberOrTag::Number(n as u64))
+                        }
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+            _ => {
+                return plan_err!(
+                    "{}: 'block' is not a valid block number or tag: {}",
+                    name,
+                    block.data_type()
+                );
+            }
         };
 
         // Make the eth_call requests.
         let mut result_builder = StructBuilder::from_fields(fields, from.len());
-        for (from, to, input_data, block) in izip!(from, to, input_data, block) {
+        for (from, to, input_data, block) in izip!(from, to, input_data, blocks) {
             let Some(to) = to else {
                 return plan_err!("to address is NULL");
-            };
-            let Some(block) = block else {
-                return plan_err!("block is NULL");
-            };
-            let block = match u64::from_str(block) {
-                Ok(block) => BlockNumberOrTag::Number(block),
-                Err(_) => match BlockNumberOrTag::from_str(block) {
-                    Ok(block) => block,
-                    Err(_) => {
-                        return plan_err!(
-                            "block is not a valid integer, \"0x\" prefixed hex integer, or tag"
-                        );
-                    }
-                },
             };
             let result = eth_call_retry(
                 &client,
