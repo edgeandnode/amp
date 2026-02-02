@@ -12270,6 +12270,7 @@ dependencies = [
  "fs-err",
  "futures",
  "indoc",
+ "kafka-client",
  "metadata-db",
  "metadata-db-postgres",
  "monitoring",

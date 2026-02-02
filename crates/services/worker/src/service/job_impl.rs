@@ -4,10 +4,11 @@ use std::{future::Future, sync::Arc};
 
 use datasets_common::hash_reference::HashReference;
 use dump::{Ctx, Error as DumpError, ProgressCallback, metrics::MetricsRegistry};
+use kafka_client::proto;
 use tracing::{Instrument, info_span};
 
 use crate::{
-    events::{DatasetInfo, WorkerProgressCallback},
+    events::WorkerProgressCallback,
     job::{JobDescriptor, JobId},
     service::WorkerJobCtx,
 };
@@ -34,10 +35,10 @@ pub(super) fn new(
                 dataset_name.clone(),
                 manifest_hash.clone(),
             );
-            let dataset_info = DatasetInfo {
-                namespace: dataset_namespace.clone(),
-                name: dataset_name.clone(),
-                manifest_hash: manifest_hash.clone(),
+            let dataset_info = proto::DatasetInfo {
+                namespace: dataset_namespace.to_string(),
+                name: dataset_name.to_string(),
+                manifest_hash: manifest_hash.to_string(),
             };
             (
                 end_block,

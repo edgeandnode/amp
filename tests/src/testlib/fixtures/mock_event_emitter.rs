@@ -6,17 +6,16 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use worker::events::{
-    EventEmitter, SyncCompletedEvent, SyncFailedEvent, SyncProgressEvent, SyncStartedEvent,
-};
+use kafka_client::proto;
+use worker::events::EventEmitter;
 
 /// Recorded events from the mock emitter.
 #[derive(Debug, Clone)]
 pub enum RecordedEvent {
-    Started(SyncStartedEvent),
-    Progress(SyncProgressEvent),
-    Completed(SyncCompletedEvent),
-    Failed(SyncFailedEvent),
+    Started(proto::SyncStarted),
+    Progress(proto::SyncProgress),
+    Completed(proto::SyncCompleted),
+    Failed(proto::SyncFailed),
 }
 
 /// A mock event emitter that records all events for testing.
@@ -45,7 +44,7 @@ impl MockEventEmitter {
     }
 
     /// Get all progress events.
-    pub fn progress_events(&self) -> Vec<SyncProgressEvent> {
+    pub fn progress_events(&self) -> Vec<proto::SyncProgress> {
         self.events
             .lock()
             .unwrap()
@@ -58,7 +57,7 @@ impl MockEventEmitter {
     }
 
     /// Get all started events.
-    pub fn started_events(&self) -> Vec<SyncStartedEvent> {
+    pub fn started_events(&self) -> Vec<proto::SyncStarted> {
         self.events
             .lock()
             .unwrap()
@@ -71,7 +70,7 @@ impl MockEventEmitter {
     }
 
     /// Get all completed events.
-    pub fn completed_events(&self) -> Vec<SyncCompletedEvent> {
+    pub fn completed_events(&self) -> Vec<proto::SyncCompleted> {
         self.events
             .lock()
             .unwrap()
@@ -84,7 +83,7 @@ impl MockEventEmitter {
     }
 
     /// Get all failed events.
-    pub fn failed_events(&self) -> Vec<SyncFailedEvent> {
+    pub fn failed_events(&self) -> Vec<proto::SyncFailed> {
         self.events
             .lock()
             .unwrap()
@@ -103,12 +102,11 @@ impl MockEventEmitter {
     pub fn progress_percentages(&self, total_blocks: u64) -> Vec<u64> {
         self.progress_events()
             .iter()
-            .map(|p| {
-                let blocks_done = p
-                    .progress
-                    .current_block
-                    .saturating_sub(p.progress.start_block);
-                (blocks_done * 100) / total_blocks
+            .filter_map(|p| {
+                p.progress.as_ref().map(|progress| {
+                    let blocks_done = progress.current_block.saturating_sub(progress.start_block);
+                    (blocks_done * 100) / total_blocks
+                })
             })
             .collect()
     }
@@ -127,10 +125,15 @@ impl Default for MockEventEmitter {
 
 #[async_trait]
 impl EventEmitter for MockEventEmitter {
-    async fn emit_sync_started(&self, event: SyncStartedEvent) {
+    async fn emit_sync_started(&self, event: proto::SyncStarted) {
+        let dataset_str = event
+            .dataset
+            .as_ref()
+            .map(|d| format!("{}/{}", d.namespace, d.name))
+            .unwrap_or_default();
         tracing::info!(
             job_id = event.job_id,
-            dataset = %format!("{}/{}", event.dataset.namespace, event.dataset.name),
+            dataset = %dataset_str,
             table = %event.table_name,
             start_block = ?event.start_block,
             end_block = ?event.end_block,
@@ -142,13 +145,18 @@ impl EventEmitter for MockEventEmitter {
             .push(RecordedEvent::Started(event));
     }
 
-    async fn emit_sync_progress(&self, event: SyncProgressEvent) {
+    async fn emit_sync_progress(&self, event: proto::SyncProgress) {
+        let (percentage, current_block, end_block) = event
+            .progress
+            .as_ref()
+            .map(|p| (p.percentage, p.current_block, p.end_block))
+            .unwrap_or_default();
         tracing::info!(
             job_id = event.job_id,
             table = %event.table_name,
-            percentage = event.progress.percentage,
-            current_block = event.progress.current_block,
-            end_block = event.progress.end_block,
+            percentage = ?percentage,
+            current_block = current_block,
+            end_block = ?end_block,
             "[EVENT] sync.progress"
         );
         self.events
@@ -157,10 +165,15 @@ impl EventEmitter for MockEventEmitter {
             .push(RecordedEvent::Progress(event));
     }
 
-    async fn emit_sync_completed(&self, event: SyncCompletedEvent) {
+    async fn emit_sync_completed(&self, event: proto::SyncCompleted) {
+        let dataset_str = event
+            .dataset
+            .as_ref()
+            .map(|d| format!("{}/{}", d.namespace, d.name))
+            .unwrap_or_default();
         tracing::info!(
             job_id = event.job_id,
-            dataset = %format!("{}/{}", event.dataset.namespace, event.dataset.name),
+            dataset = %dataset_str,
             table = %event.table_name,
             final_block = event.final_block,
             duration_millis = event.duration_millis,
@@ -172,10 +185,15 @@ impl EventEmitter for MockEventEmitter {
             .push(RecordedEvent::Completed(event));
     }
 
-    async fn emit_sync_failed(&self, event: SyncFailedEvent) {
+    async fn emit_sync_failed(&self, event: proto::SyncFailed) {
+        let dataset_str = event
+            .dataset
+            .as_ref()
+            .map(|d| format!("{}/{}", d.namespace, d.name))
+            .unwrap_or_default();
         tracing::warn!(
             job_id = event.job_id,
-            dataset = %format!("{}/{}", event.dataset.namespace, event.dataset.name),
+            dataset = %dataset_str,
             table = %event.table_name,
             error_message = %event.error_message,
             error_type = ?event.error_type,
@@ -190,20 +208,17 @@ impl EventEmitter for MockEventEmitter {
 
 #[cfg(test)]
 mod tests {
-    use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
-    use worker::events::{DatasetInfo, ProgressInfo};
-
     use super::*;
 
     /// Test hash constant (64 hex characters).
     const TEST_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
     /// Helper to create a test DatasetInfo.
-    fn test_dataset_info() -> DatasetInfo {
-        DatasetInfo {
-            namespace: "test".parse::<Namespace>().unwrap(),
-            name: "dataset".parse::<Name>().unwrap(),
-            manifest_hash: TEST_HASH.parse::<Hash>().unwrap(),
+    fn test_dataset_info() -> proto::DatasetInfo {
+        proto::DatasetInfo {
+            namespace: "test".to_string(),
+            name: "dataset".to_string(),
+            manifest_hash: TEST_HASH.to_string(),
         }
     }
 
@@ -212,9 +227,9 @@ mod tests {
         let emitter = MockEventEmitter::new();
 
         emitter
-            .emit_sync_started(SyncStartedEvent {
+            .emit_sync_started(proto::SyncStarted {
                 job_id: 1,
-                dataset: test_dataset_info(),
+                dataset: Some(test_dataset_info()),
                 table_name: "blocks".to_string(),
                 start_block: Some(0),
                 end_block: Some(100),
@@ -222,25 +237,25 @@ mod tests {
             .await;
 
         emitter
-            .emit_sync_progress(SyncProgressEvent {
+            .emit_sync_progress(proto::SyncProgress {
                 job_id: 1,
-                dataset: test_dataset_info(),
+                dataset: Some(test_dataset_info()),
                 table_name: "blocks".to_string(),
-                progress: ProgressInfo {
+                progress: Some(proto::ProgressInfo {
                     start_block: 0,
                     current_block: 50,
                     end_block: Some(100),
                     percentage: Some(50),
                     files_count: 1,
                     total_size_bytes: 1000,
-                },
+                }),
             })
             .await;
 
         emitter
-            .emit_sync_completed(SyncCompletedEvent {
+            .emit_sync_completed(proto::SyncCompleted {
                 job_id: 1,
-                dataset: test_dataset_info(),
+                dataset: Some(test_dataset_info()),
                 table_name: "blocks".to_string(),
                 final_block: 100,
                 duration_millis: 5000,
@@ -261,18 +276,18 @@ mod tests {
         // Emit progress at 25%, 50%, 75%
         for pct in [25u64, 50, 75] {
             emitter
-                .emit_sync_progress(SyncProgressEvent {
+                .emit_sync_progress(proto::SyncProgress {
                     job_id: 1,
-                    dataset: test_dataset_info(),
+                    dataset: Some(test_dataset_info()),
                     table_name: "blocks".to_string(),
-                    progress: ProgressInfo {
+                    progress: Some(proto::ProgressInfo {
                         start_block: 0,
                         current_block: pct,
                         end_block: Some(100),
-                        percentage: Some(pct as u8),
+                        percentage: Some(pct as u32),
                         files_count: 0,
                         total_size_bytes: 0,
-                    },
+                    }),
                 })
                 .await;
         }

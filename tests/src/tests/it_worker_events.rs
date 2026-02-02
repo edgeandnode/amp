@@ -7,14 +7,11 @@
 
 use std::sync::Arc;
 
-use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use dump::{ProgressCallback, ProgressUpdate};
+use kafka_client::proto;
 use monitoring::logging;
 use worker::{
-    events::{
-        DatasetInfo, EventEmitter, ProgressInfo, SyncCompletedEvent, SyncFailedEvent,
-        SyncProgressEvent, SyncStartedEvent, WorkerProgressCallback,
-    },
+    events::{EventEmitter, WorkerProgressCallback},
     job::JobId,
 };
 
@@ -23,11 +20,11 @@ const TEST_HASH: &str = "0000000000000000000000000000000000000000000000000000000
 const TEST_HASH_2: &str = "0000000000000000000000000000000000000000000000000000000000000002";
 
 /// Helper to create a test DatasetInfo.
-fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> DatasetInfo {
-    DatasetInfo {
-        namespace: namespace.parse::<Namespace>().unwrap(),
-        name: name.parse::<Name>().unwrap(),
-        manifest_hash: hash.parse::<Hash>().unwrap(),
+fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> proto::DatasetInfo {
+    proto::DatasetInfo {
+        namespace: namespace.to_string(),
+        name: name.to_string(),
+        manifest_hash: hash.to_string(),
     }
 }
 
@@ -65,17 +62,33 @@ async fn test_progress_callback_forwards_to_emitter() {
     assert_eq!(progress_events.len(), 5, "Should have 5 progress events");
 
     // Verify event contents
-    assert_eq!(progress_events[0].progress.current_block, 10);
-    assert_eq!(progress_events[1].progress.current_block, 25);
-    assert_eq!(progress_events[2].progress.current_block, 50);
-    assert_eq!(progress_events[3].progress.current_block, 75);
-    assert_eq!(progress_events[4].progress.current_block, 100);
+    assert_eq!(
+        progress_events[0].progress.as_ref().unwrap().current_block,
+        10
+    );
+    assert_eq!(
+        progress_events[1].progress.as_ref().unwrap().current_block,
+        25
+    );
+    assert_eq!(
+        progress_events[2].progress.as_ref().unwrap().current_block,
+        50
+    );
+    assert_eq!(
+        progress_events[3].progress.as_ref().unwrap().current_block,
+        75
+    );
+    assert_eq!(
+        progress_events[4].progress.as_ref().unwrap().current_block,
+        100
+    );
 
     // Verify all events have correct metadata
     for event in &progress_events {
         assert_eq!(event.job_id, 1);
-        assert_eq!(event.dataset.namespace, "test");
-        assert_eq!(event.dataset.name, "dataset");
+        let dataset = event.dataset.as_ref().unwrap();
+        assert_eq!(dataset.namespace, "test");
+        assert_eq!(dataset.name, "dataset");
         assert_eq!(event.table_name, "blocks");
     }
 }
@@ -92,18 +105,18 @@ async fn test_progress_percentages_calculation() {
     // Emit progress at 0%, 25%, 50%, 75%, 100%
     for pct in [0u64, 25, 50, 75, 100] {
         emitter
-            .emit_sync_progress(SyncProgressEvent {
+            .emit_sync_progress(proto::SyncProgress {
                 job_id: 1,
-                dataset: test_dataset_info("test", "dataset", TEST_HASH),
+                dataset: Some(test_dataset_info("test", "dataset", TEST_HASH)),
                 table_name: "blocks".to_string(),
-                progress: ProgressInfo {
+                progress: Some(proto::ProgressInfo {
                     start_block: 0,
                     current_block: pct,
                     end_block: Some(100),
-                    percentage: Some(pct as u8),
+                    percentage: Some(pct as u32),
                     files_count: 0,
                     total_size_bytes: 0,
-                },
+                }),
             })
             .await;
     }
@@ -123,9 +136,9 @@ async fn test_started_events_recorded() {
 
     // When
     emitter
-        .emit_sync_started(SyncStartedEvent {
+        .emit_sync_started(proto::SyncStarted {
             job_id: 42,
-            dataset: test_dataset_info("ethereum", "mainnet", TEST_HASH),
+            dataset: Some(test_dataset_info("ethereum", "mainnet", TEST_HASH)),
             table_name: "blocks".to_string(),
             start_block: Some(1000),
             end_block: Some(2000),
@@ -138,8 +151,9 @@ async fn test_started_events_recorded() {
 
     let event = &started_events[0];
     assert_eq!(event.job_id, 42);
-    assert_eq!(event.dataset.namespace, "ethereum");
-    assert_eq!(event.dataset.name, "mainnet");
+    let dataset = event.dataset.as_ref().unwrap();
+    assert_eq!(dataset.namespace, "ethereum");
+    assert_eq!(dataset.name, "mainnet");
     assert_eq!(event.table_name, "blocks");
     assert_eq!(event.start_block, Some(1000));
     assert_eq!(event.end_block, Some(2000));
@@ -153,9 +167,9 @@ async fn test_completed_events_recorded() {
 
     // When
     emitter
-        .emit_sync_completed(SyncCompletedEvent {
+        .emit_sync_completed(proto::SyncCompleted {
             job_id: 42,
-            dataset: test_dataset_info("ethereum", "mainnet", TEST_HASH),
+            dataset: Some(test_dataset_info("ethereum", "mainnet", TEST_HASH)),
             table_name: "blocks".to_string(),
             final_block: 2000,
             duration_millis: 5000,
@@ -180,9 +194,9 @@ async fn test_failed_events_recorded() {
 
     // When
     emitter
-        .emit_sync_failed(SyncFailedEvent {
+        .emit_sync_failed(proto::SyncFailed {
             job_id: 42,
-            dataset: test_dataset_info("ethereum", "mainnet", TEST_HASH),
+            dataset: Some(test_dataset_info("ethereum", "mainnet", TEST_HASH)),
             table_name: "blocks".to_string(),
             error_message: "Connection timeout".to_string(),
             error_type: Some("NetworkError".to_string()),
@@ -210,9 +224,9 @@ async fn test_full_job_lifecycle_events() {
 
     // When - simulate a complete job lifecycle
     emitter
-        .emit_sync_started(SyncStartedEvent {
+        .emit_sync_started(proto::SyncStarted {
             job_id: 1,
-            dataset: dataset.clone(),
+            dataset: Some(dataset.clone()),
             table_name: "blocks".to_string(),
             start_block: Some(0),
             end_block: Some(100),
@@ -222,26 +236,26 @@ async fn test_full_job_lifecycle_events() {
     // Progress at EVERY 1% from 1 to 99 (0% is start, 100% is completed)
     for pct in 1u64..100 {
         emitter
-            .emit_sync_progress(SyncProgressEvent {
+            .emit_sync_progress(proto::SyncProgress {
                 job_id: 1,
-                dataset: dataset.clone(),
+                dataset: Some(dataset.clone()),
                 table_name: "blocks".to_string(),
-                progress: ProgressInfo {
+                progress: Some(proto::ProgressInfo {
                     start_block: 0,
                     current_block: pct,
                     end_block: Some(100),
-                    percentage: Some(pct as u8),
+                    percentage: Some(pct as u32),
                     files_count: 1,
                     total_size_bytes: pct * 100,
-                },
+                }),
             })
             .await;
     }
 
     emitter
-        .emit_sync_completed(SyncCompletedEvent {
+        .emit_sync_completed(proto::SyncCompleted {
             job_id: 1,
-            dataset: dataset.clone(),
+            dataset: Some(dataset.clone()),
             table_name: "blocks".to_string(),
             final_block: 100,
             duration_millis: 10000,
@@ -262,9 +276,9 @@ async fn test_mock_emitter_clear() {
     // Given
     let emitter = Arc::new(MockEventEmitter::new());
     emitter
-        .emit_sync_started(SyncStartedEvent {
+        .emit_sync_started(proto::SyncStarted {
             job_id: 1,
-            dataset: test_dataset_info("test", "dataset", TEST_HASH),
+            dataset: Some(test_dataset_info("test", "dataset", TEST_HASH)),
             table_name: "blocks".to_string(),
             start_block: Some(0),
             end_block: Some(100),
@@ -293,9 +307,9 @@ async fn test_continuous_ingestion_events() {
 
     // When - simulate continuous ingestion (no end_block)
     emitter
-        .emit_sync_started(SyncStartedEvent {
+        .emit_sync_started(proto::SyncStarted {
             job_id: 1,
-            dataset: dataset.clone(),
+            dataset: Some(dataset.clone()),
             table_name: "events".to_string(),
             start_block: Some(1000),
             end_block: None, // No end block = continuous mode
@@ -306,18 +320,18 @@ async fn test_continuous_ingestion_events() {
     // In continuous mode, end_block and percentage are None (no fixed target)
     for batch_end in [1010u64, 1020, 1030, 1040, 1050] {
         emitter
-            .emit_sync_progress(SyncProgressEvent {
+            .emit_sync_progress(proto::SyncProgress {
                 job_id: 1,
-                dataset: dataset.clone(),
+                dataset: Some(dataset.clone()),
                 table_name: "events".to_string(),
-                progress: ProgressInfo {
+                progress: Some(proto::ProgressInfo {
                     start_block: 1000,
                     current_block: batch_end,
                     end_block: None, // No fixed end in continuous mode
                     percentage: None,
                     files_count: 1,
                     total_size_bytes: 500,
-                },
+                }),
             })
             .await;
     }
@@ -329,7 +343,7 @@ async fn test_continuous_ingestion_events() {
     // Verify blocks are sequential microbatches
     let blocks: Vec<_> = progress_events
         .iter()
-        .map(|p| p.progress.current_block)
+        .filter_map(|p| p.progress.as_ref().map(|prog| prog.current_block))
         .collect();
     assert_eq!(blocks, vec![1010, 1020, 1030, 1040, 1050]);
 
@@ -529,8 +543,9 @@ async fn test_e2e_anvil_sync_emits_lifecycle_events() {
     // Verify started events have correct metadata
     for started in &started_events {
         assert_eq!(started.job_id, *job_id);
-        assert_eq!(started.dataset.namespace, "_");
-        assert_eq!(started.dataset.name, "anvil_rpc");
+        let dataset = started.dataset.as_ref().unwrap();
+        assert_eq!(dataset.namespace, "_");
+        assert_eq!(dataset.name, "anvil_rpc");
         assert_eq!(started.end_block, Some(2000));
     }
 
