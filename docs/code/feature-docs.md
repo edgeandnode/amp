@@ -33,6 +33,14 @@ scope: "global"
 - Engineers **MUST** keep feature docs accurate - outdated docs are unacceptable
 - When implementation changes, update the feature doc in the same PR
 
+### Describe Functionality, Not Implementation
+
+Feature docs describe **what** a feature does and **why** it exists at an architectural level. They are not meant to document implementation internals — instead, they reference source files and let the code speak for itself.
+
+- Focus on capabilities, behavior, and integration points
+- Use Implementation sections to list source file references, not to explain code logic
+- When tempted to describe an algorithm, data structure, or API surface in detail, add a source file reference instead
+
 ### Purpose
 Feature docs provide contextual knowledge for AI agents to understand project features without loading all documentation upfront.
 
