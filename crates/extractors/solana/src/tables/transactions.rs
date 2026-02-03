@@ -231,18 +231,9 @@ impl TransactionStatusMeta {
             .post_token_balances
             .map(|post_token_balances| post_token_balances.into_iter().map(From::from).collect());
 
-        let rewards = rpc_tx_meta.rewards.map(|rewards| {
-            rewards
-                .into_iter()
-                .map(|reward| tables::block_rewards::Reward {
-                    pubkey: reward.pubkey,
-                    lamports: reward.lamports,
-                    post_balance: reward.post_balance,
-                    reward_type: reward.reward_type.map(From::from),
-                    commission: reward.commission,
-                })
-                .collect()
-        });
+        let rewards = rpc_tx_meta
+            .rewards
+            .map(|rewards| rewards.into_iter().map(Into::into).collect());
 
         let loaded_addresses = LoadedAddresses {
             writable: rpc_tx_meta

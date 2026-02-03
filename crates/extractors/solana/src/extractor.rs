@@ -106,8 +106,6 @@ impl SolanaExtractor {
         T: Stream<Item = Result<of1_client::DecodedSlot, BlockStreamError>>,
     {
         async_stream::stream! {
-            // Slots can be skipped, so we'll track the next expected slot for switching to
-            // JSON-RPC.
             // Helper macro to simplify error handling and early returns in the stream.
             macro_rules! ok_or_bail {
                 ($expr:expr) => {
@@ -121,6 +119,8 @@ impl SolanaExtractor {
                 };
             }
 
+            // Slots can be skipped, so we'll track the next expected slot for switching to
+            // JSON-RPC.
             let mut expected_next_slot = start;
             let requested_range = start..=end;
 
