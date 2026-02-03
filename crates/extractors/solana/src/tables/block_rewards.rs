@@ -144,13 +144,13 @@ impl TryFrom<i32> for RewardType {
     }
 }
 
-impl From<rpc_client::RewardType> for RewardType {
-    fn from(value: rpc_client::RewardType) -> Self {
+impl From<solana_reward_info::RewardType> for RewardType {
+    fn from(value: solana_reward_info::RewardType) -> Self {
         match value {
-            rpc_client::RewardType::Fee => Self::Fee,
-            rpc_client::RewardType::Rent => Self::Rent,
-            rpc_client::RewardType::Staking => Self::Staking,
-            rpc_client::RewardType::Voting => Self::Voting,
+            solana_reward_info::RewardType::Fee => Self::Fee,
+            solana_reward_info::RewardType::Rent => Self::Rent,
+            solana_reward_info::RewardType::Staking => Self::Staking,
+            solana_reward_info::RewardType::Voting => Self::Voting,
         }
     }
 }
