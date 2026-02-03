@@ -1,10 +1,7 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
 use datasets_common::network_id::NetworkId;
-pub use solana_client::{
-    rpc_config,
-    rpc_response::UiReturnDataEncoding,
-};
+pub use solana_client::{rpc_config, rpc_response::UiReturnDataEncoding};
 use solana_clock::Slot;
 pub use solana_transaction_status_client_types::{
     EncodedTransaction, EncodedTransactionWithStatusMeta, Reward, TransactionStatusMeta,
