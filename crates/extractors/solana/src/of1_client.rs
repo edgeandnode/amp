@@ -48,7 +48,6 @@ pub(crate) type DecodedBlockRewards = DecodedField<
 >;
 
 pub(crate) enum DecodedField<P, B> {
-    Empty,
     Proto(P),
     Bincode(B),
 }
@@ -61,9 +60,8 @@ pub(crate) struct DecodedSlot {
     pub(crate) block_height: Option<u64>,
     pub(crate) blocktime: i64,
     pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
-    pub(crate) transaction_metas: Vec<DecodedTransactionStatusMeta>,
-    #[allow(dead_code)]
-    pub(crate) block_rewards: DecodedBlockRewards,
+    pub(crate) transaction_metas: Vec<Option<DecodedTransactionStatusMeta>>,
+    pub(crate) block_rewards: Option<DecodedBlockRewards>,
 }
 
 pub(crate) async fn car_file_manager(
@@ -536,40 +534,34 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
         P: prost::Message + Default,
         B: serde::de::DeserializeOwned,
     {
-        if data.is_empty() {
-            Ok(DecodedField::Empty)
-        } else {
-            // All fields that need to be decoded this way are ZSTD compressed in CAR files.
-            let decompressed = &*zstd::decode_all(data).map_err(|e| Of1StreamError::Zstd {
-                field_name,
-                error: e.to_string(),
-            })?;
-            match prost::Message::decode(decompressed).map(DecodedField::Proto) {
-                Ok(data_proto) => Ok(data_proto),
-                Err(prost_err) => {
-                    match bincode::deserialize(decompressed).map(DecodedField::Bincode) {
-                        Ok(data_bincode) => Ok(data_bincode),
-                        Err(bincode_err) => {
-                            let err = Of1StreamError::DecodeField {
-                                field_name,
-                                prost_err: prost_err.to_string(),
-                                bincode_err: bincode_err.to_string(),
-                            };
-                            Err(err)
-                        }
-                    }
+        // All fields that need to be decoded this way are ZSTD compressed in CAR files.
+        let decompressed = &*zstd::decode_all(data).map_err(|e| Of1StreamError::Zstd {
+            field_name,
+            error: e.to_string(),
+        })?;
+        match prost::Message::decode(decompressed).map(DecodedField::Proto) {
+            Ok(data_proto) => Ok(data_proto),
+            Err(prost_err) => match bincode::deserialize(decompressed).map(DecodedField::Bincode) {
+                Ok(data_bincode) => Ok(data_bincode),
+                Err(bincode_err) => {
+                    let err = Of1StreamError::DecodeField {
+                        field_name,
+                        prost_err: prost_err.to_string(),
+                        bincode_err: bincode_err.to_string(),
+                    };
+                    Err(err)
                 }
-            }
+            },
         }
     }
 
     // Once we reach `Node::Block`, the node map will contain all of the nodes needed to reassemble
     // that block.
-    let mut nodes = car_parser::node::Nodes::read_until_block(node_reader)
+    let nodes = car_parser::node::Nodes::read_until_block(node_reader)
         .await
         .map_err(Of1StreamError::NodeParse)?;
 
-    let block = match nodes.nodes.pop() {
+    let block = match nodes.nodes.last() {
         // Expected block node.
         Some((_, car_parser::node::Node::Block(block))) => block,
         // Reached end of CAR file.
@@ -577,7 +569,7 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
         Some((cid, node)) => {
             return Err(Of1StreamError::UnexpectedNode {
                 kind: node.kind(),
-                cid: cid.into(),
+                cid: (*cid).into(),
             });
         }
     };
@@ -608,12 +600,42 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
                 .map_err(Of1StreamError::DataframeReassembly)?;
 
             let tx = bincode::deserialize(&tx_df).map_err(Of1StreamError::Bincode)?;
-            let tx_meta = decode_proto_or_bincode("tx_status_meta", tx_meta_df.as_slice())?;
-
             transactions.push(tx);
+
+            let tx_meta = if tx_meta_df.is_empty() {
+                None
+            } else {
+                decode_proto_or_bincode("tx_status_meta", tx_meta_df.as_slice()).map(Some)?
+            };
             transaction_metas.push(tx_meta);
         }
     }
+
+    let block_rewards = nodes
+        .nodes
+        .get(&block.rewards)
+        .map(|rewards| {
+            let car_parser::node::Node::Rewards(rewards) = rewards else {
+                return Err(Of1StreamError::MissingNode {
+                    expected: "block_rewards",
+                    cid: block.rewards.to_string(),
+                });
+            };
+            if rewards.slot != block.slot {
+                return Err(Of1StreamError::RewardSlotMismatch {
+                    expected: block.slot,
+                    found: rewards.slot,
+                });
+            }
+
+            nodes
+                .reassemble_dataframes(&rewards.data)
+                .map_err(Of1StreamError::DataframeReassembly)
+                .and_then(|rewards_df| {
+                    decode_proto_or_bincode("block_rewards", rewards_df.as_slice())
+                })
+        })
+        .transpose()?;
 
     let blockhash = {
         // Hash of the last entry has the same value as that block's `blockhash` in
@@ -648,9 +670,7 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
         blocktime,
         transactions,
         transaction_metas,
-        // TODO: Work with rewards?
-        #[allow(dead_code)]
-        block_rewards: DecodedField::Empty,
+        block_rewards,
     };
 
     Ok(Some(block))

@@ -108,19 +108,26 @@ impl SolanaExtractor {
         async_stream::stream! {
             // Slots can be skipped, so we'll track the next expected slot for switching to
             // JSON-RPC.
+            // Helper macro to simplify error handling and early returns in the stream.
+            macro_rules! ok_or_bail {
+                ($expr:expr) => {
+                    match $expr {
+                        Ok(val) => val,
+                        Err(e) => {
+                            yield Err(e);
+                            return;
+                        }
+                    }
+                };
+            }
+
             let mut expected_next_slot = start;
             let requested_range = start..=end;
 
             // Download historical blocks from the Old Faithful archive.
             futures::pin_mut!(historical_block_stream);
             while let Some(slot) = historical_block_stream.next().await {
-                let slot = match slot {
-                    Ok(slot) => slot,
-                    Err(e) => {
-                        yield Err(e);
-                        return;
-                    },
-                };
+                let slot = ok_or_bail!(slot);
 
                 let current_slot = slot.slot;
                 if !requested_range.contains(&current_slot) {
@@ -132,7 +139,8 @@ impl SolanaExtractor {
                 }
 
                 // Don't emit rows for skipped slots.
-                yield tables::convert_slot_to_db_rows(non_empty_of1_slot(slot), &self.network).map_err(Into::into);
+                let non_empty_slot = ok_or_bail!(non_empty_of1_slot(slot).map_err(Into::into));
+                yield tables::convert_slot_to_db_rows(non_empty_slot, &self.network).map_err(Into::into);
 
                 if current_slot == end {
                     // Reached the end of the requested range.
@@ -158,13 +166,7 @@ impl SolanaExtractor {
 
                 match get_block_resp {
                     Ok(block) => {
-                        let non_empty_slot = match non_empty_rpc_slot(slot, block) {
-                            Ok(slot) => slot,
-                            Err(e) => {
-                                yield Err(e.into());
-                                return;
-                            },
-                        };
+                        let non_empty_slot = ok_or_bail!(non_empty_rpc_slot(slot, block).map_err(Into::into));
                         yield tables::convert_slot_to_db_rows(non_empty_slot, &self.network).map_err(Into::into);
                     }
                     Err(e) => {
@@ -330,9 +332,9 @@ impl BlockStreamer for SolanaExtractor {
     }
 }
 
-/// Converts to [tables::NonEmptySlot]. This conversion cannot fail since the Old Faithful
-/// CAR parser only produces non-empty slots.
-fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> tables::NonEmptySlot {
+/// Converts [of1_client::DecodedSlot] to [tables::NonEmptySlot]. This conversion can fail if any
+/// of the decoded fields do not match the expected format/values.
+fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<tables::NonEmptySlot> {
     let of1_client::DecodedSlot {
         slot,
         parent_slot,
@@ -342,7 +344,7 @@ fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> tables::NonEmptySlot {
         blocktime,
         transactions,
         transaction_metas,
-        block_rewards: _block_rewards,
+        block_rewards,
     } = slot;
 
     let mut txs = Vec::with_capacity(transactions.len());
@@ -357,14 +359,18 @@ fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> tables::NonEmptySlot {
 
         let tx = tables::transactions::Transaction::from_of1_transaction(
             slot, tx_index, signatures, tx_meta,
-        );
+        )
+        .context("converting of1 transaction")?;
         let message = tables::messages::Message::from_of1_message(slot, tx_index, message);
 
         txs.push(tx);
         msgs.push(message);
     }
 
-    tables::NonEmptySlot {
+    let block_rewards = tables::block_rewards::BlockRewards::from_of1_rewards(slot, block_rewards)
+        .context("missing of1 block rewards")?;
+
+    Ok(tables::NonEmptySlot {
         slot,
         parent_slot,
         blockhash,
@@ -373,7 +379,8 @@ fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> tables::NonEmptySlot {
         blocktime: Some(blocktime),
         transactions: txs,
         messages: msgs,
-    }
+        block_rewards,
+    })
 }
 
 /// Converts a JSON-RPC confirmed block into a [tables::NonEmptySlot]. This conversion
@@ -382,10 +389,13 @@ fn non_empty_rpc_slot(
     slot: Slot,
     confirmed_block: rpc_client::UiConfirmedBlock,
 ) -> anyhow::Result<tables::NonEmptySlot> {
-    // Transactions should be present since we requested them when fetching the block.
+    // Transactions and block rewards should be present since we requested them when fetching the block.
     let transactions = confirmed_block
         .transactions
         .with_context(|| format!("missing transactions in confirmed block {slot}"))?;
+    let block_rewards = confirmed_block
+        .rewards
+        .with_context(|| format!("missing block rewards in confirmed block {slot}"))?;
 
     let mut txs = Vec::with_capacity(transactions.len());
     let mut msgs = Vec::with_capacity(transactions.len());
@@ -418,6 +428,8 @@ fn non_empty_rpc_slot(
         msgs.push(msg);
     }
 
+    let block_rewards = tables::block_rewards::BlockRewards::from_rpc_rewards(slot, block_rewards);
+
     Ok(tables::NonEmptySlot {
         slot,
         parent_slot: confirmed_block.parent_slot,
@@ -427,6 +439,7 @@ fn non_empty_rpc_slot(
         blocktime: confirmed_block.block_time,
         transactions: txs,
         messages: msgs,
+        block_rewards,
     })
 }
 
@@ -463,7 +476,7 @@ mod tests {
                 blocktime: 0,
                 transactions: Vec::new(),
                 transaction_metas: Vec::new(),
-                block_rewards: of1_client::DecodedBlockRewards::Empty,
+                block_rewards: None,
             }
         }
     }

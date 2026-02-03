@@ -5,6 +5,7 @@ use solana_clock::Slot;
 use crate::error::RowConversionError;
 
 pub mod block_headers;
+pub mod block_rewards;
 pub mod instructions;
 pub mod messages;
 pub mod transactions;
@@ -15,6 +16,7 @@ pub(crate) const BASE58_ENCODED_HASH_LEN: usize = 44;
 pub fn all(network: &NetworkId) -> Vec<datasets_common::dataset::Table> {
     vec![
         block_headers::table(network.clone()),
+        block_rewards::table(network.clone()),
         transactions::table(network.clone()),
         messages::table(network.clone()),
         instructions::table(network.clone()),
@@ -31,6 +33,7 @@ pub(crate) struct NonEmptySlot {
     pub(crate) blocktime: Option<i64>,
     pub(crate) transactions: Vec<transactions::Transaction>,
     pub(crate) messages: Vec<messages::Message>,
+    pub(crate) block_rewards: block_rewards::BlockRewards,
 }
 
 pub(crate) fn convert_slot_to_db_rows(
@@ -46,6 +49,7 @@ pub(crate) fn convert_slot_to_db_rows(
         blocktime,
         transactions,
         messages,
+        block_rewards,
     } = non_empty_slot;
 
     let range = BlockRange {
@@ -69,6 +73,14 @@ pub(crate) fn convert_slot_to_db_rows(
         };
 
         builder.append(&header);
+        builder
+            .build(range.clone())
+            .map_err(RowConversionError::TableBuild)?
+    };
+
+    let block_rewards_row = {
+        let mut builder = block_rewards::BlockRewardsRowsBuilder::new();
+        builder.append(&block_rewards);
         builder
             .build(range.clone())
             .map_err(RowConversionError::TableBuild)?
@@ -123,6 +135,7 @@ pub(crate) fn convert_slot_to_db_rows(
 
     Ok(Rows::new(vec![
         block_headers_row,
+        block_rewards_row,
         transactions_row,
         messages_row,
         instructions_row,

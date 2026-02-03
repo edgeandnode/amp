@@ -15,10 +15,9 @@ use datasets_raw::{
     },
     rows::{TableRowError, TableRows},
 };
-use serde::Deserialize;
 use solana_clock::Slot;
 
-use crate::{of1_client, rpc_client};
+use crate::{of1_client, rpc_client, tables};
 
 pub const TABLE_NAME: &str = "transactions";
 
@@ -135,28 +134,27 @@ impl Transaction {
         slot: Slot,
         tx_index: u32,
         of1_tx_signatures: Vec<solana_sdk::signature::Signature>,
-        of1_tx_meta: of1_client::DecodedTransactionStatusMeta,
-    ) -> Self {
+        of1_tx_meta: Option<of1_client::DecodedTransactionStatusMeta>,
+    ) -> anyhow::Result<Self> {
         let signatures = of1_tx_signatures.iter().map(|s| s.to_string()).collect();
-        let transaction_status_meta = match of1_tx_meta {
-            of1_client::DecodedTransactionStatusMeta::Empty => None,
-            of1_client::DecodedTransactionStatusMeta::Proto(proto_meta) => {
-                let tx_meta = TransactionStatusMeta::from_proto_meta(slot, tx_index, proto_meta);
-                Some(tx_meta)
-            }
+        let transaction_status_meta = of1_tx_meta
+            .map(|meta| match meta {
+                of1_client::DecodedTransactionStatusMeta::Proto(proto_meta) => {
+                    TransactionStatusMeta::from_proto_meta(slot, tx_index, proto_meta)
+                }
 
-            of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => {
-                let tx_meta = TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta);
-                Some(tx_meta)
-            }
-        };
+                of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => Ok(
+                    TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta),
+                ),
+            })
+            .transpose()?;
 
-        Self {
+        Ok(Self {
             slot,
             index: tx_index,
             signatures,
             transaction_status_meta,
-        }
+        })
     }
 
     pub(crate) fn from_rpc_transaction(
@@ -185,11 +183,11 @@ pub(crate) struct TransactionStatusMeta {
     pub(crate) fee: u64,
     pub(crate) pre_balances: Vec<u64>,
     pub(crate) post_balances: Vec<u64>,
-    pub(crate) inner_instructions: Option<Vec<Vec<super::instructions::Instruction>>>,
+    pub(crate) inner_instructions: Option<Vec<Vec<tables::instructions::Instruction>>>,
     pub(crate) log_messages: Option<Vec<String>>,
     pub(crate) pre_token_balances: Option<Vec<TransactionTokenBalance>>,
     pub(crate) post_token_balances: Option<Vec<TransactionTokenBalance>>,
-    pub(crate) rewards: Option<Vec<Reward>>,
+    pub(crate) rewards: Option<Vec<tables::block_rewards::Reward>>,
     pub(crate) loaded_addresses: Option<LoadedAddresses>,
     pub(crate) return_data: Option<TransactionReturnData>,
     pub(crate) compute_units_consumed: Option<u64>,
@@ -212,7 +210,7 @@ impl TransactionStatusMeta {
                         inner_instructions
                             .instructions
                             .into_iter()
-                            .map(|inst| super::instructions::Instruction {
+                            .map(|inst| tables::instructions::Instruction {
                                 slot,
                                 tx_index,
                                 program_id_index: inst.instruction.program_id_index,
@@ -236,7 +234,7 @@ impl TransactionStatusMeta {
         let rewards = rpc_tx_meta.rewards.map(|rewards| {
             rewards
                 .into_iter()
-                .map(|reward| Reward {
+                .map(|reward| tables::block_rewards::Reward {
                     pubkey: reward.pubkey,
                     lamports: reward.lamports,
                     post_balance: reward.post_balance,
@@ -289,7 +287,7 @@ impl TransactionStatusMeta {
         slot: Slot,
         tx_index: u32,
         of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let inner_instructions = of_tx_meta
             .inner_instructions
             .into_iter()
@@ -297,7 +295,7 @@ impl TransactionStatusMeta {
                 inner
                     .instructions
                     .into_iter()
-                    .map(|inst| super::instructions::Instruction {
+                    .map(|inst| tables::instructions::Instruction {
                         slot,
                         tx_index,
                         program_id_index: inst.program_id_index as u8,
@@ -321,21 +319,12 @@ impl TransactionStatusMeta {
             .map(TransactionTokenBalance::from)
             .collect();
 
-        let rewards = of_tx_meta
+        let rewards: Vec<tables::block_rewards::Reward> = of_tx_meta
             .rewards
             .into_iter()
-            .map(|reward| Reward {
-                pubkey: reward.pubkey,
-                lamports: reward.lamports,
-                post_balance: reward.post_balance,
-                reward_type: Some(reward.reward_type.into()),
-                commission: if reward.commission.is_empty() {
-                    None
-                } else {
-                    Some(reward.commission.parse().expect("commission parsing error"))
-                },
-            })
-            .collect();
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .context("converting of1 tx rewards")?;
 
         let loaded_addresses = LoadedAddresses {
             writable: of_tx_meta
@@ -358,7 +347,7 @@ impl TransactionStatusMeta {
             }
         });
 
-        TransactionStatusMeta {
+        Ok(TransactionStatusMeta {
             status: of_tx_meta.err.is_none(),
             fee: of_tx_meta.fee,
             pre_balances: of_tx_meta.pre_balances,
@@ -372,7 +361,7 @@ impl TransactionStatusMeta {
             return_data,
             compute_units_consumed: of_tx_meta.compute_units_consumed,
             cost_units: of_tx_meta.cost_units,
-        }
+        })
     }
 
     pub(crate) fn from_rpc_meta(
@@ -397,7 +386,7 @@ impl TransactionStatusMeta {
                         let data = bs58::decode(&compiled.data)
                             .into_vec()
                             .context("decoding base58 inner instruction data")?;
-                        let instruction = super::instructions::Instruction {
+                        let instruction = tables::instructions::Instruction {
                             slot,
                             tx_index,
                             program_id_index: compiled.program_id_index,
@@ -430,18 +419,9 @@ impl TransactionStatusMeta {
                 .collect()
         });
 
-        let rewards = rpc_meta.rewards.map(|rewards| {
-            rewards
-                .into_iter()
-                .map(|reward| Reward {
-                    pubkey: reward.pubkey,
-                    lamports: reward.lamports,
-                    post_balance: reward.post_balance,
-                    reward_type: reward.reward_type.map(Into::into),
-                    commission: reward.commission,
-                })
-                .collect()
-        });
+        let rewards = rpc_meta
+            .rewards
+            .map(|rewards| rewards.into_iter().map(Into::into).collect());
 
         let loaded_addresses = rpc_meta
             .loaded_addresses
@@ -484,7 +464,7 @@ impl TransactionStatusMeta {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct TransactionTokenBalance {
     account_index: u8,
     mint: String,
@@ -550,7 +530,7 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
     }
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Debug, Default, Clone)]
 struct TokenAmount {
     ui_amount: Option<f64>,
     decimals: u8,
@@ -558,64 +538,13 @@ struct TokenAmount {
     ui_amount_string: String,
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
-pub(crate) struct Reward {
-    pubkey: String,
-    lamports: i64,
-    post_balance: u64,
-    reward_type: Option<RewardType>,
-    commission: Option<u8>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-enum RewardType {
-    Fee,
-    Rent,
-    Staking,
-    Voting,
-}
-
-impl std::fmt::Display for RewardType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RewardType::Fee => write!(f, "fee"),
-            RewardType::Rent => write!(f, "rent"),
-            RewardType::Staking => write!(f, "staking"),
-            RewardType::Voting => write!(f, "voting"),
-        }
-    }
-}
-
-impl From<i32> for RewardType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => Self::Fee,
-            1 => Self::Rent,
-            2 => Self::Staking,
-            3 => Self::Voting,
-            _ => panic!("invalid reward type value: {}", value),
-        }
-    }
-}
-
-impl From<rpc_client::RewardType> for RewardType {
-    fn from(value: rpc_client::RewardType) -> Self {
-        match value {
-            rpc_client::RewardType::Fee => Self::Fee,
-            rpc_client::RewardType::Rent => Self::Rent,
-            rpc_client::RewardType::Staking => Self::Staking,
-            rpc_client::RewardType::Voting => Self::Voting,
-        }
-    }
-}
-
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct LoadedAddresses {
     writable: Vec<String>,
     readonly: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct TransactionReturnData {
     program_id: String,
     data: Vec<u8>,

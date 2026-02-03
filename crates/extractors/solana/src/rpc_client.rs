@@ -7,7 +7,7 @@ pub use solana_client::{
 };
 use solana_clock::Slot;
 pub use solana_transaction_status_client_types::{
-    EncodedTransaction, EncodedTransactionWithStatusMeta, TransactionStatusMeta,
+    EncodedTransaction, EncodedTransactionWithStatusMeta, Reward, TransactionStatusMeta,
     TransactionTokenBalance, UiConfirmedBlock, UiInstruction, UiMessage, UiRawMessage,
     UiTransaction, UiTransactionStatusMeta, UiTransactionTokenBalance,
 };

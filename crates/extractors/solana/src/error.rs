@@ -107,6 +107,13 @@ pub enum Of1StreamError {
     #[error("expected '{expected}' node for cid '{cid}'")]
     MissingNode { expected: &'static str, cid: String },
 
+    /// Block reward node slot does not match the expected slot.
+    ///
+    /// When processing block reward nodes in the CAR file, the slot
+    /// recorded within the reward data must match the slot being processed.
+    #[error("reward slot mismatch: expected {expected}, found {found}")]
+    RewardSlotMismatch { expected: u64, found: u64 },
+
     /// Failed to decompress data using Zstd.
     ///
     /// CAR files and Solana data structures may be compressed with Zstd
