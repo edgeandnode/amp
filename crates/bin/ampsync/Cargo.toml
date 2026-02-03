@@ -25,7 +25,7 @@ arrow-array = { version = "57", default-features = false }
 arrow-schema = { version = "57" }
 arrow-to-postgres = { path = "../../arrow-to-postgres" }
 backon.workspace = true
-bytes = "1.10.1"
+bytes.workspace = true
 clap.workspace = true
 common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
