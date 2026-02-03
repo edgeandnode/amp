@@ -243,6 +243,27 @@ impl DataStore {
         Ok(())
     }
 
+    /// Deactivates a specific revision by its location ID.
+    ///
+    /// Marks the specified revision as inactive in the metadata database.
+    pub async fn deactivate_revision_by_id(
+        &self,
+        location_id: LocationId,
+        dataset: &HashReference,
+        table_name: &TableName,
+    ) -> Result<(), DeactivateRevisionByIdError> {
+        metadata_db::physical_table::mark_inactive_by_id(
+            &self.metadata_db,
+            location_id,
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(DeactivateRevisionByIdError)?;
+
+        Ok(())
+    }
+
     /// Locks table revisions for a writer job.
     ///
     /// This updates the `writer` field for all specified revisions, establishing
@@ -790,6 +811,44 @@ pub struct FindLatestTableRevisionInObjectStoreError(#[source] pub object_store:
 #[error("Failed to create new table revision")]
 pub struct CreateNewTableRevisionError(#[source] pub RegisterTableRevisionError);
 
+/// Errors that occur when creating a revision from a path
+///
+/// This error type is used by `DataStore::create_revision_from_path()`.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateRevisionFromPathError {
+    /// Failed to register physical table revision
+    #[error("Failed to register physical table revision: {0}")]
+    Register(#[source] RegisterTableRevisionError),
+}
+
+/// Errors that occur when deleting a physical table revision
+///
+/// This error type is used by `DataStore::delete_revision()`.
+#[derive(Debug, thiserror::Error)]
+pub enum DeleteRevisionError {
+    /// Failed to truncate revision
+    ///
+    /// This error occurs when deleting files from object storage fails.
+    ///
+    /// Common causes:
+    /// - Object store unavailable or unreachable
+    /// - Network connectivity issues
+    /// - Permission denied for deleting objects
+    #[error("Failed to truncate revision")]
+    Truncate(#[source] TruncateError),
+
+    /// Failed to delete physical table revision from metadata database
+    ///
+    /// This error occurs when deleting the physical table revision from the metadata database fails.
+    ///
+    /// Common causes:
+    /// - Database connection lost during deletion
+    /// - Database server unreachable
+    /// - Network connectivity issues
+    #[error("Failed to delete physical table revision from metadata database")]
+    Delete(#[source] metadata_db::Error),
+}
+
 /// Failed to activate revision
 ///
 /// This error occurs when activating a physical table revision fails.
@@ -816,6 +875,18 @@ pub enum ActivateRevisionByIdError {
     #[error("Failed to commit transaction")]
     TransactionCommit(#[source] metadata_db::Error),
 }
+
+/// Failed to deactivate revision
+///
+/// This error occurs when deactivating a physical table revision fails.
+/// This typically happens during dataset dumping operations.
+///
+/// Common causes:
+/// - Database connection issues during deactivation
+/// - Permission denied for database operations
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to deactivate revision")]
+pub struct DeactivateRevisionByIdError(#[source] pub metadata_db::Error);
 
 /// Failed to lock revisions for writer job
 ///
@@ -890,34 +961,6 @@ pub enum TruncateError {
     /// - Incomplete deletion (partial failure)
     #[error("Failed to delete files from object store")]
     DeleteFiles(#[source] DeleteFilesInObjectStoreError),
-}
-
-/// Errors that occur when deleting a physical table revision
-///
-/// This error type is used by `DataStore::delete_revision()`.
-#[derive(Debug, thiserror::Error)]
-pub enum DeleteRevisionError {
-    /// Failed to truncate revision
-    ///
-    /// This error occurs when deleting files from object storage fails.
-    ///
-    /// Common causes:
-    /// - Object store unavailable or unreachable
-    /// - Network connectivity issues
-    /// - Permission denied for deleting objects
-    #[error("Failed to truncate revision")]
-    Truncate(#[source] TruncateError),
-
-    /// Failed to delete physical table revision from metadata database
-    ///
-    /// This error occurs when deleting the physical table revision from the metadata database fails.
-    ///
-    /// Common causes:
-    /// - Database connection lost during deletion
-    /// - Database server unreachable
-    /// - Network connectivity issues
-    #[error("Failed to delete physical table revision from metadata database")]
-    Delete(#[source] metadata_db::Error),
 }
 
 /// Failed to register file metadata in the metadata database

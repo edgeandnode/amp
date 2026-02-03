@@ -217,6 +217,31 @@ where
     Ok(())
 }
 
+/// Deactivate a specific location by ID
+pub async fn mark_inactive_by_id<'c, E>(
+    exe: E,
+    manifest_hash: ManifestHash<'_>,
+    table_name: Name<'_>,
+    location_id: LocationId,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        UPDATE physical_tables
+        SET active = false
+        WHERE id = $1 AND manifest_hash = $2 AND table_name = $3
+    "};
+
+    sqlx::query(query)
+        .bind(location_id)
+        .bind(manifest_hash)
+        .bind(table_name)
+        .execute(exe)
+        .await?;
+    Ok(())
+}
+
 /// Activate a specific location by ID (does not deactivate others)
 pub async fn mark_active_by_id<'c, E>(
     exe: E,

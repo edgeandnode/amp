@@ -139,6 +139,29 @@ where
         .map_err(Error::Database)
 }
 
+/// Mark a specific location as inactive
+///
+/// This does not automatically deactivate other locations.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_inactive_by_id<'c, E>(
+    exe: E,
+    location_id: impl Into<LocationId> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::mark_inactive_by_id(
+        exe,
+        manifest_hash.into(),
+        table_name.into(),
+        location_id.into(),
+    )
+    .await
+    .map_err(Error::Database)
+}
+
 /// Mark a specific location as active
 ///
 /// This does not automatically deactivate other locations. Use `mark_inactive_by_table_id()`
