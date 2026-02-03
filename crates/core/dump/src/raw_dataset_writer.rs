@@ -2,10 +2,11 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use amp_data_store::{DataStore, file_name::FileName};
 use common::{
-    BlockNum, BlockRange, BoxError,
+    BlockNum, BlockRange,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::Generation,
+    parquet::errors::ParquetError,
 };
 use datasets_common::table_name::TableName;
 use datasets_raw::rows::TableRows;
@@ -13,9 +14,12 @@ use metadata_db::MetadataDb;
 
 use crate::{
     WriterProperties,
-    compaction::AmpCompactor,
+    compaction::{AmpCompactor, AmpCompactorTaskError},
     metrics,
-    parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
+    parquet_writer::{
+        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
+        ParquetFileWriterOutput, commit_metadata,
+    },
 };
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
@@ -37,7 +41,7 @@ impl RawDatasetWriter {
         missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
         compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ParquetError> {
         let mut writers = BTreeMap::new();
         for table in catalog.tables() {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
@@ -60,7 +64,7 @@ impl RawDatasetWriter {
         })
     }
 
-    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), BoxError> {
+    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), RawDatasetWriterError> {
         let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
         if let Some(ParquetFileWriterOutput {
@@ -69,7 +73,10 @@ impl RawDatasetWriter {
             footer,
             url,
             ..
-        }) = writer.write(table_rows).await?
+        }) = writer
+            .write(table_rows)
+            .await
+            .map_err(RawDatasetWriterError::Write)?
         {
             let location_id = writer.table.location_id();
             commit_metadata(
@@ -80,14 +87,15 @@ impl RawDatasetWriter {
                 &url,
                 footer,
             )
-            .await?;
+            .await
+            .map_err(RawDatasetWriterError::CommitMetadata)?;
         }
 
         Ok(())
     }
 
     /// Close and flush all pending writes.
-    pub async fn close(self) -> Result<(), BoxError> {
+    pub async fn close(self) -> Result<(), RawDatasetWriterCloseError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
             if let Some(ParquetFileWriterOutput {
@@ -96,7 +104,10 @@ impl RawDatasetWriter {
                 footer,
                 url,
                 ..
-            }) = writer.close().await?
+            }) = writer
+                .close()
+                .await
+                .map_err(RawDatasetWriterCloseError::CloseCurrentFile)?
             {
                 commit_metadata(
                     &self.metadata_db,
@@ -106,12 +117,73 @@ impl RawDatasetWriter {
                     &url,
                     footer,
                 )
-                .await?
+                .await
+                .map_err(RawDatasetWriterCloseError::CommitMetadata)?;
             }
         }
 
         Ok(())
     }
+}
+
+/// Errors that occur when writing to the raw dataset
+///
+/// This error type is used by `RawDatasetWriter::write()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RawDatasetWriterError {
+    /// Failed to write table rows to the underlying parquet file
+    ///
+    /// This occurs when the raw table writer encounters an error while
+    /// writing block data to parquet files.
+    ///
+    /// Possible causes:
+    /// - I/O error during write operation
+    /// - Schema mismatch between data and writer
+    /// - Parquet encoding failure
+    #[error("Failed to write")]
+    Write(#[source] RawTableWriterError),
+
+    /// Failed to commit file metadata to the database
+    ///
+    /// This occurs after successfully writing a parquet file, when registering
+    /// the file metadata in the metadata database fails.
+    ///
+    /// Possible causes:
+    /// - Database connection lost
+    /// - Constraint violation (duplicate file ID)
+    /// - Transaction timeout
+    #[error("Failed to commit metadata")]
+    CommitMetadata(#[source] CommitMetadataError),
+}
+
+/// Errors that occur when closing the raw dataset writer
+///
+/// This error type is used by `RawDatasetWriter::close()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RawDatasetWriterCloseError {
+    /// Failed to close and finalize the current parquet file
+    ///
+    /// This occurs when the underlying parquet writer fails to close
+    /// or when the compaction task fails.
+    ///
+    /// Possible causes:
+    /// - I/O error during file finalization
+    /// - Compaction task failure
+    /// - Writer in an invalid state
+    #[error("Failed to close current file")]
+    CloseCurrentFile(#[source] CloseCurrentFileError),
+
+    /// Failed to commit file metadata to the database
+    ///
+    /// This occurs after successfully closing a parquet file, when registering
+    /// the file metadata in the metadata database fails.
+    ///
+    /// Possible causes:
+    /// - Database connection lost
+    /// - Constraint violation (duplicate file ID)
+    /// - Transaction timeout
+    #[error("Failed to commit metadata")]
+    CommitMetadata(#[source] CommitMetadataError),
 }
 
 struct RawTableWriter {
@@ -139,7 +211,7 @@ impl RawTableWriter {
         opts: Arc<WriterProperties>,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ParquetError> {
         let mut ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
         ranges_to_write.reverse();
         let current_file = match ranges_to_write.last() {
@@ -173,7 +245,7 @@ impl RawTableWriter {
     pub async fn write(
         &mut self,
         table_rows: TableRows,
-    ) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
+    ) -> Result<Option<ParquetFileWriterOutput>, RawTableWriterError> {
         assert_eq!(table_rows.table.name(), self.table.table_name());
 
         let mut parquet_meta = None;
@@ -185,7 +257,11 @@ impl RawTableWriter {
             .last()
             .is_some_and(|r| *r.end() < block_num)
         {
-            parquet_meta = Some(self.close_current_file().await?);
+            parquet_meta = Some(
+                self.close_current_file()
+                    .await
+                    .map_err(RawTableWriterError::CloseCurrentFile)?,
+            );
             assert!(self.current_file.is_none());
             self.ranges_to_write.pop();
             let new_file = self
@@ -205,7 +281,8 @@ impl RawTableWriter {
                         self.opts.parquet.clone(),
                     )
                 })
-                .transpose()?;
+                .transpose()
+                .map_err(RawTableWriterError::CreateNewFile)?;
             self.current_file = new_file;
         }
 
@@ -242,7 +319,11 @@ impl RawTableWriter {
                 *self.current_range.as_ref().unwrap().numbers.end(),
                 block_num - 1
             );
-            parquet_meta = Some(self.close_current_file().await?);
+            parquet_meta = Some(
+                self.close_current_file()
+                    .await
+                    .map_err(RawTableWriterError::CloseCurrentFile)?,
+            );
 
             // The current range was partially written, so we need to split it.
             let range = self.ranges_to_write.pop().unwrap();
@@ -251,19 +332,27 @@ impl RawTableWriter {
             let buf_writer = self
                 .store
                 .create_revision_file_writer(self.table.revision(), &filename);
-            let new_file = Some(ParquetFileWriter::new(
-                self.store.clone(),
-                buf_writer,
-                filename,
-                self.table.clone(),
-                self.opts.max_row_group_bytes,
-                self.opts.parquet.clone(),
-            )?);
+            let new_file = Some(
+                ParquetFileWriter::new(
+                    self.store.clone(),
+                    buf_writer,
+                    filename,
+                    self.table.clone(),
+                    self.opts.max_row_group_bytes,
+                    self.opts.parquet.clone(),
+                )
+                .map_err(RawTableWriterError::CreateNewFile)?,
+            );
             self.current_file = new_file;
         }
 
         let rows = &table_rows.rows;
-        self.current_file.as_mut().unwrap().write(rows).await?;
+        self.current_file
+            .as_mut()
+            .unwrap()
+            .write(rows)
+            .await
+            .map_err(RawTableWriterError::Write)?;
 
         self.post_write_metrics(rows);
 
@@ -283,7 +372,7 @@ impl RawTableWriter {
         Ok(parquet_meta)
     }
 
-    async fn close(mut self) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
+    async fn close(mut self) -> Result<Option<ParquetFileWriterOutput>, CloseCurrentFileError> {
         if self.current_file.is_none() {
             assert!(self.ranges_to_write.is_empty());
             return Ok(None);
@@ -293,12 +382,17 @@ impl RawTableWriter {
         self.close_current_file().await.map(Some)
     }
 
-    async fn close_current_file(&mut self) -> Result<ParquetFileWriterOutput, BoxError> {
+    async fn close_current_file(
+        &mut self,
+    ) -> Result<ParquetFileWriterOutput, CloseCurrentFileError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
 
-        let metadata = file.close(range, vec![], Generation::default()).await?;
+        let metadata = file
+            .close(range, vec![], Generation::default())
+            .await
+            .map_err(CloseCurrentFileError::Close)?;
 
         if let Some(ref metrics) = self.metrics {
             let table_name = self.table.table_name().to_string();
@@ -306,7 +400,9 @@ impl RawTableWriter {
             metrics.record_file_written(table_name, *location_id);
         }
 
-        self.compactor.try_run()?;
+        self.compactor
+            .try_run()
+            .map_err(CloseCurrentFileError::Compactor)?;
 
         Ok(metadata)
     }
@@ -319,6 +415,75 @@ impl RawTableWriter {
             metrics.record_write_call(num_bytes, table_name, *location_id);
         }
     }
+}
+
+/// Errors that occur when writing to a raw table
+///
+/// This error type is used by `RawTableWriter::write()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RawTableWriterError {
+    /// Failed to close the current parquet file before starting a new one
+    ///
+    /// This occurs when the writer needs to finalize the current file
+    /// (e.g., when moving to a new block range) but encounters an error.
+    ///
+    /// Possible causes:
+    /// - I/O error during file finalization
+    /// - Compaction task failure
+    /// - Writer in an invalid state
+    #[error("Failed to close current file")]
+    CloseCurrentFile(#[source] CloseCurrentFileError),
+
+    /// Failed to create a new parquet file
+    ///
+    /// This occurs when initializing a new parquet writer for a new block range fails.
+    ///
+    /// Possible causes:
+    /// - Invalid writer properties configuration
+    /// - Schema initialization failure
+    /// - Memory allocation failure
+    #[error("Failed to create new file")]
+    CreateNewFile(#[source] ParquetError),
+
+    /// Failed to write record batch to the parquet file
+    ///
+    /// This occurs when writing the actual block data to the parquet writer fails.
+    ///
+    /// Possible causes:
+    /// - I/O error during write operation
+    /// - Schema mismatch between data and writer
+    /// - Parquet encoding failure
+    #[error("Failed to write to file")]
+    Write(#[source] ParquetError),
+}
+
+/// Errors that occur when closing the current parquet file
+///
+/// This error type is used by `RawTableWriter::close_current_file()`.
+#[derive(Debug, thiserror::Error)]
+pub enum CloseCurrentFileError {
+    /// Failed to close and finalize the parquet writer
+    ///
+    /// This occurs when the parquet writer fails to write the file footer
+    /// and finalize the parquet file structure.
+    ///
+    /// Possible causes:
+    /// - I/O error during footer write
+    /// - Insufficient disk space
+    /// - Writer already closed or in invalid state
+    #[error("Failed to close file")]
+    Close(#[source] ParquetFileWriterCloseError),
+
+    /// Failed to trigger or run the compaction task
+    ///
+    /// This occurs when the compactor fails to process newly written files.
+    /// Compaction may be deferred or retried later.
+    ///
+    /// Possible causes:
+    /// - Compaction task panicked
+    /// - Resource exhaustion during compaction
+    #[error("Failed to run compactor")]
+    Compactor(#[source] AmpCompactorTaskError),
 }
 
 fn limit_ranges(

@@ -97,9 +97,10 @@ use common::{
         physical::{Catalog, MissingRangesError, PhysicalTable},
     },
     metadata::segments::merge_ranges,
+    parquet::errors::ParquetError,
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
-use datasets_raw::client::BlockStreamer;
+use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use monitoring::logging;
@@ -110,7 +111,7 @@ use crate::{
     check::consistency_check,
     compaction::AmpCompactor,
     metrics,
-    raw_dataset_writer::RawDatasetWriter,
+    raw_dataset_writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError},
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
 
@@ -430,7 +431,7 @@ pub enum Error {
     /// - Provider temporarily unavailable
     /// - Invalid provider credentials
     #[error("Failed to get latest block number")]
-    LatestBlock(#[source] BoxError),
+    LatestBlock(#[source] LatestBlockError),
 
     /// Failed to get missing block ranges for table
     ///
@@ -469,7 +470,7 @@ pub enum Error {
     /// At the end of the dump process, the blockchain client may need to perform
     /// cleanup operations, some of which could fail. This error indicates such a failure.
     #[error("Failed to perform blockchain client cleanup: {0}")]
-    Cleanup(#[source] BoxError),
+    Cleanup(#[source] CleanupError),
 }
 
 /// Dumps block ranges by partitioning them across multiple parallel workers.
@@ -709,7 +710,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         Ok(())
     }
 
-    async fn run_range(&self, range: RangeInclusive<BlockNum>) -> Result<(), BoxError> {
+    async fn run_range(&self, range: RangeInclusive<BlockNum>) -> Result<(), RunRangeError> {
         let stream = {
             let block_streamer = self.block_streamer.clone();
             block_streamer
@@ -739,10 +740,11 @@ impl<S: BlockStreamer> DumpPartition<S> {
             missing_ranges_by_table,
             self.compactors_by_table.clone(),
             self.metrics.clone(),
-        )?;
+        )
+        .map_err(RunRangeError::CreateWriter)?;
 
         let mut stream = std::pin::pin!(stream);
-        while let Some(dataset_rows) = stream.try_next().await? {
+        while let Some(dataset_rows) = stream.try_next().await.map_err(RunRangeError::ReadStream)? {
             for table_rows in dataset_rows {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
@@ -761,17 +763,72 @@ impl<S: BlockStreamer> DumpPartition<S> {
                     metrics.set_latest_block(block_num, table_name.to_string(), location_id);
                 }
 
-                writer.write(table_rows).await?;
+                writer
+                    .write(table_rows)
+                    .await
+                    .map_err(RunRangeError::Write)?;
             }
 
             self.progress_reporter.block_covered();
         }
 
         // Close the last part file for each table, checking for any errors.
-        writer.close().await?;
+        writer.close().await.map_err(RunRangeError::Close)?;
 
         Ok(())
     }
+}
+
+/// Errors that occur when running a block range dump operation
+///
+/// This error type is used by `DumpPartition::run_range()`.
+#[derive(Debug, thiserror::Error)]
+pub enum RunRangeError {
+    /// Failed to create the raw dataset writer
+    ///
+    /// This occurs when initializing the parquet writer for one or more tables fails.
+    ///
+    /// Possible causes:
+    /// - Invalid writer properties configuration
+    /// - Schema initialization failure
+    /// - Memory allocation failure
+    #[error("Failed to create raw dataset writer")]
+    CreateWriter(#[source] ParquetError),
+
+    /// Failed to read blocks from the blockchain stream
+    ///
+    /// This occurs when the block streamer encounters an error while fetching
+    /// or streaming blockchain data.
+    ///
+    /// Possible causes:
+    /// - Network connectivity issues with the blockchain provider
+    /// - Provider rate limiting or temporary unavailability
+    /// - Invalid block range requested
+    /// - Provider returned malformed data
+    #[error("Failed to read stream")]
+    ReadStream(#[source] BlockStreamError),
+
+    /// Failed to write block data to parquet files
+    ///
+    /// This occurs when writing table rows to the underlying parquet writer fails.
+    ///
+    /// Possible causes:
+    /// - I/O error during write operation
+    /// - Insufficient disk space
+    /// - Schema mismatch between data and writer
+    #[error("Failed to write")]
+    Write(#[source] RawDatasetWriterError),
+
+    /// Failed to close and finalize the writer
+    ///
+    /// This occurs when closing the parquet writer or committing metadata fails.
+    ///
+    /// Possible causes:
+    /// - I/O error during file finalization
+    /// - Database error when registering file metadata
+    /// - Compaction task failure
+    #[error("Failed to close")]
+    Close(#[source] RawDatasetWriterCloseError),
 }
 
 #[cfg(test)]
