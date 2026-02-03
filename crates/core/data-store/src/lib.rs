@@ -171,7 +171,8 @@ impl DataStore {
         table_name: &TableName,
     ) -> Result<PhyTableRevision, CreateNewTableRevisionError> {
         let revision_id = Uuid::now_v7();
-        let path = PhyTableRevisionPath::new(dataset.name(), table_name, revision_id);
+        let path =
+            PhyTableRevisionPath::new(dataset.namespace(), dataset.name(), table_name, revision_id);
         let url = PhyTableUrl::new(self.url(), &path);
 
         let location_id = self
@@ -693,6 +694,16 @@ pub struct PhyTableRevisionFileMetadata {
     pub parquet_meta_json: serde_json::Value,
 }
 
+/// Errors that occur when creating a revision from a path
+///
+/// This error type is used by `DataStore::create_revision_from_path()`.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateRevisionFromPathError {
+    /// Failed to register physical table revision
+    #[error("Failed to register physical table revision: {0}")]
+    Register(#[source] RegisterTableRevisionError),
+}
+
 /// Errors that occur when registering and activating a physical table revision
 ///
 /// This error type is used by `Store::register_table_revision()`.
@@ -810,16 +821,6 @@ pub struct FindLatestTableRevisionInObjectStoreError(#[source] pub object_store:
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to create new table revision")]
 pub struct CreateNewTableRevisionError(#[source] pub RegisterTableRevisionError);
-
-/// Errors that occur when creating a revision from a path
-///
-/// This error type is used by `DataStore::create_revision_from_path()`.
-#[derive(Debug, thiserror::Error)]
-pub enum CreateRevisionFromPathError {
-    /// Failed to register physical table revision
-    #[error("Failed to register physical table revision: {0}")]
-    Register(#[source] RegisterTableRevisionError),
-}
 
 /// Errors that occur when deleting a physical table revision
 ///

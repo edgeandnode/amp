@@ -1,10 +1,7 @@
-use datasets_common::{name::Name, table_name::TableName};
+use datasets_common::{name::Name, namespace::Namespace, table_name::TableName};
 use object_store::path::Path;
 use url::Url;
 use uuid::Uuid;
-
-/// Path delimiter used in object store paths.
-const PATH_DELIMITER: char = '/';
 
 /// Physical table URL _new-type_ wrapper
 ///
@@ -147,19 +144,30 @@ pub struct PhyTableRevisionPath(Path);
 impl PhyTableRevisionPath {
     /// Constructs the path to a table revision directory.
     pub fn new(
+        namespace: impl AsRef<Namespace>,
         dataset_name: impl AsRef<Name>,
         table_name: impl AsRef<TableName>,
         revision_id: impl AsRef<Uuid>,
     ) -> Self {
         Self(
             format!(
-                "{}/{}/{}",
+                "{}/{}/{}/{}",
+                namespace.as_ref(),
                 dataset_name.as_ref(),
                 table_name.as_ref(),
                 revision_id.as_ref()
             )
             .into(),
         )
+    }
+
+    /// Creates a path from a pre-validated [`Path`].
+    ///
+    /// This is an internal constructor used after validation has been performed
+    /// (e.g., via [`FromStr`] implementation). The caller must ensure the path
+    /// is non-empty and contains valid object store path characters.
+    fn new_unchecked(path: Path) -> Self {
+        Self(path)
     }
 
     /// Get a reference to the underlying [`Path`]
@@ -173,34 +181,25 @@ impl PhyTableRevisionPath {
     }
 }
 
+/// Parses a string into a [`PhyTableRevisionPath`].
+///
+/// Validates that the input is:
+/// - Non-empty
+/// - A valid [`object_store::path::Path`] (no invalid characters or empty segments)
+///
+/// This is the primary constructor for paths from external input (e.g., API requests,
+/// database records).
 impl std::str::FromStr for PhyTableRevisionPath {
-    type Err = PhyTableRevisionPathError;
+    type Err = PhyTableRevisionPathParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.trim_end_matches(PATH_DELIMITER).split(PATH_DELIMITER);
+        if s.is_empty() {
+            return Err(PhyTableRevisionPathParseError::Empty);
+        }
+        let path =
+            object_store::path::Path::parse(s).map_err(PhyTableRevisionPathParseError::Invalid)?;
 
-        let revision_uuid: Uuid = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(0))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidRevisionUuid)?;
-
-        let table_name: TableName = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(1))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidTableName)?;
-
-        let dataset_name: Name = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(2))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidDatasetName)?;
-
-        Ok(Self::new(dataset_name, table_name, revision_uuid))
+        Ok(Self::new_unchecked(path))
     }
 }
 
@@ -218,20 +217,29 @@ impl std::ops::Deref for PhyTableRevisionPath {
     }
 }
 
-/// Error when parsing a path into a [`PhyTableRevisionPath`]
+/// Errors that occur when parsing a string into a [`PhyTableRevisionPath`]
+///
+/// This error type is used by the `FromStr` implementation for `PhyTableRevisionPath`.
 #[derive(Debug, thiserror::Error)]
-pub enum PhyTableRevisionPathError {
-    #[error("path must have at least 3 components, got {0}")]
-    NotEnoughComponents(usize),
+pub enum PhyTableRevisionPathParseError {
+    /// The provided path string is empty
+    ///
+    /// A physical table revision path must contain at least the path components
+    /// `namespace/dataset/table/revision_id`. An empty string cannot represent
+    /// a valid revision path.
+    #[error("physical table revision path cannot be empty")]
+    Empty,
 
-    #[error("invalid dataset name")]
-    InvalidDatasetName(#[source] datasets_common::name::NameError),
-
-    #[error("invalid table name")]
-    InvalidTableName(#[source] datasets_common::table_name::TableNameError),
-
-    #[error("invalid revision UUID")]
-    InvalidRevisionUuid(#[source] uuid::Error),
+    /// The path contains invalid characters or malformed segments
+    ///
+    /// This error occurs when the path string fails object store path validation.
+    ///
+    /// Common causes:
+    /// - Empty segments (consecutive slashes like `foo//bar`)
+    /// - Invalid characters in path segments
+    /// - Malformed path encoding
+    #[error("invalid physical table revision path: {0}")]
+    Invalid(object_store::path::Error),
 }
 
 /// Error type for PhyTableUrl parsing

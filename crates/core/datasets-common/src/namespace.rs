@@ -89,6 +89,12 @@ impl AsRef<str> for Namespace {
     }
 }
 
+impl AsRef<Namespace> for Namespace {
+    fn as_ref(&self) -> &Namespace {
+        self
+    }
+}
+
 impl std::ops::Deref for Namespace {
     type Target = str;
 
