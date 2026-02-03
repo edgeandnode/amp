@@ -8,7 +8,7 @@ license-file.workspace = true
 [dependencies]
 arrow-array = { version = "57", default-features = false }
 arrow-schema = { version = "57" }
-bytes = "1.10.1"
+bytes = "1.11.1"
 enum_dispatch = "0.3.13"
 serde_json = "1.0"
 thiserror.workspace = true
