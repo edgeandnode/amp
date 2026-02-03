@@ -1,7 +1,7 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, pin::pin, sync::Arc};
 
 use amp_data_store::{
-    DataStore, PhyTableRevision,
+    DataStore, GetCachedMetadataError, PhyTableRevision,
     physical_table::{PhyTablePath, PhyTableRevisionPath},
 };
 use datafusion::{
@@ -14,7 +14,7 @@ use datafusion::{
         object_store::ObjectStoreUrl as DataFusionObjectStoreUrl,
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::Result as DataFusionResult,
+    error::{DataFusionError, Result as DataFusionResult},
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr, empty::EmptyExec},
@@ -30,7 +30,7 @@ use object_store::ObjectStore;
 use url::Url;
 
 use crate::{
-    BlockNum, BlockRange, BoxError, LogicalCatalog,
+    BlockNum, BlockRange, LogicalCatalog,
     metadata::{
         FileMetadata,
         parquet::ParquetMeta,
@@ -519,7 +519,7 @@ impl TableSnapshot {
     async fn segment_to_partitioned_file(
         &self,
         segment: &Segment,
-    ) -> Result<PartitionedFile, BoxError> {
+    ) -> Result<PartitionedFile, GetCachedMetadataError> {
         let metadata = self.reader_factory.get_cached_metadata(segment.id).await?;
         let file = PartitionedFile::from(segment.object.clone())
             .with_extensions(Arc::new(segment.id))
@@ -565,7 +565,9 @@ impl TableProvider for TableSnapshot {
             let file_count = self.canonical_segments.len();
             let file_stream = stream::iter(self.canonical_segments.iter())
                 .then(|s| self.segment_to_partitioned_file(s));
-            let partitioned = round_robin(file_stream, file_count, target_partitions).await?;
+            let partitioned = round_robin(file_stream, file_count, target_partitions)
+                .await
+                .map_err(|e| DataFusionError::External(e.into()))?;
             compute_all_files_statistics(partitioned, table_schema.clone(), true, false)?
         };
         if statistics.num_rows == Precision::Absent {
@@ -649,13 +651,13 @@ pub struct ListRevisionsError(#[source] pub object_store::Error);
 /// Lexicographic comparison works correctly for UUIDv7 revisions since they are
 /// time-ordered by design. The latest UUID will sort last lexicographically.
 async fn round_robin(
-    files: impl Stream<Item = Result<PartitionedFile, BoxError>> + Send,
+    files: impl Stream<Item = Result<PartitionedFile, GetCachedMetadataError>> + Send,
     files_len: usize,
     target_partitions: usize,
-) -> Result<Vec<FileGroup>, BoxError> {
+) -> Result<Vec<FileGroup>, GetCachedMetadataError> {
     let size = files_len.min(target_partitions);
     let mut groups = vec![FileGroup::default(); size];
-    let mut stream = files.enumerate().boxed();
+    let mut stream = pin!(files.enumerate());
     while let Some((idx, file)) = stream.next().await {
         groups[idx % size].push(file?);
     }

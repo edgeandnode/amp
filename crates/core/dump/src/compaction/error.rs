@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use common::{
-    BoxError,
     catalog::physical::SnapshotError,
     parquet::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
@@ -12,7 +11,7 @@ use metadata_db::files::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
-use crate::WriterProperties;
+use crate::{WriterProperties, parquet_writer::ParquetFileWriterCloseError};
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
@@ -57,7 +56,7 @@ pub enum CompactorError {
     #[error("failed to create writer (writer properties: {opts:?}): {err}")]
     CreateWriter {
         #[source]
-        err: BoxError,
+        err: ParquetError,
         opts: Box<ParquetWriterProperties>,
     },
 
@@ -77,7 +76,7 @@ pub enum CompactorError {
     /// A write failure leaves the compaction incomplete. The partial output file
     /// should be cleaned up, and source files remain unchanged.
     #[error("failed to write to parquet file: {0}")]
-    FileWrite(#[source] BoxError),
+    FileWrite(#[source] ParquetFileWriterCloseError),
 
     /// Failed to read/stream data from Parquet files
     ///
@@ -189,7 +188,7 @@ impl CompactorError {
         }
     }
 
-    pub fn create_writer_error(opts: &Arc<WriterProperties>) -> impl FnOnce(BoxError) -> Self {
+    pub fn create_writer_error(opts: &Arc<WriterProperties>) -> impl FnOnce(ParquetError) -> Self {
         move |err| Self::CreateWriter {
             err,
             opts: opts.parquet.clone().into(),
