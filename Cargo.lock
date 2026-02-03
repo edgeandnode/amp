@@ -1106,6 +1106,7 @@ name = "ampctl"
 version = "0.1.0"
 dependencies = [
  "admin-client",
+ "alloy",
  "amp-object-store",
  "anyhow",
  "clap",
@@ -1127,6 +1128,7 @@ dependencies = [
  "tracing",
  "url",
  "vergen-gitcl",
+ "verification",
  "worker",
 ]
 
@@ -12901,6 +12903,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-arrow"
+version = "0.6.0"
+source = "git+https://github.com/tonbo-io/typed-arrow?branch=main#9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "half 2.7.1",
+ "thiserror 2.0.18",
+ "typed-arrow-derive",
+]
+
+[[package]]
+name = "typed-arrow-derive"
+version = "0.6.0"
+source = "git+https://github.com/tonbo-io/typed-arrow?branch=main#9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13245,6 +13271,25 @@ dependencies = [
  "anyhow",
  "derive_builder",
  "rustversion",
+]
+
+[[package]]
+name = "verification"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "amp-client",
+ "anyhow",
+ "arrow-flight",
+ "clap",
+ "futures",
+ "indicatif",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "typed-arrow",
 ]
 
 [[package]]

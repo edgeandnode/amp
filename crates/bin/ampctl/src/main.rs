@@ -55,6 +55,10 @@ enum Commands {
     #[command(alias = "workers")]
     #[command(long_about = include_str!("cmd/worker__long_about.md"))]
     Worker(cmd::worker::Commands),
+
+    /// Verify dataset integrity
+    #[command()]
+    Verify(cmd::verify::Args),
 }
 
 async fn run() -> anyhow::Result<()> {
@@ -66,6 +70,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Job(command) => cmd::job::run(command).await?,
         Commands::Dataset(command) => cmd::dataset::run(command).await?,
         Commands::Worker(command) => cmd::worker::run(command).await?,
+        Commands::Verify(args) => cmd::verify::run(args).await?,
     }
 
     Ok(())

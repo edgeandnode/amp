@@ -23,6 +23,7 @@ members = [
     "crates/core/metadata-db",
     "crates/core/monitoring",
     "crates/core/object-store",
+    "crates/core/verification",
     "crates/extractors/evm-rpc",
     "crates/extractors/evm-rpc/gen",
     "crates/extractors/firehose",
@@ -53,7 +54,7 @@ version = "0.1.0"
 license-file = "LICENSE"
 
 [workspace.dependencies]
-alloy = { version = "1.2.1", default-features = false, features = [
+alloy = { version = "1.4", default-features = false, features = [
     "contract",
     "dyn-abi",
     "json-abi",
@@ -141,6 +142,8 @@ nix = { version = "0.30.1", default-features = false, features = ["signal"] }
 percent-encoding = "2.3"
 which = "8.0.0"
 zstd = "0.13.3"
+typed-arrow = { git = "https://github.com/tonbo-io/typed-arrow", branch = "main", default-features = false, features = ["derive", "views", "arrow-57"] }
+indicatif = "0.18"
 
 # Datafusion and Arrow crates
 arrow = "57"
