@@ -57,6 +57,7 @@ impl NonEmptySlot {
             network: network.clone(),
             hash: blockhash.into(),
             prev_hash: prev_blockhash.into(),
+            timestamp: blocktime.and_then(|t| u64::try_from(t).ok()),
         };
 
         let block_headers_row = {

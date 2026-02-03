@@ -364,6 +364,7 @@ impl RawTableWriter {
                     network: range.network,
                     hash: table_rows.range.hash,
                     prev_hash: range.prev_hash,
+                    timestamp: table_rows.range.timestamp,
                 })
             }
         };

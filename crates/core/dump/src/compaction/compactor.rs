@@ -231,6 +231,7 @@ impl CompactionGroup {
                 numbers,
                 hash: end_range.hash,
                 prev_hash: start_range.prev_hash,
+                timestamp: end_range.timestamp,
             }
         };
 

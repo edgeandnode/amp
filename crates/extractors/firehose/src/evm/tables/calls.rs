@@ -282,6 +282,7 @@ fn default_to_arrow() {
                 network: "test_network".parse().expect("valid network id"),
                 hash: call.block_hash.into(),
                 prev_hash: Default::default(),
+                timestamp: None,
             })
             .unwrap()
     };

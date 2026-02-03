@@ -512,6 +512,7 @@ impl TableSnapshot {
             numbers: start.start()..=end.end(),
             hash: end.hash,
             prev_hash: start.prev_hash,
+            timestamp: end.timestamp,
         })
     }
 
