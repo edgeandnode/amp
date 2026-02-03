@@ -368,7 +368,7 @@ fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<tables::N
     }
 
     let block_rewards = tables::block_rewards::BlockRewards::from_of1_rewards(slot, block_rewards)
-        .context("missing of1 block rewards")?;
+        .context("converting of1 block rewards")?;
 
     Ok(tables::NonEmptySlot {
         slot,
