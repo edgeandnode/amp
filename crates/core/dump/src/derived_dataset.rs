@@ -135,7 +135,9 @@ use crate::{
         CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
         ParquetFileWriterOutput, commit_metadata,
     },
-    progress::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
+    progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
     streaming_query::{
         QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
@@ -149,6 +151,7 @@ pub async fn dump(
     microbatch_max_interval: u64,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     let writer = writer.into();
 
@@ -248,6 +251,7 @@ pub async fn dump(
         let metrics = ctx.metrics.clone();
         let manifest = manifest.clone();
 
+        let progress_reporter = progress_reporter.clone();
         join_set.spawn(
             async move {
                 let table_name = table.table_name().to_string();
@@ -262,6 +266,7 @@ pub async fn dump(
                     microbatch_max_interval,
                     end,
                     metrics,
+                    progress_reporter,
                 )
                 .await?;
 
@@ -417,6 +422,7 @@ async fn dump_table(
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), DumpTableError> {
     let dump_start_time = Instant::now();
 
@@ -548,8 +554,8 @@ async fn dump_table(
             };
 
             // Emit sync.started event now that we have resolved start/end blocks
-            if let Some(ref callback) = ctx.progress_callback {
-                callback.on_sync_started(SyncStartedInfo {
+            if let Some(ref reporter) = progress_reporter {
+                reporter.report_sync_started(SyncStartedInfo {
                     table_name: table.table_name().clone(),
                     start_block: Some(start),
                     end_block: end,
@@ -578,6 +584,7 @@ async fn dump_table(
                 table.clone(),
                 compactor,
                 &opts,
+                progress_reporter.clone(),
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
                 metrics.clone(),
@@ -586,8 +593,8 @@ async fn dump_table(
 
             // Handle dump result and emit appropriate lifecycle event
             if let Err(ref err) = dump_result {
-                if let Some(ref callback) = ctx.progress_callback {
-                    callback.on_sync_failed(SyncFailedInfo {
+                if let Some(ref reporter) = progress_reporter {
+                    reporter.report_sync_failed(SyncFailedInfo {
                         table_name: table.table_name().clone(),
                         error_message: err.to_string(),
                         error_type: Some("DerivedDumpError".to_string()),
@@ -599,9 +606,9 @@ async fn dump_table(
             // Emit sync.completed event for bounded jobs only
             // (continuous jobs never complete, they just keep syncing)
             if let Some(final_block) = end
-                && let Some(ref callback) = ctx.progress_callback
+                && let Some(ref reporter) = progress_reporter
             {
-                callback.on_sync_completed(SyncCompletedInfo {
+                reporter.report_sync_completed(SyncCompletedInfo {
                     table_name: table.table_name().clone(),
                     final_block,
                     duration_millis: table_dump_start.elapsed().as_millis() as u64,
@@ -781,6 +788,7 @@ async fn dump_sql_query(
     physical_table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
     opts: &Arc<WriterProperties>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -895,7 +903,7 @@ async fn dump_sql_query(
                 compactor.try_run().map_err(DumpSqlQueryError::Compactor)?;
 
                 // Emit progress event on 1% increments (or every microbatch if no end block)
-                if let Some(ref callback) = ctx.progress_callback {
+                if let Some(ref reporter) = progress_reporter {
                     let should_emit = if let Some(total) = total_blocks {
                         // Calculate percentage and emit on 1% increments
                         let blocks_done = microbatch_end.saturating_sub(start);
@@ -913,7 +921,7 @@ async fn dump_sql_query(
                     };
 
                     if should_emit {
-                        callback.on_progress(ProgressUpdate {
+                        reporter.report_progress(ProgressUpdate {
                             table_name: table_name.clone(),
                             start_block: start,
                             current_block: microbatch_end,

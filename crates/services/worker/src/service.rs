@@ -103,7 +103,7 @@ pub async fn new(
             if config.events_config.enabled {
                 match &config.events_config.kafka {
                     Some(kafka_config) => {
-                        match kafka_client::KafkaProducer::new(kafka_config).await {
+                        match crate::kafka::KafkaProducer::new(kafka_config).await {
                             Ok(producer) => {
                                 tracing::info!("Kafka event streaming enabled");
                                 Arc::new(crate::events::KafkaEventEmitter::new(

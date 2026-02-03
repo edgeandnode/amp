@@ -31,7 +31,7 @@ pub use self::{
     },
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
     progress::{
-        NoOpProgressCallback, ProgressCallback, ProgressCallbackExt, ProgressUpdate,
+        NoOpProgressReporter, ProgressReporter, ProgressReporterExt, ProgressUpdate,
         SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     },
 };
@@ -50,15 +50,23 @@ pub async fn dump_tables(
     microbatch_max_interval: u64,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     if kind == DerivedDatasetKind {
         // Derived datasets
-        derived_dataset::dump(ctx, dataset, microbatch_max_interval, end, writer)
-            .await
-            .map_err(Error::DerivedDatasetDump)?;
+        derived_dataset::dump(
+            ctx,
+            dataset,
+            microbatch_max_interval,
+            end,
+            writer,
+            progress_reporter,
+        )
+        .await
+        .map_err(Error::DerivedDatasetDump)?;
     } else {
         // Raw datasets (EvmRpc, Firehose, Solana, etc.)
-        raw_dataset::dump(ctx, dataset, max_writers, end, writer)
+        raw_dataset::dump(ctx, dataset, max_writers, end, writer, progress_reporter)
             .await
             .map_err(Error::RawDatasetDump)?;
     }
@@ -114,8 +122,6 @@ pub struct Ctx {
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     /// Optional job-specific metrics registry
     pub metrics: Option<Arc<MetricsRegistry>>,
-    /// Optional progress callback for reporting dump progress
-    pub progress_callback: Option<Arc<dyn ProgressCallback>>,
 }
 
 #[derive(Debug, Clone)]

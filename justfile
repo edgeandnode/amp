@@ -307,6 +307,11 @@ gen-firehose-datasets-proto:
 gen-solana-storage-proto:
     RUSTFLAGS="--cfg gen_proto" cargo check -p solana-storage-proto
 
+# Generate worker events protobuf bindings (RUSTFLAGS="--cfg gen_worker_proto" cargo check)
+[group: 'codegen']
+gen-worker-events-proto:
+    RUSTFLAGS="--cfg gen_worker_proto" cargo check -p worker
+
 # Update solana-storage-proto .proto files from upstream agave repo
 [group: 'codegen']
 update-solana-storage-proto BRANCH="master":

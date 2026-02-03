@@ -88,7 +88,6 @@ const AMP_CRATES: &[&str] = &[
     "evm_rpc_datasets",
     "firehose_datasets",
     "js_runtime",
-    "kafka_client",
     "metadata_db",
     "metadata_db_postgres",
     "monitoring",

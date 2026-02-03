@@ -3,12 +3,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use kafka_client::{KafkaProducer, proto};
 use monitoring::logging;
 use prost::Message;
 
 use super::emitter::EventEmitter;
-use crate::node_id::NodeId;
+use crate::{
+    kafka::{KafkaProducer, proto},
+    node_id::NodeId,
+};
 
 /// Creates the partition key for Kafka events.
 ///

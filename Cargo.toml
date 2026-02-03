@@ -9,7 +9,6 @@ members = [
     "crates/bin/ampsync",
     "crates/bin/ampup",
     "crates/clients/flight",
-    "crates/clients/kafka",
     "crates/core/common",
     "crates/core/data-store",
     "crates/core/dataset-store",

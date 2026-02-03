@@ -6355,23 +6355,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kafka-client"
-version = "0.1.0"
-dependencies = [
- "amp-config",
- "backon",
- "chrono",
- "monitoring",
- "prost",
- "prost-build",
- "rskafka",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "kasuari"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12361,7 +12344,6 @@ dependencies = [
  "fs-err",
  "futures",
  "indoc",
- "kafka-client",
  "metadata-db",
  "metadata-db-postgres",
  "monitoring",
@@ -14133,10 +14115,11 @@ dependencies = [
  "datasets-common",
  "dump",
  "futures",
- "kafka-client",
  "metadata-db",
  "monitoring",
  "prost",
+ "prost-build",
+ "rskafka",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

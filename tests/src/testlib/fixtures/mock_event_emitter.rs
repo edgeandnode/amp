@@ -6,8 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use kafka_client::proto;
-use worker::events::EventEmitter;
+use worker::{events::EventEmitter, kafka::proto};
 
 /// Recorded events from the mock emitter.
 #[derive(Debug, Clone)]

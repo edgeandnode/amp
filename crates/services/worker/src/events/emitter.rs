@@ -1,7 +1,8 @@
 //! Event emitter trait and implementations.
 
 use async_trait::async_trait;
-use kafka_client::proto;
+
+use crate::kafka::proto;
 
 /// Trait for emitting worker events.
 ///

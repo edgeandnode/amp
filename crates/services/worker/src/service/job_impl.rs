@@ -3,13 +3,13 @@
 use std::{future::Future, sync::Arc};
 
 use datasets_common::hash_reference::HashReference;
-use dump::{Ctx, Error as DumpError, ProgressCallback, metrics::MetricsRegistry};
-use kafka_client::proto;
+use dump::{Ctx, Error as DumpError, ProgressReporter, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
 use crate::{
-    events::WorkerProgressCallback,
+    events::WorkerProgressReporter,
     job::{JobDescriptor, JobId},
+    kafka::proto,
     service::WorkerJobCtx,
 };
 
@@ -55,10 +55,10 @@ pub(super) fn new(
         .as_ref()
         .map(|m| Arc::new(MetricsRegistry::new(m, reference.clone())));
 
-    // Create progress callback for event streaming
-    // Always create the callback - NoOpEmitter will discard events if not needed
-    let progress_callback: Option<Arc<dyn ProgressCallback>> = Some(Arc::new(
-        WorkerProgressCallback::new(job_id, dataset_info, job_ctx.event_emitter.clone()),
+    // Create progress reporter for event streaming
+    // Always create the reporter - NoOpEmitter will discard events if not needed
+    let progress_reporter: Option<Arc<dyn ProgressReporter>> = Some(Arc::new(
+        WorkerProgressReporter::new(job_id, dataset_info, job_ctx.event_emitter.clone()),
     ));
 
     // Create Ctx instance for job execution
@@ -69,7 +69,6 @@ pub(super) fn new(
         data_store: job_ctx.data_store.clone(),
         notification_multiplexer: job_ctx.notification_multiplexer.clone(),
         metrics,
-        progress_callback,
     };
 
     let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
@@ -83,6 +82,7 @@ pub(super) fn new(
             microbatch_max_interval,
             end_block,
             writer,
+            progress_reporter,
         )
         .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
         .await

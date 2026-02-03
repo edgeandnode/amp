@@ -1,6 +1,6 @@
 //! Kafka client for worker event streaming.
 //!
-//! This crate provides a Kafka producer for emitting worker lifecycle events
+//! This module provides a Kafka producer for emitting worker lifecycle events
 //! (sync.started, sync.progress, sync.completed, sync.failed) to a Kafka topic.
 //!
 //! Events are encoded using Protocol Buffers for compact, schema-enforced messages.
@@ -9,7 +9,7 @@
 //!
 //! ```ignore
 //! use amp_config::KafkaEventsConfig;
-//! use kafka_client::KafkaProducer;
+//! use worker::kafka::KafkaProducer;
 //!
 //! let config = KafkaEventsConfig {
 //!     brokers: vec!["localhost:9092".to_string()],
@@ -24,8 +24,6 @@
 //! ```
 
 mod client;
-mod error;
 pub mod proto;
 
-pub use client::KafkaProducer;
-pub use error::Error;
+pub use client::{Error, KafkaProducer};

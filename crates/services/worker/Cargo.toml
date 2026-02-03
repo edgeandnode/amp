@@ -13,10 +13,10 @@ amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
-kafka-client = { path = "../../clients/kafka" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
+rskafka = "0.6"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -24,3 +24,12 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 uuid = { workspace = true, features = ["v7"] }
+
+# Protobuf code generation dependencies
+# Run with: RUSTFLAGS="--cfg gen_worker_proto" cargo check -p worker
+[target.'cfg(gen_worker_proto)'.build-dependencies]
+prost-build.workspace = true
+
+[lints.rust]
+# Allow the gen_worker_proto cfg flag used for conditional protobuf code generation
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gen_worker_proto)'] }

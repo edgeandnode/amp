@@ -7,12 +7,12 @@
 
 use std::sync::Arc;
 
-use dump::{ProgressCallback, ProgressUpdate};
-use kafka_client::proto;
+use dump::{ProgressReporter, ProgressUpdate};
 use monitoring::logging;
 use worker::{
-    events::{EventEmitter, WorkerProgressCallback},
+    events::{EventEmitter, WorkerProgressReporter},
     job::JobId,
+    kafka::proto,
 };
 
 /// Test hash constant (64 hex characters).
@@ -30,9 +30,9 @@ fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> proto::DatasetI
 
 use crate::testlib::fixtures::MockEventEmitter;
 
-/// Test that WorkerProgressCallback correctly forwards progress updates to the event emitter.
+/// Test that WorkerProgressReporter correctly forwards progress updates to the event emitter.
 #[tokio::test]
-async fn test_progress_callback_forwards_to_emitter() {
+async fn test_progress_reporter_forwards_to_emitter() {
     logging::init();
 
     // Given
@@ -40,11 +40,11 @@ async fn test_progress_callback_forwards_to_emitter() {
     let dataset_info = test_dataset_info("test", "dataset", TEST_HASH);
 
     let job_id = JobId::try_from(1i64).unwrap();
-    let callback = WorkerProgressCallback::new(job_id, dataset_info, emitter.clone());
+    let reporter = WorkerProgressReporter::new(job_id, dataset_info, emitter.clone());
 
     // When - emit multiple progress updates
     for block in [10u64, 25, 50, 75, 100] {
-        callback.on_progress(ProgressUpdate {
+        reporter.report_progress(ProgressUpdate {
             table_name: "blocks".parse().unwrap(),
             start_block: 0,
             current_block: block,
@@ -360,14 +360,14 @@ async fn test_multiple_tables_emit_separate_events() {
     // Given
     let emitter = Arc::new(MockEventEmitter::new());
     let job_id = JobId::try_from(1i64).unwrap();
-    let callback = WorkerProgressCallback::new(
+    let reporter = WorkerProgressReporter::new(
         job_id,
         test_dataset_info("test", "dataset", TEST_HASH),
         emitter.clone(),
     );
 
     // When - emit progress for different tables
-    callback.on_progress(ProgressUpdate {
+    reporter.report_progress(ProgressUpdate {
         table_name: "blocks".parse().unwrap(),
         start_block: 0,
         current_block: 50,
@@ -375,7 +375,7 @@ async fn test_multiple_tables_emit_separate_events() {
         files_count: 1,
         total_size_bytes: 1000,
     });
-    callback.on_progress(ProgressUpdate {
+    reporter.report_progress(ProgressUpdate {
         table_name: "transactions".parse().unwrap(),
         start_block: 0,
         current_block: 50,
@@ -383,7 +383,7 @@ async fn test_multiple_tables_emit_separate_events() {
         files_count: 2,
         total_size_bytes: 2000,
     });
-    callback.on_progress(ProgressUpdate {
+    reporter.report_progress(ProgressUpdate {
         table_name: "logs".parse().unwrap(),
         start_block: 0,
         current_block: 50,

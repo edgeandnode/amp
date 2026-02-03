@@ -1,6 +1,6 @@
-//! Progress callback infrastructure for dump operations.
+//! Progress reporting infrastructure for dump operations.
 //!
-//! This module provides the [`ProgressCallback`] trait that allows external code to receive
+//! This module provides the [`ProgressReporter`] trait that allows external code to receive
 //! progress updates during dump operations. This enables real-time monitoring of sync jobs
 //! through event streaming systems like Kafka.
 
@@ -27,47 +27,41 @@ pub struct ProgressUpdate {
     pub total_size_bytes: u64,
 }
 
-/// Trait for receiving progress and lifecycle updates during dump operations.
+/// Trait for reporting progress and lifecycle events during dump operations.
 ///
-/// Implementations must be thread-safe as callbacks may be invoked
-/// from multiple concurrent partition tasks.
+/// Implementations must be thread-safe as reporting may happen from
+/// multiple concurrent partition tasks.
 ///
-/// Lifecycle methods (`on_sync_started`, `on_sync_completed`, `on_sync_failed`)
+/// Lifecycle methods (`report_sync_started`, `report_sync_completed`, `report_sync_failed`)
 /// are called per-table so consumers watching a specific table's partition
 /// receive all relevant events.
-pub trait ProgressCallback: Send + Sync {
-    /// Called when progress is made on a dump operation.
+pub trait ProgressReporter: Send + Sync {
+    /// Report progress on a dump operation.
     ///
     /// This method should be non-blocking and should not fail - progress
     /// reporting is best-effort and should not impact the dump operation.
-    fn on_progress(&self, update: ProgressUpdate);
+    fn report_progress(&self, update: ProgressUpdate);
 
-    /// Called when sync begins for a table.
+    /// Report that sync has started for a table.
     ///
     /// This is called once per table at the start of a dump operation,
     /// after the dataset and tables have been loaded.
-    fn on_sync_started(&self, _info: SyncStartedInfo) {
-        // Default: no-op
-    }
+    fn report_sync_started(&self, info: SyncStartedInfo);
 
-    /// Called when sync completes successfully for a table.
+    /// Report that sync completed successfully for a table.
     ///
     /// This is called once per table when the dump operation completes
     /// successfully.
-    fn on_sync_completed(&self, _info: SyncCompletedInfo) {
-        // Default: no-op
-    }
+    fn report_sync_completed(&self, info: SyncCompletedInfo);
 
-    /// Called when sync fails for a table.
+    /// Report that sync failed for a table.
     ///
     /// This is called for each table when an error occurs during the
     /// dump operation.
-    fn on_sync_failed(&self, _info: SyncFailedInfo) {
-        // Default: no-op
-    }
+    fn report_sync_failed(&self, info: SyncFailedInfo);
 }
 
-/// Information passed to `on_sync_started` callback.
+/// Information passed to `report_sync_started`.
 #[derive(Debug, Clone)]
 pub struct SyncStartedInfo {
     /// The table that is starting to sync.
@@ -78,7 +72,7 @@ pub struct SyncStartedInfo {
     pub end_block: Option<BlockNum>,
 }
 
-/// Information passed to `on_sync_completed` callback.
+/// Information passed to `report_sync_completed`.
 #[derive(Debug, Clone)]
 pub struct SyncCompletedInfo {
     /// The table that completed syncing.
@@ -89,7 +83,7 @@ pub struct SyncCompletedInfo {
     pub duration_millis: u64,
 }
 
-/// Information passed to `on_sync_failed` callback.
+/// Information passed to `report_sync_failed`.
 #[derive(Debug, Clone)]
 pub struct SyncFailedInfo {
     /// The table that failed to sync.
@@ -100,27 +94,63 @@ pub struct SyncFailedInfo {
     pub error_type: Option<String>,
 }
 
-/// A no-op progress callback that discards all progress updates.
+/// A no-op progress reporter that discards all reports.
 ///
 /// Used when progress reporting is disabled.
-pub struct NoOpProgressCallback;
+pub struct NoOpProgressReporter;
 
-impl ProgressCallback for NoOpProgressCallback {
-    fn on_progress(&self, _update: ProgressUpdate) {
+impl ProgressReporter for NoOpProgressReporter {
+    fn report_progress(&self, _update: ProgressUpdate) {
         // Intentionally empty - discard progress updates
+    }
+
+    fn report_sync_started(&self, _info: SyncStartedInfo) {
+        // Intentionally empty
+    }
+
+    fn report_sync_completed(&self, _info: SyncCompletedInfo) {
+        // Intentionally empty
+    }
+
+    fn report_sync_failed(&self, _info: SyncFailedInfo) {
+        // Intentionally empty
     }
 }
 
-/// Extension trait for optional progress callbacks.
-pub trait ProgressCallbackExt {
-    /// Report progress if a callback is configured.
+/// Extension trait for optional progress reporters.
+pub trait ProgressReporterExt {
+    /// Report progress if a reporter is configured.
     fn report_progress(&self, update: ProgressUpdate);
+    /// Report sync started if a reporter is configured.
+    fn report_sync_started(&self, info: SyncStartedInfo);
+    /// Report sync completed if a reporter is configured.
+    fn report_sync_completed(&self, info: SyncCompletedInfo);
+    /// Report sync failed if a reporter is configured.
+    fn report_sync_failed(&self, info: SyncFailedInfo);
 }
 
-impl ProgressCallbackExt for Option<Arc<dyn ProgressCallback>> {
+impl ProgressReporterExt for Option<Arc<dyn ProgressReporter>> {
     fn report_progress(&self, update: ProgressUpdate) {
-        if let Some(callback) = self {
-            callback.on_progress(update);
+        if let Some(reporter) = self {
+            reporter.report_progress(update);
+        }
+    }
+
+    fn report_sync_started(&self, info: SyncStartedInfo) {
+        if let Some(reporter) = self {
+            reporter.report_sync_started(info);
+        }
+    }
+
+    fn report_sync_completed(&self, info: SyncCompletedInfo) {
+        if let Some(reporter) = self {
+            reporter.report_sync_completed(info);
+        }
+    }
+
+    fn report_sync_failed(&self, info: SyncFailedInfo) {
+        if let Some(reporter) = self {
+            reporter.report_sync_failed(info);
         }
     }
 }

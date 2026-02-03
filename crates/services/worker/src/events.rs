@@ -9,4 +9,4 @@ mod progress_adapter;
 
 pub use emitter::{EventEmitter, NoOpEmitter};
 pub use kafka::KafkaEventEmitter;
-pub use progress_adapter::WorkerProgressCallback;
+pub use progress_adapter::WorkerProgressReporter;

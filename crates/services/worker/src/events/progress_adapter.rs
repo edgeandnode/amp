@@ -1,29 +1,28 @@
-//! Progress callback adapter for bridging dump crate progress to event emitter.
+//! Progress reporter adapter for bridging dump crate progress to event emitter.
 //!
-//! This module provides a [`WorkerProgressCallback`] that implements the dump crate's
-//! [`dump::ProgressCallback`] trait and forwards progress updates to the worker's
+//! This module provides a [`WorkerProgressReporter`] that implements the dump crate's
+//! [`dump::ProgressReporter`] trait and forwards progress updates to the worker's
 //! [`EventEmitter`] for Kafka streaming.
 
 use std::sync::Arc;
 
 use dump::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo};
-use kafka_client::proto;
 
 use super::EventEmitter;
-use crate::job::JobId;
+use crate::{job::JobId, kafka::proto};
 
-/// Adapter that bridges dump crate progress callbacks to worker event emission.
+/// Adapter that bridges dump crate progress reporting to worker event emission.
 ///
-/// This struct implements [`dump::ProgressCallback`] and translates progress updates
+/// This struct implements [`dump::ProgressReporter`] and translates progress updates
 /// into proto events that are sent to the configured [`EventEmitter`].
-pub struct WorkerProgressCallback {
+pub struct WorkerProgressReporter {
     job_id: JobId,
     dataset_info: proto::DatasetInfo,
     event_emitter: Arc<dyn EventEmitter>,
 }
 
-impl WorkerProgressCallback {
-    /// Creates a new progress callback adapter.
+impl WorkerProgressReporter {
+    /// Creates a new progress reporter adapter.
     pub fn new(
         job_id: JobId,
         dataset_info: proto::DatasetInfo,
@@ -37,8 +36,8 @@ impl WorkerProgressCallback {
     }
 }
 
-impl dump::ProgressCallback for WorkerProgressCallback {
-    fn on_progress(&self, update: ProgressUpdate) {
+impl dump::ProgressReporter for WorkerProgressReporter {
+    fn report_progress(&self, update: ProgressUpdate) {
         // Calculate percentage only if we have an end block (not in continuous mode)
         let percentage = update.end_block.map(|end_block| {
             let total_blocks = end_block.saturating_sub(update.start_block) + 1;
@@ -65,7 +64,7 @@ impl dump::ProgressCallback for WorkerProgressCallback {
         };
 
         // Clone the emitter and spawn an async task to emit the event.
-        // This is necessary because ProgressCallback::on_progress is synchronous
+        // This is necessary because ProgressReporter::report_progress is synchronous
         // but EventEmitter::emit_sync_progress is asynchronous.
         let emitter = Arc::clone(&self.event_emitter);
         tokio::spawn(async move {
@@ -73,7 +72,7 @@ impl dump::ProgressCallback for WorkerProgressCallback {
         });
     }
 
-    fn on_sync_started(&self, info: SyncStartedInfo) {
+    fn report_sync_started(&self, info: SyncStartedInfo) {
         let event = proto::SyncStarted {
             job_id: *self.job_id,
             dataset: Some(self.dataset_info.clone()),
@@ -88,7 +87,7 @@ impl dump::ProgressCallback for WorkerProgressCallback {
         });
     }
 
-    fn on_sync_completed(&self, info: SyncCompletedInfo) {
+    fn report_sync_completed(&self, info: SyncCompletedInfo) {
         let event = proto::SyncCompleted {
             job_id: *self.job_id,
             dataset: Some(self.dataset_info.clone()),
@@ -103,7 +102,7 @@ impl dump::ProgressCallback for WorkerProgressCallback {
         });
     }
 
-    fn on_sync_failed(&self, info: SyncFailedInfo) {
+    fn report_sync_failed(&self, info: SyncFailedInfo) {
         let event = proto::SyncFailed {
             job_id: *self.job_id,
             dataset: Some(self.dataset_info.clone()),
