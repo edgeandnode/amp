@@ -51,6 +51,9 @@ pub(crate) struct Reward {
 
 #[derive(Debug, Clone)]
 pub(crate) enum RewardType {
+    /// The `Unspecified` variant only in the protobuf version of
+    /// RewardType, it is not defined by the Solana spec.
+    Unspecified,
     Fee,
     Rent,
     Staking,
@@ -81,7 +84,10 @@ impl TryFrom<solana_storage_proto::confirmed_block::Reward> for Reward {
                 .reward_type
                 .try_into()
                 .context("parsing proto reward type")
-                .map(Some)?,
+                .map(|reward| match reward {
+                    RewardType::Unspecified => None,
+                    reward => Some(reward),
+                })?,
             commission: if value.commission.is_empty() {
                 None
             } else {
@@ -112,6 +118,7 @@ impl From<rpc_client::Reward> for Reward {
 impl std::fmt::Display for RewardType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RewardType::Unspecified => write!(f, "unspecified"),
             RewardType::Fee => write!(f, "fee"),
             RewardType::Rent => write!(f, "rent"),
             RewardType::Staking => write!(f, "staking"),
@@ -125,13 +132,12 @@ impl TryFrom<i32> for RewardType {
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let typ = match value {
-            0 => Self::Fee,
-            1 => Self::Rent,
-            2 => Self::Staking,
-            3 => Self::Voting,
-            invalid => {
-                anyhow::bail!("invalid reward type value: {invalid}");
-            }
+            0 => Self::Unspecified,
+            1 => Self::Fee,
+            2 => Self::Rent,
+            3 => Self::Staking,
+            4 => Self::Voting,
+            _ => anyhow::bail!("invalid reward type: {value}"),
         };
 
         Ok(typ)
