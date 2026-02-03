@@ -12906,7 +12906,7 @@ dependencies = [
 [[package]]
 name = "typed-arrow"
 version = "0.6.0"
-source = "git+https://github.com/tonbo-io/typed-arrow?branch=main#9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc"
+source = "git+https://github.com/tonbo-io/typed-arrow?rev=9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc#9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -12920,7 +12920,7 @@ dependencies = [
 [[package]]
 name = "typed-arrow-derive"
 version = "0.6.0"
-source = "git+https://github.com/tonbo-io/typed-arrow?branch=main#9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc"
+source = "git+https://github.com/tonbo-io/typed-arrow?rev=9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc#9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc"
 dependencies = [
  "proc-macro2",
  "quote",

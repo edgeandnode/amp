@@ -2,15 +2,20 @@ mod client;
 mod diff;
 mod rpc;
 
-use std::collections::BTreeMap;
-use std::ops::RangeInclusive;
-use std::sync::Arc;
-use std::sync::atomic::{self, AtomicU64};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    ops::RangeInclusive,
+    sync::{
+        Arc,
+        atomic::{self, AtomicU64},
+    },
+};
 
 use alloy::primitives::BlockNumber;
 use anyhow::{Context as _, anyhow};
-use arrow_flight::flight_service_client::FlightServiceClient;
-use arrow_flight::sql::client::FlightSqlServiceClient;
+use arrow_flight::{
+    flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Url;
 use tokio::sync::Mutex;
@@ -45,7 +50,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     let block_range = args.start_block..=args.end_block;
     let total_blocks = block_range.end() - block_range.start() + 1;
 
-    let batches: Vec<RangeInclusive<BlockNumber>> = block_range
+    let batches: VecDeque<RangeInclusive<BlockNumber>> = block_range
         .clone()
         .step_by(BATCH_SIZE as usize)
         .map(|start| start..=u64::min(start + BATCH_SIZE - 1, *block_range.end()))
@@ -56,7 +61,8 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     progress_bar.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} blocks ({percent}%)")
-            .unwrap()
+            // SAFETY: Template string is a compile-time constant and cannot fail
+            .expect("progress bar template is valid")
             .progress_chars("=> "),
     );
 
@@ -79,10 +85,10 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
             loop {
                 let batch_range = {
                     let mut queue = work_queue.lock().await;
-                    if queue.is_empty() {
-                        break;
+                    match queue.pop_front() {
+                        Some(range) => range,
+                        None => break,
                     }
-                    queue.remove(0)
                 };
 
                 fetch_and_verify_batch(
@@ -123,11 +129,13 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
 
     let success_progress_style = ProgressStyle::default_bar()
         .template("[{elapsed_precise}] [{bar:40.green/green}] {pos}/{len} blocks ({percent}%)")
-        .unwrap()
+        // SAFETY: Template string is a compile-time constant and cannot fail
+        .expect("progress bar template is valid")
         .progress_chars("=> ");
     let error_progress_style = ProgressStyle::default_bar()
         .template("[{elapsed_precise}] [{bar:40.red/red}]")
-        .unwrap()
+        // SAFETY: Template string is a compile-time constant and cannot fail
+        .expect("progress bar template is valid")
         .progress_chars("=> ");
 
     for handle in worker_handles {
@@ -194,8 +202,11 @@ async fn fetch_and_verify_batch(
                 return Err(err).context(anyhow!("verify block {}", block_number));
             }
             (Err(err), amp_block) => {
+                let Some(rpc_url) = rpc_url else {
+                    unreachable!("rpc_url is Some due to previous match arm");
+                };
                 let rpc_verification_message =
-                    match fetch_and_verify_rpc_block(rpc_url.unwrap(), block_number).await {
+                    match fetch_and_verify_rpc_block(rpc_url, block_number).await {
                         Ok(rpc_block) => diff::create_block_diff(&amp_block, &rpc_block),
                         Err(err) => format!("RPC verification also failed: {err:#}"),
                     };

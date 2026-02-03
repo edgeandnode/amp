@@ -58,7 +58,7 @@ enum Commands {
 
     /// Verify dataset integrity
     #[command()]
-    Verify(cmd::verify::Args),
+    Verify(verification::Args),
 }
 
 async fn run() -> anyhow::Result<()> {
@@ -70,7 +70,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Job(command) => cmd::job::run(command).await?,
         Commands::Dataset(command) => cmd::dataset::run(command).await?,
         Commands::Worker(command) => cmd::worker::run(command).await?,
-        Commands::Verify(args) => cmd::verify::run(args).await?,
+        Commands::Verify(args) => verification::run(args).await?,
     }
 
     Ok(())

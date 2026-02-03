@@ -297,6 +297,12 @@ impl Transaction {
     }
 }
 
+/// Escape and quote dataset name for SQL identifier safety.
+/// Replaces " with "" and wraps the result in double quotes.
+fn escape_dataset_name(dataset: &str) -> String {
+    format!("\"{}\"", dataset.replace('"', "\"\""))
+}
+
 pub async fn fetch_blocks(
     amp: &mut AmpClient,
     dataset: &str,
@@ -400,8 +406,9 @@ pub async fn fetch_blocks(
     let mut block_data: Vec<Block> = Default::default();
 
     let mut logs_by_block: BTreeMap<BlockNumber, Vec<Log>> = Default::default();
+    let escaped_dataset = escape_dataset_name(dataset);
     let logs_query = format!(
-        "SELECT * FROM \"{dataset}\".logs WHERE block_num >= {start_block} AND block_num <= {end_block}"
+        "SELECT * FROM {escaped_dataset}.logs WHERE block_num >= {start_block} AND block_num <= {end_block}"
     );
     let mut logs_response_stream = amp.query(&logs_query).await?;
 
@@ -439,7 +446,7 @@ pub async fn fetch_blocks(
     // Fetch transactions for the range
     let mut transactions_by_block: BTreeMap<BlockNumber, Vec<Transaction>> = Default::default();
     let tx_query = format!(
-        "SELECT * FROM \"{dataset}\".transactions WHERE block_num >= {start_block} AND block_num <= {end_block}"
+        "SELECT * FROM {escaped_dataset}.transactions WHERE block_num >= {start_block} AND block_num <= {end_block}"
     );
     let mut tx_response_stream = amp.query(&tx_query).await?;
 
@@ -457,21 +464,28 @@ pub async fn fetch_blocks(
                 nonce: view.nonce,
                 gas_price: view
                     .gas_price
-                    .map(|d| u128::try_from(d.into_value()).expect("gas_price should fit in u128")),
-                max_fee_per_gas: view.max_fee_per_gas.map(|d| {
-                    u128::try_from(d.into_value()).expect("max_fee_per_gas should fit in u128")
-                }),
-                max_priority_fee_per_gas: view.max_priority_fee_per_gas.map(|d| {
-                    u128::try_from(d.into_value())
-                        .expect("max_priority_fee_per_gas should fit in u128")
-                }),
-                max_fee_per_blob_gas: view.max_fee_per_blob_gas.map(|d| {
-                    u128::try_from(d.into_value()).expect("max_fee_per_blob_gas should fit in u128")
-                }),
+                    .map(|d| u128::try_from(d.into_value()))
+                    .transpose()
+                    .context("gas_price does not fit in u128")?,
+                max_fee_per_gas: view
+                    .max_fee_per_gas
+                    .map(|d| u128::try_from(d.into_value()))
+                    .transpose()
+                    .context("max_fee_per_gas does not fit in u128")?,
+                max_priority_fee_per_gas: view
+                    .max_priority_fee_per_gas
+                    .map(|d| u128::try_from(d.into_value()))
+                    .transpose()
+                    .context("max_priority_fee_per_gas does not fit in u128")?,
+                max_fee_per_blob_gas: view
+                    .max_fee_per_blob_gas
+                    .map(|d| u128::try_from(d.into_value()))
+                    .transpose()
+                    .context("max_fee_per_blob_gas does not fit in u128")?,
                 gas_limit: view.gas_limit,
                 to: view.to.map(Address::from),
                 value: U256::from_str_radix(&view.value, 10)
-                    .expect("value should be valid decimal string"),
+                    .context("value is not a valid decimal string")?,
                 input: Bytes::from(view.input),
                 r: view.r.into(),
                 s: view.s.into(),
@@ -529,7 +543,7 @@ pub async fn fetch_blocks(
 
     // Fetch blocks and attach transactions and logs
     let block_query = format!(
-        "SELECT * FROM \"{dataset}\".blocks WHERE block_num >= {start_block} AND block_num <= {end_block} ORDER BY block_num"
+        "SELECT * FROM {escaped_dataset}.blocks WHERE block_num >= {start_block} AND block_num <= {end_block} ORDER BY block_num"
     );
     let mut block_response_stream = amp.query(&block_query).await?;
 
@@ -551,18 +565,22 @@ pub async fn fetch_blocks(
                 receipts_root: BlockHash::from(view.receipt_root),
                 logs_bloom: view.logs_bloom.into(),
                 difficulty: U256::try_from(view.difficulty.into_value())
-                    .expect("difficulty should be non-negative"),
-                total_difficulty: view.total_difficulty.map(|d| {
-                    U256::try_from(d.into_value()).expect("total_difficulty should be non-negative")
-                }),
+                    .context("difficulty is negative")?,
+                total_difficulty: view
+                    .total_difficulty
+                    .map(|d| U256::try_from(d.into_value()))
+                    .transpose()
+                    .context("total_difficulty is negative")?,
                 gas_limit: view.gas_limit,
                 gas_used: view.gas_used,
                 extra_data: view.extra_data.into(),
                 mix_hash: BlockHash::from(view.mix_hash),
                 nonce: view.nonce,
-                base_fee_per_gas: view.base_fee_per_gas.map(|d| {
-                    u64::try_from(d.into_value()).expect("base_fee_per_gas should fit in u64")
-                }),
+                base_fee_per_gas: view
+                    .base_fee_per_gas
+                    .map(|d| u64::try_from(d.into_value()))
+                    .transpose()
+                    .context("base_fee_per_gas does not fit in u64")?,
                 withdrawals_root: view.withdrawals_root.map(BlockHash::from),
                 blob_gas_used: view.blob_gas_used,
                 excess_blob_gas: view.excess_blob_gas,
@@ -578,10 +596,9 @@ pub async fn fetch_blocks(
 
     block_data.sort_unstable_by_key(|b| b.number);
 
-    assert!(
-        block_data
-            .windows(2)
-            .all(|b| (b[0].number + 1) == b[1].number)
+    anyhow::ensure!(
+        block_data.windows(2).all(|b| b[0].number < b[1].number),
+        "blocks are not ordered"
     );
 
     anyhow::ensure!(
