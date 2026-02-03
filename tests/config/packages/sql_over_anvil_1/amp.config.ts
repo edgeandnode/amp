@@ -8,7 +8,7 @@ export default defineDataset(() => ({
   },
   tables: {
     blocks: {
-      sql: `select block_num, hash, parent_hash
+      sql: `select block_num, hash, parent_hash, timestamp
 from anvil_rpc.blocks`,
       network: "anvil",
     },

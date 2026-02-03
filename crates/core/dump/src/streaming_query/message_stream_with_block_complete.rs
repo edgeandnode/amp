@@ -300,6 +300,7 @@ mod tests {
             network: "test".parse().expect("valid network id"),
             hash: [0u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         }
     }
 

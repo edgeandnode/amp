@@ -107,6 +107,7 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
             network: "anvil".parse().expect("valid network id"),
             hash: blocks0[2].hash,
             prev_hash: blocks0[0].parent_hash,
+            timestamp: blocks0[2].timestamp,
         }
     );
     assert_eq!(ranges[1].numbers, 3..=3);
@@ -253,7 +254,7 @@ async fn streaming_reorg_rewind_shallow() {
 
     // Set up streaming query
     let streaming_query = r#"
-        SELECT block_num, hash, parent_hash
+        SELECT block_num, hash, parent_hash, CAST(EXTRACT(EPOCH FROM timestamp) AS BIGINT) as timestamp
         FROM sql_over_anvil_1.blocks
         SETTINGS stream = true
     "#;
@@ -277,8 +278,8 @@ async fn streaming_reorg_rewind_shallow() {
 
     // Check stream includes new blocks
     assert_eq!(
-        &take_blocks_from_stream(&mut flight_client, 2).await,
-        &test.query_blocks("anvil_rpc", None).await[1..=2],
+        take_blocks_from_stream(&mut flight_client, 2).await,
+        test.query_blocks("anvil_rpc", None).await[1..=2],
     );
 
     // Trigger shallow reorg (depth 1)
@@ -290,8 +291,8 @@ async fn streaming_reorg_rewind_shallow() {
 
     // Check stream shows rewind from shallow reorg
     assert_eq!(
-        &take_blocks_from_stream(&mut flight_client, 3).await,
-        &test.query_blocks("anvil_rpc", None).await[2..=4],
+        take_blocks_from_stream(&mut flight_client, 3).await,
+        test.query_blocks("anvil_rpc", None).await[2..=4],
     );
 }
 
@@ -310,7 +311,7 @@ async fn streaming_reorg_rewind_deep() {
 
     // Set up streaming query
     let streaming_query = r#"
-        SELECT block_num, hash, parent_hash
+        SELECT block_num, hash, parent_hash, CAST(EXTRACT(EPOCH FROM timestamp) AS BIGINT) as timestamp
         FROM sql_over_anvil_1.blocks
         SETTINGS stream = true
     "#;
@@ -336,8 +337,8 @@ async fn streaming_reorg_rewind_deep() {
 
     // Check stream includes all new blocks
     assert_eq!(
-        &take_blocks_from_stream(&mut flight_client, 6).await,
-        &test.query_blocks("anvil_rpc", None).await[1..=6],
+        take_blocks_from_stream(&mut flight_client, 6).await,
+        test.query_blocks("anvil_rpc", None).await[1..=6],
     );
 
     // Trigger deep reorg (depth 5)
@@ -349,8 +350,8 @@ async fn streaming_reorg_rewind_deep() {
 
     // Check stream shows rewind from deep reorg
     assert_eq!(
-        &take_blocks_from_stream(&mut flight_client, 7).await,
-        &test.query_blocks("anvil_rpc", None).await[2..=8],
+        take_blocks_from_stream(&mut flight_client, 7).await,
+        test.query_blocks("anvil_rpc", None).await[2..=8],
     );
 }
 
@@ -446,9 +447,16 @@ impl ReorgTestCtx {
         let test_env = &self.ctx;
         let jsonl_client = test_env.new_jsonl_client();
         let limit_clause = take.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
+        // Raw datasets (like anvil_rpc) have timestamp column, derived datasets (sql_*) don't
+        let is_raw_dataset = !dataset.starts_with("sql_");
+        let timestamp_col = if is_raw_dataset {
+            ", CAST(EXTRACT(EPOCH FROM timestamp) AS BIGINT) as timestamp"
+        } else {
+            ""
+        };
         let sql = format!(
-            "SELECT block_num, hash, parent_hash FROM {}.blocks ORDER BY block_num ASC{}",
-            dataset, limit_clause
+            "SELECT block_num, hash, parent_hash{} FROM {}.blocks ORDER BY block_num ASC{}",
+            timestamp_col, dataset, limit_clause
         );
 
         jsonl_client
@@ -590,6 +598,7 @@ impl ReorgTestCtx {
             network: "anvil".parse().expect("valid network id"),
             hash: blocks[*numbers.end() as usize].hash,
             prev_hash: blocks[*numbers.start() as usize].parent_hash,
+            timestamp: blocks[*numbers.end() as usize].timestamp,
         }
     }
 }
@@ -599,6 +608,7 @@ struct BlockRow {
     block_num: BlockNum,
     hash: BlockHash,
     parent_hash: BlockHash,
+    timestamp: Option<u64>,
 }
 
 impl From<BlockInfo> for BlockRow {
@@ -607,6 +617,7 @@ impl From<BlockInfo> for BlockRow {
             block_num: block_info.block_num,
             hash: block_info.hash,
             parent_hash: block_info.parent_hash,
+            timestamp: None,
         }
     }
 }
