@@ -616,8 +616,8 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
         .get(&block.rewards)
         .map(|rewards| {
             let car_parser::node::Node::Rewards(rewards) = rewards else {
-                return Err(Of1StreamError::MissingNode {
-                    expected: "block_rewards",
+                return Err(Of1StreamError::UnexpectedNode {
+                    kind: rewards.kind(),
                     cid: block.rewards.to_string(),
                 });
             };
