@@ -19,3 +19,4 @@ build/
 .idea
 .vscode/
 .amp/
+commit-changes.sh
