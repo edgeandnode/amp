@@ -5,6 +5,9 @@ on:
    push:
       tags: ["v*"]
 
+permissions:
+   actions: read
+
 jobs:
    trigger-deploy:
       runs-on: ubuntu-latest
