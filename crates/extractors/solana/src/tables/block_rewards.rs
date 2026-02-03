@@ -208,15 +208,15 @@ pub(crate) struct BlockRewardsRowsBuilder {
 
 impl BlockRewardsRowsBuilder {
     /// Creates a new [BlockRewardsRowsBuilder].
-    pub(crate) fn new() -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            special_block_num: UInt64Builder::with_capacity(1),
-            slot: UInt64Builder::with_capacity(1),
-            pubkey: StringBuilder::with_capacity(1, tables::BASE58_ENCODED_HASH_LEN),
-            lamports: Int64Builder::with_capacity(1),
-            post_balance: UInt64Builder::with_capacity(1),
-            reward_type: StringBuilder::with_capacity(1, 8),
-            commission: StringBuilder::with_capacity(1, 4),
+            special_block_num: UInt64Builder::with_capacity(capacity),
+            slot: UInt64Builder::with_capacity(capacity),
+            pubkey: StringBuilder::with_capacity(capacity, tables::BASE58_ENCODED_HASH_LEN),
+            lamports: Int64Builder::with_capacity(capacity),
+            post_balance: UInt64Builder::with_capacity(capacity),
+            reward_type: StringBuilder::with_capacity(capacity, capacity * 8),
+            commission: StringBuilder::with_capacity(capacity, capacity * 4),
         }
     }
 

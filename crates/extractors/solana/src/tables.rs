@@ -79,7 +79,8 @@ pub(crate) fn convert_slot_to_db_rows(
     };
 
     let block_rewards_row = {
-        let mut builder = block_rewards::BlockRewardsRowsBuilder::new();
+        let mut builder =
+            block_rewards::BlockRewardsRowsBuilder::with_capacity(block_rewards.rewards.len());
         builder.append(&block_rewards);
         builder
             .build(range.clone())
