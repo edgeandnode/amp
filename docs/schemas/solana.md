@@ -15,6 +15,20 @@ Auto-generated file. See `to_markdown` in `crates/core/datasets-raw/src/schema.r
 | block_time          | Int64     | YES         |
 +---------------------+-----------+-------------+
 ````
+## block_rewards
+````
++--------------+-----------+-------------+
+| column_name  | data_type | is_nullable |
++--------------+-----------+-------------+
+| _block_num   | UInt64    | NO          |
+| slot         | UInt64    | NO          |
+| pubkey       | Utf8      | NO          |
+| lamports     | Int64     | NO          |
+| post_balance | UInt64    | NO          |
+| reward_type  | Utf8      | YES         |
+| commission   | Utf8      | YES         |
++--------------+-----------+-------------+
+````
 ## transactions
 ````
 +---------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------+

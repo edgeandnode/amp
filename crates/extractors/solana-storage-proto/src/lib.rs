@@ -20,14 +20,14 @@ pub type StoredExtendedRewards = Vec<StoredExtendedReward>;
 
 #[derive(Serialize, Deserialize)]
 pub struct StoredExtendedReward {
-    pubkey: String,
-    lamports: i64,
+    pub pubkey: String,
+    pub lamports: i64,
     #[serde(deserialize_with = "default_on_eof")]
-    post_balance: u64,
+    pub post_balance: u64,
     #[serde(deserialize_with = "default_on_eof")]
-    reward_type: Option<RewardType>,
+    pub reward_type: Option<RewardType>,
     #[serde(deserialize_with = "default_on_eof")]
-    commission: Option<u8>,
+    pub commission: Option<u8>,
 }
 
 impl From<StoredExtendedReward> for Reward {

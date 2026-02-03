@@ -9980,6 +9980,7 @@ dependencies = [
  "serde_with",
  "solana-client",
  "solana-clock",
+ "solana-reward-info",
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-storage-proto",

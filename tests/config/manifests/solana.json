@@ -48,6 +48,50 @@
       },
       "network": "mainnet"
     },
+    "block_rewards": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "slot",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "pubkey",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "lamports",
+              "type": "Int64",
+              "nullable": false
+            },
+            {
+              "name": "post_balance",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "reward_type",
+              "type": "Utf8",
+              "nullable": true
+            },
+            {
+              "name": "commission",
+              "type": "Utf8",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "network": "mainnet"
+    },
     "instructions": {
       "schema": {
         "arrow": {
