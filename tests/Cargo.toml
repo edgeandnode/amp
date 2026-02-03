@@ -60,6 +60,7 @@ toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 url.workspace = true
+verification = { path = "../crates/core/verification" }
 worker = { path = "../crates/services/worker" }
 
 [build-dependencies]
