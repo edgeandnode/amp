@@ -186,6 +186,63 @@ impl DataStore {
         })
     }
 
+    /// Deletes a physical table revision completely.
+    ///
+    /// This removes:
+    /// 1. All Parquet files from object storage
+    /// 2. All file metadata records from the database (via CASCADE)
+    /// 3. The physical table revision record from the database
+    pub async fn delete_revision(
+        &self,
+        revision: &PhyTableRevision,
+    ) -> Result<(), DeleteRevisionError> {
+        metadata_db::physical_table::delete_by_id(&self.metadata_db, revision.location_id)
+            .await
+            .map_err(DeleteRevisionError::Delete)?;
+
+        self.truncate_revision(revision)
+            .await
+            .map_err(DeleteRevisionError::Truncate)?;
+
+        Ok(())
+    }
+
+    /// Activates a specific revision by its location ID.
+    ///
+    /// This atomically deactivates all other revisions for the table and
+    /// marks the specified revision as active.
+    pub async fn activate_revision_by_id(
+        &self,
+        location_id: LocationId,
+        dataset: &HashReference,
+        table_name: &TableName,
+    ) -> Result<(), ActivateRevisionByIdError> {
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(ActivateRevisionByIdError::TransactionBegin)?;
+
+        metadata_db::physical_table::mark_inactive_by_table_id(&mut tx, dataset.hash(), table_name)
+            .await
+            .map_err(ActivateRevisionByIdError::MarkInactive)?;
+
+        metadata_db::physical_table::mark_active_by_id(
+            &mut tx,
+            location_id,
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(ActivateRevisionByIdError::Activate)?;
+
+        tx.commit()
+            .await
+            .map_err(ActivateRevisionByIdError::TransactionCommit)?;
+
+        Ok(())
+    }
+
     /// Locks table revisions for a writer job.
     ///
     /// This updates the `writer` field for all specified revisions, establishing
@@ -409,27 +466,6 @@ impl DataStore {
         self.delete_files_in_object_store(file_locations)
             .await
             .map_err(TruncateError::DeleteFiles)?;
-
-        Ok(())
-    }
-
-    /// Deletes a physical table revision completely.
-    ///
-    /// This removes:
-    /// 1. All Parquet files from object storage
-    /// 2. All file metadata records from the database (via CASCADE)
-    /// 3. The physical table revision record from the database
-    pub async fn delete_revision(
-        &self,
-        revision: &PhyTableRevision,
-    ) -> Result<(), DeleteRevisionError> {
-        metadata_db::physical_table::delete_by_id(&self.metadata_db, revision.location_id)
-            .await
-            .map_err(DeleteRevisionError::Delete)?;
-
-        self.truncate_revision(revision)
-            .await
-            .map_err(DeleteRevisionError::Truncate)?;
 
         Ok(())
     }
@@ -753,6 +789,33 @@ pub struct FindLatestTableRevisionInObjectStoreError(#[source] pub object_store:
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to create new table revision")]
 pub struct CreateNewTableRevisionError(#[source] pub RegisterTableRevisionError);
+
+/// Failed to activate revision
+///
+/// This error occurs when activating a physical table revision fails.
+/// This typically happens during dataset dumping operations.
+///
+/// Common causes:
+/// - Database connection issues during activation
+/// - Permission denied for database operations
+#[derive(Debug, thiserror::Error)]
+pub enum ActivateRevisionByIdError {
+    /// Failed to begin transaction
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to mark existing active revisions as inactive
+    #[error("Failed to mark existing active revisions as inactive")]
+    MarkInactive(#[source] metadata_db::Error),
+
+    /// Failed to activate revision
+    #[error("Failed to activate revision")]
+    Activate(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction after successful database operations
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
+}
 
 /// Failed to lock revisions for writer job
 ///
