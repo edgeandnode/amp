@@ -55,7 +55,13 @@ Workers emit events directly to Kafka as sync jobs progress:
 
 #### Progress Throttling
 
-Progress events are emitted on **1% increments** rather than per-block to avoid excessive noise, especially for high-throughput chains like Solana. For continuous jobs (no end block), progress events are emitted on each microbatch completion since percentage cannot be calculated.
+Progress events are emitted based on **either**:
+1. **Percentage increase** - Every 1% increment of sync progress
+2. **Time interval** - Configurable interval (default: 10 seconds)
+
+Whichever condition is met first triggers an event. This ensures timely updates for long-running syncs with many blocks (where 1% may take a long time) while still providing percentage-based updates for shorter syncs.
+
+The time interval can be configured via `progress_interval_secs` (default: 10.0). Set to `0` to disable time-based emission and only emit on percentage changes.
 
 #### Continuous vs Bounded Jobs
 
@@ -91,6 +97,7 @@ Event streaming is **opt-in** (disabled by default). When disabled, the [Job Pro
 ```toml
 [worker.events]
 enabled = true
+progress_interval_secs = 10.0  # Emit progress every 10s OR on 1% increase
 
 [worker.events.kafka]
 brokers = ["kafka-1:9092", "kafka-2:9092"]
@@ -98,12 +105,13 @@ topic = "amp.worker.events"
 partitions = 16
 ```
 
-| Setting            | Default               | Description                                         |
-| ------------------ | --------------------- | --------------------------------------------------- |
-| `enabled`          | `false`               | Enable/disable event emission                       |
-| `kafka.brokers`    | -                     | Kafka broker addresses                              |
-| `kafka.topic`      | `"amp.worker.events"` | Kafka topic name                                    |
-| `kafka.partitions` | `16`                  | Number of partitions (must match actual topic config) |
+| Setting                   | Default               | Description                                              |
+| ------------------------- | --------------------- | -------------------------------------------------------- |
+| `enabled`                 | `false`               | Enable/disable event emission                            |
+| `progress_interval_secs`  | `10.0`                | Time interval for progress events (0 to disable)         |
+| `kafka.brokers`           | -                     | Kafka broker addresses                                   |
+| `kafka.topic`             | `"amp.worker.events"` | Kafka topic name                                         |
+| `kafka.partitions`        | `16`                  | Number of partitions (must match actual topic config)    |
 
 ### Prerequisites
 
@@ -127,6 +135,7 @@ If the topic doesn't exist, event sends will retry then log a warning and drop t
 ```toml
 [worker.events]
 enabled = true
+progress_interval_secs = 10.0  # Optional: emit progress every 10s (default)
 
 [worker.events.kafka]
 brokers = ["localhost:9092"]

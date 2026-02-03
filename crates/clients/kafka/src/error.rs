@@ -18,6 +18,10 @@ pub enum Error {
     /// Failed to encode protobuf message
     #[error("failed to encode protobuf message")]
     Encode(#[source] prost::EncodeError),
+
+    /// Invalid SASL configuration
+    #[error("invalid SASL configuration: {0}")]
+    InvalidSaslConfig(String),
 }
 
 impl Error {

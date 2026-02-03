@@ -6332,10 +6332,12 @@ dependencies = [
  "prost",
  "prost-build",
  "rskafka",
+ "rustls",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -8857,9 +8859,11 @@ dependencies = [
  "parking_lot",
  "rand 0.8.5",
  "rsasl",
+ "rustls",
  "snap",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "zstd",
 ]

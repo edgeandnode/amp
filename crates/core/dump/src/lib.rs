@@ -1,6 +1,6 @@
 //! # Dump
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
@@ -116,6 +116,8 @@ pub struct Ctx {
     pub metrics: Option<Arc<MetricsRegistry>>,
     /// Optional progress callback for reporting dump progress
     pub progress_callback: Option<Arc<dyn ProgressCallback>>,
+    /// Interval for emitting progress events (time-based throttling)
+    pub progress_interval: Duration,
 }
 
 #[derive(Debug, Clone)]

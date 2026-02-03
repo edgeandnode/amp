@@ -84,9 +84,9 @@ use std::{
     ops::RangeInclusive,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use amp_data_store::DataStore;
@@ -561,17 +561,23 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     // Extract table names for progress reporting
     let table_names: Vec<TableName> = tables.iter().map(|(t, _)| t.table_name().clone()).collect();
 
+    // Create shared stats that writers will update and progress reporter will read
+    let shared_stats = Arc::new(SharedProgressStats::new());
+
     // Use the job's actual start/end blocks for progress events (not the missing ranges).
     // This ensures consumers see the overall job progress, not just progress through remaining work.
     // For continuous mode, chain_head is used instead of job_end_block for percentage calculation.
     let progress_reporter = Arc::new(ProgressReporter {
         last_logged_percent: AtomicUsize::new(0),
         last_emitted_percent: AtomicUsize::new(0),
+        last_emit_time_millis: AtomicU64::new(0),
+        progress_interval: ctx.progress_interval,
         progress_callback: ctx.progress_callback.clone(),
         table_names,
         job_start_block,
         job_end_block,
         chain_head,
+        shared_stats: shared_stats.clone(),
     });
 
     let writers = missing_dataset_ranges
@@ -589,6 +595,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             id: i as u32,
             metrics: metrics.cloned(),
             progress_reporter: progress_reporter.clone(),
+            shared_stats: shared_stats.clone(),
         });
 
     // Spawn the writers, starting them with a 1-second delay between each.
@@ -629,11 +636,52 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     Ok(())
 }
 
+/// Shared progress statistics that are updated by writers and read by the progress reporter.
+///
+/// This struct uses atomic counters to allow multiple writer partitions to update
+/// the stats concurrently while the progress reporter reads them for event emission.
+pub(crate) struct SharedProgressStats {
+    /// Total number of Parquet files committed across all partitions and tables.
+    files_count: AtomicU64,
+    /// Total bytes written across all partitions and tables.
+    total_size_bytes: AtomicU64,
+}
+
+impl SharedProgressStats {
+    pub(crate) fn new() -> Self {
+        Self {
+            files_count: AtomicU64::new(0),
+            total_size_bytes: AtomicU64::new(0),
+        }
+    }
+
+    /// Record a file commit, incrementing the file count and adding to total bytes.
+    pub(crate) fn record_file_commit(&self, file_size_bytes: u64) {
+        self.files_count.fetch_add(1, Ordering::SeqCst);
+        self.total_size_bytes
+            .fetch_add(file_size_bytes, Ordering::SeqCst);
+    }
+
+    /// Get the current file count.
+    fn files_count(&self) -> u64 {
+        self.files_count.load(Ordering::SeqCst)
+    }
+
+    /// Get the current total bytes written.
+    fn total_size_bytes(&self) -> u64 {
+        self.total_size_bytes.load(Ordering::SeqCst)
+    }
+}
+
 struct ProgressReporter {
     /// Last percentage that was logged (for throttling log output)
     last_logged_percent: AtomicUsize,
-    /// Last percentage that triggered a callback (for 1% increment events)
+    /// Last percentage that triggered a callback emission (for 1% increment events)
     last_emitted_percent: AtomicUsize,
+    /// Last time (millis since UNIX epoch) that a progress event was emitted
+    last_emit_time_millis: AtomicU64,
+    /// Interval for emitting progress events (time-based throttling)
+    progress_interval: Duration,
     /// Optional progress callback for external event streaming
     progress_callback: Option<Arc<dyn ProgressCallback>>,
     /// Table names for progress reporting
@@ -644,6 +692,8 @@ struct ProgressReporter {
     job_end_block: Option<BlockNum>,
     /// Current chain head block, used for percentage calculation in continuous mode
     chain_head: BlockNum,
+    /// Shared progress stats updated by writers
+    shared_stats: Arc<SharedProgressStats>,
 }
 
 impl ProgressReporter {
@@ -674,10 +724,31 @@ impl ProgressReporter {
                 .store(current_percent, Ordering::SeqCst);
         }
 
-        // Emit progress callback on every 1% increment
+        // Emit progress callback based on either:
+        // 1. Percentage has increased (1% increments), OR
+        // 2. Time interval has passed (if configured and non-zero)
         if let Some(ref callback) = self.progress_callback {
             let last_emitted = self.last_emitted_percent.load(Ordering::SeqCst);
-            if current_percent > last_emitted {
+
+            // Check if we should emit based on percentage increase (1% increments)
+            let percent_based_emit = current_percent > last_emitted;
+
+            // Check if we should emit based on time interval (if non-zero interval configured)
+            let now_millis = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let last_emit_time = self.last_emit_time_millis.load(Ordering::SeqCst);
+            let interval_millis = self.progress_interval.as_millis() as u64;
+            let time_based_emit = !self.progress_interval.is_zero()
+                && now_millis.saturating_sub(last_emit_time) >= interval_millis;
+
+            // Emit if either condition is met
+            if percent_based_emit || time_based_emit {
+                // Read current stats from shared counters
+                let files_count = self.shared_stats.files_count();
+                let total_size_bytes = self.shared_stats.total_size_bytes();
+
                 // Emit for each table
                 for table_name in &self.table_names {
                     callback.on_progress(ProgressUpdate {
@@ -685,14 +756,18 @@ impl ProgressReporter {
                         start_block: self.job_start_block,
                         current_block,
                         end_block: self.job_end_block,
-                        // File and byte counts are tracked at the writer level and
-                        // reported via metrics. Progress callbacks focus on block progress.
-                        files_count: 0,
-                        total_size_bytes: 0,
+                        files_count,
+                        total_size_bytes,
                     });
                 }
-                self.last_emitted_percent
-                    .store(current_percent, Ordering::SeqCst);
+
+                // Update tracking state after emitting
+                if percent_based_emit {
+                    self.last_emitted_percent
+                        .store(current_percent, Ordering::SeqCst);
+                }
+                self.last_emit_time_millis
+                    .store(now_millis, Ordering::SeqCst);
             }
         }
     }
@@ -782,6 +857,8 @@ struct DumpPartition<S: BlockStreamer> {
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     /// A progress reporter which logs the overall progress of all partitions.
     progress_reporter: Arc<ProgressReporter>,
+    /// Shared progress stats updated when files are committed
+    shared_stats: Arc<SharedProgressStats>,
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -846,6 +923,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             missing_ranges_by_table,
             self.compactors_by_table.clone(),
             self.metrics.clone(),
+            self.shared_stats.clone(),
         )?;
 
         let mut stream = std::pin::pin!(stream);
@@ -886,11 +964,17 @@ impl<S: BlockStreamer> DumpPartition<S> {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Mutex, atomic::AtomicUsize};
+    use std::{
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicU64, AtomicUsize},
+        },
+        time::Duration,
+    };
 
     use datasets_common::table_name::TableName;
 
-    use super::ProgressReporter;
+    use super::{ProgressReporter, SharedProgressStats};
     use crate::progress::{ProgressCallback, ProgressUpdate};
 
     /// A mock progress callback that records all progress updates.
@@ -933,15 +1017,19 @@ mod test {
         // Given: A ProgressReporter with 100 total blocks (1 block = 1%)
         let callback = Arc::new(MockProgressCallback::new());
         let table_name: TableName = "blocks".parse().unwrap();
+        let shared_stats = Arc::new(SharedProgressStats::new());
 
         let reporter = ProgressReporter {
             last_logged_percent: AtomicUsize::new(0),
             last_emitted_percent: AtomicUsize::new(0),
+            last_emit_time_millis: AtomicU64::new(0),
+            progress_interval: Duration::ZERO, // Disable time-based emission for this test
             progress_callback: Some(callback.clone()),
             table_names: vec![table_name.clone()],
             job_start_block: 0,
             job_end_block: Some(99),
             chain_head: 99,
+            shared_stats,
         };
 
         // When: Process all 100 blocks (block numbers 0-99)
@@ -991,15 +1079,19 @@ mod test {
             "transactions".parse().unwrap(),
             "logs".parse().unwrap(),
         ];
+        let shared_stats = Arc::new(SharedProgressStats::new());
 
         let reporter = ProgressReporter {
             last_logged_percent: AtomicUsize::new(0),
             last_emitted_percent: AtomicUsize::new(0),
+            last_emit_time_millis: AtomicU64::new(0),
+            progress_interval: Duration::ZERO, // Disable time-based emission for this test
             progress_callback: Some(callback.clone()),
             table_names: tables.clone(),
             job_start_block: 0,
             job_end_block: Some(99),
             chain_head: 99,
+            shared_stats,
         };
 
         // When: Process 10 blocks (10%)
@@ -1038,14 +1130,18 @@ mod test {
     #[test]
     fn progress_reporter_no_callback_no_updates() {
         // Given: A ProgressReporter with no callback
+        let shared_stats = Arc::new(SharedProgressStats::new());
         let reporter = ProgressReporter {
             last_logged_percent: AtomicUsize::new(0),
             last_emitted_percent: AtomicUsize::new(0),
+            last_emit_time_millis: AtomicU64::new(0),
+            progress_interval: Duration::from_secs(10),
             progress_callback: None,
             table_names: vec!["blocks".parse().unwrap()],
             job_start_block: 0,
             job_end_block: Some(99),
             chain_head: 99,
+            shared_stats,
         };
 
         // When: Process all 100 blocks
@@ -1062,15 +1158,19 @@ mod test {
         // Given: A ProgressReporter with 10,000 blocks
         let callback = Arc::new(MockProgressCallback::new());
         let table_name: TableName = "blocks".parse().unwrap();
+        let shared_stats = Arc::new(SharedProgressStats::new());
 
         let reporter = ProgressReporter {
             last_logged_percent: AtomicUsize::new(0),
             last_emitted_percent: AtomicUsize::new(0),
+            last_emit_time_millis: AtomicU64::new(0),
+            progress_interval: Duration::ZERO, // Disable time-based emission for this test
             progress_callback: Some(callback.clone()),
             table_names: vec![table_name],
             job_start_block: 1000, // Non-zero start block
             job_end_block: Some(10999),
             chain_head: 10999,
+            shared_stats,
         };
 
         // When: Process all 10,000 blocks

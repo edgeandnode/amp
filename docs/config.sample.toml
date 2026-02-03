@@ -94,3 +94,16 @@ url = "postgres://<pg_url>"
 # active = false                   # Enable or disable the collector (default: false)
 # min_interval = 30.0              # Interval in seconds to run the garbage collector (default: 30.0)
 # deletion_lock_duration = 1800.0  # Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)
+
+# Worker configuration
+[worker.events]
+# enabled = false                  # Enable event streaming to Kafka (default: false)
+# progress_interval_secs = 10.0    # Interval in seconds for emitting progress events (default: 10.0)
+                                   # Progress events will be emitted at most once per this interval,
+                                   # OR when the percentage increases by 1%, whichever comes first.
+                                   # Set to 0 to disable time-based progress events.
+
+[worker.events.kafka]
+# brokers = "localhost:9092"       # Kafka broker addresses (required if events enabled)
+# topic = "amp.worker.events"      # Kafka topic for worker events (default: "amp.worker.events")
+# partitions = 16                  # Number of partitions when auto-creating topic (default: 16)

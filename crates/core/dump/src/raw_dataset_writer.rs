@@ -16,6 +16,7 @@ use crate::{
     compaction::AmpCompactor,
     metrics,
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput, commit_metadata},
+    raw_dataset::SharedProgressStats,
 };
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
@@ -24,11 +25,14 @@ const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 pub struct RawDatasetWriter {
     writers: BTreeMap<TableName, RawTableWriter>,
     metadata_db: MetadataDb,
+    /// Shared progress stats - updated when files are committed
+    shared_stats: Arc<SharedProgressStats>,
 }
 
 impl RawDatasetWriter {
     /// Expects `dataset_ctx` to contain a single dataset and `block_ranges_by_table` to contain
     /// one entry per table in that dataset.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         catalog: Catalog,
         metadata_db: MetadataDb,
@@ -37,6 +41,7 @@ impl RawDatasetWriter {
         missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
         compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
+        shared_stats: Arc<SharedProgressStats>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         for table in catalog.tables() {
@@ -57,6 +62,7 @@ impl RawDatasetWriter {
         Ok(RawDatasetWriter {
             writers,
             metadata_db,
+            shared_stats,
         })
     }
 
@@ -72,6 +78,7 @@ impl RawDatasetWriter {
         }) = writer.write(table_rows).await?
         {
             let location_id = writer.table.location_id();
+            let file_size = object_meta.size;
             commit_metadata(
                 &self.metadata_db,
                 parquet_meta,
@@ -81,6 +88,9 @@ impl RawDatasetWriter {
                 footer,
             )
             .await?;
+
+            // Track file commit for progress reporting
+            self.shared_stats.record_file_commit(file_size);
         }
 
         Ok(())
@@ -98,6 +108,7 @@ impl RawDatasetWriter {
                 ..
             }) = writer.close().await?
             {
+                let file_size = object_meta.size;
                 commit_metadata(
                     &self.metadata_db,
                     parquet_meta,
@@ -106,7 +117,10 @@ impl RawDatasetWriter {
                     &url,
                     footer,
                 )
-                .await?
+                .await?;
+
+                // Track file commit for progress reporting
+                self.shared_stats.record_file_commit(file_size);
             }
         }
 

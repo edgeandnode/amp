@@ -206,12 +206,23 @@ pub struct WorkerConfig {
     pub events: WorkerEventsConfig,
 }
 
+fn default_progress_interval_secs() -> f64 {
+    10.0
+}
+
 /// Configuration for worker event streaming.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct WorkerEventsConfig {
     /// Enable/disable event emission (default: false)
     #[serde(default)]
     pub enabled: bool,
+
+    /// Interval in seconds for emitting progress events (default: 10.0)
+    ///
+    /// Progress events will be emitted at most once per this interval.
+    /// Set to 0 to disable time-based progress events (only emit on file finalization).
+    #[serde(default = "default_progress_interval_secs")]
+    pub progress_interval_secs: f64,
 
     /// Kafka-specific configuration
     pub kafka: Option<KafkaEventsConfig>,
@@ -241,6 +252,24 @@ pub struct KafkaEventsConfig {
     /// Used for consistent partition key hashing.
     #[serde(default = "default_kafka_partitions")]
     pub partitions: u32,
+
+    /// SASL authentication mechanism (optional)
+    ///
+    /// Supported values: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"
+    /// If not set, no SASL authentication is used.
+    pub sasl_mechanism: Option<String>,
+
+    /// SASL username (required if sasl_mechanism is set)
+    pub sasl_username: Option<String>,
+
+    /// SASL password (required if sasl_mechanism is set)
+    pub sasl_password: Option<String>,
+
+    /// Enable TLS encryption (default: false)
+    ///
+    /// When enabled, connections to Kafka brokers use TLS.
+    #[serde(default)]
+    pub tls_enabled: bool,
 }
 
 impl ConfigFile {

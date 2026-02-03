@@ -1,6 +1,6 @@
 //! Internal job implementation for the worker service.
 
-use std::{future::Future, sync::Arc};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use datasets_common::hash_reference::HashReference;
 use dump::{Ctx, Error as DumpError, ProgressCallback, metrics::MetricsRegistry};
@@ -62,6 +62,8 @@ pub(super) fn new(
     ));
 
     // Create Ctx instance for job execution
+    let progress_interval =
+        Duration::from_secs_f64(job_ctx.config.events_config.progress_interval_secs);
     let ctx = Ctx {
         config: job_ctx.config.dump_config(),
         metadata_db: job_ctx.metadata_db.clone(),
@@ -70,6 +72,7 @@ pub(super) fn new(
         notification_multiplexer: job_ctx.notification_multiplexer.clone(),
         metrics,
         progress_callback,
+        progress_interval,
     };
 
     let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
