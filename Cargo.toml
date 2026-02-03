@@ -41,6 +41,12 @@ members = [
 
 resolver = "2"
 
+[workspace.metadata.cargo-shear]
+# Ignore minimal lib.rs files in codegen auxiliary crates
+ignored-paths = [
+    "*/gen/src/lib.rs",
+]
+
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
