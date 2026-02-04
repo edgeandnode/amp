@@ -81,6 +81,7 @@ const AMP_CRATES: &[&str] = &[
     "auth_http",
     "common",
     "controller",
+    "dataset_authoring",
     "datasets_common",
     "datasets_derived",
     "datasets_raw",

@@ -12,6 +12,8 @@ name = "tests"
 
 [dependencies]
 alloy.workspace = true
+async-trait.workspace = true
+datafusion.workspace = true
 amp-client = { path = "../crates/clients/flight" }
 amp-data-store = { path = "../crates/core/data-store" }
 amp-object-store = { path = "../crates/core/object-store" }
@@ -29,6 +31,7 @@ ctor = "0.5.0"
 amp-dataset-store = { path = "../crates/core/dataset-store" }
 amp-datasets-registry = { path = "../crates/core/datasets-registry" }
 amp-providers-registry = { path = "../crates/core/providers-registry" }
+dataset-authoring = { path = "../crates/core/dataset-authoring" }
 datasets-common = { path = "../crates/core/datasets-common" }
 datasets-derived = { path = "../crates/core/datasets-derived" }
 dotenvy.workspace = true

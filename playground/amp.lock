@@ -1,0 +1,11 @@
+version: 1
+root:
+  namespace: playground
+  name: demo
+  version: 0.0.0
+dependencies:
+  eth: 4d31610e5cad62ee287373d590cf80b9e0a63cd48ac96fe7d571d79d8759c7f8
+nodes:
+  4d31610e5cad62ee287373d590cf80b9e0a63cd48ac96fe7d571d79d8759c7f8:
+    namespace: my_org
+    name: eth_mainnet
