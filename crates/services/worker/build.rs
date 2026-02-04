@@ -5,6 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut config = prost_build::Config::new();
         config.out_dir("src/kafka/proto");
+        config.protoc_arg("--experimental_allow_proto3_optional");
 
         config.compile_protos(&["proto/worker_events.proto"], &["proto/"])?;
 

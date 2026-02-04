@@ -1,5 +1,6 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
+use amp_config::WorkerEventsConfig;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use backon::{ExponentialBuilder, Retryable};
@@ -27,8 +28,6 @@ use self::{
     job_queue::JobQueue,
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
-use amp_config::WorkerEventsConfig;
-
 use crate::{
     build_info::BuildInfo,
     config::Config,
