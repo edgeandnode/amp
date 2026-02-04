@@ -388,7 +388,6 @@ impl RawTableWriter {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
-        let block_timestamp = range.timestamp();
 
         let metadata = file
             .close(range, vec![], Generation::default())
@@ -398,10 +397,7 @@ impl RawTableWriter {
         if let Some(ref metrics) = self.metrics {
             let table_name = self.table.table_name().to_string();
             let location_id = self.table.location_id();
-            metrics.record_file_written(table_name.clone(), *location_id);
-            if let Some(ts) = block_timestamp {
-                metrics.record_table_freshness(table_name, *location_id, ts);
-            }
+            metrics.record_file_written(table_name, *location_id);
         }
 
         self.compactor

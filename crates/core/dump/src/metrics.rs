@@ -238,7 +238,7 @@ impl MetricsRegistry {
     }
 
     /// Record table freshness metrics (timestamp and delay)
-    pub(crate) fn record_table_freshness(
+    pub fn record_table_freshness(
         &self,
         table: String,
         location_id: i64,
