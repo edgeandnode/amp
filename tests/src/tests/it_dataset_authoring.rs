@@ -262,15 +262,10 @@ async fn infer_schema_from_select_query() {
 
     //* Then
     let schema = result.expect("should infer schema");
-    assert_eq!(schema.arrow.fields.len(), 3);
+    assert_eq!(schema.fields().len(), 3);
 
     // Check field names
-    let field_names: Vec<&str> = schema
-        .arrow
-        .fields
-        .iter()
-        .map(|f| f.name.as_str())
-        .collect();
+    let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert!(field_names.contains(&"id"));
     assert!(field_names.contains(&"name"));
     assert!(field_names.contains(&"active"));
@@ -714,7 +709,8 @@ async fn full_build_pipeline_without_dependencies() {
         fs::write(&sql_output_path, &rendered).expect("should write sql");
 
         let schema_output_path = sql_output_dir.join(format!("{}.schema.json", table_name));
-        arrow_json::write_schema_file(&schema.arrow, &schema_output_path)
+        let arrow_schema: datasets_common::manifest::ArrowSchema = (&schema).into();
+        arrow_json::write_schema_file(&arrow_schema, &schema_output_path)
             .expect("should write schema");
     }
 

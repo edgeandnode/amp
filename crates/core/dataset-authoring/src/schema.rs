@@ -17,7 +17,7 @@
 //!
 //! ```ignore
 //! use dataset_authoring::schema::{SchemaContext, DependencyTable};
-//! use datasets_common::manifest::TableSchema;
+//! use datafusion::arrow::datatypes::SchemaRef;
 //!
 //! // Create context with dependency tables
 //! let mut ctx = SchemaContext::new();
@@ -27,8 +27,8 @@
 //!     schema: schema_ref,
 //! });
 //!
-//! // Infer schema from SELECT query
-//! let schema = ctx.infer_schema(&query).await?;
+//! // Infer schema from SELECT query - returns Arrow SchemaRef
+//! let schema: SchemaRef = ctx.infer_schema(&query).await?;
 //! ```
 
 use std::sync::Arc;
@@ -45,7 +45,7 @@ use datafusion::{
     physical_plan::ExecutionPlan,
     sql::sqlparser::ast,
 };
-use datasets_common::{manifest::TableSchema, table_name::TableName};
+use datasets_common::table_name::TableName;
 
 /// A dependency table to register for schema inference.
 ///
@@ -105,7 +105,7 @@ impl SchemaContext {
     /// Infers the output schema of a SELECT query.
     ///
     /// Plans the query against the registered dependency tables and
-    /// returns the schema of the query result.
+    /// returns the Arrow schema of the query result.
     ///
     /// # Arguments
     ///
@@ -113,12 +113,12 @@ impl SchemaContext {
     ///
     /// # Returns
     ///
-    /// * `Ok(TableSchema)` - The inferred schema of the query result.
+    /// * `Ok(SchemaRef)` - The inferred Arrow schema of the query result.
     /// * `Err(SchemaInferenceError)` - If planning fails.
     pub async fn infer_schema(
         &self,
         query: &ast::Query,
-    ) -> Result<TableSchema, SchemaInferenceError> {
+    ) -> Result<SchemaRef, SchemaInferenceError> {
         let ctx = self.create_session_context()?;
 
         // Create a SELECT statement from the query
@@ -133,10 +133,9 @@ impl SchemaContext {
             .await
             .map_err(SchemaInferenceError::Planning)?;
 
-        // Extract schema from the logical plan
+        // Extract schema from the logical plan - convert DFSchema to Arrow Schema
         let df_schema: DFSchemaRef = plan.schema().clone();
-
-        Ok(TableSchema::from(df_schema))
+        Ok(Arc::new(df_schema.as_arrow().clone()))
     }
 
     /// Creates a DataFusion session context with all registered tables.
@@ -316,10 +315,10 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 3);
-            assert_eq!(schema.arrow.fields[0].name, "block_num");
-            assert_eq!(schema.arrow.fields[1].name, "tx_hash");
-            assert_eq!(schema.arrow.fields[2].name, "value");
+            assert_eq!(schema.fields().len(), 3);
+            assert_eq!(schema.field(0).name(), "block_num");
+            assert_eq!(schema.field(1).name(), "tx_hash");
+            assert_eq!(schema.field(2).name(), "value");
         }
 
         #[tokio::test]
@@ -344,9 +343,9 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 2);
-            assert_eq!(schema.arrow.fields[0].name, "block_num");
-            assert_eq!(schema.arrow.fields[1].name, "tx_hash");
+            assert_eq!(schema.fields().len(), 2);
+            assert_eq!(schema.field(0).name(), "block_num");
+            assert_eq!(schema.field(1).name(), "tx_hash");
         }
 
         #[tokio::test]
@@ -371,9 +370,9 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 2);
-            assert_eq!(schema.arrow.fields[0].name, "block");
-            assert_eq!(schema.arrow.fields[1].name, "amount");
+            assert_eq!(schema.fields().len(), 2);
+            assert_eq!(schema.field(0).name(), "block");
+            assert_eq!(schema.field(1).name(), "amount");
         }
 
         #[tokio::test]
@@ -396,7 +395,7 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 2);
+            assert_eq!(schema.fields().len(), 2);
         }
 
         #[tokio::test]
@@ -431,9 +430,9 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 2);
-            assert_eq!(schema.arrow.fields[0].name, "tx_hash");
-            assert_eq!(schema.arrow.fields[1].name, "timestamp");
+            assert_eq!(schema.fields().len(), 2);
+            assert_eq!(schema.field(0).name(), "tx_hash");
+            assert_eq!(schema.field(1).name(), "timestamp");
         }
 
         #[tokio::test]
@@ -459,8 +458,8 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 1);
-            assert_eq!(schema.arrow.fields[0].name, "block_num");
+            assert_eq!(schema.fields().len(), 1);
+            assert_eq!(schema.field(0).name(), "block_num");
         }
 
         #[tokio::test]
@@ -484,11 +483,11 @@ mod tests {
             //* Then
             let schema = result.expect("schema inference should succeed");
             assert!(
-                !schema.arrow.fields[0].nullable,
+                !schema.field(0).is_nullable(),
                 "required_col should not be nullable"
             );
             assert!(
-                schema.arrow.fields[1].nullable,
+                schema.field(1).is_nullable(),
                 "optional_col should be nullable"
             );
         }
@@ -514,9 +513,9 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 2);
-            assert_eq!(schema.arrow.fields[0].name, "sum");
-            assert_eq!(schema.arrow.fields[1].name, "doubled");
+            assert_eq!(schema.fields().len(), 2);
+            assert_eq!(schema.field(0).name(), "sum");
+            assert_eq!(schema.field(1).name(), "doubled");
         }
 
         #[tokio::test]
@@ -584,9 +583,9 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 2);
-            assert_eq!(schema.arrow.fields[0].name, "number");
-            assert_eq!(schema.arrow.fields[1].name, "block_number");
+            assert_eq!(schema.fields().len(), 2);
+            assert_eq!(schema.field(0).name(), "number");
+            assert_eq!(schema.field(1).name(), "block_number");
         }
 
         #[tokio::test]
@@ -612,11 +611,11 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 1);
-            assert_eq!(schema.arrow.fields[0].name, "casted_col");
+            assert_eq!(schema.fields().len(), 1);
+            assert_eq!(schema.field(0).name(), "casted_col");
             assert_eq!(
-                schema.arrow.fields[0].type_,
-                datasets_common::manifest::DataType(DataType::UInt32),
+                schema.field(0).data_type(),
+                &DataType::UInt32,
                 "arrow_cast should produce the explicitly specified type"
             );
         }
@@ -641,13 +640,13 @@ mod tests {
 
             //* Then
             let schema = result.expect("schema inference should succeed");
-            assert_eq!(schema.arrow.fields.len(), 1);
-            assert_eq!(schema.arrow.fields[0].name, "decimal_col");
+            assert_eq!(schema.fields().len(), 1);
+            assert_eq!(schema.field(0).name(), "decimal_col");
             // Verify the type is Decimal128 with the specified precision and scale
             assert!(
-                matches!(schema.arrow.fields[0].type_.0, DataType::Decimal128(18, 8)),
+                matches!(schema.field(0).data_type(), DataType::Decimal128(18, 8)),
                 "arrow_cast should produce Decimal128(18, 8), got: {:?}",
-                schema.arrow.fields[0].type_.0
+                schema.field(0).data_type()
             );
         }
     }

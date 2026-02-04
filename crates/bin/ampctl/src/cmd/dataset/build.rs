@@ -208,8 +208,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
         })?;
 
         let ipc_output_path = tables_dir.join(format!("{table_name}.ipc"));
-        let schema_ref = table.schema.arrow.clone().into_schema_ref();
-        arrow_ipc::write_ipc_schema(&schema_ref, &ipc_output_path).map_err(|e| {
+        arrow_ipc::write_ipc_schema(&table.schema, &ipc_output_path).map_err(|e| {
             Error::WriteIpcSchema {
                 table: table_name.clone(),
                 source: e,

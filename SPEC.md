@@ -30,7 +30,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 | 1 | Arrow IPC Module | **Complete** |
 | 2 | Rename `models` → `tables` | **Complete** |
 | 3 | Build Output Layout (`sql/` → `tables/`) | **Complete** |
-| 4 | Schema Type Refactor | Not started |
+| 4 | Schema Type Refactor | **Complete** |
 | 5 | Manifest Table Shape Changes | **Complete** |
 | 6 | Adapter Layer (Legacy ↔ Package) | Not started |
 | 7 | Cache Updates | Not started |
@@ -157,20 +157,20 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `schema.rs`, `validation.rs`, `dependency_manifest.rs`, build commands
 
 **4.1) Update schema inference in `schema.rs`**
-- [ ] Change return type from `TableSchema` to Arrow `SchemaRef`
-- [ ] Remove intermediate `TableSchema`/`ArrowSchema` conversions
-- [ ] Update `SchemaContext::infer_schema()` to return `SchemaRef` directly
+- [x] Change return type from `TableSchema` to Arrow `SchemaRef`
+- [x] Remove intermediate `TableSchema`/`ArrowSchema` conversions
+- [x] Update `SchemaContext::infer_schema()` to return `SchemaRef` directly
 
 **4.2) Update build pipeline**
-- [ ] Write inferred schemas using `arrow_ipc::write_ipc_schema()` instead of JSON
-- [ ] Update validation output to use Arrow types
-- [ ] Update dependency schema handling to read IPC schemas
+- [x] Write inferred schemas using `arrow_ipc::write_ipc_schema()` instead of JSON
+- [x] Update validation output to use Arrow types (`ValidatedTable.schema: SchemaRef`)
+- [x] Build command now uses `SchemaRef` directly without conversion
 
 **4.3) Update `dependency_manifest.rs`**
-- [ ] Consider if `DependencyTable.schema` field needs to change (for cached dependencies)
-- [ ] May need intermediate representation for cache format
+- [x] `DependencyTable.schema` stays as `TableSchema` for JSON serialization (needed for legacy adapter in Phase 6)
+- [x] Added `From<&SchemaRef> for ArrowSchema` to enable conversion from native to serializable format
 
-**Acceptance criteria**: No `TableSchema`/`ArrowSchema` usage in authoring pipeline (only in adapter layer).
+**Acceptance criteria**: No `TableSchema`/`ArrowSchema` usage in authoring pipeline (only in adapter layer). **VERIFIED**
 
 ---
 

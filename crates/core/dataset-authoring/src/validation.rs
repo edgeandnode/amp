@@ -21,17 +21,16 @@ use common::{
     },
 };
 use datafusion::{
-    arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields},
+    arrow::datatypes::{
+        DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields, SchemaRef,
+    },
     common::utils::quote_identifier,
     error::DataFusionError,
     logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
     },
 };
-use datasets_common::{
-    manifest::{DataType as ManifestDataType, TableSchema},
-    table_name::TableName,
-};
+use datasets_common::{manifest::DataType as ManifestDataType, table_name::TableName};
 use datasets_derived::{
     deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, SELF_REF_KEYWORD},
     func_name::{ETH_CALL_FUNCTION_NAME, FuncName},
@@ -116,8 +115,8 @@ pub struct ValidatedTable {
     pub source_path: PathBuf,
     /// Rendered SQL after Jinja templating.
     pub rendered_sql: String,
-    /// Inferred schema from the rendered SQL.
-    pub schema: TableSchema,
+    /// Inferred Arrow schema from the rendered SQL.
+    pub schema: SchemaRef,
 }
 
 /// Errors that can occur during validation.
