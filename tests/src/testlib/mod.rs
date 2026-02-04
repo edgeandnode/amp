@@ -66,6 +66,7 @@ pub mod fixtures {
     mod metadata_db;
     mod package;
     mod snapshot_ctx;
+    mod surfpool;
 
     // Re-export commonly used types for convenience
     pub use ampctl::*;
@@ -82,4 +83,5 @@ pub mod fixtures {
     pub use metadata_db::*;
     pub use package::*;
     pub use snapshot_ctx::*;
+    pub use surfpool::*;
 }

@@ -39,7 +39,7 @@ use worker::node_id::NodeId;
 use super::fixtures::{
     AmpCli, Ampctl, Anvil, DaemonConfig, DaemonConfigBuilder, DaemonController, DaemonServer,
     DaemonStateDir, DaemonWorker, FlightClient, JsonlClient, MetadataDb as MetadataDbFixture,
-    builder as daemon_state_dir_builder,
+    Surfpool, builder as daemon_state_dir_builder,
 };
 use crate::testlib::{
     config::{read_manifest_fixture, read_provider_fixture},
@@ -55,6 +55,7 @@ pub struct TestCtxBuilder {
     test_name: String,
     daemon_config: DaemonConfig,
     anvil_fixture: Option<AnvilMode>,
+    surfpool_fixture: bool,
     manifests_to_register: Vec<ManifestRegistration>,
     providers_to_register: Vec<ProviderRegistration>,
     dataset_snapshots_to_preload: BTreeSet<String>,
@@ -68,6 +69,7 @@ impl TestCtxBuilder {
             test_name: test_name.into(),
             daemon_config: Default::default(),
             anvil_fixture: None,
+            surfpool_fixture: false,
             manifests_to_register: Default::default(),
             providers_to_register: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
@@ -287,6 +289,16 @@ impl TestCtxBuilder {
         self
     }
 
+    /// Enable Surfpool fixture for Solana blockchain testing.
+    ///
+    /// A Surfpool instance will be spawned as a child process with an automatically
+    /// allocated port. The provider will be named "sol_rpc" and available for
+    /// Solana dataset connections.
+    pub fn with_surfpool(mut self) -> Self {
+        self.surfpool_fixture = true;
+        self
+    }
+
     /// Build the isolated test environment.
     ///
     /// Creates a temporary directory structure, generates the configuration file,
@@ -401,6 +413,20 @@ impl TestCtxBuilder {
             None => (None, None),
         };
 
+        // Create Surfpool fixture (if enabled) and capture provider config for later registration
+        let (surfpool, surfpool_provider_config) = if self.surfpool_fixture {
+            let fixture = Surfpool::new()?;
+
+            fixture
+                .wait_for_ready(std::time::Duration::from_secs(30))
+                .await?;
+
+            let surfpool_provider = fixture.new_provider_config();
+            (Some(fixture), Some(surfpool_provider))
+        } else {
+            (None, None)
+        };
+
         // Clone meter for worker and controller before server consumes it
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
@@ -468,7 +494,10 @@ impl TestCtxBuilder {
         }
 
         // Register providers with Admin API (if any)
-        if !self.providers_to_register.is_empty() || anvil_provider_config.is_some() {
+        if !self.providers_to_register.is_empty()
+            || anvil_provider_config.is_some()
+            || surfpool_provider_config.is_some()
+        {
             let ampctl = Ampctl::new(controller.admin_api_url());
 
             // Register static providers from fixtures
@@ -518,6 +547,20 @@ impl TestCtxBuilder {
 
                 tracing::info!("Successfully registered dynamic Anvil provider");
             }
+
+            // Register dynamic Surfpool provider (if present)
+            if let Some(surfpool_config) = surfpool_provider_config {
+                tracing::info!("Registering dynamic Surfpool provider with Admin API");
+
+                ampctl
+                    .register_provider("sol_rpc", &surfpool_config)
+                    .await
+                    .map_err(|err| {
+                        format!("Failed to register dynamic Surfpool provider: {err}")
+                    })?;
+
+                tracing::info!("Successfully registered dynamic Surfpool provider");
+            }
         }
 
         // Start worker using the fixture with shared dataset_store
@@ -545,6 +588,7 @@ impl TestCtxBuilder {
             daemon_controller_fixture: controller,
             daemon_worker_fixture: worker,
             anvil_fixture: anvil,
+            surfpool_fixture: surfpool,
         })
     }
 }
@@ -565,6 +609,7 @@ pub struct TestCtx {
     daemon_controller_fixture: DaemonController,
     daemon_worker_fixture: DaemonWorker,
     anvil_fixture: Option<Anvil>,
+    surfpool_fixture: Option<Surfpool>,
 }
 
 impl TestCtx {
@@ -611,6 +656,17 @@ impl TestCtx {
     pub fn anvil(&self) -> &Anvil {
         self.anvil_fixture.as_ref().unwrap_or_else(|| {
             panic!("Anvil fixture not enabled - call with_anvil_ipc() on TestCtxBuilder")
+        })
+    }
+
+    /// Get a reference to the [`Surfpool`] fixture.
+    ///
+    /// # Panics
+    ///
+    /// Panics if Surfpool was not enabled during environment creation with `with_surfpool()`.
+    pub fn surfpool(&self) -> &Surfpool {
+        self.surfpool_fixture.as_ref().unwrap_or_else(|| {
+            panic!("Surfpool fixture not enabled - call with_surfpool() on TestCtxBuilder")
         })
     }
 

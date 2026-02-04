@@ -11189,6 +11189,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-system-transaction"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a31b5699ec533621515e714f1533ee6b3b0e71c463301d919eb59b8c1e249d30"
+dependencies = [
+ "solana-hash 3.1.0",
+ "solana-keypair",
+ "solana-message",
+ "solana-pubkey 3.0.0",
+ "solana-signer",
+ "solana-system-interface",
+ "solana-transaction",
+]
+
+[[package]]
 name = "solana-sysvar"
 version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12272,7 +12287,11 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "server",
+ "solana-commitment-config",
  "solana-datasets",
+ "solana-rpc-client",
+ "solana-sdk",
+ "solana-system-transaction",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

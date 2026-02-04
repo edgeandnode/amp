@@ -19,6 +19,9 @@ mod register;
 mod restore;
 mod stream;
 mod stream_take;
+mod surfpool;
+mod surfpool_advance;
+mod surfpool_send;
 
 use crate::testlib::{ctx::TestCtx, fixtures::FlightClient};
 
@@ -49,6 +52,12 @@ pub enum TestStep {
     Register(register::Step),
     /// Clean dump location directory.
     CleanDumpLocation(clean_dump_location::Step),
+    /// Initialize Surfpool Solana fixture.
+    Surfpool(surfpool::Step),
+    /// Wait for Surfpool to reach a target slot.
+    SurfpoolAdvance(surfpool_advance::Step),
+    /// Send SOL transfers on Surfpool.
+    SurfpoolSend(surfpool_send::Step),
 }
 
 impl TestStep {
@@ -68,6 +77,9 @@ impl TestStep {
             TestStep::Restore(step) => &step.name,
             TestStep::Register(step) => &step.name,
             TestStep::CleanDumpLocation(step) => &step.clean_dump_location,
+            TestStep::Surfpool(_) => "surfpool",
+            TestStep::SurfpoolAdvance(step) => &step.name,
+            TestStep::SurfpoolSend(step) => &step.name,
         }
     }
 
@@ -87,6 +99,9 @@ impl TestStep {
             TestStep::Restore(step) => step.run(ctx).await,
             TestStep::Register(step) => step.run(ctx).await,
             TestStep::CleanDumpLocation(step) => step.run(ctx).await,
+            TestStep::Surfpool(step) => step.run(ctx).await,
+            TestStep::SurfpoolAdvance(step) => step.run(ctx).await,
+            TestStep::SurfpoolSend(step) => step.run(ctx).await,
         };
 
         match result {

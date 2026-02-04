@@ -96,6 +96,14 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1.4
 
+      - name: Install Surfpool
+        env:
+          SURFPOOL_VERSION: "1.0.0"
+        run: |
+          curl -fsSL "https://github.com/txtx/surfpool/releases/download/v${SURFPOOL_VERSION}/surfpool-linux-x64.tar.gz" \
+            | tar -xz -C /usr/local/bin surfpool
+          surfpool --version
+
       - name: Install cargo-nextest
         uses: baptiste0928/cargo-install@b687c656bda5733207e629b50a22bf68974a0305 # v3
         with:

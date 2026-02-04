@@ -120,14 +120,6 @@ pub fn extractor(
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, ExtractorError> {
-    if config.network != "mainnet" {
-        let err = format!(
-            "unsupported Solana network: {}. Only 'mainnet' is supported.",
-            config.network
-        );
-        return Err(ExtractorError(err));
-    }
-
     let client = match config.rpc_provider_url.scheme() {
         "http" | "https" => SolanaExtractor::new(
             config.rpc_provider_url,

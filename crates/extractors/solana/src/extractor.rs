@@ -59,8 +59,6 @@ impl SolanaExtractor {
         use_archive: crate::UseArchive,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
-        assert_eq!(network, "mainnet", "only mainnet is supported");
-
         let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
 
         let rpc_client = rpc_client::SolanaRpcClient::new(
@@ -481,10 +479,63 @@ mod tests {
         }
     }
 
+    /// Verify that `UseArchive::Never` with a non-existent `of1_car_directory`
+    /// does not panic or attempt directory access. The OF1 car manager task is
+    /// always spawned but receives no messages when archive is disabled, so the
+    /// directory path is never used.
+    #[tokio::test]
+    async fn never_archive_with_nonexistent_of1_dir_succeeds() {
+        //* Given
+        let nonexistent_dir = PathBuf::from("/tmp/amp-test-nonexistent-of1-dir-does-not-exist");
+        assert!(
+            !nonexistent_dir.exists(),
+            "test requires the directory to not exist"
+        );
+
+        let extractor = SolanaExtractor::new(
+            Url::parse("https://example.net").expect("valid URL"),
+            None,
+            "localnet".parse().expect("valid network id"),
+            String::new(),
+            nonexistent_dir,
+            false,
+            crate::UseArchive::Never,
+            None,
+        );
+
+        let start = 0;
+        let end = 10;
+
+        // Empty historical stream — mirrors what `block_stream` produces for
+        // `UseArchive::Never`.
+        let historical = futures::stream::empty();
+
+        //* When
+        let block_stream = extractor.block_stream_impl(
+            start,
+            end,
+            historical,
+            rpc_client::rpc_config::RpcBlockConfig::default(),
+        );
+
+        futures::pin_mut!(block_stream);
+
+        // The stream will attempt JSON-RPC calls (which will fail against a
+        // fake URL), but the important thing is that no OF1 directory access
+        // occurs. Consume whatever items are available without asserting on
+        // RPC results — we only care that no panic/crash happens due to the
+        // missing directory.
+        while let Some(_result) = block_stream.next().await {}
+
+        //* Then
+        // If we reach here, the extractor did not panic or attempt to access
+        // the non-existent OF1 directory. The test passes.
+    }
+
     #[tokio::test]
     async fn historical_blocks_only() {
         let extractor = SolanaExtractor::new(
-            Url::parse("https://example.net").unwrap(),
+            Url::parse("https://example.net").expect("valid URL"),
             None,
             "mainnet".parse().expect("valid network id"),
             String::new(),
