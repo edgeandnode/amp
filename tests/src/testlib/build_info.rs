@@ -20,25 +20,3 @@ pub fn load() -> BuildInfo {
         build_date: env!("VERGEN_BUILD_DATE").to_string(),
     }
 }
-
-impl From<BuildInfo> for controller::build_info::BuildInfo {
-    fn from(value: BuildInfo) -> Self {
-        Self {
-            version: value.version,
-            commit_sha: value.commit_sha,
-            commit_timestamp: value.commit_timestamp,
-            build_date: value.build_date,
-        }
-    }
-}
-
-impl From<BuildInfo> for worker::build_info::BuildInfo {
-    fn from(value: BuildInfo) -> Self {
-        Self {
-            version: Some(value.version.clone()),
-            commit_sha: Some(value.commit_sha.clone()),
-            commit_timestamp: Some(value.commit_timestamp.clone()),
-            build_date: Some(value.build_date.clone()),
-        }
-    }
-}

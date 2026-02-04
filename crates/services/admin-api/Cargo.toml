@@ -11,7 +11,6 @@ amp-providers-registry = { path = "../../core/providers-registry" }
 async-trait.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }
-amp-config = { path = "../../config" }
 datafusion.workspace = true
 amp-dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { path = "../../core/datasets-common" }

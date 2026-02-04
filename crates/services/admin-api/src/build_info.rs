@@ -1,5 +1,5 @@
-/// Build information populated from vergen at compile time.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Build information for the Admin API.
+#[derive(Debug, Clone)]
 pub struct BuildInfo {
     /// Git describe output (e.g. `v0.0.22-15-g8b065bde`)
     pub version: String,

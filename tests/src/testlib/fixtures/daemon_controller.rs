@@ -6,7 +6,6 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
@@ -15,6 +14,8 @@ use common::BoxError;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
+
+use crate::testlib::build_info::BuildInfo;
 
 /// Fixture for managing Amp daemon controller instances in tests.
 ///
@@ -94,5 +95,16 @@ impl Drop for DaemonController {
     fn drop(&mut self) {
         tracing::debug!("Aborting daemon controller task");
         self._task.abort();
+    }
+}
+
+impl From<BuildInfo> for controller::build_info::BuildInfo {
+    fn from(value: BuildInfo) -> Self {
+        Self {
+            version: value.version,
+            commit_sha: value.commit_sha,
+            commit_timestamp: value.commit_timestamp,
+            build_date: value.build_date,
+        }
     }
 }

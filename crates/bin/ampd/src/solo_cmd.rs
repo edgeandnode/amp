@@ -177,9 +177,10 @@ pub async fn run(
     };
 
     // Initialize worker
-    let worker_config = worker_cmd::config_from_common(&config, &build_info);
+    let worker_config = worker_cmd::config_from_common(&config);
     let worker_fut = worker::service::new(
         worker_config,
+        build_info,
         metadata_db,
         data_store,
         dataset_store,

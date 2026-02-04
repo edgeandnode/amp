@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use monitoring::logging;
-use worker::{info::WorkerInfo, node_id::NodeId};
+use worker::{build_info::BuildInfo, node_id::NodeId};
 
 use crate::{
     ctx::Ctx,
@@ -221,12 +221,12 @@ impl Default for WorkerMetadata {
 impl From<metadata_db::Worker> for WorkerDetailResponse {
     fn from(worker: metadata_db::Worker) -> Self {
         // Convert the WorkerInfoOwned (JSON RawValue wrapper) from the database
-        // into the strongly-typed WorkerInfo struct from the worker crate.
+        // into the strongly-typed build info struct from the worker crate.
         // If deserialization fails or fields are missing, fall back to defaults.
         let info = worker
             .info
             .try_into()
-            .map(|info: WorkerInfo| WorkerMetadata {
+            .map(|info: BuildInfo| WorkerMetadata {
                 version: info.version.unwrap_or(default_unknown()),
                 commit_sha: info.commit_sha.unwrap_or(default_unknown()),
                 commit_timestamp: info.commit_timestamp.unwrap_or(default_unknown()),

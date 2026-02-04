@@ -28,8 +28,8 @@ use self::{
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
 use crate::{
+    build_info::BuildInfo,
     config::Config,
-    info::WorkerInfo,
     job::{Job, JobAction, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
@@ -48,15 +48,18 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 ///   job results, and reconciliation. Errors in this phase are returned as [`RuntimeError`].
 pub async fn new(
     config: Config,
+    build_info: impl Into<BuildInfo>,
     metadata_db: MetadataDb,
     data_store: DataStore,
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     node_id: NodeId,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
+    let build_info = build_info.into();
+
     // Register the worker in the Metadata DB and update the latest heartbeat timestamp.
     // Retry on failure
-    register_worker_with_retry(&metadata_db, &node_id, &config.worker_info)
+    register_worker_with_retry(&metadata_db, &node_id, &build_info)
         .await
         .map_err(InitError::Registration)?;
 
@@ -442,7 +445,7 @@ impl Worker {
 async fn register_worker_with_retry(
     metadata_db: &MetadataDb,
     node_id: &NodeId,
-    info: &WorkerInfo,
+    info: &BuildInfo,
 ) -> Result<(), MetadataDbError> {
     (|| metadata_db::workers::register(metadata_db, node_id, info))
         .retry(with_policy())

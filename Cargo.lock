@@ -28,7 +28,6 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "admin-api"
 version = "0.1.0"
 dependencies = [
- "amp-config",
  "amp-data-store",
  "amp-dataset-store",
  "amp-datasets-registry",
@@ -2945,7 +2944,6 @@ name = "controller"
 version = "0.1.0"
 dependencies = [
  "admin-api",
- "amp-config",
  "amp-data-store",
  "amp-dataset-store",
  "amp-datasets-registry",
@@ -12296,6 +12294,7 @@ dependencies = [
  "tonic",
  "tracing",
  "url",
+ "vergen-gitcl",
  "worker",
 ]
 

@@ -1,4 +1,4 @@
-use amp_config::{Config, MetadataDbConfig, build_info::BuildInfo};
+use amp_config::{Config, MetadataDbConfig};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
@@ -6,6 +6,8 @@ use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use monitoring::telemetry::metrics::Meter;
 use worker::node_id::NodeId;
+
+use crate::build_info::BuildInfo;
 
 pub async fn run(
     build_info: BuildInfo,
@@ -53,11 +55,12 @@ pub async fn run(
     let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
 
     // Convert common config to worker-specific config
-    let worker_config = config_from_common(&config, &build_info);
+    let worker_config = config_from_common(&config);
 
     // Initialize the worker (setup phase)
     let worker_fut = worker::service::new(
         worker_config,
+        build_info,
         metadata_db,
         data_store,
         dataset_store,
@@ -114,10 +117,7 @@ pub enum Error {
 }
 
 /// Convert config::Config to worker::config::Config
-pub(crate) fn config_from_common(
-    config: &Config,
-    build_info: &BuildInfo,
-) -> worker::config::Config {
+pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
     worker::config::Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,
@@ -126,11 +126,5 @@ pub(crate) fn config_from_common(
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
-        worker_info: worker::info::WorkerInfo {
-            version: Some(build_info.version.clone()),
-            commit_sha: Some(build_info.commit_sha.clone()),
-            commit_timestamp: Some(build_info.commit_timestamp.clone()),
-            build_date: Some(build_info.build_date.clone()),
-        },
     }
 }

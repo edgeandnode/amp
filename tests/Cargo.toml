@@ -3,6 +3,7 @@ name = "tests"
 edition.workspace = true
 version.workspace = true
 license-file.workspace = true
+build = "build.rs"
 
 [lib]
 name = "tests"
@@ -60,3 +61,6 @@ tonic.workspace = true
 tracing.workspace = true
 url.workspace = true
 worker = { path = "../crates/services/worker" }
+
+[build-dependencies]
+vergen-gitcl = { version = "9.1.0", features = ["build"] }

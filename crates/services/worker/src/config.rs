@@ -2,8 +2,6 @@ use std::{path::PathBuf, time::Duration};
 
 use dump::ParquetConfig;
 
-use crate::info::WorkerInfo;
-
 /// Configuration specific to the worker service
 ///
 /// This configuration contains all fields needed by the worker service to execute
@@ -31,9 +29,6 @@ pub struct Config {
 
     /// Parquet file configuration
     pub parquet: ParquetConfig,
-
-    /// Worker build/version information for registration
-    pub worker_info: WorkerInfo,
 }
 
 impl Config {

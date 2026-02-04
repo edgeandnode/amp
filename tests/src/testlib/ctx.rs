@@ -30,7 +30,6 @@
 
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
-use amp_config::build_info;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::BoxError;
@@ -43,6 +42,7 @@ use super::fixtures::{
     builder as daemon_amp_dir_builder,
 };
 use crate::testlib::{
+    build_info,
     config::{read_manifest_fixture, read_provider_fixture},
     env_dir::TestEnvDir,
 };
@@ -427,7 +427,7 @@ impl TestCtxBuilder {
         .await?;
 
         // Start controller (Admin API) with shared dataset_store
-        let build_info = build_info::unknown();
+        let build_info = build_info::load();
         let controller = DaemonController::new(
             build_info.clone(),
             config.clone(),

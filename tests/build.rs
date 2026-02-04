@@ -1,0 +1,21 @@
+//! Build script for test build metadata.
+//!
+//! This emits VERGEN_* environment variables used by `tests/src/testlib/build_info.rs`.
+
+use vergen_gitcl::{BuildBuilder, Emitter, GitclBuilder};
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+fn main() -> Result<(), BoxError> {
+    let build = BuildBuilder::all_build()?;
+    let gitcl = GitclBuilder::default()
+        .describe(true, true, None)
+        .sha(false)
+        .commit_timestamp(true)
+        .build()?;
+    Emitter::new()
+        .add_instructions(&build)?
+        .add_instructions(&gitcl)?
+        .emit()?;
+    Ok(())
+}
