@@ -146,7 +146,7 @@ Based on codebase exploration (2026-02-04, verified via code search):
 
 **3.4) Update `arrow_json.rs` → deprecate or remove**
 - [x] After IPC is working, remove JSON schema write calls from build flow
-- [ ] Keep `arrow_json.rs` only if needed for legacy adapter layer in Phase 6 (confirmed needed)
+- [x] Keep `arrow_json.rs` only if needed for legacy adapter layer in Phase 6 (confirmed needed)
 
 **Acceptance criteria**: `ampctl dataset build` produces `tables/<table>.sql` + `tables/<table>.ipc`, no `sql/` directory. **VERIFIED**
 
