@@ -40,30 +40,38 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 
 ## Gap Analysis
 
-Based on codebase exploration (2026-02-04):
+Based on codebase exploration (2026-02-04, verified via code search):
 
 ### Currently Implemented
-- `amp.yaml` parsing with `models` field (default `"models"`) in `config.rs:108-109`
-- Model discovery from `models/**/*.sql` in `discovery.rs:97-162`
-- Build output to `sql/<table>.sql` and `sql/<table>.schema.json` in `manifest.rs:405-415`
-- Arrow JSON schema read/write in `arrow_json.rs`
-- Package assembly including `sql/` directory in `package.rs:175-177`
-- Cache storing `manifest.json` only in `cache.rs`
-- Legacy bridge converting authoring manifest to runtime format in `bridge.rs`
-- Jinja templating with `ref`, `source`, `var`, `env_var`, `this` helpers in `jinja.rs`
-- SQL validation (SELECT-only, incremental constraints) in `query.rs`
-- Lockfile (`amp.lock`) for reproducible builds in `lockfile.rs`
-- CLI commands: `build`, `check`, `package`, `register` in `ampctl`
+
+| Component | Location | Details |
+|-----------|----------|---------|
+| Config parsing | `config.rs:87-118` | `AmpYaml` with `models: PathBuf` field, default via `default_models_dir()` returning `"models"` |
+| Model discovery | `discovery.rs:97-162` | `discover_models()` scans `<models_dir>/**/*.sql`, returns `BTreeMap<TableName, PathBuf>` |
+| Build output | `manifest.rs:406,415` | `sql/<table>.sql` and `sql/<table>.schema.json` |
+| Schema files | `arrow_json.rs` | JSON format using `ArrowSchema` from `datasets_common::manifest` |
+| Package assembly | `package.rs:175-184` | Includes `sql/` and `functions/` directories |
+| Cache | `cache.rs:131-133` | Stores `<hash>/manifest.json` only (no SQL/schema files) |
+| Bridge | `bridge.rs` | Converts `AuthoringManifest` → legacy runtime format |
+| Jinja | `jinja.rs` | `ref`, `source`, `var`, `env_var`, `this` template helpers |
+| SQL validation | `query.rs` | SELECT-only, incremental mode constraints |
+| Lockfile | `lockfile.rs` | `amp.lock` for reproducible dependency resolution |
+| Validation | `validation.rs:105` | `discovered_models: BTreeMap<TableName, PathBuf>` |
+| TableDef | `manifest.rs:168-176` | Has `sql: FileRef`, `schema: FileRef`, `network: NetworkId` |
+| Playground | `playground/` | Uses `models/` dir, builds to `build/sql/` |
 
 ### Not Yet Implemented
-- Arrow IPC file I/O (no `arrow_ipc.rs` module exists)
-- `tables/` output directory (currently `sql/`)
-- `.ipc` schema files (currently `.schema.json`)
-- `tables` config field (currently `models`)
-- Support for raw tables (tables without SQL) in authoring manifest
-- Canonical package format in cache (currently legacy manifest JSON)
-- Admin API fetch → canonical package conversion (adapter layer)
-- IPC → legacy schema JSON conversion for register (adapter layer)
+
+| Feature | Current State | Target State |
+|---------|---------------|--------------|
+| Arrow IPC I/O | No `arrow_ipc.rs` module | `write_ipc_schema()`, `read_ipc_schema()` functions |
+| Build output dir | `sql/` | `tables/` |
+| Schema format | `.schema.json` (JSON) | `.ipc` (Arrow IPC file) |
+| Config field | `models:` (default `"models"`) | `tables:` (default `"tables"`) |
+| Raw table support | `sql` field required | `sql: Option<FileRef>` |
+| Cache format | `manifest.json` only | Full package: `manifest.json` + `tables/` + `functions/` |
+| Fetch adapter | N/A | Legacy manifest → canonical package conversion |
+| Register adapter | N/A | Package → legacy manifest JSON for API |
 
 ---
 
@@ -91,20 +99,23 @@ Based on codebase exploration (2026-02-04):
 **Files**: `config.rs`, `discovery.rs`, `validation.rs`, CLI commands, integration tests
 
 **2.1) Update `config.rs`**
-- [ ] Rename field `models: PathBuf` to `tables: PathBuf` (line 109)
-- [ ] Update default function `default_models_dir()` → `default_tables_dir()` returning `"tables"`
+- [ ] Rename field `models: PathBuf` to `tables: PathBuf` (line 109 in `AmpYaml`)
+- [ ] Update default function `default_models_dir()` → `default_tables_dir()` returning `"tables"` (line 156-158)
 - [ ] Update `AmpYamlV1` struct similarly (line 141)
-- [ ] Update all validation messages referencing "models directory"
-- [ ] Update all tests using `models` field
+- [ ] Update `validate()` to reference "tables directory" instead of "models directory" (line 208)
+- [ ] Update all tests using `models` field (lines 507-852 test module)
 
 **2.2) Update `discovery.rs`**
-- [ ] Rename function `discover_models()` → `discover_tables()`
+- [ ] Rename function `discover_models()` → `discover_tables()` (line 97)
 - [ ] Update variable name `models` → `tables` in function body (line 108)
-- [ ] Update documentation and error messages
+- [ ] Update `DiscoveryError` variants: `DuplicateModelName` → `DuplicateTableName`, etc.
+- [ ] Update `DiscoveredModel` → `DiscoveredTable` struct
+- [ ] Update documentation and error messages throughout
 
 **2.3) Update call sites**
-- [ ] Update `validation.rs` field `discovered_models` → `discovered_tables` (line 105)
-- [ ] Update all callers of discovery functions
+- [ ] Update `validation.rs` field `discovered_models` → `discovered_tables` (line 105 in `ValidationResult`)
+- [ ] Update `validate_network_inference()` parameters (line 591)
+- [ ] Update all callers of discovery functions in validation/build flows
 
 **Acceptance criteria**: `amp.yaml` accepts `tables:` field (with `tables` as default). `models:` is no longer recognized.
 
@@ -118,11 +129,14 @@ Based on codebase exploration (2026-02-04):
 - [ ] Change SQL file path from `sql/<table>.sql` to `tables/<table>.sql` (line 406)
 - [ ] Change schema file path from `sql/<table>.schema.json` to `tables/<table>.ipc` (line 415)
 - [ ] Update `sql_dir` parameter naming throughout to `tables_dir`
-- [ ] Update `ManifestBuilder` field and parameter names
+- [ ] Update `ManifestBuilder` field `sql_dir: &'a Path` → `tables_dir: &'a Path` (line 286)
+- [ ] Update `ManifestBuilder::new()` parameter (line 306)
+- [ ] Update all test fixtures using `sql/` paths (lines 819-934 tests)
 
 **3.2) Update `package.rs`**
-- [ ] Change directory inclusion from `sql/` to `tables/` (lines 174-177)
-- [ ] Update all test fixtures and assertions
+- [ ] Change directory inclusion from `sql/` to `tables/` (lines 175-178)
+- [ ] Update `from_directory()` to look for `tables/` instead of `sql/`
+- [ ] Update all test fixtures and assertions (lines 613-651 tests)
 
 **3.3) Update `bridge.rs`**
 - [ ] Update all path references from `sql/` to `tables/`
@@ -130,7 +144,7 @@ Based on codebase exploration (2026-02-04):
 
 **3.4) Update `arrow_json.rs` → deprecate or remove**
 - [ ] After IPC is working, remove JSON schema write calls from build flow
-- [ ] Keep `arrow_json.rs` only if needed for legacy adapter layer
+- [ ] Keep `arrow_json.rs` only if needed for legacy adapter layer in Phase 6
 
 **Acceptance criteria**: `ampctl dataset build` produces `tables/<table>.sql` + `tables/<table>.ipc`, no `sql/` directory.
 
@@ -163,13 +177,20 @@ Based on codebase exploration (2026-02-04):
 **Files**: `manifest.rs` (TableDef struct and builder)
 
 **5.1) Update `TableDef` in `manifest.rs`**
-- [ ] Change `schema: FileRef` to `ipc: FileRef` (path to `.ipc` file)
-- [ ] Make `sql: FileRef` optional (`Option<FileRef>`) for raw table support
-- [ ] Update serialization to omit `sql` field when `None`
+- [ ] Change `schema: FileRef` to `ipc: FileRef` (line 173)
+- [ ] Make `sql: FileRef` optional: `sql: Option<FileRef>` (line 171)
+- [ ] Add `#[serde(skip_serializing_if = "Option::is_none")]` to `sql` field
+- [ ] Update `ManifestError::SchemaFileRef` → `ManifestError::IpcFileRef` (lines 78-87)
 
 **5.2) Update manifest builder**
-- [ ] Handle derived tables: write both `sql` and `ipc`
-- [ ] Prepare for raw tables: only `ipc` field (future support)
+- [ ] Update `build_tables()` to create `TableDef` with optional `sql` (lines 401-438)
+- [ ] Handle derived tables: write both `sql: Some(...)` and `ipc: ...`
+- [ ] Prepare for raw tables: `sql: None`, only `ipc` field (future support)
+
+**5.3) Update tests**
+- [ ] Update `table_def_serializes_correctly` test (lines 727-753)
+- [ ] Add test for optional SQL field serialization
+- [ ] Add test for raw table (no SQL) serialization
 
 **Acceptance criteria**: Manifest JSON has `"ipc"` field instead of `"schema"`. SQL field can be optional.
 
@@ -210,20 +231,26 @@ Based on codebase exploration (2026-02-04):
 
 ### Phase 7: Cache Updates
 
-**Files**: `cache.rs`, `resolver.rs`
+**Files**: `cache.rs`, `resolver.rs`, `dependency_manifest.rs`
 
 **7.1) Update `cache.rs`**
 - [ ] Change cache structure from `manifest.json` only to full package format:
-  - `<hash>/manifest.json` (canonical format)
+  - `<hash>/manifest.json` (canonical format with file refs)
   - `<hash>/tables/<table>.sql`
   - `<hash>/tables/<table>.ipc`
-  - `<hash>/functions/`
-- [ ] Update `Cache::get()` to read canonical package
-- [ ] Update `Cache::put()` to write canonical package
+  - `<hash>/functions/<name>.js`
+- [ ] Add new struct `CachedPackage` to represent full package
+- [ ] Update `Cache::get()` to return `CachedPackage` (line 145)
+- [ ] Update `Cache::put()` to accept and write full package (line 173)
+- [ ] Update `manifest_path()` logic (line 131-133)
 
 **7.2) Update `resolver.rs`**
-- [ ] Update dependency resolution to read IPC schemas from cache
-- [ ] Update `DependencyManifest` parsing to handle new format
+- [ ] Update dependency resolution to read IPC schemas from cached package
+- [ ] Update `DependencyManifest` parsing to read from package structure
+
+**7.3) Update `dependency_manifest.rs`**
+- [ ] Update `DependencyTable.schema` field to work with IPC format
+- [ ] Consider if schema should be loaded lazily from `.ipc` file
 
 **Acceptance criteria**: Cache stores and retrieves full canonical packages, not just manifest JSON.
 
@@ -251,10 +278,34 @@ Based on codebase exploration (2026-02-04):
 - [ ] Update `ampctl dataset` subcommand help for `tables/` directory
 
 **8.4) Update playground sample**
+- [ ] Delete `playground/build/` directory (will be regenerated)
 - [ ] Rename `playground/models/` to `playground/tables/`
 - [ ] Update `playground/amp.yaml` to use `tables:` field (or rely on new default)
+- [ ] Regenerate `playground/build/` with new structure
+
+**8.5) Update module docstrings**
+- [ ] Update `lib.rs` docstring (lines 1-29) mentioning `models/` and `sql/`
+- [ ] Update `manifest.rs` docstring (lines 1-41) with example JSON
 
 **Acceptance criteria**: Docs, tests, and samples are consistent with new implementation.
+
+---
+
+## File Annotations
+
+Quick reference for key files and line numbers (verified 2026-02-04):
+
+| File | Key Lines | Purpose |
+|------|-----------|---------|
+| `config.rs` | 87-118, 156-158 | `AmpYaml` struct, `default_models_dir()` |
+| `discovery.rs` | 97-162 | `discover_models()` function |
+| `manifest.rs` | 168-176, 282-292 | `TableDef` struct, `ManifestBuilder` |
+| `package.rs` | 164-187 | `from_directory()` reads `sql/` and `functions/` |
+| `cache.rs` | 131-133, 145-163, 173-200 | `manifest_path()`, `get()`, `put()` |
+| `arrow_json.rs` | 74-104 | `write_schema_file()`, `read_schema_file()` |
+| `validation.rs` | 105 | `discovered_models` field |
+| `lib.rs` | 1-29 | Module docstring with workflow description |
+| `playground/amp.yaml` | 1-8 | Sample config using `models` default |
 
 ---
 
