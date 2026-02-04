@@ -27,7 +27,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Arrow IPC Module | Not started |
+| 1 | Arrow IPC Module | **Complete** |
 | 2 | Rename `models` → `tables` | Not started |
 | 3 | Build Output Layout (`sql/` → `tables/`) | Not started |
 | 4 | Schema Type Refactor | Not started |
@@ -64,7 +64,7 @@ Based on codebase exploration (2026-02-04, verified via code search):
 
 | Feature | Current State | Target State |
 |---------|---------------|--------------|
-| Arrow IPC I/O | No `arrow_ipc.rs` module | `write_ipc_schema()`, `read_ipc_schema()` functions |
+| Arrow IPC I/O | `arrow_ipc.rs` module with `write_ipc_schema()`, `read_ipc_schema()` | **Complete** |
 | Build output dir | `sql/` | `tables/` |
 | Schema format | `.schema.json` (JSON) | `.ipc` (Arrow IPC file) |
 | Config field | `models:` (default `"models"`) | `tables:` (default `"tables"`) |
@@ -82,15 +82,15 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `arrow_ipc.rs` (new), `lib.rs` (1 line)
 
 **1.1) Create `arrow_ipc.rs` module**
-- [ ] Add new module `crates/core/dataset-authoring/src/arrow_ipc.rs`
-- [ ] Implement `write_ipc_schema(schema: &Schema, path: &Path) -> Result<()>`
-  - Use Arrow IPC FileWriter with schema-only (no record batches)
-- [ ] Implement `read_ipc_schema(path: &Path) -> Result<Schema>`
-  - Use Arrow IPC FileReader to read schema metadata
-- [ ] Add comprehensive tests for round-trip serialization
-- [ ] Export from `lib.rs`
+- [x] Add new module `crates/core/dataset-authoring/src/arrow_ipc.rs`
+- [x] Implement `write_ipc_schema(schema: &SchemaRef, path: &Path) -> Result<()>`
+  - Uses Arrow IPC FileWriter with schema-only (no record batches)
+- [x] Implement `read_ipc_schema(path: &Path) -> Result<SchemaRef>`
+  - Uses Arrow IPC FileReader to read schema metadata
+- [x] Add comprehensive tests for round-trip serialization
+- [x] Export from `lib.rs`
 
-**Acceptance criteria**: Can write Arrow `Schema` to `.ipc` file and read it back losslessly.
+**Acceptance criteria**: Can write Arrow `Schema` to `.ipc` file and read it back losslessly. **VERIFIED**
 
 ---
 
