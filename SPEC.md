@@ -25,7 +25,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 
 ## Gap Analysis
 
-Based on codebase exploration (2025-02-04):
+Based on codebase exploration (2026-02-04):
 
 ### Currently Implemented
 - `amp.yaml` parsing with `models` field (default `"models"`) in `config.rs:108-109`
@@ -52,6 +52,8 @@ Based on codebase exploration (2025-02-04):
 
 ### Phase 1: Arrow IPC Module (Foundational)
 
+**Files**: `arrow_ipc.rs` (new), `lib.rs` (1 line)
+
 **1.1) Create `arrow_ipc.rs` module**
 - [ ] Add new module `crates/core/dataset-authoring/src/arrow_ipc.rs`
 - [ ] Implement `write_ipc_schema(schema: &Schema, path: &Path) -> Result<()>`
@@ -66,6 +68,8 @@ Based on codebase exploration (2025-02-04):
 ---
 
 ### Phase 2: Rename `models` → `tables` (Config Change)
+
+**Files**: `config.rs`, `discovery.rs`, `validation.rs`, CLI commands, integration tests
 
 **2.1) Update `config.rs`**
 - [ ] Rename field `models: PathBuf` to `tables: PathBuf` (line 109)
@@ -88,6 +92,8 @@ Based on codebase exploration (2025-02-04):
 ---
 
 ### Phase 3: Build Output Layout (`sql/` → `tables/`)
+
+**Files**: `manifest.rs`, `package.rs`, `bridge.rs`, `arrow_json.rs`, CLI help text
 
 **3.1) Update `manifest.rs` output paths**
 - [ ] Change SQL file path from `sql/<table>.sql` to `tables/<table>.sql` (line 406)
@@ -113,6 +119,8 @@ Based on codebase exploration (2025-02-04):
 
 ### Phase 4: Schema Type Refactor (Arrow-native)
 
+**Files**: `schema.rs`, `validation.rs`, `dependency_manifest.rs`, build commands
+
 **4.1) Update schema inference in `schema.rs`**
 - [ ] Change return type from `TableSchema` to Arrow `SchemaRef`
 - [ ] Remove intermediate `TableSchema`/`ArrowSchema` conversions
@@ -133,6 +141,8 @@ Based on codebase exploration (2025-02-04):
 
 ### Phase 5: Manifest Table Shape Changes
 
+**Files**: `manifest.rs` (TableDef struct and builder)
+
 **5.1) Update `TableDef` in `manifest.rs`**
 - [ ] Change `schema: FileRef` to `ipc: FileRef` (path to `.ipc` file)
 - [ ] Make `sql: FileRef` optional (`Option<FileRef>`) for raw table support
@@ -147,6 +157,8 @@ Based on codebase exploration (2025-02-04):
 ---
 
 ### Phase 6: Adapter Layer - Legacy ↔ Package
+
+**Files**: `bridge.rs` (extend), `cache.rs` (adapter calls), `resolver.rs` (use adapter)
 
 **6.1) Admin API fetch adapter (legacy → package)**
 - [ ] Create adapter function to convert legacy manifest JSON to canonical package format
@@ -179,6 +191,8 @@ Based on codebase exploration (2025-02-04):
 
 ### Phase 7: Cache Updates
 
+**Files**: `cache.rs`, `resolver.rs`
+
 **7.1) Update `cache.rs`**
 - [ ] Change cache structure from `manifest.json` only to full package format:
   - `<hash>/manifest.json` (canonical format)
@@ -198,6 +212,8 @@ Based on codebase exploration (2025-02-04):
 
 ### Phase 8: Documentation & Tests
 
+**Files**: `docs/features/dataset-authoring.md`, `tests/src/tests/it_dataset_authoring.rs`, CLI help markdown files, `playground/`
+
 **8.1) Update `docs/features/dataset-authoring.md`**
 - [ ] Replace all `models/` references with `tables/`
 - [ ] Update build output structure section
@@ -215,7 +231,11 @@ Based on codebase exploration (2025-02-04):
 **8.3) Update CLI help text**
 - [ ] Update `ampctl dataset` subcommand help for `tables/` directory
 
-**Acceptance criteria**: Docs and tests are consistent with new implementation.
+**8.4) Update playground sample**
+- [ ] Rename `playground/models/` to `playground/tables/`
+- [ ] Update `playground/amp.yaml` to use `tables:` field (or rely on new default)
+
+**Acceptance criteria**: Docs, tests, and samples are consistent with new implementation.
 
 ---
 
