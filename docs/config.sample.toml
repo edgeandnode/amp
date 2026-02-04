@@ -102,11 +102,11 @@ url = "postgres://<pg_url>"
 # deletion_lock_duration = 1800.0  # Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)
 
 # Worker configuration
-[worker.events]
+[worker_events]
 # enabled = false                  # Enable event streaming to Kafka (default: false)
 # progress_interval_secs = 10     # Interval in seconds for emitting progress events (default: 10)
 
-[worker.events.kafka]
+[worker_events.kafka]
 # brokers = ["localhost:9092"]    # Kafka broker addresses (required if events enabled)
 # topic = "amp.worker.events"     # Kafka topic for worker events (default: "amp.worker.events")
 # partitions = 16                 # Number of partitions for consistent hashing (default: 16)
