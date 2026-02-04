@@ -133,7 +133,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     drop(car_manager_tx);
-    let _ = car_manager_jh.await;
+    if let Err(e) = car_manager_jh.await {
+        tracing::error!(error = %e, "car file manager task failed");
+    }
 
     tracing::info!("comparison complete");
 
