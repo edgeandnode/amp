@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use amp_datasets_registry::{DatasetsRegistry, error::ResolveRevisionError};
+use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
 use common::{
     catalog::dataset_access::{
@@ -32,6 +32,8 @@ use tracing::instrument;
 
 mod dataset_kind;
 mod error;
+
+pub use amp_datasets_registry::error::ResolveRevisionError;
 
 pub use self::error::{
     EthCallForDatasetError, GetClientError, GetDatasetError, GetDerivedManifestError,

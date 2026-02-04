@@ -2,7 +2,6 @@
 
 use std::future::Future;
 
-use common::BoxError;
 use monitoring::logging;
 use tokio::task::{JoinError, JoinSet};
 
@@ -37,19 +36,20 @@ impl<T> FailFastJoinSet<T> {
     }
 }
 
-impl<T> FailFastJoinSet<Result<T, BoxError>>
+impl<T, E> FailFastJoinSet<Result<T, E>>
 where
     T: Send + 'static,
+    E: Send + 'static,
 {
     /// Waits for all tasks to complete with fail-fast behavior.
     ///
     /// Returns `Ok(())` only if all tasks succeed. On first failure:
     /// - Aborts remaining tasks
-    /// - Waits for clean shutdown  
+    /// - Waits for clean shutdown
     /// - Returns the error
     ///
     /// Task cancellations are logged but don't trigger aborts
-    pub async fn try_wait_all(&mut self) -> Result<(), TryWaitAllError<BoxError>> {
+    pub async fn try_wait_all(&mut self) -> Result<(), TryWaitAllError<E>> {
         while let Some(result) = self.0.join_next().await {
             match result {
                 // One task succeeded, wait for the rest to finish
@@ -79,24 +79,33 @@ where
 }
 
 /// The error type returned by [`FailFastJoinSet::try_wait_all`]
+///
+/// This enum represents the two failure modes when waiting for parallel tasks:
+/// either a task explicitly returned an error, or a task panicked unexpectedly.
+/// In both cases, all remaining tasks are aborted before returning.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub enum TryWaitAllError<E> {
-    /// A task returned an error
-    Error(E),
-    /// A task panicked
-    Panic(JoinError),
-}
-
-impl TryWaitAllError<BoxError> {
-    /// Convert the error into a [`BoxError`]
+    /// A task returned an error through its Result type
     ///
-    /// This method overcomes a limitation in Rust's trait system where `Box<dyn Error + Send + Sync>`
-    /// cannot always be proven to implement `Error` in generic contexts, even though it does.
-    pub fn into_box_error(self) -> BoxError {
-        match self {
-            TryWaitAllError::Error(err) => err,
-            TryWaitAllError::Panic(err) => err.into(),
-        }
-    }
+    /// This occurs when one of the spawned tasks completes with `Err(e)`.
+    /// The fail-fast behavior ensures remaining tasks are immediately aborted.
+    ///
+    /// The wrapped error `E` is the original error returned by the failed task,
+    /// preserving full error context and source chain for debugging.
+    Error(E),
+
+    /// A task panicked during execution
+    ///
+    /// This occurs when a spawned task panics rather than returning normally.
+    /// Panics typically indicate programming bugs such as:
+    /// - Array index out of bounds
+    /// - Unwrap on None/Err
+    /// - Explicit panic!() calls
+    /// - Stack overflow
+    ///
+    /// The wrapped `JoinError` contains panic information including
+    /// the panic payload if available. Unlike explicit errors, panics
+    /// cannot be easily recovered from and usually indicate a bug.
+    Panic(JoinError),
 }

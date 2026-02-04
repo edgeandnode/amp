@@ -13,7 +13,6 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::BoxError;
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
@@ -36,7 +35,7 @@ pub async fn new(
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
     jsonl_at: impl Into<Option<SocketAddr>>,
-) -> Result<(BoundAddrs, impl Future<Output = Result<(), ServerRunError>>), InitError> {
+) -> Result<(BoundAddrs, impl Future<Output = Result<(), ServeError>>), InitError> {
     // Create the internal service instance
     let service =
         flight::Service::create(config, data_store, metadata_db, dataset_store, meter).await?;
@@ -49,7 +48,7 @@ pub async fn new(
             .map_err(InitError::Flight)?,
         None => (
             None,
-            Box::pin(std::future::pending::<Result<(), ServerRunError>>()) as _,
+            Box::pin(std::future::pending::<Result<(), ServeError>>()) as _,
         ),
     };
 
@@ -61,7 +60,7 @@ pub async fn new(
             .map_err(InitError::Jsonl)?,
         None => (
             None,
-            Box::pin(std::future::pending::<Result<(), ServerRunError>>()) as _,
+            Box::pin(std::future::pending::<Result<(), ServeError>>()) as _,
         ),
     };
 
@@ -74,13 +73,13 @@ pub async fn new(
         tokio::select! {
             result = flight_fut => {
                 if let Err(err) = &result {
-                    tracing::error!(error = %err, error_source = logging::error_source(&**err), "Flight server shutting down due to unexpected error");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Flight server shutting down due to unexpected error");
                 }
                 result
             }
             result = jsonl_fut => {
                 if let Err(err) = &result {
-                    tracing::error!(error = %err, error_source = logging::error_source(&**err), "JSONL server shutting down due to unexpected error");
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "JSONL server shutting down due to unexpected error");
                 }
                 result
             }
@@ -89,12 +88,6 @@ pub async fn new(
 
     Ok((addrs, fut))
 }
-
-/// Runtime error for the server future returned by [`new`].
-///
-/// This error occurs when the Arrow Flight or JSON Lines server encounters
-/// an unexpected error during operation (after successful initialization).
-pub type ServerRunError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {
@@ -106,7 +99,7 @@ pub struct BoundAddrs {
 async fn new_flight_server(
     ctx: flight::Service,
     at: SocketAddr,
-) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), FlightInitError> {
+) -> Result<(SocketAddr, impl Future<Output = Result<(), ServeError>>), FlightInitError> {
     let listener = TcpListener::bind(at)
         .await
         .map_err(|source| FlightInitError::Bind { addr: at, source })?
@@ -128,7 +121,7 @@ async fn new_flight_server(
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, error_source = logging::error_source(&err), "Flight server error");
-                err.into()
+                ServeError(err)
             })
     };
 
@@ -139,7 +132,7 @@ async fn new_flight_server(
 async fn new_jsonl_server(
     ctx: flight::Service,
     at: SocketAddr,
-) -> Result<(SocketAddr, impl Future<Output = Result<(), BoxError>>), JsonlInitError> {
+) -> Result<(SocketAddr, impl Future<Output = Result<(), ServeError>>), JsonlInitError> {
     let listener = TcpListener::bind(at)
         .await
         .map_err(|source| JsonlInitError::Bind { addr: at, source })?
@@ -159,11 +152,32 @@ async fn new_jsonl_server(
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
             .await
-            .map_err(Into::into)
+            .map_err(ServeError)
     };
 
     Ok((bound_addr, fut))
 }
+
+/// Error that occurs when serving the HTTP/Flight server fails
+///
+/// This error is returned when the server has successfully bound to its address
+/// and started accepting connections, but subsequently fails during operation.
+/// The server future returned by `bind_server` will resolve to this error if
+/// the underlying TCP listener or HTTP server encounters a fatal error.
+///
+/// Possible causes:
+/// - Network interface becomes unavailable
+/// - Too many open file descriptors (ulimit reached)
+/// - Operating system resource exhaustion
+/// - TCP listener encounters an unrecoverable error
+/// - Graceful shutdown interrupted by I/O failure
+///
+/// This error typically indicates a system-level problem rather than an
+/// application error. Recovery may require restarting the server process
+/// or addressing the underlying system resource issue.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to serve the server")]
+pub struct ServeError(#[source] std::io::Error);
 
 /// Errors that can occur when creating the server service
 #[derive(Debug, Error)]

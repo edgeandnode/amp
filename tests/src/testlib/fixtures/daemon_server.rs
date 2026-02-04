@@ -11,7 +11,10 @@ use amp_dataset_store::DatasetStore;
 use common::BoxError;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
-use server::{config::Config, service::BoundAddrs};
+use server::{
+    config::Config,
+    service::{BoundAddrs, ServeError},
+};
 use tokio::task::JoinHandle;
 
 /// Fixture for managing Amp daemon server instances in tests.
@@ -26,7 +29,7 @@ pub struct DaemonServer {
     dataset_store: DatasetStore,
     server_addrs: BoundAddrs,
 
-    _task: JoinHandle<Result<(), BoxError>>,
+    _task: JoinHandle<Result<(), ServeError>>,
 }
 
 impl DaemonServer {
