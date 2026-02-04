@@ -1,6 +1,6 @@
 ---
 name: code-test
-description: Run tests to validate changes. Use after implementing features, fixing bugs, or before commits. Defaults to 'just test-local' which runs without external dependencies (recommended for local development).
+description: Run targeted tests to validate changes. Prefer the smallest relevant scope; broaden only when necessary. Use just test-local for broad local coverage when needed.
 ---
 
 # Code Testing Skill
@@ -9,11 +9,21 @@ This skill provides testing operations for the project codebase using cargo-next
 
 ## When to Use This Skill
 
-Use this skill when you need to:
-- Run tests after implementing features or fixing bugs
-- Validate that changes don't break existing functionality
-- Run specific test suites (unit, integration, local-only)
-- Test specific packages
+Use this skill when you need to run tests and have decided testing is warranted:
+- Validate behavior changes or bug fixes
+- Confirm localized changes with targeted test suites (unit, integration, local-only)
+- Test specific packages or areas
+- Respond to a user request to run tests
+
+## Test Scope Selection (Default: Minimal)
+
+Start with the smallest scope that covers the change. Only broaden if you need more confidence.
+
+- Docs/comments-only changes: skip tests and state why
+- Localized code change in 1-2 crates: run unit tests or targeted package tests
+- Cross-cutting behavior changes or risky refactors: run `just test-local`
+- End-to-end/external dependency changes: run `just test` or `just test-it` in CI
+- If unsure, ask the user which scope they want
 
 ## Available Commands
 
@@ -27,10 +37,11 @@ Runs only tests that don't require external dependencies using the "local" nexte
 
 **Use this when**: Working locally without access to external services (databases, Firehose endpoints, etc.).
 
-**This is the PRIMARY testing command for local development.**
+**This is the broadest local test sweep; use it when you need broader confidence.**
 
 Examples:
 - `just test-local` - run all local tests
+- `just test-local -p metadata-db` - run local tests for a specific crate
 
 ### Run All Tests (REQUIRES EXTERNAL DEPENDENCIES)
 ```bash
@@ -40,7 +51,7 @@ Runs all tests (unit and integration) in the workspace. Uses `cargo nextest run 
 
 **⚠️ WARNING**: This command requires external dependencies (PostgreSQL, Firehose services, etc.) that may not be available locally.
 
-**Use this when**: Running in CI or when you have all external services configured.
+**Use this when**: Running in CI.
 
 Examples:
 - `just test` - run all tests
@@ -55,7 +66,7 @@ Runs only unit tests, excluding integration tests and ampup package. Uses `cargo
 
 **⚠️ WARNING**: Some unit tests may require external dependencies (e.g., PostgreSQL for metadata-db tests).
 
-**Use this when**: You want faster feedback than full test suite, but slower than test-local.
+**Use this when**: You want targeted unit coverage for a specific crate or area.
 
 Examples:
 - `just test-unit` - run all unit tests
@@ -69,7 +80,7 @@ Runs integration tests from the `tests` package. Uses `cargo nextest run --packa
 
 **⚠️ WARNING**: Integration tests require external dependencies (databases, Firehose endpoints, etc.).
 
-**Use this when**: You need to validate end-to-end functionality and have external services available.
+**Use this when**: Running in CI for end-to-end validation.
 
 Examples:
 - `just test-it` - run all integration tests
@@ -101,16 +112,16 @@ All test commands automatically detect nextest availability:
 
 ### Pre-approved Commands
 This test command is pre-approved and can be run without user permission:
-- `just test-local` - The ONLY test command that should be used for local development
+- `just test-local` - Broad local test sweep (use only when needed)
   - In Codex, still request escalation to run this outside the sandbox.
 
 ### Test Workflow Recommendations
 
-1. **During local development**: ALWAYS use `just test-local` - it's designed to work without external dependencies
-2. **Before commits (local)**: Run `just test-local` to validate changes
-3. **In CI environments**: The CI system will run `just test` or other commands with proper service configurations
-4. **DO NOT run locally**: `just test`, `just test-unit`, `just test-it`, or `just test-ampup` unless you have explicitly configured all external services
-5. **Codex sandbox**: Run `just test-local` with escalation (outside the sandbox)
+1. **During local development**: Prefer targeted tests first; use `just test-local` only for broader confidence
+2. **Before commits (local)**: Run the smallest relevant test scope; broaden only if the change is risky or cross-cutting
+3. **In CI environments**: The CI system will run `just test` or other commands
+4. **Local development**: Never run `just test`, `just test-unit`, `just test-it`, or `just test-ampup` locally. Those are for CI
+5. **Codex sandbox**: Run tests only when warranted; prefer targeted scope. If running `just test-local`, request escalation (outside the sandbox)
 
 ### External Dependencies Required by Non-Local Tests
 
@@ -135,21 +146,21 @@ You can pass extra flags to cargo through the EXTRA_FLAGS parameter:
 ### ❌ Anti-patterns
 - **Never run `cargo test` directly** - Use justfile tasks for proper configuration
 - **Never run `just test` locally** - It requires external dependencies
-- **Never skip tests** - Even for "trivial" changes
+- **Never skip tests when behavior changes** - Skipping is OK for docs/comments-only changes, but not for runtime changes
 - **Never ignore failing tests** - Fix them or document why they fail
-- **Never run integration tests locally** - Use `just test-local` instead
+- **Never run integration tests locally** - Use `just test-local` or target unit tests instead
 
 ### ✅ Best Practices
-- **Always use `just test-local`** for local development
-- Run tests after EVERY code change
+- Prefer the smallest relevant test scope
+- Run tests for behavior changes or bug fixes
 - Fix failing tests immediately
 - If nextest not installed, install it for better performance
-- Run tests before commits
+- Run broader tests only when necessary
 
 ## Validation Loop Pattern
 
 ```
-Code Change → Format → Check → Clippy → Test
+Code Change → Format → Check → Clippy → Targeted Tests (when needed)
                 ↑                          ↓
                 ←── Fix failures ──────────┘
 ```
@@ -159,12 +170,12 @@ If tests fail:
 2. Fix the issue
 3. Format the fix (`just fmt-file`)
 4. Check compilation (`just check-crate`)
-5. Re-run tests (`just test-local`)
+5. Re-run the relevant tests (same scope as before)
 6. Repeat until all pass
 
 ## Next Steps
 
-After all tests pass:
+After required tests pass:
 1. **Generate schemas if needed** → See `.claude/skills/code-gen/SKILL.md`
 2. **Review changes** → Ensure quality before commits
 3. **Commit** → All checks and tests must be green

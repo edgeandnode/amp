@@ -132,7 +132,7 @@ Before considering a task complete: all checks MUST pass AND all clippy warnings
 - Use per-crate commands for 1-2 crates (faster, focused feedback)
 - Use global commands for 3+ crates (more efficient)
 - Fix compilation errors before running clippy
-- Run clippy after EVERY code change
+- Run clippy when you finish a coherent chunk of work or before committing
 - Document any warnings you absolutely cannot fix (rare exception)
 
 ## Pre-approved Commands
@@ -145,6 +145,6 @@ These commands can run without user permission:
 ## Next Steps
 
 After all checks pass:
-1. **Run tests** → See `.claude/skills/code-test/SKILL.md`
+1. **Run targeted tests when warranted** → See `.claude/skills/code-test/SKILL.md`
 2. **Generate schemas if needed** → See `.claude/skills/code-gen/SKILL.md`
 3. **Commit changes** → Ensure all checks green first
