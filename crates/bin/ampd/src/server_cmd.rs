@@ -96,7 +96,9 @@ pub async fn run(
         tracing::info!("JSON Lines server running at {}", addr);
     }
 
-    server.await.map_err(Error::ServerRuntime)
+    server.await.map_err(Error::ServerRuntime)?;
+
+    Ok(())
 }
 
 /// Errors that can occur during server execution.
@@ -142,7 +144,7 @@ pub enum Error {
     /// This occurs after the servers have started successfully but encounter
     /// an error during operation.
     #[error("Server runtime error: {0}")]
-    ServerRuntime(#[source] server::service::ServerRunError),
+    ServerRuntime(#[source] server::service::ServeError),
 }
 
 /// Convert common config to server-specific config

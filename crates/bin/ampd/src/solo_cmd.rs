@@ -18,8 +18,7 @@ type ControllerFuture =
     Pin<Box<dyn Future<Output = Result<(), controller::service::ServerError>> + Send>>;
 
 /// Type alias for the server service future to reduce type complexity
-type ServerFuture =
-    Pin<Box<dyn Future<Output = Result<(), server::service::ServerRunError>> + Send>>;
+type ServerFuture = Pin<Box<dyn Future<Output = Result<(), server::service::ServeError>> + Send>>;
 
 pub async fn run(
     amp_dir: PathBuf,
@@ -353,5 +352,5 @@ pub enum Error {
     /// This occurs after the Arrow Flight RPC and/or JSON Lines servers have
     /// started successfully but encounter an error during operation.
     #[error("Server runtime error: {0}")]
-    ServerRuntime(#[source] server::service::ServerRunError),
+    ServerRuntime(#[source] server::service::ServeError),
 }

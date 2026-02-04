@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use common::{BoxError, arrow, sql_str::SqlStr, stream_helpers::is_streaming};
+use common::{arrow, sql_str::SqlStr, stream_helpers::is_streaming};
 use futures::{StreamExt as _, TryStreamExt as _};
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
@@ -54,11 +54,15 @@ async fn handle_jsonl_request(State(service): State<Service>, request: String) -
 
     let stream = stream
         .record_batches()
-        .map(|res| -> Result<Vec<u8>, BoxError> {
-            let batch = res.map_err(error_payload)?;
+        .map(|res| -> Result<Vec<u8>, JsonlSerializationError> {
+            let batch = res
+                .map_err(error_payload)
+                .map_err(JsonlSerializationError::RecordBatchStream)?;
             let mut buf: Vec<u8> = Default::default();
             let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
-            writer.write(&batch)?;
+            writer
+                .write(&batch)
+                .map_err(JsonlSerializationError::JsonSerialization)?;
             Ok(buf)
         })
         .map_err(error_payload);
@@ -67,6 +71,45 @@ async fn handle_jsonl_request(State(service): State<Service>, request: String) -
         .header("content-type", "application/x-ndjson")
         .body(Body::from_stream(stream))
         .unwrap()
+}
+
+/// Errors that occur when serializing query results to JSON Lines format
+///
+/// These errors can occur during the streaming response phase when converting
+/// Arrow record batches to newline-delimited JSON. The HTTP response has already
+/// started at this point, so these errors are serialized into the response stream
+/// rather than returning an HTTP error status.
+#[derive(Debug, thiserror::Error)]
+pub enum JsonlSerializationError {
+    /// Failed to retrieve record batch from query result stream
+    ///
+    /// This occurs when iterating over the query result stream fails. The query
+    /// has already started executing successfully, but an error occurred while
+    /// fetching subsequent record batches.
+    ///
+    /// Possible causes:
+    /// - Query execution timeout during streaming
+    /// - Connection lost to data source mid-query
+    /// - Memory allocation failure for large batches
+    /// - Internal query engine error during execution
+    /// - Resource exhaustion (file handles, memory)
+    #[error("failed to retrieve record batch from query stream")]
+    RecordBatchStream(String),
+
+    /// Failed to serialize record batch to JSON Lines format
+    ///
+    /// This occurs when the Arrow JSON writer cannot convert a record batch
+    /// to newline-delimited JSON format. The record batch was retrieved
+    /// successfully but serialization failed.
+    ///
+    /// Possible causes:
+    /// - Unsupported Arrow data type for JSON serialization
+    /// - Invalid UTF-8 data in string columns
+    /// - Nested or complex types that cannot be represented in JSON
+    /// - I/O error writing to the output buffer
+    /// - Memory allocation failure during serialization
+    #[error("failed to serialize record batch to JSON")]
+    JsonSerialization(#[source] common::arrow::error::ArrowError),
 }
 
 /// Build a BAD_REQUEST error response with the given error code and message
