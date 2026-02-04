@@ -29,7 +29,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 |-------|-------------|--------|
 | 1 | Arrow IPC Module | **Complete** |
 | 2 | Rename `models` → `tables` | **Complete** |
-| 3 | Build Output Layout (`sql/` → `tables/`) | Not started |
+| 3 | Build Output Layout (`sql/` → `tables/`) | **Complete** |
 | 4 | Schema Type Refactor | Not started |
 | 5 | Manifest Table Shape Changes | **Complete** |
 | 6 | Adapter Layer (Legacy ↔ Package) | Not started |
