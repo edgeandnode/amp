@@ -273,7 +273,9 @@ pub struct KafkaEventsConfig {
     pub partitions: u32,
 
     /// SASL authentication mechanism (optional)
+    ///
     /// Supported values: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"
+    /// If not set, no SASL authentication is used.
     pub sasl_mechanism: Option<String>,
 
     /// SASL username (required if sasl_mechanism is set)
@@ -283,6 +285,8 @@ pub struct KafkaEventsConfig {
     pub sasl_password: Option<String>,
 
     /// Enable TLS encryption (default: false)
+    ///
+    /// When enabled, connections to Kafka brokers use TLS.
     #[serde(default)]
     pub tls_enabled: bool,
 }

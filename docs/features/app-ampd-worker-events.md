@@ -91,6 +91,7 @@ Event streaming is **opt-in** (disabled by default). When disabled, the [Job Pro
 ```toml
 [worker.events]
 enabled = true
+progress_interval_secs = 10  # Emit progress events at most every 10 seconds
 
 [worker.events.kafka]
 brokers = ["kafka-1:9092", "kafka-2:9092"]
@@ -98,12 +99,31 @@ topic = "amp.worker.events"
 partitions = 16
 ```
 
-| Setting            | Default               | Description                                         |
-| ------------------ | --------------------- | --------------------------------------------------- |
-| `enabled`          | `false`               | Enable/disable event emission                       |
-| `kafka.brokers`    | -                     | Kafka broker addresses                              |
-| `kafka.topic`      | `"amp.worker.events"` | Kafka topic name                                    |
-| `kafka.partitions` | `16`                  | Number of partitions (must match actual topic config) |
+| Setting                     | Default               | Description                                           |
+| --------------------------- | --------------------- | ----------------------------------------------------- |
+| `enabled`                   | `false`               | Enable/disable event emission                         |
+| `progress_interval_secs`    | `10`                  | Time interval for progress events (in seconds)        |
+| `kafka.brokers`             | -                     | Kafka broker addresses                                |
+| `kafka.topic`               | `"amp.worker.events"` | Kafka topic name                                      |
+| `kafka.partitions`          | `16`                  | Number of partitions (must match actual topic config) |
+| `kafka.sasl_mechanism`      | -                     | SASL auth: `"PLAIN"`, `"SCRAM-SHA-256"`, `"SCRAM-SHA-512"` |
+| `kafka.sasl_username`       | -                     | SASL username (required if sasl_mechanism set)        |
+| `kafka.sasl_password`       | -                     | SASL password (required if sasl_mechanism set)        |
+| `kafka.tls_enabled`         | `false`               | Enable TLS encryption for broker connections          |
+
+### Authentication (Managed Kafka)
+
+For managed Kafka services (AWS MSK, Confluent Cloud, Redpanda Cloud), configure SASL authentication:
+
+```toml
+[worker.events.kafka]
+brokers = ["pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"]
+topic = "amp.worker.events"
+sasl_mechanism = "SCRAM-SHA-256"
+sasl_username = "your-api-key"
+sasl_password = "your-api-secret"
+tls_enabled = true
+```
 
 ### Prerequisites
 
@@ -127,6 +147,7 @@ If the topic doesn't exist, event sends will retry then log a warning and drop t
 ```toml
 [worker.events]
 enabled = true
+progress_interval_secs = 10  # Optional: emit progress every 10s (default)
 
 [worker.events.kafka]
 brokers = ["localhost:9092"]

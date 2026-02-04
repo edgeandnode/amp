@@ -16,7 +16,9 @@ futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
-rskafka = "0.6"
+rskafka = { version = "0.6", features = ["transport-tls"] }
+rustls.workspace = true
+webpki-roots.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

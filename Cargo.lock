@@ -1145,6 +1145,7 @@ dependencies = [
  "metadata-db",
  "metadata-db-postgres",
  "monitoring",
+ "rustls",
  "server",
  "snmalloc-rs",
  "thiserror 2.0.18",
@@ -8922,9 +8923,11 @@ dependencies = [
  "parking_lot",
  "rand 0.8.5",
  "rsasl",
+ "rustls",
  "snap",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "zstd",
 ]
@@ -14120,6 +14123,7 @@ dependencies = [
  "prost",
  "prost-build",
  "rskafka",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -14127,6 +14131,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

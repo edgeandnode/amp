@@ -7,11 +7,12 @@ use backon::{BackoffBuilder, Retryable};
 use monitoring::logging;
 use rskafka::{
     client::{
-        Client, ClientBuilder,
+        Client, ClientBuilder, Credentials, SaslConfig,
         partition::{Compression, UnknownTopicHandling},
     },
     record::Record,
 };
+use rustls::ClientConfig;
 
 /// Errors that can occur when working with the Kafka producer.
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +32,10 @@ pub enum Error {
     /// Failed to encode protobuf message
     #[error("failed to encode protobuf message")]
     Encode(#[source] prost::EncodeError),
+
+    /// Invalid SASL configuration
+    #[error("invalid SASL configuration: {0}")]
+    InvalidSaslConfig(String),
 }
 
 impl Error {
@@ -95,18 +100,65 @@ impl KafkaProducer {
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection to the Kafka brokers fails.
+    /// Returns an error if the connection to the Kafka brokers fails,
+    /// or if SASL configuration is invalid.
     pub async fn new(config: &KafkaEventsConfig) -> Result<Self, Error> {
-        let client = ClientBuilder::new(config.brokers.clone())
-            .build()
-            .await
-            .map_err(Error::Connection)?;
+        let mut builder = ClientBuilder::new(config.brokers.clone());
+
+        // Configure SASL authentication if mechanism is specified
+        if let Some(mechanism) = &config.sasl_mechanism {
+            let sasl_config = Self::build_sasl_config(mechanism, config)?;
+            builder = builder.sasl_config(sasl_config);
+        }
+
+        // Configure TLS if enabled
+        if config.tls_enabled {
+            let tls_config = Self::build_tls_config();
+            builder = builder.tls_config(tls_config);
+        }
+
+        let client = builder.build().await.map_err(Error::Connection)?;
 
         Ok(Self {
             client: Arc::new(client),
             topic: config.topic.clone(),
             partitions: config.partitions,
         })
+    }
+
+    /// Builds SASL configuration from the provided mechanism and credentials.
+    fn build_sasl_config(mechanism: &str, config: &KafkaEventsConfig) -> Result<SaslConfig, Error> {
+        let username = config.sasl_username.as_ref().ok_or_else(|| {
+            Error::InvalidSaslConfig("sasl_username is required when sasl_mechanism is set".into())
+        })?;
+        let password = config.sasl_password.as_ref().ok_or_else(|| {
+            Error::InvalidSaslConfig("sasl_password is required when sasl_mechanism is set".into())
+        })?;
+
+        let credentials = Credentials::new(username.clone(), password.clone());
+
+        match mechanism.to_uppercase().as_str() {
+            "PLAIN" => Ok(SaslConfig::Plain(credentials)),
+            "SCRAM-SHA-256" => Ok(SaslConfig::ScramSha256(credentials)),
+            "SCRAM-SHA-512" => Ok(SaslConfig::ScramSha512(credentials)),
+            _ => Err(Error::InvalidSaslConfig(format!(
+                "unsupported SASL mechanism '{}'. Supported: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512",
+                mechanism
+            ))),
+        }
+    }
+
+    /// Builds TLS configuration with system root certificates.
+    fn build_tls_config() -> Arc<ClientConfig> {
+        let root_store = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+
+        let tls_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        Arc::new(tls_config)
     }
 
     /// Sends an event to Kafka with retry logic.
@@ -242,5 +294,65 @@ mod tests {
         let encode_err = encode_result.expect_err("encoding to tiny buffer should fail");
         let err = Error::Encode(encode_err);
         assert!(!err.is_retryable(), "Encode errors should not be retryable");
+    }
+
+    fn make_kafka_config(
+        mechanism: Option<&str>,
+        username: Option<&str>,
+        password: Option<&str>,
+    ) -> KafkaEventsConfig {
+        KafkaEventsConfig {
+            brokers: vec!["localhost:9092".to_string()],
+            topic: "test".to_string(),
+            partitions: 1,
+            sasl_mechanism: mechanism.map(String::from),
+            sasl_username: username.map(String::from),
+            sasl_password: password.map(String::from),
+            tls_enabled: false,
+        }
+    }
+
+    #[test]
+    fn build_sasl_config_plain() {
+        let config = make_kafka_config(Some("PLAIN"), Some("user"), Some("pass"));
+        let result = KafkaProducer::build_sasl_config("PLAIN", &config);
+        assert!(matches!(result, Ok(SaslConfig::Plain(_))));
+
+        // Case-insensitive
+        let result = KafkaProducer::build_sasl_config("plain", &config);
+        assert!(matches!(result, Ok(SaslConfig::Plain(_))));
+    }
+
+    #[test]
+    fn build_sasl_config_scram_sha_256() {
+        let config = make_kafka_config(Some("SCRAM-SHA-256"), Some("user"), Some("pass"));
+        let result = KafkaProducer::build_sasl_config("SCRAM-SHA-256", &config);
+        assert!(matches!(result, Ok(SaslConfig::ScramSha256(_))));
+
+        // Case-insensitive
+        let result = KafkaProducer::build_sasl_config("scram-sha-256", &config);
+        assert!(matches!(result, Ok(SaslConfig::ScramSha256(_))));
+    }
+
+    #[test]
+    fn build_sasl_config_scram_sha_512() {
+        let config = make_kafka_config(Some("SCRAM-SHA-512"), Some("user"), Some("pass"));
+        let result = KafkaProducer::build_sasl_config("SCRAM-SHA-512", &config);
+        assert!(matches!(result, Ok(SaslConfig::ScramSha512(_))));
+    }
+
+    #[test]
+    fn build_sasl_config_validation_errors() {
+        // Missing username
+        let config = make_kafka_config(Some("PLAIN"), None, Some("pass"));
+        assert!(KafkaProducer::build_sasl_config("PLAIN", &config).is_err());
+
+        // Missing password
+        let config = make_kafka_config(Some("PLAIN"), Some("user"), None);
+        assert!(KafkaProducer::build_sasl_config("PLAIN", &config).is_err());
+
+        // Unsupported mechanism
+        let config = make_kafka_config(Some("GSSAPI"), Some("user"), Some("pass"));
+        assert!(KafkaProducer::build_sasl_config("GSSAPI", &config).is_err());
     }
 }
