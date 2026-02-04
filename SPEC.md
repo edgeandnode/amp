@@ -32,7 +32,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 | 3 | Build Output Layout (`sql/` → `tables/`) | **Complete** |
 | 4 | Schema Type Refactor | **Complete** |
 | 5 | Manifest Table Shape Changes | **Complete** |
-| 6 | Adapter Layer (Legacy ↔ Package) | **In Progress** (6.1 done, 6.2 done, 6.3 pending) |
+| 6 | Adapter Layer (Legacy ↔ Package) | **Complete** |
 | 7 | Cache Updates | Not started |
 | 8 | Documentation & Tests | Not started |
 
@@ -222,8 +222,9 @@ Based on codebase exploration (2026-02-04, verified via code search):
 - [x] Upload legacy manifest to admin API (existing functionality via `LegacyBridge::to_json()`)
 
 **6.3) Constrain legacy parsing**
-- [ ] Ensure all legacy JSON schema parsing is confined to adapter layer
-- [ ] Remove direct `TableSchema` parsing from non-adapter code
+- [x] Ensure all legacy JSON schema parsing is confined to adapter layer
+- [x] Update resolver to use LegacyAdapter for derived datasets (kind="manifest")
+- [x] Raw datasets (evm-rpc, firehose, etc.) parsed directly into DependencyManifest
 
 **Acceptance criteria**:
 - Fetching legacy manifests populates cache with canonical package format.

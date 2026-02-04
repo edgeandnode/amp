@@ -36,6 +36,7 @@ use datasets_common::{
 use datasets_derived::deps::{DepAlias, DepReference, HashOrVersion};
 
 use crate::{
+    adapter::{AdapterError, LegacyAdapter},
     cache::{Cache, CacheError},
     canonical::{CanonicalizeError, hash_canonical},
     dependency_manifest::DependencyManifest,
@@ -91,12 +92,25 @@ pub enum ResolveError {
         actual: Hash,
     },
 
-    /// Failed to parse manifest from registry.
+    /// Failed to adapt legacy manifest from registry.
     ///
-    /// This occurs when the registry returns invalid JSON or a manifest
-    /// that does not conform to the expected schema.
-    #[error("failed to parse manifest for '{reference}'")]
-    ParseError {
+    /// This occurs when the registry returns a derived manifest that cannot be
+    /// converted to the canonical package format.
+    #[error("failed to adapt legacy manifest for '{reference}'")]
+    AdaptError {
+        /// The reference being resolved
+        reference: String,
+        /// The underlying adapter error
+        #[source]
+        source: AdapterError,
+    },
+
+    /// Failed to parse raw manifest from registry.
+    ///
+    /// This occurs when the registry returns a raw manifest that cannot be
+    /// parsed into a DependencyManifest.
+    #[error("failed to parse raw manifest for '{reference}'")]
+    ParseRawManifest {
         /// The reference being resolved
         reference: String,
         /// The underlying parse error
@@ -412,19 +426,8 @@ impl<F: ManifestFetcher> Resolver<F> {
                     });
                 }
 
-                // Parse and cache
-                let manifest: DependencyManifest =
-                    serde_json::from_value(json).map_err(|e| ResolveError::ParseError {
-                        reference: reference.to_string(),
-                        source: e,
-                    })?;
-
-                self.cache
-                    .put(&hash, &manifest)
-                    .map_err(|e| ResolveError::CacheError {
-                        hash: hash.clone(),
-                        source: e,
-                    })?;
+                // Adapt legacy format and cache
+                let manifest = self.adapt_and_cache(&json, &hash, &reference.to_string())?;
 
                 Ok(ResolvedDependency {
                     hash,
@@ -534,18 +537,8 @@ impl<F: ManifestFetcher> Resolver<F> {
             });
         }
 
-        let manifest: DependencyManifest =
-            serde_json::from_value(json).map_err(|err| ResolveError::ParseError {
-                reference: reference.clone(),
-                source: err,
-            })?;
-
-        self.cache
-            .put(expected_hash, &manifest)
-            .map_err(|err| ResolveError::CacheError {
-                hash: expected_hash.clone(),
-                source: err,
-            })?;
+        // Adapt legacy format and cache
+        let manifest = self.adapt_and_cache(&json, expected_hash, &reference)?;
 
         Ok(ResolvedDependency {
             hash: expected_hash.clone(),
@@ -553,6 +546,72 @@ impl<F: ManifestFetcher> Resolver<F> {
             namespace,
             name,
         })
+    }
+
+    /// Adapts a legacy manifest JSON and caches the result.
+    ///
+    /// For derived datasets (kind="manifest"), uses [`LegacyAdapter`] to convert
+    /// the legacy inline format to canonical package format, writing IPC schema
+    /// files to the cache directory.
+    ///
+    /// For raw datasets (evm-rpc, firehose, etc.), parses directly into
+    /// [`DependencyManifest`] since they don't have inline SQL to extract.
+    fn adapt_and_cache(
+        &self,
+        json: &serde_json::Value,
+        hash: &Hash,
+        reference: &str,
+    ) -> Result<DependencyManifest, ResolveError> {
+        // Check the manifest kind to determine how to process it
+        let kind = json
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        let manifest = if kind == "manifest" {
+            // Derived dataset: use adapter to extract inline content to files
+            let target_dir = self.cache.dir_path(hash);
+
+            // Create cache directory if needed
+            if !target_dir.exists() {
+                std::fs::create_dir_all(&target_dir).map_err(|err| ResolveError::CacheError {
+                    hash: hash.clone(),
+                    source: CacheError::CreateDir {
+                        path: target_dir.clone(),
+                        source: err,
+                    },
+                })?;
+            }
+
+            // Use the adapter to convert legacy format to canonical package
+            let adapter = LegacyAdapter::new(&target_dir);
+            let adapted =
+                adapter
+                    .adapt_legacy_manifest(json)
+                    .map_err(|err| ResolveError::AdaptError {
+                        reference: reference.to_string(),
+                        source: err,
+                    })?;
+
+            adapted.into_dependency_manifest()
+        } else {
+            // Raw dataset: parse directly into DependencyManifest
+            // Raw datasets don't have inline SQL, just schema information
+            serde_json::from_value(json.clone()).map_err(|err| ResolveError::ParseRawManifest {
+                reference: reference.to_string(),
+                source: err,
+            })?
+        };
+
+        // Cache the manifest JSON for future lookups
+        self.cache
+            .put(hash, &manifest)
+            .map_err(|err| ResolveError::CacheError {
+                hash: hash.clone(),
+                source: err,
+            })?;
+
+        Ok(manifest)
     }
 
     /// Resolves all dependencies and their transitive dependencies.
