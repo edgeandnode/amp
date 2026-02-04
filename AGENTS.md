@@ -10,12 +10,14 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 
 1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`, `/feature-discovery`, `/feature-fmt-check`, `/feature-validate`) instead of running commands directly
 2. **Skills wrap justfile tasks** → Skills provide the interface to `just` commands with proper guidance
-3. **Follow the workflow** → Format → Check → Clippy → Test (in that order)
+3. **Follow the workflow** → Format → Check → Clippy → Targeted Tests (when needed)
 4. **Fix ALL warnings** → Zero tolerance for clippy warnings
 5. **Check patterns** → Use `/code-pattern-discovery` before implementing code
 
 **Your first action**: If you need to run a command, invoke the relevant Skill! If you need to implement code, invoke
 `/code-pattern-discovery` to load relevant patterns!
+
+**Testing default**: Run the smallest relevant test slice. Only broaden to `just test-local` for cross-cutting/high-risk changes or when you need broader confidence.
 
 ## Table of Contents
 
@@ -161,7 +163,7 @@ When determining which command to run, follow this strict hierarchy:
 
 - Need to format a file? → Use `/code-format` skill
 - Need to check a crate? → Use `/code-check` skill
-- Need to run tests? → Use `/code-test` skill
+- Need to run tests? → Use `/code-test` skill (choose the smallest relevant scope)
 
 ### Command-Line Operations Reference
 
@@ -171,7 +173,7 @@ Available skills and their purposes:
 
 - **Formatting**: Use `/code-format` skill - Format code after editing files
 - **Checking/Linting**: Use `/code-check` skill - Validate and lint code changes
-- **Testing**: Use `/code-test` skill - Run tests to validate functionality
+- **Testing**: Use `/code-test` skill - Run targeted tests when warranted
 - **Code Generation**: Use `/code-gen` skill - Generate schemas and specs
 
 Each Skill provides:
@@ -226,9 +228,9 @@ Development Progress:
 - [ ] Step 4: Fix all compilation errors
 - [ ] Step 5: Run clippy (use /code-check skill)
 - [ ] Step 6: Fix ALL clippy warnings
-- [ ] Step 7: Run tests (use /code-test skill)
-- [ ] Step 8: Fix all test failures
-- [ ] Step 9: All checks pass ✅
+- [ ] Step 7: Run targeted tests when warranted (use /code-test skill)
+- [ ] Step 8: Fix test failures or document why tests were skipped
+- [ ] Step 9: All required checks pass ✅
 ```
 
 **Detailed workflow for EVERY code change:**
@@ -249,10 +251,10 @@ Development Progress:
    - **Must pass**: Fix all clippy warnings
    - **Validation**: Re-run until zero warnings before proceeding
 
-5. **Run tests**:
-   - **Use**: `/code-test` skill to validate changes
-   - **Must pass**: Fix all test failures
-   - **Validation**: All tests green
+5. **Run targeted tests (when warranted)**:
+   - **Use**: `/code-test` skill to select the smallest relevant scope
+   - **Escalate**: Use `just test-local` only for cross-cutting/high-risk changes or when broader confidence is needed
+   - **Validation**: Fix failures or record why tests were skipped
 
 6. **Iterate**: If any validation fails → fix → return to step 2
 
@@ -265,7 +267,7 @@ Edit File → /code-format skill
           ↓                            ↓ Yes
     /code-check skill (clippy) → (loop back)
           ↓
-    /code-test skill → Fix failures?
+    Targeted tests (if needed) → Fix failures?
           ↓                 ↓ Yes
     All Pass ✅      (loop back)
 ```
@@ -274,7 +276,8 @@ Edit File → /code-format skill
 
 #### 4. Completion Phase
 
-- Ensure all automated checks pass (format, check, clippy, tests)
+- Ensure all required checks pass (format, check, clippy, and any tests you ran)
+- If tests were skipped, document why and the risk assessment
 - Review changes against patterns and security guidelines
 - Document any warnings you couldn't fix and why
 
@@ -293,7 +296,7 @@ Edit File → /code-format skill
 - **Never expose secrets/keys**: All sensitive data in environment variables
 - **Maintain type safety**: Leverage Rust's type system fully
 - **Prefer async operations**: This codebase uses async/await extensively
-- **Always run tests**: Use `/code-test` skill
+- **Run targeted tests when warranted**: Use `/code-test` skill and broaden only if necessary
 - **Always format code**: Use `/code-format` skill
 - **Fix all warnings**: Use `/code-check` skill for clippy
 
@@ -309,13 +312,13 @@ Edit File → /code-format skill
 | **Format**       | `/code-format`                        | IMMEDIATELY after each edit         |
 | **Check**        | `/code-check`                         | After formatting                    |
 | **Lint**         | `/code-check`                         | Fix ALL warnings                    |
-| **Test**         | `/code-test`                          | Validate all changes                |
+| **Test**         | `/code-test`                          | Validate changes with targeted tests when warranted |
 
 **Golden Rules:**
 
 1. ✅ Invoke Skills for all common operations
 2. ✅ Skills wrap justfile tasks with proper guidance
-3. ✅ Follow the workflow: Format → Check → Clippy → Test
+3. ✅ Follow the workflow: Format → Check → Clippy → Targeted Tests (when needed)
 4. ✅ Zero tolerance for errors and warnings
 5. ✅ Every change improves the codebase
 

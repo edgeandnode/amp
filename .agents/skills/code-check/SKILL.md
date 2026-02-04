@@ -145,6 +145,6 @@ These commands can run without user permission:
 ## Next Steps
 
 After all checks pass:
-1. **Run tests** → See `.claude/skills/code-test/SKILL.md`
+1. **Run targeted tests when warranted** → See `.claude/skills/code-test/SKILL.md`
 2. **Generate schemas if needed** → See `.claude/skills/code-gen/SKILL.md`
 3. **Commit changes** → Ensure all checks green first

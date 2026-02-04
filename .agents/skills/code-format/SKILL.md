@@ -112,4 +112,4 @@ This is a critical requirement from the project's development workflow:
 After formatting your code:
 1. **Check compilation** → See `.claude/skills/code-check/SKILL.md`
 2. **Run clippy** → See `.claude/skills/code-check/SKILL.md`
-3. **Run tests** → See `.claude/skills/code-test/SKILL.md`
+3. **Run targeted tests when warranted** → See `.claude/skills/code-test/SKILL.md`
