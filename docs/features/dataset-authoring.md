@@ -22,7 +22,7 @@ Dataset Authoring provides a filesystem-first workflow for defining derived data
 
 ## Key Concepts
 
-- **amp.yaml / amp.yml**: The YAML configuration file that defines a dataset's metadata, dependencies, models, functions, and variables. It is the entrypoint for the authoring workflow and must include an `amp` contract version.
+- **amp.yaml / amp.yml**: The YAML configuration file that defines a dataset's metadata, dependencies, tables, functions, and variables. It is the entrypoint for the authoring workflow and must include an `amp` contract version.
 
 - **Tables**: SQL files in the `tables/` directory (default), each containing a single SELECT query. The table name is derived from the filename (e.g., `tables/transfers.sql` creates the `transfers` table).
 
@@ -214,7 +214,7 @@ CLI `--var` keys must be declared in config `vars`; unknown keys fail build/chec
 | `name` | Yes | Dataset name (lowercase, alphanumeric, underscores) |
 | `version` | Yes | Semantic version (e.g., `1.0.0`) |
 | `dependencies` | No | Map of alias to `namespace/name@version` or `@hash` |
-| `models` | No | Path to directory containing model SQL files (defaults to `models`) |
+| `tables` | No | Path to directory containing table SQL files (defaults to `tables`) |
 | `functions` | No | Map of function name to function definition |
 | `vars` | No | Map of variable name to default value |
 
@@ -228,7 +228,7 @@ version: 1.0.0
 dependencies:
   eth: my_namespace/eth_mainnet@1.0.0
   other: other_ns/other@sha256:b94d27b9...
- # models: models  # optional; defaults to "models"
+ # tables: tables  # optional; defaults to "tables"
 functions:
   addSuffix:
     input_types: [Utf8]
@@ -253,9 +253,9 @@ The build command produces:
 ```
 <output>/
   manifest.json           # Canonical manifest with file references
-  sql/
+  tables/
     <table>.sql           # Rendered SQL (post-Jinja)
-    <table>.schema.json   # Inferred Arrow schema
+    <table>.ipc           # Inferred Arrow schema (IPC file format)
   functions/
     <func>.js             # Copied function sources
 ```
@@ -313,7 +313,7 @@ Notes:
 
 - Dependencies must be explicitly versioned or hashed; symbolic references like `latest` or `dev` are not allowed.
 - Dependency-free datasets cannot infer network configuration; include at least one dependency.
-- Model SQL must satisfy the validation constraints listed above.
+- Table SQL must satisfy the validation constraints listed above.
 - Jinja is deterministic-only: no database access or filesystem/network operations during rendering.
 - Using `env_var()` makes builds environment-dependent; avoid for reproducible builds.
 - The legacy bridge is required until servers support the new package format directly.

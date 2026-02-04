@@ -273,11 +273,11 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `docs/features/dataset-authoring.md`, `tests/src/tests/it_dataset_authoring.rs`, CLI help markdown files, `playground/`
 
 **8.1) Update `docs/features/dataset-authoring.md`**
-- [ ] Replace all `models/` references with `tables/` (currently 11 occurrences)
-- [ ] Update build output structure section (currently shows `sql/` layout)
-- [ ] Update `amp.yaml` schema documentation (config field `models` → `tables`)
-- [ ] Document `.ipc` schema format (replace `.schema.json` references)
-- [ ] Update CLI examples
+- [x] Replace all `models/` references with `tables/` (currently 11 occurrences)
+- [x] Update build output structure section (currently shows `sql/` layout)
+- [x] Update `amp.yaml` schema documentation (config field `models` → `tables`)
+- [x] Document `.ipc` schema format (replace `.schema.json` references)
+- [x] Update CLI examples
 
 **8.2) Update tests**
 - [ ] Update all fixture paths from `sql/` to `tables/`
