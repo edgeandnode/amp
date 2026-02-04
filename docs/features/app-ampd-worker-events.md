@@ -3,7 +3,7 @@ name: "app-ampd-worker-events"
 description: "Worker event streaming via Kafka for real-time sync progress updates. Load when asking about push-based sync notifications, event emission, or Kafka integration"
 type: feature
 status: experimental
-components: "service:worker,crate:kafka"
+components: "service:worker"
 ---
 
 # Worker Event Streaming
@@ -49,13 +49,13 @@ Workers emit events directly to Kafka as sync jobs progress:
 | Event Type       | Trigger                      | Purpose                    |
 | ---------------- | ---------------------------- | -------------------------- |
 | `sync.started`   | Job begins extraction        | Track job lifecycle        |
-| `sync.progress`  | Progress percentage changes  | Report sync progress       |
+| `sync.progress`  | Time interval elapsed        | Report sync progress       |
 | `sync.completed` | Job finishes successfully    | Mark dataset as synced     |
 | `sync.failed`    | Job encounters fatal error   | Trigger alerts             |
 
 #### Progress Throttling
 
-Progress events are emitted on **1% increments** rather than per-block to avoid excessive noise, especially for high-throughput chains like Solana. For continuous jobs (no end block), progress events are emitted on each microbatch completion since percentage cannot be calculated.
+Progress events are emitted on a **configurable time interval** (default: 10 seconds) rather than per-block to avoid excessive noise, especially for high-throughput chains like Solana. Events are only emitted when there is new progress to report since the last event.
 
 #### Continuous vs Bounded Jobs
 
@@ -80,7 +80,7 @@ Uses [rskafka](https://github.com/influxdata/rskafka) - a pure Rust Kafka client
 
 Event emission is a by-product of sync jobs - Kafka unavailability must not fail the job:
 
-- **Retry with exponential backoff**: 3 attempts, then 1s, 5s, 1min delays
+- **Retry with fixed delays**: 3 attempts with delays of 1s, 5s, 60s
 - **Log errors**: Record failures for debugging without blocking sync
 - **Fallback**: The [Job Progress API](admin-jobs-progress.md) remains available when events are disabled or Kafka is unavailable
 
@@ -89,11 +89,11 @@ Event emission is a by-product of sync jobs - Kafka unavailability must not fail
 Event streaming is **opt-in** (disabled by default). When disabled, the [Job Progress API](admin-jobs-progress.md) remains available for polling sync status.
 
 ```toml
-[worker.events]
+[worker_events]
 enabled = true
 progress_interval_secs = 10  # Emit progress events at most every 10 seconds
 
-[worker.events.kafka]
+[worker_events.kafka]
 brokers = ["kafka-1:9092", "kafka-2:9092"]
 topic = "amp.worker.events"
 partitions = 16
@@ -116,7 +116,7 @@ partitions = 16
 For managed Kafka services (AWS MSK, Confluent Cloud, Redpanda Cloud), configure SASL authentication:
 
 ```toml
-[worker.events.kafka]
+[worker_events.kafka]
 brokers = ["pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"]
 topic = "amp.worker.events"
 sasl_mechanism = "SCRAM-SHA-256"
@@ -145,11 +145,11 @@ If the topic doesn't exist, event sends will retry then log a warning and drop t
 ### Enable Kafka Events
 
 ```toml
-[worker.events]
+[worker_events]
 enabled = true
 progress_interval_secs = 10  # Optional: emit progress every 10s (default)
 
-[worker.events.kafka]
+[worker_events.kafka]
 brokers = ["localhost:9092"]
 topic = "amp.worker.events"
 partitions = 16  # Must match actual topic partition count
