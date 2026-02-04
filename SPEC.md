@@ -128,27 +128,27 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `manifest.rs`, `package.rs`, `bridge.rs`, `arrow_json.rs`, CLI help text
 
 **3.1) Update `manifest.rs` output paths**
-- [ ] Change SQL file path from `sql/<table>.sql` to `tables/<table>.sql` (line 406)
-- [ ] Change schema file path from `sql/<table>.schema.json` to `tables/<table>.ipc` (line 415)
-- [ ] Update `sql_dir` parameter naming throughout to `tables_dir`
-- [ ] Update `ManifestBuilder` field `sql_dir: &'a Path` → `tables_dir: &'a Path` (line 286)
-- [ ] Update `ManifestBuilder::new()` parameter (line 306)
-- [ ] Update all test fixtures using `sql/` paths (lines 819-934 tests)
+- [x] Change SQL file path from `sql/<table>.sql` to `tables/<table>.sql` (line 406)
+- [x] Change schema file path from `sql/<table>.schema.json` to `tables/<table>.ipc` (line 415)
+- [x] Update `sql_dir` parameter naming throughout to `tables_dir`
+- [x] Update `ManifestBuilder` field `sql_dir: &'a Path` → `tables_dir: &'a Path` (line 286)
+- [x] Update `ManifestBuilder::new()` parameter (line 306)
+- [x] Update all test fixtures using `sql/` paths (lines 819-934 tests)
 
 **3.2) Update `package.rs`**
-- [ ] Change directory inclusion from `sql/` to `tables/` (lines 175-178)
-- [ ] Update `from_directory()` to look for `tables/` instead of `sql/`
-- [ ] Update all test fixtures and assertions (lines 613-651 tests)
+- [x] Change directory inclusion from `sql/` to `tables/` (lines 175-178)
+- [x] Update `from_directory()` to look for `tables/` instead of `sql/`
+- [x] Update all test fixtures and assertions (lines 613-651 tests)
 
 **3.3) Update `bridge.rs`**
-- [ ] Update all path references from `sql/` to `tables/`
-- [ ] Update test fixtures
+- [x] Update all path references from `sql/` to `tables/`
+- [ ] Update test fixtures (deferred to Phase 6 - bridge reads JSON schemas for legacy conversion)
 
 **3.4) Update `arrow_json.rs` → deprecate or remove**
-- [ ] After IPC is working, remove JSON schema write calls from build flow
-- [ ] Keep `arrow_json.rs` only if needed for legacy adapter layer in Phase 6
+- [x] After IPC is working, remove JSON schema write calls from build flow
+- [ ] Keep `arrow_json.rs` only if needed for legacy adapter layer in Phase 6 (confirmed needed)
 
-**Acceptance criteria**: `ampctl dataset build` produces `tables/<table>.sql` + `tables/<table>.ipc`, no `sql/` directory.
+**Acceptance criteria**: `ampctl dataset build` produces `tables/<table>.sql` + `tables/<table>.ipc`, no `sql/` directory. **VERIFIED**
 
 ---
 
