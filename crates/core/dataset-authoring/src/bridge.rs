@@ -6,8 +6,8 @@
 //! # Overview
 //!
 //! The authoring workflow uses file references in manifests:
-//! - SQL files at `sql/<table>.sql`
-//! - Schema files at `sql/<table>.schema.json`
+//! - SQL files at `tables/<table>.sql` (derived tables only)
+//! - IPC schema files at `tables/<table>.ipc`
 //! - Function source files at `functions/<name>.js`
 //!
 //! The legacy runtime format requires inline content:
@@ -16,6 +16,8 @@
 //! - `functions.<name>.source` contains `{ source: <code>, filename: <name> }`
 //!
 //! This module provides the [`LegacyBridge`] type to convert between formats.
+//!
+//! Note: Raw tables (no SQL definition) are not supported by the legacy bridge.
 //!
 //! # Example
 //!
@@ -88,6 +90,18 @@ pub enum BridgeError {
         /// The underlying I/O error.
         #[source]
         source: io::Error,
+    },
+
+    /// Missing SQL file reference for derived table.
+    ///
+    /// This occurs when a derived table is missing a SQL file reference.
+    /// Raw tables (which have no SQL) cannot be converted to the legacy format.
+    #[error(
+        "table '{table_name}' has no SQL definition (raw tables not supported in legacy bridge)"
+    )]
+    MissingSql {
+        /// The table name.
+        table_name: String,
     },
 
     /// SQL content is invalid.
@@ -172,12 +186,18 @@ impl<'a> LegacyBridge<'a> {
         let mut tables = BTreeMap::new();
 
         for (table_name, table_def) in &manifest.tables {
-            // Read SQL file
-            let sql_path = self.base_path.join(&table_def.sql.path);
+            // Read SQL file (required for derived tables)
+            let sql_ref = table_def
+                .sql
+                .as_ref()
+                .ok_or_else(|| BridgeError::MissingSql {
+                    table_name: table_name.to_string(),
+                })?;
+            let sql_path = self.base_path.join(&sql_ref.path);
             let sql_content =
                 fs::read_to_string(&sql_path).map_err(|err| BridgeError::ReadSqlFile {
                     table_name: table_name.to_string(),
-                    path: table_def.sql.path.clone(),
+                    path: sql_ref.path.clone(),
                     source: err,
                 })?;
 
@@ -187,12 +207,12 @@ impl<'a> LegacyBridge<'a> {
                 source: err,
             })?;
 
-            // Read schema file
-            let schema_path = self.base_path.join(&table_def.schema.path);
-            let arrow_schema = arrow_json::read_schema_file(&schema_path).map_err(|err| {
+            // Read IPC schema file
+            let ipc_path = self.base_path.join(&table_def.ipc.path);
+            let arrow_schema = arrow_json::read_schema_file(&ipc_path).map_err(|err| {
                 BridgeError::ReadSchemaFile {
                     table_name: table_name.to_string(),
-                    path: table_def.schema.path.clone(),
+                    path: table_def.ipc.path.clone(),
                     source: err,
                 }
             })?;
@@ -391,8 +411,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -428,8 +451,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -460,8 +486,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "arbitrum-one".parse().expect("valid network"),
             },
         );
@@ -491,8 +520,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -529,8 +561,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -679,8 +714,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -712,8 +750,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -804,8 +845,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -862,8 +906,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -1005,8 +1052,11 @@ mod tests {
         manifest.tables.insert(
             "transfers".parse().expect("valid table name"),
             TableDef {
-                sql: FileRef::new("sql/transfers.sql".to_string(), create_test_hash()),
-                schema: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                sql: Some(FileRef::new(
+                    "sql/transfers.sql".to_string(),
+                    create_test_hash(),
+                )),
+                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );

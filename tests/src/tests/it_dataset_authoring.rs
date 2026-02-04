@@ -550,8 +550,11 @@ fn legacy_bridge_converts_manifest_with_inline_content() {
     manifest.tables.insert(
         "transfers".parse().expect("valid table name"),
         TableDef {
-            sql: FileRef::new("sql/transfers.sql".to_string(), test_hash.clone()),
-            schema: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            sql: Some(FileRef::new(
+                "sql/transfers.sql".to_string(),
+                test_hash.clone(),
+            )),
+            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -617,8 +620,11 @@ fn legacy_bridge_produces_valid_json() {
     manifest.tables.insert(
         "transfers".parse().expect("valid table name"),
         TableDef {
-            sql: FileRef::new("sql/transfers.sql".to_string(), test_hash.clone()),
-            schema: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            sql: Some(FileRef::new(
+                "sql/transfers.sql".to_string(),
+                test_hash.clone(),
+            )),
+            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -771,8 +777,11 @@ async fn full_package_and_bridge_pipeline() {
     authoring_manifest.tables.insert(
         "transfers".parse().expect("valid table name"),
         TableDef {
-            sql: FileRef::new("sql/transfers.sql".to_string(), test_hash.clone()),
-            schema: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            sql: Some(FileRef::new(
+                "sql/transfers.sql".to_string(),
+                test_hash.clone(),
+            )),
+            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -841,8 +850,11 @@ fn canonical_manifest_hash_matches_identity() {
     manifest.tables.insert(
         "transfers".parse().expect("valid table name"),
         TableDef {
-            sql: FileRef::new("sql/transfers.sql".to_string(), test_hash.clone()),
-            schema: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            sql: Some(FileRef::new(
+                "sql/transfers.sql".to_string(),
+                test_hash.clone(),
+            )),
+            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -886,8 +898,11 @@ fn canonical_manifest_is_deterministic() {
     manifest.tables.insert(
         "transfers".parse().expect("valid table name"),
         TableDef {
-            sql: FileRef::new("sql/transfers.sql".to_string(), test_hash.clone()),
-            schema: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            sql: Some(FileRef::new(
+                "sql/transfers.sql".to_string(),
+                test_hash.clone(),
+            )),
+            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -980,8 +995,11 @@ fn legacy_bridge_reads_function_from_canonical_path() {
     manifest.tables.insert(
         "transfers".parse().expect("valid table name"),
         TableDef {
-            sql: FileRef::new("sql/transfers.sql".to_string(), test_hash.clone()),
-            schema: FileRef::new("sql/transfers.schema.json".to_string(), test_hash.clone()),
+            sql: Some(FileRef::new(
+                "sql/transfers.sql".to_string(),
+                test_hash.clone(),
+            )),
+            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash.clone()),
             network: "mainnet".parse().expect("valid network"),
         },
     );

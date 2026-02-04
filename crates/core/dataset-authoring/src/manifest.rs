@@ -20,8 +20,8 @@
 //!   },
 //!   "tables": {
 //!     "transfers": {
-//!       "sql": { "path": "sql/transfers.sql", "hash": "..." },
-//!       "schema": { "path": "sql/transfers.schema.json", "hash": "..." },
+//!       "sql": { "path": "tables/transfers.sql", "hash": "..." },
+//!       "ipc": { "path": "tables/transfers.ipc", "hash": "..." },
 //!       "network": "mainnet"
 //!     }
 //!   },
@@ -34,6 +34,8 @@
 //!   }
 //! }
 //! ```
+//!
+//! For raw tables (no SQL definition), the `sql` field is omitted.
 //!
 //! # Identity Hash
 //!
@@ -74,12 +76,12 @@ pub enum ManifestError {
         source: FileRefError,
     },
 
-    /// Failed to create file reference for schema file.
+    /// Failed to create file reference for IPC schema file.
     ///
-    /// This occurs when the schema file cannot be read or hashed.
-    #[error("failed to create file reference for schema file '{table_name}'")]
-    SchemaFileRef {
-        /// The table name associated with the schema file.
+    /// This occurs when the IPC schema file cannot be read or hashed.
+    #[error("failed to create file reference for IPC schema file '{table_name}'")]
+    IpcFileRef {
+        /// The table name associated with the IPC schema file.
         table_name: TableName,
         /// The underlying file reference error.
         #[source]
@@ -164,13 +166,17 @@ pub struct DepInfo {
 
 /// Table definition in the authoring manifest.
 ///
-/// References SQL and schema files by path and content hash.
+/// References SQL and IPC schema files by path and content hash.
+/// For derived tables, `sql` contains the CTAS query. For raw tables,
+/// `sql` is `None` since raw tables have no SQL definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableDef {
     /// Reference to the SQL file containing the CTAS statement.
-    pub sql: FileRef,
-    /// Reference to the schema JSON file.
-    pub schema: FileRef,
+    /// `None` for raw tables which have no SQL definition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<FileRef>,
+    /// Reference to the Arrow IPC schema file.
+    pub ipc: FileRef,
     /// Network this table belongs to (inferred from dependencies).
     pub network: NetworkId,
 }
@@ -411,15 +417,15 @@ where
                 }
             })?;
 
-            // Schema file path: sql/<table_name>.schema.json
-            let schema_file_path = self.sql_dir.join(format!("{}.schema.json", table_name));
-            let schema_ref =
-                FileRef::from_file(&schema_file_path, self.base_path).map_err(|err| {
-                    ManifestError::SchemaFileRef {
-                        table_name: table_name.clone(),
-                        source: err,
-                    }
-                })?;
+            // IPC schema file path: sql/<table_name>.schema.json
+            // Note: Path will change to tables/<table_name>.ipc in Phase 3
+            let ipc_file_path = self.sql_dir.join(format!("{}.schema.json", table_name));
+            let ipc_ref = FileRef::from_file(&ipc_file_path, self.base_path).map_err(|err| {
+                ManifestError::IpcFileRef {
+                    table_name: table_name.clone(),
+                    source: err,
+                }
+            })?;
 
             // Infer network using the resolver
             let network = (self.network_resolver)(table_name, self.dep_graph)?;
@@ -427,8 +433,8 @@ where
             tables.insert(
                 table_name.clone(),
                 TableDef {
-                    sql: sql_ref,
-                    schema: schema_ref,
+                    sql: Some(sql_ref),
+                    ipc: ipc_ref,
                     network,
                 },
             );
@@ -727,14 +733,14 @@ mod tests {
     fn table_def_serializes_correctly() {
         //* Given
         let table_def = TableDef {
-            sql: FileRef::new(
-                "sql/transfers.sql".to_string(),
+            sql: Some(FileRef::new(
+                "tables/transfers.sql".to_string(),
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                     .parse()
                     .expect("valid hash"),
-            ),
-            schema: FileRef::new(
-                "sql/transfers.schema.json".to_string(),
+            )),
+            ipc: FileRef::new(
+                "tables/transfers.ipc".to_string(),
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                     .parse()
                     .expect("valid hash"),
@@ -747,9 +753,84 @@ mod tests {
 
         //* Then
         let json_str = json.expect("serialization should succeed");
-        assert!(json_str.contains("sql/transfers.sql"));
-        assert!(json_str.contains("sql/transfers.schema.json"));
+        assert!(json_str.contains("tables/transfers.sql"));
+        assert!(json_str.contains("tables/transfers.ipc"));
         assert!(json_str.contains("mainnet"));
+    }
+
+    #[test]
+    fn table_def_without_sql_omits_sql_field() {
+        //* Given - a raw table with no SQL definition
+        let table_def = TableDef {
+            sql: None,
+            ipc: FileRef::new(
+                "tables/raw_events.ipc".to_string(),
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .parse()
+                    .expect("valid hash"),
+            ),
+            network: "mainnet".parse().expect("valid network"),
+        };
+
+        //* When
+        let json = serde_json::to_string_pretty(&table_def);
+
+        //* Then
+        let json_str = json.expect("serialization should succeed");
+        assert!(
+            !json_str.contains("\"sql\""),
+            "sql field should be omitted when None"
+        );
+        assert!(json_str.contains("tables/raw_events.ipc"));
+        assert!(json_str.contains("mainnet"));
+    }
+
+    #[test]
+    fn table_def_roundtrip_with_optional_sql() {
+        //* Given - a table with SQL
+        let table_def_with_sql = TableDef {
+            sql: Some(FileRef::new(
+                "tables/transfers.sql".to_string(),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .parse()
+                    .expect("valid hash"),
+            )),
+            ipc: FileRef::new(
+                "tables/transfers.ipc".to_string(),
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .parse()
+                    .expect("valid hash"),
+            ),
+            network: "mainnet".parse().expect("valid network"),
+        };
+
+        //* When - roundtrip serialize/deserialize
+        let json = serde_json::to_string(&table_def_with_sql).expect("serialize should succeed");
+        let deserialized: TableDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+
+        //* Then
+        assert_eq!(deserialized, table_def_with_sql);
+
+        //* Given - a table without SQL (raw table)
+        let table_def_without_sql = TableDef {
+            sql: None,
+            ipc: FileRef::new(
+                "tables/raw_events.ipc".to_string(),
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .parse()
+                    .expect("valid hash"),
+            ),
+            network: "mainnet".parse().expect("valid network"),
+        };
+
+        //* When
+        let json = serde_json::to_string(&table_def_without_sql).expect("serialize should succeed");
+        let deserialized: TableDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+
+        //* Then
+        assert_eq!(deserialized, table_def_without_sql);
     }
 
     // ============================================================
@@ -906,13 +987,13 @@ models: models
     }
 
     #[test]
-    fn manifest_builder_fails_on_missing_schema_file() {
+    fn manifest_builder_fails_on_missing_ipc_file() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
         let sql_dir = dir.path().join("sql");
         fs::create_dir(&sql_dir).expect("should create sql dir");
 
-        // Create SQL but not schema
+        // Create SQL but not IPC schema
         fs::write(sql_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
 
         let config = create_test_config();
@@ -927,8 +1008,8 @@ models: models
         assert!(result.is_err());
         let err = result.expect_err("should fail");
         assert!(
-            matches!(err, ManifestError::SchemaFileRef { .. }),
-            "should be SchemaFileRef error, got: {:?}",
+            matches!(err, ManifestError::IpcFileRef { .. }),
+            "should be IpcFileRef error, got: {:?}",
             err
         );
     }
