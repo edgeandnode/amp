@@ -27,16 +27,47 @@ use self::{
     job_queue::JobQueue,
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
+use amp_config::WorkerEventsConfig;
+
 use crate::{
     build_info::BuildInfo,
     config::Config,
-    events::{EventEmitter, NoOpEmitter},
+    events::{EventEmitter, KafkaEventEmitter, NoOpEmitter},
     job::{Job, JobAction, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
 
 /// Frequency on which to send a heartbeat.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Creates an event emitter based on configuration.
+///
+/// Returns a [`NoOpEmitter`] if events are disabled, Kafka config is missing,
+/// or Kafka producer creation fails.
+async fn create_event_emitter(
+    events_config: &WorkerEventsConfig,
+    node_id: &NodeId,
+) -> Arc<dyn EventEmitter> {
+    if !events_config.enabled {
+        return Arc::new(NoOpEmitter);
+    }
+
+    let Some(kafka_config) = &events_config.kafka else {
+        tracing::warn!("Events enabled but no Kafka config provided, events disabled");
+        return Arc::new(NoOpEmitter);
+    };
+
+    let producer = match crate::kafka::KafkaProducer::new(kafka_config).await {
+        Ok(producer) => producer,
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to create Kafka producer, events disabled");
+            return Arc::new(NoOpEmitter);
+        }
+    };
+
+    tracing::info!("Kafka event streaming enabled");
+    Arc::new(KafkaEventEmitter::new(Arc::new(producer), node_id.clone()))
+}
 
 /// Run the worker service
 ///
@@ -57,7 +88,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// - If `Some(emitter)` is provided, it will be used directly.
 /// - If `None` is provided, an emitter will be created based on the configuration
 ///   (either [`KafkaEventEmitter`] if events are enabled, or [`NoOpEmitter`] otherwise).
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn new(
     config: Config,
     build_info: impl Into<BuildInfo>,
@@ -99,36 +130,7 @@ pub async fn new(
             tracing::info!("Using injected event emitter");
             emitter
         }
-        None => {
-            // Create emitter based on configuration
-            if config.events_config.enabled {
-                match &config.events_config.kafka {
-                    Some(kafka_config) => {
-                        match crate::kafka::KafkaProducer::new(kafka_config).await {
-                            Ok(producer) => {
-                                tracing::info!("Kafka event streaming enabled");
-                                Arc::new(crate::events::KafkaEventEmitter::new(
-                                    Arc::new(producer),
-                                    node_id.clone(),
-                                ))
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Failed to create Kafka producer, events disabled");
-                                Arc::new(NoOpEmitter)
-                            }
-                        }
-                    }
-                    None => {
-                        tracing::warn!(
-                            "Events enabled but no Kafka config provided, events disabled"
-                        );
-                        Arc::new(NoOpEmitter)
-                    }
-                }
-            } else {
-                Arc::new(NoOpEmitter)
-            }
-        }
+        None => create_event_emitter(&config.events_config, &node_id).await,
     };
 
     // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state

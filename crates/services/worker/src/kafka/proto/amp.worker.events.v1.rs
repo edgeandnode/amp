@@ -161,13 +161,13 @@ pub struct SyncProgress {
     #[prost(message, optional, tag = "4")]
     pub progress: ::core::option::Option<ProgressInfo>,
 }
-/// SyncCompleted is emitted when a sync job finishes successfully.
+/// SyncCompleted is emitted when a bounded sync job finishes successfully.
 ///
 /// Event type: "sync.completed"
 ///
-/// This event indicates the job processed all blocks in its range
-/// without errors. For continuous jobs, this is emitted when the
-/// job is gracefully stopped.
+/// This event indicates the job processed all blocks in its configured range
+/// without errors. Only emitted for bounded jobs (jobs with a configured end block).
+/// Continuous jobs (no end block) never emit this event since they sync indefinitely.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SyncCompleted {
     /// Database ID of the job.

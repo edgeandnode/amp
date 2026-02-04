@@ -30,19 +30,19 @@ fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> proto::DatasetI
 
 use crate::testlib::fixtures::MockEventEmitter;
 
-/// Test that WorkerProgressReporter correctly forwards progress updates to the event emitter.
+/// WorkerProgressReporter correctly forwards progress updates to the event emitter.
 #[tokio::test]
-async fn test_progress_reporter_forwards_to_emitter() {
+async fn progress_reporter_forwards_updates_to_emitter() {
     logging::init();
 
-    // Given
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
     let dataset_info = test_dataset_info("test", "dataset", TEST_HASH);
 
     let job_id = JobId::try_from(1i64).unwrap();
     let reporter = WorkerProgressReporter::new(job_id, dataset_info, emitter.clone());
 
-    // When - emit multiple progress updates
+    //* When - emit multiple progress updates
     for block in [10u64, 25, 50, 75, 100] {
         reporter.report_progress(ProgressUpdate {
             table_name: "blocks".parse().unwrap(),
@@ -57,7 +57,7 @@ async fn test_progress_reporter_forwards_to_emitter() {
     // Give async tasks time to complete
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    // Then
+    //* Then
     let progress_events = emitter.progress_events();
     assert_eq!(progress_events.len(), 5, "Should have 5 progress events");
 
@@ -93,13 +93,13 @@ async fn test_progress_reporter_forwards_to_emitter() {
     }
 }
 
-/// Test that started events are recorded correctly.
+/// Started events contain correct job and dataset metadata.
 #[tokio::test]
-async fn test_started_events_recorded() {
-    // Given
+async fn started_event_contains_correct_metadata() {
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
 
-    // When
+    //* When
     emitter
         .emit_sync_started(proto::SyncStarted {
             job_id: 42,
@@ -110,7 +110,7 @@ async fn test_started_events_recorded() {
         })
         .await;
 
-    // Then
+    //* Then
     let started_events = emitter.started_events();
     assert_eq!(started_events.len(), 1);
 
@@ -124,13 +124,13 @@ async fn test_started_events_recorded() {
     assert_eq!(event.end_block, Some(2000));
 }
 
-/// Test that completed events are recorded correctly.
+/// Completed events contain correct job metadata and duration.
 #[tokio::test]
-async fn test_completed_events_recorded() {
-    // Given
+async fn completed_event_contains_correct_metadata() {
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
 
-    // When
+    //* When
     emitter
         .emit_sync_completed(proto::SyncCompleted {
             job_id: 42,
@@ -141,7 +141,7 @@ async fn test_completed_events_recorded() {
         })
         .await;
 
-    // Then
+    //* Then
     let completed_events = emitter.completed_events();
     assert_eq!(completed_events.len(), 1);
 
@@ -151,13 +151,13 @@ async fn test_completed_events_recorded() {
     assert_eq!(event.duration_millis, 5000);
 }
 
-/// Test that failed events are recorded correctly.
+/// Failed events contain correct error message and type.
 #[tokio::test]
-async fn test_failed_events_recorded() {
-    // Given
+async fn failed_event_contains_correct_metadata() {
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
 
-    // When
+    //* When
     emitter
         .emit_sync_failed(proto::SyncFailed {
             job_id: 42,
@@ -168,7 +168,7 @@ async fn test_failed_events_recorded() {
         })
         .await;
 
-    // Then
+    //* Then
     let failed_events = emitter.failed_events();
     assert_eq!(failed_events.len(), 1);
 
@@ -178,16 +178,16 @@ async fn test_failed_events_recorded() {
     assert_eq!(event.error_type, Some("NetworkError".to_string()));
 }
 
-/// Test that the full job lifecycle emits events in the correct order.
+/// Full job lifecycle emits started, progress, and completed events.
 #[tokio::test]
-async fn test_full_job_lifecycle_events() {
+async fn full_lifecycle_emits_started_progress_completed() {
     logging::init();
 
-    // Given
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
     let dataset = test_dataset_info("test", "dataset", TEST_HASH);
 
-    // When - simulate a complete job lifecycle
+    //* When - simulate a complete job lifecycle
     emitter
         .emit_sync_started(proto::SyncStarted {
             job_id: 1,
@@ -226,7 +226,7 @@ async fn test_full_job_lifecycle_events() {
         })
         .await;
 
-    // Then
+    //* Then
     assert_eq!(emitter.started_events().len(), 1);
     assert_eq!(emitter.progress_events().len(), 99); // 1% to 99%
     assert_eq!(emitter.completed_events().len(), 1);
@@ -234,10 +234,10 @@ async fn test_full_job_lifecycle_events() {
     assert_eq!(emitter.event_count(), 101); // 1 started + 99 progress + 1 completed
 }
 
-/// Test that events can be cleared from the mock emitter.
+/// Mock emitter clear removes all recorded events.
 #[tokio::test]
-async fn test_mock_emitter_clear() {
-    // Given
+async fn mock_emitter_clear_removes_all_events() {
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
     emitter
         .emit_sync_started(proto::SyncStarted {
@@ -250,26 +250,26 @@ async fn test_mock_emitter_clear() {
         .await;
     assert_eq!(emitter.event_count(), 1);
 
-    // When
+    //* When
     emitter.clear();
 
-    // Then
+    //* Then
     assert_eq!(emitter.event_count(), 0);
 }
 
-/// Test continuous ingestion scenario (no end block).
+/// Continuous ingestion emits progress events without an end block.
 ///
 /// In continuous ingestion mode, events are emitted on time intervals
 /// with no fixed end block.
 #[tokio::test]
-async fn test_continuous_ingestion_events() {
+async fn continuous_ingestion_emits_progress_without_end_block() {
     logging::init();
 
-    // Given
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
     let dataset = test_dataset_info("test", "stream", TEST_HASH_2);
 
-    // When - simulate continuous ingestion (no end_block)
+    //* When - simulate continuous ingestion (no end_block)
     emitter
         .emit_sync_started(proto::SyncStarted {
             job_id: 1,
@@ -299,7 +299,7 @@ async fn test_continuous_ingestion_events() {
             .await;
     }
 
-    // Then - all progress events should be recorded
+    //* Then - all progress events should be recorded
     let progress_events = emitter.progress_events();
     assert_eq!(progress_events.len(), 5);
 
@@ -315,12 +315,12 @@ async fn test_continuous_ingestion_events() {
     assert_eq!(started.end_block, None);
 }
 
-/// Test that multiple tables emit separate events.
+/// Multiple tables emit separate events with distinct table names.
 #[tokio::test]
-async fn test_multiple_tables_emit_separate_events() {
+async fn separate_events_emitted_per_table() {
     logging::init();
 
-    // Given
+    //* Given
     let emitter = Arc::new(MockEventEmitter::new());
     let job_id = JobId::try_from(1i64).unwrap();
     let reporter = WorkerProgressReporter::new(
@@ -329,7 +329,7 @@ async fn test_multiple_tables_emit_separate_events() {
         emitter.clone(),
     );
 
-    // When - emit progress for different tables
+    //* When - emit progress for different tables
     reporter.report_progress(ProgressUpdate {
         table_name: "blocks".parse().unwrap(),
         start_block: 0,
@@ -358,7 +358,7 @@ async fn test_multiple_tables_emit_separate_events() {
     // Give async tasks time to complete
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    // Then
+    //* Then
     let progress_events = emitter.progress_events();
     assert_eq!(progress_events.len(), 3);
 
@@ -384,7 +384,7 @@ async fn test_multiple_tables_emit_separate_events() {
 
 use crate::testlib::ctx::TestCtxBuilder;
 
-/// End-to-end test that deploys a dataset to Anvil and verifies events are captured.
+/// E2E: Anvil sync captures started, progress, and completed events.
 ///
 /// This test:
 /// 1. Starts Anvil with mined blocks
@@ -393,10 +393,10 @@ use crate::testlib::ctx::TestCtxBuilder;
 /// 4. Waits for the sync to complete
 /// 5. Verifies that started, progress, and completed events were captured
 #[tokio::test]
-async fn test_e2e_anvil_sync_emits_lifecycle_events() {
+async fn e2e_anvil_sync_captures_lifecycle_events() {
     logging::init();
 
-    // Given: Create a MockEventEmitter to capture events
+    //* Given: Create a MockEventEmitter to capture events
     let mock_emitter = Arc::new(MockEventEmitter::new());
 
     // Build test context with Anvil and inject the mock emitter
@@ -411,7 +411,7 @@ async fn test_e2e_anvil_sync_emits_lifecycle_events() {
     // Mine some blocks so we have data to sync
     ctx.anvil().mine(2000).await.expect("failed to mine blocks");
 
-    // When: Deploy the dataset with an end block so the job completes
+    //* When: Deploy the dataset with an end block so the job completes
     let ampctl = ctx.new_ampctl();
     let job_id = ampctl
         .dataset_deploy("_/anvil_rpc@0.0.0", Some(2000), None, None)
@@ -451,7 +451,7 @@ async fn test_e2e_anvil_sync_emits_lifecycle_events() {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
 
-    // Then: Verify events were captured
+    //* Then: Verify events were captured
     let started_events = mock_emitter.started_events();
     let progress_events = mock_emitter.progress_events();
     let completed_events = mock_emitter.completed_events();
