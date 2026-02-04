@@ -32,11 +32,11 @@
 //! use dataset_authoring::arrow_json::{write_schema_file, read_schema_file};
 //! use datasets_common::manifest::TableSchema;
 //!
-//! // Write schema to file (legacy JSON format)
-//! write_schema_file(&schema, "tables/transfers.schema.json")?;
+//! // Write schema to file (legacy JSON format for admin API)
+//! write_schema_file(&schema, "legacy_schema.json")?;
 //!
 //! // Read schema from file
-//! let loaded_schema = read_schema_file("tables/transfers.schema.json")?;
+//! let loaded_schema = read_schema_file("legacy_schema.json")?;
 //! ```
 
 use std::{

@@ -8,8 +8,8 @@
 //!
 //! The archive contains:
 //! - `manifest.json` - Canonical manifest with file references
-//! - `sql/<table>.sql` - Rendered SQL files
-//! - `sql/<table>.schema.json` - Inferred Arrow schemas
+//! - `tables/<table>.sql` - Rendered SQL files
+//! - `tables/<table>.ipc` - Inferred Arrow schemas (IPC format)
 //! - `functions/<name>.js` - Function source files (if any)
 //!
 //! # Determinism
@@ -36,7 +36,7 @@ pub struct Args {
     #[command(flatten)]
     pub global: GlobalArgs,
 
-    /// Directory containing build artifacts (with manifest.json, sql/, etc.).
+    /// Directory containing build artifacts (with manifest.json, tables/, etc.).
     ///
     /// This should be the output directory from `ampctl dataset build`.
     /// If not specified, uses the current directory if it contains a manifest.json.

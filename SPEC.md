@@ -280,14 +280,14 @@ Based on codebase exploration (2026-02-04, verified via code search):
 - [x] Update CLI examples
 
 **8.2) Update tests**
-- [ ] Update all fixture paths from `sql/` to `tables/`
-- [ ] Update all `.schema.json` references to `.ipc`
-- [ ] Add IPC round-trip tests
-- [ ] Add adapter layer tests for legacy conversion
-- [ ] Ensure coverage of new table shape (optional sql)
+- [x] Update all fixture paths from `sql/` to `tables/`
+- [x] Update all `.schema.json` references to `.ipc`
+- [x] Add IPC round-trip tests (already exist in arrow_ipc.rs)
+- [x] Add adapter layer tests for legacy conversion (already exist in bridge.rs)
+- [x] Ensure coverage of new table shape (optional sql) (already exist in manifest.rs)
 
 **8.3) Update CLI help text**
-- [ ] Update `ampctl dataset` subcommand help for `tables/` directory
+- [x] Update `ampctl dataset` subcommand help for `tables/` directory (package.rs docstrings updated)
 
 **8.4) Update playground sample**
 - [ ] Delete `playground/build/` directory (will be regenerated)

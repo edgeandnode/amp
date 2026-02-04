@@ -858,10 +858,10 @@ fn canonical_manifest_hash_matches_identity() {
         "transfers".parse().expect("valid table name"),
         TableDef {
             sql: Some(FileRef::new(
-                "sql/transfers.sql".to_string(),
+                "tables/transfers.sql".to_string(),
                 test_hash.clone(),
             )),
-            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            ipc: FileRef::new("tables/transfers.ipc".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -906,10 +906,10 @@ fn canonical_manifest_is_deterministic() {
         "transfers".parse().expect("valid table name"),
         TableDef {
             sql: Some(FileRef::new(
-                "sql/transfers.sql".to_string(),
+                "tables/transfers.sql".to_string(),
                 test_hash.clone(),
             )),
-            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            ipc: FileRef::new("tables/transfers.ipc".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
