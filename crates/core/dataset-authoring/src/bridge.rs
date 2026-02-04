@@ -39,7 +39,7 @@ use datasets_derived::{
     manifest::{Function, Manifest, Table, TableInput, View},
 };
 
-use crate::{arrow_json, manifest::AuthoringManifest};
+use crate::{arrow_ipc, manifest::AuthoringManifest};
 
 /// Errors that occur during legacy bridge conversion.
 #[derive(Debug, thiserror::Error)]
@@ -60,20 +60,20 @@ pub enum BridgeError {
         source: io::Error,
     },
 
-    /// Failed to read schema file for a table.
+    /// Failed to read IPC schema file for a table.
     ///
-    /// This occurs when the schema JSON file referenced in the manifest cannot
+    /// This occurs when the IPC schema file referenced in the manifest cannot
     /// be read from disk. The file should exist at the path specified in the
     /// manifest's table definition.
-    #[error("failed to read schema file for table '{table_name}' at path '{path}'")]
-    ReadSchemaFile {
+    #[error("failed to read IPC schema file for table '{table_name}' at path '{path}'")]
+    ReadIpcSchemaFile {
         /// The table name.
         table_name: String,
-        /// The path to the schema file.
+        /// The path to the IPC schema file.
         path: String,
-        /// The underlying schema file error.
+        /// The underlying IPC schema error.
         #[source]
-        source: arrow_json::SchemaFileError,
+        source: arrow_ipc::IpcSchemaError,
     },
 
     /// Failed to read function source file.
@@ -207,15 +207,16 @@ impl<'a> LegacyBridge<'a> {
                 source: err,
             })?;
 
-            // Read IPC schema file
+            // Read IPC schema file and convert to legacy ArrowSchema format
             let ipc_path = self.base_path.join(&table_def.ipc.path);
-            let arrow_schema = arrow_json::read_schema_file(&ipc_path).map_err(|err| {
-                BridgeError::ReadSchemaFile {
+            let schema_ref = arrow_ipc::read_ipc_schema(&ipc_path).map_err(|err| {
+                BridgeError::ReadIpcSchemaFile {
                     table_name: table_name.to_string(),
                     path: table_def.ipc.path.clone(),
                     source: err,
                 }
             })?;
+            let arrow_schema = datasets_common::manifest::ArrowSchema::from(&schema_ref);
 
             let table = Table {
                 input: TableInput::View(View { sql: sql_str }),
@@ -299,13 +300,15 @@ pub enum ToJsonError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
+    use datafusion::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use datasets_common::{hash::Hash, manifest::DataType};
     use tempfile::TempDir;
 
     use super::*;
     use crate::{
+        arrow_ipc::write_ipc_schema,
         files::FileRef,
         manifest::{AuthoringFunctionDef, AuthoringManifest, DepInfo, TableDef},
     };
@@ -342,12 +345,14 @@ mod tests {
         )
         .expect("should write sql");
 
-        // Create schema file (still JSON format for legacy bridge compatibility)
-        fs::write(
-            tables_dir.join("transfers.schema.json"),
-            r#"{"fields":[{"name":"id","type":"UInt64","nullable":false}]}"#,
-        )
-        .expect("should write schema");
+        // Create IPC schema file
+        let schema = Arc::new(Schema::new(vec![ArrowField::new(
+            "id",
+            ArrowDataType::UInt64,
+            false,
+        )]));
+        write_ipc_schema(&schema, tables_dir.join("transfers.ipc"))
+            .expect("should write ipc schema");
     }
 
     fn setup_function_files(dir: &TempDir) {
@@ -415,10 +420,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -458,10 +460,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -496,10 +495,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "arbitrum-one".parse().expect("valid network"),
             },
         );
@@ -533,10 +529,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -567,7 +560,7 @@ mod tests {
             "CREATE TABLE transfers AS SELECT 1",
         )
         .expect("should write sql");
-        // Don't create the schema file
+        // Don't create the IPC schema file
 
         let mut manifest = create_minimal_manifest();
         manifest.tables.insert(
@@ -577,10 +570,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -594,8 +584,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.expect_err("should fail");
         assert!(
-            matches!(err, BridgeError::ReadSchemaFile { .. }),
-            "should be ReadSchemaFile error, got: {:?}",
+            matches!(err, BridgeError::ReadIpcSchemaFile { .. }),
+            "should be ReadIpcSchemaFile error, got: {:?}",
             err
         );
     }
@@ -733,10 +723,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -772,10 +759,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -870,10 +854,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -934,10 +915,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -1083,10 +1061,7 @@ mod tests {
                     "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new(
-                    "tables/transfers.schema.json".to_string(),
-                    create_test_hash(),
-                ),
+                ipc: FileRef::new("tables/transfers.ipc".to_string(), create_test_hash()),
                 network: "mainnet".parse().expect("valid network"),
             },
         );

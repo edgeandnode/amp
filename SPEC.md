@@ -142,7 +142,7 @@ Based on codebase exploration (2026-02-04, verified via code search):
 
 **3.3) Update `bridge.rs`**
 - [x] Update all path references from `sql/` to `tables/`
-- [ ] Update test fixtures (deferred to Phase 6 - bridge reads JSON schemas for legacy conversion)
+- [x] Update test fixtures to use IPC schema files (completed in Phase 6)
 
 **3.4) Update `arrow_json.rs` → deprecate or remove**
 - [x] After IPC is working, remove JSON schema write calls from build flow
@@ -213,13 +213,13 @@ Based on codebase exploration (2026-02-04, verified via code search):
 - [ ] Store canonical package in cache directory
 
 **6.2) Register adapter (package → legacy)**
-- [ ] Create adapter function to convert package format to legacy manifest JSON
-- [ ] When registering via `--package`:
+- [x] Create adapter function to convert package format to legacy manifest JSON
+- [x] When registering via `--package`:
   - Read `tables/<table>.ipc` → convert to legacy schema JSON
   - Read `tables/<table>.sql` content
   - Read `functions/` sources
   - Build legacy manifest JSON with inline content
-- [ ] Upload legacy manifest to admin API
+- [x] Upload legacy manifest to admin API (existing functionality via `LegacyBridge::to_json()`)
 
 **6.3) Constrain legacy parsing**
 - [ ] Ensure all legacy JSON schema parsing is confined to adapter layer
