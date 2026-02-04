@@ -217,23 +217,23 @@ fn slots_match(
             "transaction count mismatch"
         );
         return false;
-    } else {
-        for (tx_index, (of1_tx, rpc_tx)) in of1_slot
-            .transactions
-            .iter()
-            .zip(rpc_slot.transactions.iter())
-            .enumerate()
-        {
-            if of1_tx != rpc_tx {
-                let cmp = pretty_assertions::Comparison::new(&of1_tx, &rpc_tx);
-                tracing::warn!(
-                    %slot_num,
-                    %tx_index,
-                    %cmp,
-                    "transaction mismatch"
-                );
-                return false;
-            }
+    }
+
+    for (tx_index, (of1_tx, rpc_tx)) in of1_slot
+        .transactions
+        .iter()
+        .zip(rpc_slot.transactions.iter())
+        .enumerate()
+    {
+        if of1_tx != rpc_tx {
+            let cmp = pretty_assertions::Comparison::new(&of1_tx, &rpc_tx);
+            tracing::warn!(
+                %slot_num,
+                %tx_index,
+                %cmp,
+                "transaction mismatch"
+            );
+            return false;
         }
     }
 
@@ -245,23 +245,23 @@ fn slots_match(
             "message count mismatch"
         );
         return false;
-    } else {
-        for (msg_index, (of1_msg, rpc_msg)) in of1_slot
-            .messages
-            .iter()
-            .zip(rpc_slot.messages.iter())
-            .enumerate()
-        {
-            if of1_msg != rpc_msg {
-                let cmp = pretty_assertions::Comparison::new(&of1_msg, &rpc_msg);
-                tracing::warn!(
-                    %slot_num,
-                    %msg_index,
-                    %cmp,
-                    "message mismatch"
-                );
-                return false;
-            }
+    }
+
+    for (msg_index, (of1_msg, rpc_msg)) in of1_slot
+        .messages
+        .iter()
+        .zip(rpc_slot.messages.iter())
+        .enumerate()
+    {
+        if of1_msg != rpc_msg {
+            let cmp = pretty_assertions::Comparison::new(&of1_msg, &rpc_msg);
+            tracing::warn!(
+                %slot_num,
+                %msg_index,
+                %cmp,
+                "message mismatch"
+            );
+            return false;
         }
     }
 
