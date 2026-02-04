@@ -233,12 +233,12 @@ Development Progress:
 - [ ] Step 9: All required checks pass ✅
 ```
 
-**Detailed workflow for EVERY code change:**
+**Detailed workflow for each work chunk (and before committing):**
 
 1. **Write code** following patterns from [Coding Patterns](#2-coding-patterns) (loaded via `/code-pattern-discovery`)
 
-2. **Format immediately** (MANDATORY after EVERY edit):
-   - **Use**: `/code-format` skill after editing ANY Rust or TypeScript file
+2. **Format before checks/commit**:
+   - **Use**: `/code-format` skill when you finish a coherent chunk of work
    - **Validation**: Verify no formatting changes remain
 
 3. **Check compilation**:
@@ -297,7 +297,7 @@ Edit File → /code-format skill
 - **Maintain type safety**: Leverage Rust's type system fully
 - **Prefer async operations**: This codebase uses async/await extensively
 - **Run targeted tests when warranted**: Use `/code-test` skill and broaden only if necessary
-- **Always format code**: Use `/code-format` skill
+- **Format code before checks/commit**: Use `/code-format` skill
 - **Fix all warnings**: Use `/code-check` skill for clippy
 
 ### Summary: Key Takeaways for AI Agents
@@ -309,7 +309,7 @@ Edit File → /code-format skill
 | **Plan work**    | `/code-pattern-discovery`             | BEFORE creating any plan            |
 | **Run commands** | `.claude/skills/`                     | Check Skills BEFORE any command     |
 | **Write code**   | [Coding Patterns](#2-coding-patterns) | Load patterns before implementation |
-| **Format**       | `/code-format`                        | IMMEDIATELY after each edit         |
+| **Format**       | `/code-format`                        | Before checks or before committing  |
 | **Check**        | `/code-check`                         | After formatting                    |
 | **Lint**         | `/code-check`                         | Fix ALL warnings                    |
 | **Test**         | `/code-test`                          | Validate changes with targeted tests when warranted |

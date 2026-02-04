@@ -72,11 +72,11 @@ Checks TypeScript code formatting using `pnpm lint`.
 
 ## Important Guidelines
 
-### MANDATORY: Format After Every Edit
-**You MUST format code immediately after editing Rust or TypeScript files.**
+### Format Before Checks/Commit
+Format code when you finish a coherent chunk of work and before running checks or committing.
 
 This is a critical requirement from the project's development workflow:
-- Never skip formatting after file edits
+- Do not skip formatting before checks/commit
 - Use the Command Selection Rules above to choose the right command
 - Run formatting before any check or test commands
 
@@ -84,12 +84,12 @@ This is a critical requirement from the project's development workflow:
 
 **Single file edit:**
 1. Edit a Rust file: `src/common/utils.rs`
-2. **IMMEDIATELY** run: `just fmt-file src/common/utils.rs`
+2. When ready to validate, run: `just fmt-file src/common/utils.rs`
 3. Then run checks
 
 **Multiple files edit (3+):**
 1. Edit multiple Rust files across the codebase
-2. **IMMEDIATELY** run: `just fmt-rs`
+2. When ready to validate, run: `just fmt-rs`
 3. Then run checks
 
 ## Common Mistakes to Avoid
@@ -97,12 +97,12 @@ This is a critical requirement from the project's development workflow:
 ### ❌ Anti-patterns
 - **Never run `cargo fmt` directly** - Use `just fmt-file` or `just fmt-rs`
 - **Never run `rustfmt` directly** - The justfile includes proper flags
-- **Never skip formatting** - Even "minor" edits need formatting
+- **Never skip formatting before checks/commit** - Even "minor" edits need formatting
 - **Never use `just fmt-rs` for 1-2 files** - Use `just fmt-file <file>` for efficiency
 - **Never use `just fmt-file` for 3+ files** - Use `just fmt-rs` for efficiency
 
 ### ✅ Best Practices
-- Format immediately after editing files
+- Format before running checks/tests or before committing
 - Use `just fmt-file` for 1-2 files (faster, targeted)
 - Use `just fmt-rs` for 3+ files (more efficient)
 - Run `just fmt-rs-check` to verify formatting before commits
