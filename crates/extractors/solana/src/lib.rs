@@ -32,7 +32,7 @@ pub mod tables;
 pub use self::{
     dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
-    extractor::{non_empty_of1_slot, non_empty_rpc_slot, SolanaExtractor},
+    extractor::{SolanaExtractor, non_empty_of1_slot, non_empty_rpc_slot},
 };
 use crate::error::ExtractorError;
 
