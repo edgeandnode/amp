@@ -52,7 +52,6 @@ use std::{
     time::Duration,
 };
 
-use amp_config::build_info;
 use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetStore, GetDatasetError};
 use amp_datasets_registry::{
@@ -71,6 +70,7 @@ use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use monitoring::logging;
 use tests::testlib::{
+    build_info,
     fixtures::{
         Ampctl, DaemonConfigBuilder, DaemonController, DaemonWorker,
         MetadataDb as MetadataDbFixture,
@@ -199,7 +199,7 @@ async fn main() {
             };
 
             // Start controller for Admin API access during dependency restoration
-            let build_info = build_info::unknown();
+            let build_info = build_info::load();
             let controller = DaemonController::new(
                 build_info.clone(),
                 config.clone(),

@@ -34,6 +34,7 @@
 //! - [`helpers`]: Common test helper functions for data extraction and validation
 //! - [`debug`]: Debug utilities and environment variable handling for test development
 
+pub mod build_info;
 mod config;
 pub mod ctx;
 pub mod debug;

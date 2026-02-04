@@ -1,14 +1,13 @@
 //! Service context
 use std::sync::Arc;
 
-use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
 use metadata_db::MetadataDb;
 
-use crate::scheduler::Scheduler;
+use crate::{build_info::BuildInfo, scheduler::Scheduler};
 
 /// The Admin API context
 #[derive(Clone)]

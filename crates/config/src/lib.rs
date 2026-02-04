@@ -10,7 +10,6 @@ use dump::ParquetConfig;
 use fs_err as fs;
 use monitoring::config::OpenTelemetryConfig;
 
-pub mod build_info;
 mod config_file;
 pub mod controller;
 pub mod metadb;

@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::BoxError;
@@ -14,6 +13,8 @@ use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
+
+use crate::testlib::build_info::BuildInfo;
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///
@@ -44,10 +45,10 @@ impl DaemonWorker {
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self, BoxError> {
-        // Two-phase worker initialization
-        let worker_config = worker_config_from_common(&config, &build_info);
+        let worker_config = worker_config_from_common(&config);
         let worker_fut = worker::service::new(
             worker_config.clone(),
+            build_info,
             metadata_db.clone(),
             data_store.clone(),
             dataset_store.clone(),
@@ -105,7 +106,7 @@ impl Drop for DaemonWorker {
 }
 
 /// Convert config::Config to worker::config::Config for tests
-fn worker_config_from_common(config: &amp_config::Config, build_info: &BuildInfo) -> Config {
+fn worker_config_from_common(config: &amp_config::Config) -> Config {
     Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,
@@ -114,11 +115,16 @@ fn worker_config_from_common(config: &amp_config::Config, build_info: &BuildInfo
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
-        worker_info: worker::info::WorkerInfo {
-            version: Some(build_info.version.clone()),
-            commit_sha: Some(build_info.commit_sha.clone()),
-            commit_timestamp: Some(build_info.commit_timestamp.clone()),
-            build_date: Some(build_info.build_date.clone()),
-        },
+    }
+}
+
+impl From<BuildInfo> for worker::build_info::BuildInfo {
+    fn from(value: BuildInfo) -> Self {
+        Self {
+            version: Some(value.version),
+            commit_sha: Some(value.commit_sha),
+            commit_timestamp: Some(value.commit_timestamp),
+            build_date: Some(value.build_date),
+        }
     }
 }

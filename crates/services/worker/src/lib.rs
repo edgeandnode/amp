@@ -8,8 +8,8 @@
 //! via `PostgreSQL` LISTEN/NOTIFY, executes assigned dump jobs, updates job status and progress in
 //! the metadata DB, and gracefully recovers jobs after restarts with periodic state reconciliation.
 
+pub mod build_info;
 pub mod config;
-pub mod info;
 pub mod job;
 pub mod node_id;
 pub mod service;

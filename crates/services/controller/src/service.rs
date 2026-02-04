@@ -1,7 +1,6 @@
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use admin_api::ctx::Ctx;
-use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
@@ -18,7 +17,7 @@ use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
 use tokio::{net::TcpListener, time::MissedTickBehavior};
 use tower_http::cors::CorsLayer;
 
-use crate::scheduler::Scheduler;
+use crate::{build_info::BuildInfo, scheduler::Scheduler};
 
 /// Reconciliation interval for failed job retries
 ///
@@ -32,9 +31,9 @@ const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60);
 /// Spawns a background task for failed job reconciliation with exponential backoff retry.
 ///
 /// Returns the bound socket address and a future that runs the server with graceful shutdown.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn new(
-    build_info: BuildInfo,
+    build_info: impl Into<BuildInfo>,
     metadata_db: MetadataDb,
     datasets_registry: DatasetsRegistry,
     providers_registry: ProvidersRegistry,
@@ -43,6 +42,8 @@ pub async fn new(
     meter: Option<Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), ServerError>>), Error> {
+    let build_info = build_info.into();
+
     let scheduler = Arc::new(Scheduler::new(metadata_db.clone()));
 
     let ctx = Ctx {

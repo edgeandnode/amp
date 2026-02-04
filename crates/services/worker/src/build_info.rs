@@ -1,6 +1,6 @@
-//! Worker metadata information
+//! Worker build metadata information
 //!
-//! This module defines the `WorkerInfo` struct which contains metadata about a worker node,
+//! This module defines the `BuildInfo` struct which contains metadata about a worker node,
 //! including build information (version, commit SHA, timestamps) that is stored in the
 //! metadata database.
 //!
@@ -13,9 +13,9 @@
 //! During serialization, `None` values are omitted from the output to reduce payload size
 //! and avoid storing redundant default values.
 
-/// Worker metadata
+/// Worker build metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WorkerInfo {
+pub struct BuildInfo {
     /// Git describe output (e.g. `v0.0.22-15-g8b065bde`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -33,33 +33,33 @@ pub struct WorkerInfo {
     pub build_date: Option<String>,
 }
 
-impl From<WorkerInfo> for metadata_db::WorkerInfoOwned {
-    fn from(value: WorkerInfo) -> Self {
+impl From<BuildInfo> for metadata_db::WorkerInfoOwned {
+    fn from(value: BuildInfo) -> Self {
         let raw = serde_json::value::to_raw_value(&value)
-            .expect("WorkerInfo should serialize to RawValue");
+            .expect("BuildInfo should serialize to RawValue");
         // SAFETY: to_raw_value produces valid JSON, ensuring RawValue invariants are upheld.
         metadata_db::WorkerInfo::from_owned_unchecked(raw)
     }
 }
 
-impl<'a> From<&'a WorkerInfo> for metadata_db::WorkerInfo<'a> {
-    fn from(value: &'a WorkerInfo) -> Self {
-        let raw = serde_json::value::to_raw_value(value)
-            .expect("WorkerInfo should serialize to RawValue");
+impl<'a> From<&'a BuildInfo> for metadata_db::WorkerInfo<'a> {
+    fn from(value: &'a BuildInfo) -> Self {
+        let raw =
+            serde_json::value::to_raw_value(value).expect("BuildInfo should serialize to RawValue");
         // SAFETY: to_raw_value produces valid JSON, ensuring RawValue invariants are upheld.
         metadata_db::WorkerInfo::from_owned_unchecked(raw)
     }
 }
 
-impl TryFrom<metadata_db::WorkerInfoOwned> for WorkerInfo {
-    type Error = WorkerInfoDeserializeError;
+impl TryFrom<metadata_db::WorkerInfoOwned> for BuildInfo {
+    type Error = BuildInfoDeserializeError;
 
     fn try_from(value: metadata_db::WorkerInfoOwned) -> Result<Self, Self::Error> {
-        serde_json::from_str(value.as_str()).map_err(WorkerInfoDeserializeError)
+        serde_json::from_str(value.as_str()).map_err(BuildInfoDeserializeError)
     }
 }
 
-/// Error type for WorkerInfo deserialization failures
+/// Error type for BuildInfo deserialization failures
 #[derive(Debug, thiserror::Error)]
-#[error("failed to deserialize WorkerInfo from database")]
-pub struct WorkerInfoDeserializeError(#[source] serde_json::Error);
+#[error("failed to deserialize BuildInfo from database")]
+pub struct BuildInfoDeserializeError(#[source] serde_json::Error);

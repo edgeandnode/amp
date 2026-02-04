@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post, put},
 };
 
+pub mod build_info;
 pub mod ctx;
 pub mod handlers;
 pub mod scheduler;
