@@ -7,7 +7,8 @@
 //! - **Templating**: Jinja2-compatible SQL templating ([`jinja`])
 //! - **SQL validation**: SELECT statement validation ([`query`])
 //! - **Schema inference**: Arrow schema inference via DataFusion planning ([`schema`])
-//! - **Schema files**: Arrow schema JSON serialization ([`arrow_json`])
+//! - **Schema files (IPC)**: Arrow schema IPC serialization ([`arrow_ipc`])
+//! - **Schema files (JSON)**: Arrow schema JSON serialization ([`arrow_json`])
 //! - **File utilities**: File hashing and path normalization ([`files`])
 //! - **Manifest generation**: Canonical JSON manifest with content hashing ([`manifest`])
 //! - **Packaging**: Deterministic archive creation for deployment ([`package`])
@@ -23,10 +24,11 @@
 //! 4. Render Jinja SQL templates
 //! 5. Validate SELECT statements
 //! 6. Infer schemas via DataFusion
-//! 7. Write schema files to `sql/<table>.schema.json`
+//! 7. Write schema files to `tables/<table>.ipc`
 //! 8. Generate canonical manifest with file hashes
 //! 9. Package for deployment
 
+pub mod arrow_ipc;
 pub mod arrow_json;
 pub mod bridge;
 pub mod cache;
