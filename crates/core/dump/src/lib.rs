@@ -42,6 +42,7 @@ use crate::{
 };
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
+#[expect(clippy::too_many_arguments)]
 pub async fn dump_tables(
     ctx: Ctx,
     dataset: &HashReference,
