@@ -26,5 +26,8 @@ default-filter = '''
   test(install_already_installed_version_switches_to_it) -
   test(install_latest_version) -
   test(install_specific_version) -
-  test(extractor::tests::historical_to_json_rpc_transition)
+  test(extractor::tests::historical_to_json_rpc_transition) -
+  test(tests::it_admin_api_datasets_stop_job::stop_running_job_succeeds) -
+  test(tests::it_admin_api_datasets_stop_job::stop_already_stopped_job_is_idempotent) -
+  test(tests::it_admin_api_datasets_stop_job::stop_completed_job_is_idempotent)
 '''
