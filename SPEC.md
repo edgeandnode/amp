@@ -34,7 +34,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 | 5 | Manifest Table Shape Changes | **Complete** |
 | 6 | Adapter Layer (Legacy ↔ Package) | **Complete** |
 | 7 | Cache Updates | **Complete** |
-| 8 | Documentation & Tests | Not started |
+| 8 | Documentation & Tests | **Complete** |
 
 ---
 
@@ -290,16 +290,16 @@ Based on codebase exploration (2026-02-04, verified via code search):
 - [x] Update `ampctl dataset` subcommand help for `tables/` directory (package.rs docstrings updated)
 
 **8.4) Update playground sample**
-- [ ] Delete `playground/build/` directory (will be regenerated)
-- [ ] Rename `playground/models/` to `playground/tables/`
-- [ ] Update `playground/amp.yaml` to use `tables:` field (or rely on new default)
-- [ ] Regenerate `playground/build/` with new structure
+- [x] Delete `playground/build/` directory (gitignored, not tracked)
+- [x] Rename `playground/models/` to `playground/tables/`
+- [x] Update `playground/amp.yaml` to use `tables:` field (relies on new default)
+- [x] Regenerate `playground/build/` with new structure (gitignored)
 
 **8.5) Update module docstrings**
-- [ ] Update `lib.rs` docstring (lines 1-29) mentioning `models/` and `sql/`
-- [ ] Update `manifest.rs` docstring (lines 1-41) with example JSON
+- [x] Update `lib.rs` docstring (lines 1-29) mentioning `models/` and `sql/`
+- [x] Update `manifest.rs` docstring (lines 1-41) with example JSON
 
-**Acceptance criteria**: Docs, tests, and samples are consistent with new implementation.
+**Acceptance criteria**: Docs, tests, and samples are consistent with new implementation. **VERIFIED**
 
 ---
 
@@ -357,6 +357,11 @@ None identified. All dependencies (Arrow, IPC support) are already available in 
 
 ## Next Steps
 
-1. Begin with **Phase 1** (Arrow IPC module) - self-contained, no breaking changes
-2. Implementation should follow the recommended sequence in "Implementation Order"
-3. Each phase should be one atomic commit/PR
+All phases complete. The refactor is done:
+- Arrow IPC schema format in use
+- `tables/` directory layout
+- `tables:` config field (with `tables` default)
+- Legacy adapter layer for API interop
+- Full package caching
+
+Ready for review and merge.
