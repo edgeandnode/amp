@@ -13,7 +13,7 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
 use dataset_authoring::{
-    arrow_json,
+    arrow_ipc, arrow_json,
     bridge::LegacyBridge,
     canonical,
     config::AmpYaml,
@@ -466,6 +466,10 @@ fn package_writes_valid_tgz() {
 
 /// Helper to set up a build output directory for packaging tests.
 fn setup_build_output(dir: &Path) {
+    use std::sync::Arc;
+
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
     let tables_dir = dir.join("tables");
     fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
@@ -497,15 +501,10 @@ fn setup_build_output(dir: &Path) {
     )
     .expect("should write sql");
 
-    // Create IPC schema file (JSON format for now - bridge reads JSON)
-    let schema = serde_json::json!({
-        "fields": [{"name": "id", "type": "Int64", "nullable": false}]
-    });
-    fs::write(
-        tables_dir.join("transfers.ipc"),
-        serde_json::to_string(&schema).unwrap(),
-    )
-    .expect("should write ipc");
+    // Create IPC schema file using Arrow IPC format
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+    arrow_ipc::write_ipc_schema(&schema, tables_dir.join("transfers.ipc"))
+        .expect("should write ipc schema");
 }
 
 // ============================================================
@@ -514,21 +513,29 @@ fn setup_build_output(dir: &Path) {
 
 #[test]
 fn legacy_bridge_converts_manifest_with_inline_content() {
+    use std::sync::Arc;
+
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
     //* Given
     let dir = TempDir::new().expect("should create temp dir");
-    let sql_dir = dir.path().join("sql");
-    fs::create_dir_all(&sql_dir).expect("should create sql dir");
+    let tables_dir = dir.path().join("tables");
+    fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
     // Create SQL file
     fs::write(
-        sql_dir.join("transfers.sql"),
+        tables_dir.join("transfers.sql"),
         "CREATE TABLE transfers AS SELECT id, amount FROM source.transactions",
     )
     .expect("should write sql");
 
-    // Create schema file
-    let schema_json = r#"{"fields":[{"name":"id","type":"UInt64","nullable":false},{"name":"amount","type":"UInt64","nullable":false}]}"#;
-    fs::write(sql_dir.join("transfers.schema.json"), schema_json).expect("should write schema");
+    // Create IPC schema file using Arrow IPC format
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::UInt64, false),
+        Field::new("amount", DataType::UInt64, false),
+    ]));
+    arrow_ipc::write_ipc_schema(&schema, tables_dir.join("transfers.ipc"))
+        .expect("should write ipc schema");
 
     let test_hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         .parse()
@@ -546,10 +553,10 @@ fn legacy_bridge_converts_manifest_with_inline_content() {
         "transfers".parse().expect("valid table name"),
         TableDef {
             sql: Some(FileRef::new(
-                "sql/transfers.sql".to_string(),
+                "tables/transfers.sql".to_string(),
                 test_hash.clone(),
             )),
-            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            ipc: FileRef::new("tables/transfers.ipc".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -584,21 +591,25 @@ fn legacy_bridge_converts_manifest_with_inline_content() {
 
 #[test]
 fn legacy_bridge_produces_valid_json() {
+    use std::sync::Arc;
+
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
     //* Given
     let dir = TempDir::new().expect("should create temp dir");
-    let sql_dir = dir.path().join("sql");
-    fs::create_dir_all(&sql_dir).expect("should create sql dir");
+    let tables_dir = dir.path().join("tables");
+    fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
     fs::write(
-        sql_dir.join("transfers.sql"),
+        tables_dir.join("transfers.sql"),
         "CREATE TABLE transfers AS SELECT 1",
     )
     .expect("should write sql");
-    fs::write(
-        sql_dir.join("transfers.schema.json"),
-        r#"{"fields":[{"name":"id","type":"Int64","nullable":false}]}"#,
-    )
-    .expect("should write schema");
+
+    // Create IPC schema file using Arrow IPC format
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+    arrow_ipc::write_ipc_schema(&schema, tables_dir.join("transfers.ipc"))
+        .expect("should write ipc schema");
 
     let test_hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         .parse()
@@ -616,10 +627,10 @@ fn legacy_bridge_produces_valid_json() {
         "transfers".parse().expect("valid table name"),
         TableDef {
             sql: Some(FileRef::new(
-                "sql/transfers.sql".to_string(),
+                "tables/transfers.sql".to_string(),
                 test_hash.clone(),
             )),
-            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            ipc: FileRef::new("tables/transfers.ipc".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
@@ -939,27 +950,35 @@ fn canonical_manifest_is_deterministic() {
 
 #[test]
 fn legacy_bridge_reads_function_from_canonical_path() {
+    use std::sync::Arc;
+
+    use datafusion::arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
+
     logging::init();
 
     //* Given
     // Set up a directory structure with functions at canonical paths
     let dir = TempDir::new().expect("should create temp dir");
-    let sql_dir = dir.path().join("sql");
+    let tables_dir = dir.path().join("tables");
     let functions_dir = dir.path().join("functions");
-    fs::create_dir_all(&sql_dir).expect("should create sql dir");
+    fs::create_dir_all(&tables_dir).expect("should create tables dir");
     fs::create_dir_all(&functions_dir).expect("should create functions dir");
 
     // Create files at canonical locations
     fs::write(
-        sql_dir.join("transfers.sql"),
+        tables_dir.join("transfers.sql"),
         "CREATE TABLE transfers AS SELECT 1",
     )
     .expect("should write sql");
-    fs::write(
-        sql_dir.join("transfers.schema.json"),
-        r#"{"fields":[{"name":"id","type":"Int64","nullable":false}]}"#,
-    )
-    .expect("should write schema");
+
+    // Create IPC schema file using Arrow IPC format
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "id",
+        ArrowDataType::Int64,
+        false,
+    )]));
+    arrow_ipc::write_ipc_schema(&schema, tables_dir.join("transfers.ipc"))
+        .expect("should write ipc schema");
 
     // Function file at canonical path (functions/<name>.js)
     let function_content = "function decode(input) { return input.toString(); }";
@@ -992,10 +1011,10 @@ fn legacy_bridge_reads_function_from_canonical_path() {
         "transfers".parse().expect("valid table name"),
         TableDef {
             sql: Some(FileRef::new(
-                "sql/transfers.sql".to_string(),
+                "tables/transfers.sql".to_string(),
                 test_hash.clone(),
             )),
-            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash.clone()),
+            ipc: FileRef::new("tables/transfers.ipc".to_string(), test_hash.clone()),
             network: "mainnet".parse().expect("valid network"),
         },
     );

@@ -10,7 +10,7 @@ components: "crate:dataset-authoring,app:ampctl"
 
 ## Summary
 
-Dataset Authoring provides a filesystem-first workflow for defining derived datasets using YAML configuration and SQL files. The authoring pipeline parses `amp.yaml` or `amp.yml` (including the required `amp` contract version), discovers model SQL files from the `models/` directory (default when omitted), renders Jinja templates, validates SELECT-only statements, infers Arrow schemas via DataFusion, and produces deterministic packages for deployment. The workflow integrates with the existing registry and admin API for dependency resolution and manifest registration.
+Dataset Authoring provides a filesystem-first workflow for defining derived datasets using YAML configuration and SQL files. The authoring pipeline parses `amp.yaml` or `amp.yml` (including the required `amp` contract version), discovers table SQL files from the `tables/` directory (default when omitted), renders Jinja templates, validates SELECT-only statements, infers Arrow schemas via DataFusion, and produces deterministic packages for deployment. The workflow integrates with the existing registry and admin API for dependency resolution and manifest registration.
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@ Dataset Authoring provides a filesystem-first workflow for defining derived data
 
 - **amp.yaml / amp.yml**: The YAML configuration file that defines a dataset's metadata, dependencies, models, functions, and variables. It is the entrypoint for the authoring workflow and must include an `amp` contract version.
 
-- **Models**: SQL files in the `models/` directory (default), each containing a single SELECT query. The model name is derived from the filename (e.g., `models/transfers.sql` creates the `transfers` table).
+- **Tables**: SQL files in the `tables/` directory (default), each containing a single SELECT query. The table name is derived from the filename (e.g., `tables/transfers.sql` creates the `transfers` table).
 
 - **Jinja templating**: SQL files support Jinja templates rendered at build time. Available helpers include `ref()`, `source()`, `var()`, `env_var()`, and `this`. No database access is permitted during rendering.
 
@@ -43,8 +43,8 @@ A dataset project has this structure (use `amp.yaml` or `amp.yml`, not both):
 ```
 my_dataset/
   amp.yaml              # Required: dataset configuration (or amp.yml)
-  models/
-    transfers.sql       # One SQL file per model
+  tables/
+    transfers.sql       # One SQL file per table
     balances.sql
   functions/            # Optional: JavaScript UDFs
     my_func.js
@@ -161,7 +161,7 @@ ampctl dataset register my_namespace/my_dataset --package build --tag 1.0.0
 Each SQL file must contain exactly one SELECT statement:
 
 ```sql
--- models/transfers.sql
+-- tables/transfers.sql
 SELECT
     block_num,
     tx_hash,
@@ -173,9 +173,9 @@ FROM {{ ref('eth', 'logs') }}
 WHERE topic0 = '0xddf252ad...'
 ```
 
-### Model Validation Constraints
+### Table Validation Constraints
 
-Authoring validation matches legacy `manifest.json` rules. For a model to be valid:
+Authoring validation matches legacy `manifest.json` rules. For a table to be valid:
 
 - The SQL file must contain exactly one SELECT statement (no DDL/DML).
 - Table references must be dependency-qualified `alias.table` and exist in the dependency manifest. Unqualified (`table`) or catalog-qualified (`catalog.schema.table`) references are rejected.

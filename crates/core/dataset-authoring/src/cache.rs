@@ -2,15 +2,21 @@
 //!
 //! Provides caching for resolved manifests at `~/.amp/registry/<hash>/`.
 //!
-//! The cache stores dependency manifests locally to avoid repeated network
-//! fetches during builds. Each manifest is stored in a directory named by
-//! its content hash, containing `manifest.json`.
+//! The cache stores dependency packages locally to avoid repeated network
+//! fetches during builds. Each package is stored in a directory named by
+//! its content hash, containing:
+//!
+//! - `manifest.json` - Canonical manifest with file references
+//! - `tables/<table>.sql` - SQL files for derived tables
+//! - `tables/<table>.ipc` - Arrow IPC schema files
+//! - `functions/<name>.js` - Function source files
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use datasets_common::hash::Hash;
+use datafusion::arrow::datatypes::SchemaRef;
+use datasets_common::{hash::Hash, table_name::TableName};
 
-use crate::dependency_manifest::DependencyManifest;
+use crate::{arrow_ipc, dependency_manifest::DependencyManifest};
 
 /// Default cache location relative to home directory.
 const CACHE_DIR: &str = ".amp/registry";
@@ -88,6 +94,30 @@ pub enum CacheError {
         hash: Hash,
         #[source]
         source: serde_json::Error,
+    },
+
+    /// Failed to read SQL file from cached package.
+    #[error("failed to read SQL file for table '{table_name}'")]
+    ReadSqlFile {
+        table_name: TableName,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to read IPC schema file from cached package.
+    #[error("failed to read IPC schema file for table '{table_name}'")]
+    ReadIpcSchema {
+        table_name: TableName,
+        #[source]
+        source: arrow_ipc::IpcSchemaError,
+    },
+
+    /// Failed to read function source file from cached package.
+    #[error("failed to read function source file '{filename}'")]
+    ReadFunctionFile {
+        filename: String,
+        #[source]
+        source: std::io::Error,
     },
 }
 
@@ -197,6 +227,150 @@ impl Cache {
         })?;
 
         Ok(())
+    }
+
+    /// Gets a cached package by hash, returning access to all package files.
+    ///
+    /// Unlike [`get`](Self::get) which returns only the manifest, this method
+    /// returns a [`CachedPackage`] that provides access to the full package
+    /// structure including SQL files, IPC schemas, and function sources.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the package exists but cannot be read or parsed.
+    pub fn get_package(&self, hash: &Hash) -> Result<Option<CachedPackage>, CacheError> {
+        let dir_path = self.dir_path(hash);
+        let manifest_path = self.manifest_path(hash);
+
+        if !manifest_path.exists() {
+            return Ok(None);
+        }
+
+        let contents =
+            std::fs::read_to_string(&manifest_path).map_err(|err| CacheError::ReadManifest {
+                hash: hash.clone(),
+                source: err,
+            })?;
+
+        let manifest =
+            serde_json::from_str(&contents).map_err(|err| CacheError::ParseManifest {
+                hash: hash.clone(),
+                source: err,
+            })?;
+
+        Ok(Some(CachedPackage {
+            root: dir_path,
+            manifest,
+        }))
+    }
+}
+
+/// A cached package providing access to all package files.
+///
+/// This represents a complete package stored in the cache, including:
+/// - The dependency manifest (parsed from `manifest.json`)
+/// - SQL files in `tables/<table>.sql`
+/// - Arrow IPC schema files in `tables/<table>.ipc`
+/// - Function sources in `functions/<name>.js`
+///
+/// Use this when you need to access the actual file contents beyond just
+/// the manifest metadata.
+#[derive(Debug, Clone)]
+pub struct CachedPackage {
+    /// Root directory of the cached package.
+    root: PathBuf,
+    /// Parsed manifest from manifest.json.
+    manifest: DependencyManifest,
+}
+
+impl CachedPackage {
+    /// Returns the root directory of the cached package.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Returns the dependency manifest.
+    pub fn manifest(&self) -> &DependencyManifest {
+        &self.manifest
+    }
+
+    /// Consumes the cached package and returns the manifest.
+    pub fn into_manifest(self) -> DependencyManifest {
+        self.manifest
+    }
+
+    /// Returns the path to the tables directory.
+    pub fn tables_dir(&self) -> PathBuf {
+        self.root.join("tables")
+    }
+
+    /// Returns the path to the functions directory.
+    pub fn functions_dir(&self) -> PathBuf {
+        self.root.join("functions")
+    }
+
+    /// Returns the path to a table's SQL file.
+    pub fn sql_path(&self, table_name: &TableName) -> PathBuf {
+        self.tables_dir().join(format!("{table_name}.sql"))
+    }
+
+    /// Returns the path to a table's IPC schema file.
+    pub fn ipc_path(&self, table_name: &TableName) -> PathBuf {
+        self.tables_dir().join(format!("{table_name}.ipc"))
+    }
+
+    /// Returns the path to a function's source file.
+    pub fn function_path(&self, filename: &str) -> PathBuf {
+        self.functions_dir().join(filename)
+    }
+
+    /// Reads the SQL content for a table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CacheError::ReadSqlFile`] if the file cannot be read.
+    pub fn read_sql(&self, table_name: &TableName) -> Result<String, CacheError> {
+        let path = self.sql_path(table_name);
+        std::fs::read_to_string(&path).map_err(|err| CacheError::ReadSqlFile {
+            table_name: table_name.clone(),
+            source: err,
+        })
+    }
+
+    /// Reads the Arrow schema from a table's IPC file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CacheError::ReadIpcSchema`] if the file cannot be read or parsed.
+    pub fn read_schema(&self, table_name: &TableName) -> Result<SchemaRef, CacheError> {
+        let path = self.ipc_path(table_name);
+        arrow_ipc::read_ipc_schema(&path).map_err(|err| CacheError::ReadIpcSchema {
+            table_name: table_name.clone(),
+            source: err,
+        })
+    }
+
+    /// Reads the source content for a function.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CacheError::ReadFunctionFile`] if the file cannot be read.
+    pub fn read_function(&self, filename: &str) -> Result<String, CacheError> {
+        let path = self.function_path(filename);
+        std::fs::read_to_string(&path).map_err(|err| CacheError::ReadFunctionFile {
+            filename: filename.to_string(),
+            source: err,
+        })
+    }
+
+    /// Checks if a table has an IPC schema file.
+    pub fn has_ipc_schema(&self, table_name: &TableName) -> bool {
+        self.ipc_path(table_name).exists()
+    }
+
+    /// Checks if a table has a SQL file.
+    pub fn has_sql(&self, table_name: &TableName) -> bool {
+        self.sql_path(table_name).exists()
     }
 }
 
@@ -386,5 +560,242 @@ mod tests {
             matches!(err, CacheError::ParseManifest { .. }),
             "should be ParseManifest error"
         );
+    }
+
+    // ============================================================
+    // CachedPackage tests
+    // ============================================================
+
+    #[test]
+    fn get_package_returns_none_for_nonexistent_hash() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+
+        //* When
+        let result = cache.get_package(&hash);
+
+        //* Then
+        assert!(result.is_ok(), "get_package should succeed");
+        assert!(
+            result.expect("should be ok").is_none(),
+            "should return None for nonexistent hash"
+        );
+    }
+
+    #[test]
+    fn get_package_returns_cached_package() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        //* When
+        let result = cache.get_package(&hash);
+
+        //* Then
+        assert!(result.is_ok(), "get_package should succeed");
+        let package = result.expect("should be ok").expect("should have package");
+        assert_eq!(package.manifest().kind.as_str(), "manifest");
+        assert_eq!(package.root(), cache.dir_path(&hash));
+    }
+
+    #[test]
+    fn cached_package_path_methods_return_correct_paths() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        let package = cache
+            .get_package(&hash)
+            .expect("should succeed")
+            .expect("should have package");
+
+        //* When/Then
+        let table_name: TableName = "transfers".parse().expect("valid table name");
+        assert!(
+            package
+                .sql_path(&table_name)
+                .ends_with("tables/transfers.sql")
+        );
+        assert!(
+            package
+                .ipc_path(&table_name)
+                .ends_with("tables/transfers.ipc")
+        );
+        assert!(
+            package
+                .function_path("decode.js")
+                .ends_with("functions/decode.js")
+        );
+    }
+
+    #[test]
+    fn cached_package_read_sql_succeeds() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        // Create SQL file in cache
+        let tables_dir = cache.dir_path(&hash).join("tables");
+        std::fs::create_dir_all(&tables_dir).expect("should create dir");
+        std::fs::write(tables_dir.join("test_table.sql"), "SELECT * FROM source")
+            .expect("should write");
+
+        let package = cache
+            .get_package(&hash)
+            .expect("should succeed")
+            .expect("should have package");
+
+        //* When
+        let table_name: TableName = "test_table".parse().expect("valid table name");
+        let result = package.read_sql(&table_name);
+
+        //* Then
+        assert!(result.is_ok(), "read_sql should succeed");
+        assert_eq!(result.expect("should have content"), "SELECT * FROM source");
+    }
+
+    #[test]
+    fn cached_package_read_schema_succeeds() {
+        use std::sync::Arc;
+
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        // Create IPC schema file in cache
+        let tables_dir = cache.dir_path(&hash).join("tables");
+        std::fs::create_dir_all(&tables_dir).expect("should create dir");
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::UInt64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        arrow_ipc::write_ipc_schema(&schema, tables_dir.join("test_table.ipc"))
+            .expect("should write");
+
+        let package = cache
+            .get_package(&hash)
+            .expect("should succeed")
+            .expect("should have package");
+
+        //* When
+        let table_name: TableName = "test_table".parse().expect("valid table name");
+        let result = package.read_schema(&table_name);
+
+        //* Then
+        assert!(result.is_ok(), "read_schema should succeed");
+        let read_schema = result.expect("should have schema");
+        assert_eq!(read_schema.fields().len(), 2);
+        assert_eq!(read_schema.field(0).name(), "id");
+        assert_eq!(read_schema.field(1).name(), "name");
+    }
+
+    #[test]
+    fn cached_package_read_function_succeeds() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        // Create function file in cache
+        let functions_dir = cache.dir_path(&hash).join("functions");
+        std::fs::create_dir_all(&functions_dir).expect("should create dir");
+        std::fs::write(functions_dir.join("decode.js"), "function decode() {}")
+            .expect("should write");
+
+        let package = cache
+            .get_package(&hash)
+            .expect("should succeed")
+            .expect("should have package");
+
+        //* When
+        let result = package.read_function("decode.js");
+
+        //* Then
+        assert!(result.is_ok(), "read_function should succeed");
+        assert_eq!(result.expect("should have content"), "function decode() {}");
+    }
+
+    #[test]
+    fn cached_package_has_methods_work() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        // Create only SQL file
+        let tables_dir = cache.dir_path(&hash).join("tables");
+        std::fs::create_dir_all(&tables_dir).expect("should create dir");
+        std::fs::write(tables_dir.join("test_table.sql"), "SELECT 1").expect("should write");
+
+        let package = cache
+            .get_package(&hash)
+            .expect("should succeed")
+            .expect("should have package");
+
+        //* When/Then
+        let table_name: TableName = "test_table".parse().expect("valid table name");
+        let missing_table: TableName = "missing".parse().expect("valid table name");
+
+        assert!(package.has_sql(&table_name), "should have SQL");
+        assert!(!package.has_ipc_schema(&table_name), "should not have IPC");
+        assert!(!package.has_sql(&missing_table), "should not have SQL");
+    }
+
+    #[test]
+    fn cached_package_into_manifest_returns_manifest() {
+        //* Given
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let cache = Cache::with_root(temp_dir.path().to_path_buf());
+        let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            .parse()
+            .expect("valid hash");
+        let manifest = create_test_manifest();
+        cache.put(&hash, &manifest).expect("put should succeed");
+
+        let package = cache
+            .get_package(&hash)
+            .expect("should succeed")
+            .expect("should have package");
+
+        //* When
+        let manifest = package.into_manifest();
+
+        //* Then
+        assert_eq!(manifest.kind.as_str(), "manifest");
     }
 }
