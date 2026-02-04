@@ -4,9 +4,13 @@
 //! The format used is compatible with the existing Amp manifest schema format, which
 //! represents Arrow types using DataFusion's serde implementation.
 //!
+//! **Note**: This module is primarily used by the legacy bridge for converting between
+//! the canonical IPC format and the legacy JSON format expected by the admin API.
+//! New code should prefer using `arrow_ipc` for native Arrow IPC schema I/O.
+//!
 //! # Schema File Format
 //!
-//! Schema files are stored as `sql/<table>.schema.json` and contain:
+//! Schema files in JSON format contain:
 //!
 //! ```json
 //! {
@@ -28,11 +32,11 @@
 //! use dataset_authoring::arrow_json::{write_schema_file, read_schema_file};
 //! use datasets_common::manifest::TableSchema;
 //!
-//! // Write schema to file
-//! write_schema_file(&schema, "sql/transfers.schema.json")?;
+//! // Write schema to file (legacy JSON format)
+//! write_schema_file(&schema, "tables/transfers.schema.json")?;
 //!
 //! // Read schema from file
-//! let loaded_schema = read_schema_file("sql/transfers.schema.json")?;
+//! let loaded_schema = read_schema_file("tables/transfers.schema.json")?;
 //! ```
 
 use std::{

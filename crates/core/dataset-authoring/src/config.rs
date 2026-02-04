@@ -540,7 +540,7 @@ version: 1.2.3
 dependencies:
   eth: my_namespace/eth_mainnet@1.0.0
   other: other_ns/other_dataset@0.5.0
-tables: sql/tables
+tables: custom/models
 functions:
   myFunc:
     input_types: [Int64, Utf8]
@@ -561,7 +561,7 @@ vars:
         assert_eq!(config.name, "my_dataset");
         assert_eq!(config.version.to_string(), "1.2.3");
         assert_eq!(config.dependencies.len(), 2);
-        assert_eq!(config.tables, PathBuf::from("sql/tables"));
+        assert_eq!(config.tables, PathBuf::from("custom/models"));
         assert!(config.functions.is_some());
         let funcs = config.functions.as_ref().expect("should have functions");
         assert_eq!(funcs.len(), 1);
@@ -884,7 +884,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-tables: sql/tables
+tables: custom/models
 functions:
   helper:
     input_types: [Int64]

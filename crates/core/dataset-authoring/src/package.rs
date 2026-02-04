@@ -2,8 +2,8 @@
 //!
 //! Creates deterministic `dataset.tgz` archives containing:
 //! - `manifest.json` (canonical)
-//! - `sql/<table>.sql` (rendered, post-Jinja)
-//! - `sql/<table>.schema.json`
+//! - `tables/<table>.sql` (rendered, post-Jinja) for derived tables
+//! - `tables/<table>.ipc` (Arrow IPC schema)
 //! - `functions/<name>.js` (if any)
 //!
 //! # Determinism
@@ -21,7 +21,7 @@
 //!
 //! use dataset_authoring::package::PackageBuilder;
 //!
-//! // Build from a directory containing manifest.json, sql/, and optional functions/
+//! // Build from a directory containing manifest.json, tables/, and optional functions/
 //! let builder = PackageBuilder::from_directory(Path::new("build"))?;
 //! builder.write_to(Path::new("dataset.tgz"))?;
 //! ```
@@ -153,7 +153,7 @@ impl PackageBuilder {
     ///
     /// Expects the directory to contain:
     /// - `manifest.json` (required)
-    /// - `sql/*.sql` and `sql/*.schema.json` (table files)
+    /// - `tables/*.sql` and `tables/*.ipc` (table files)
     /// - `functions/*.js` (optional function files)
     ///
     /// # Errors
@@ -171,10 +171,10 @@ impl PackageBuilder {
         }
         builder.add_entry(PackageEntry::from_file(&manifest_path, "manifest.json")?);
 
-        // Add sql/ directory contents
-        let sql_dir = dir.join("sql");
-        if sql_dir.exists() {
-            builder.add_directory_contents(&sql_dir, "sql")?;
+        // Add tables/ directory contents
+        let tables_dir = dir.join("tables");
+        if tables_dir.exists() {
+            builder.add_directory_contents(&tables_dir, "tables")?;
         }
 
         // Add functions/ directory contents
@@ -529,9 +529,9 @@ mod tests {
     fn package_builder_entries_returns_sorted() {
         //* Given
         let mut builder = PackageBuilder::new();
-        builder.add_entry(PackageEntry::new("sql/z.sql", b"z"));
+        builder.add_entry(PackageEntry::new("tables/z.sql", b"z"));
         builder.add_entry(PackageEntry::new("manifest.json", b"{}"));
-        builder.add_entry(PackageEntry::new("sql/a.sql", b"a"));
+        builder.add_entry(PackageEntry::new("tables/a.sql", b"a"));
 
         //* When
         let entries = builder.entries();
@@ -539,8 +539,8 @@ mod tests {
         //* Then
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].path, "manifest.json");
-        assert_eq!(entries[1].path, "sql/a.sql");
-        assert_eq!(entries[2].path, "sql/z.sql");
+        assert_eq!(entries[1].path, "tables/a.sql");
+        assert_eq!(entries[2].path, "tables/z.sql");
     }
 
     #[test]
@@ -564,11 +564,11 @@ mod tests {
         //* Given
         let mut builder1 = PackageBuilder::new();
         builder1.add_entry(PackageEntry::new("manifest.json", b"{}".to_vec()));
-        builder1.add_entry(PackageEntry::new("sql/test.sql", b"SELECT 1".to_vec()));
+        builder1.add_entry(PackageEntry::new("tables/test.sql", b"SELECT 1".to_vec()));
 
         let mut builder2 = PackageBuilder::new();
         // Add in different order
-        builder2.add_entry(PackageEntry::new("sql/test.sql", b"SELECT 1".to_vec()));
+        builder2.add_entry(PackageEntry::new("tables/test.sql", b"SELECT 1".to_vec()));
         builder2.add_entry(PackageEntry::new("manifest.json", b"{}".to_vec()));
 
         //* When
@@ -619,11 +619,11 @@ mod tests {
         // Create manifest.json
         fs::write(dir.path().join("manifest.json"), b"{}").expect("should write");
 
-        // Create sql/ directory with files
-        fs::create_dir(dir.path().join("sql")).expect("should create sql dir");
-        fs::write(dir.path().join("sql/users.sql"), b"SELECT * FROM users").expect("should write");
-        fs::write(dir.path().join("sql/users.schema.json"), b"{\"fields\":[]}")
+        // Create tables/ directory with files
+        fs::create_dir(dir.path().join("tables")).expect("should create tables dir");
+        fs::write(dir.path().join("tables/users.sql"), b"SELECT * FROM users")
             .expect("should write");
+        fs::write(dir.path().join("tables/users.ipc"), b"ipc schema data").expect("should write");
 
         // Create functions/ directory with file
         fs::create_dir(dir.path().join("functions")).expect("should create functions dir");
@@ -646,8 +646,8 @@ mod tests {
         // Verify paths (sorted)
         let paths: Vec<_> = entries.iter().map(|e| e.path.as_str()).collect();
         assert!(paths.contains(&"manifest.json"));
-        assert!(paths.contains(&"sql/users.sql"));
-        assert!(paths.contains(&"sql/users.schema.json"));
+        assert!(paths.contains(&"tables/users.sql"));
+        assert!(paths.contains(&"tables/users.ipc"));
         assert!(paths.contains(&"functions/decode.js"));
     }
 
@@ -680,7 +680,10 @@ mod tests {
 
         let mut builder = PackageBuilder::new();
         builder.add_entry(PackageEntry::new("manifest.json", b"{\"name\":\"test\"}"));
-        builder.add_entry(PackageEntry::new("sql/users.sql", b"SELECT * FROM users"));
+        builder.add_entry(PackageEntry::new(
+            "tables/users.sql",
+            b"SELECT * FROM users",
+        ));
 
         builder.write_to(&archive_path).expect("should write");
 
@@ -694,7 +697,7 @@ mod tests {
         assert_eq!(entries[0].path, "manifest.json");
         assert_eq!(entries[0].contents, b"{\"name\":\"test\"}");
 
-        assert_eq!(entries[1].path, "sql/users.sql");
+        assert_eq!(entries[1].path, "tables/users.sql");
         assert_eq!(entries[1].contents, b"SELECT * FROM users");
     }
 
@@ -708,7 +711,7 @@ mod tests {
 
         let mut builder = PackageBuilder::new();
         builder.add_entry(PackageEntry::new("manifest.json", b"{}"));
-        builder.add_entry(PackageEntry::new("sql/users.sql", b"SELECT 1"));
+        builder.add_entry(PackageEntry::new("tables/users.sql", b"SELECT 1"));
         builder.write_to(&archive_path).expect("should write");
 
         //* When
@@ -717,7 +720,7 @@ mod tests {
         //* Then
         assert!(result.is_ok());
         assert!(output_dir.join("manifest.json").exists());
-        assert!(output_dir.join("sql/users.sql").exists());
+        assert!(output_dir.join("tables/users.sql").exists());
     }
 
     // ============================================================
@@ -729,8 +732,8 @@ mod tests {
         //* Given
         let entries = vec![
             PackageEntry::new("manifest.json", b"{}".to_vec()),
-            PackageEntry::new("sql/a.sql", b"SELECT 1".to_vec()),
-            PackageEntry::new("sql/b.sql", b"SELECT 2".to_vec()),
+            PackageEntry::new("tables/a.sql", b"SELECT 1".to_vec()),
+            PackageEntry::new("tables/b.sql", b"SELECT 2".to_vec()),
             PackageEntry::new("functions/f.js", b"export function f() {}".to_vec()),
         ];
 

@@ -23,14 +23,14 @@
 //! use dataset_authoring::files::{FileRef, hash_file, normalize_path};
 //!
 //! let base = Path::new("/project");
-//! let file = Path::new("/project/sql/users.sql");
+//! let file = Path::new("/project/tables/users.sql");
 //!
 //! // Compute file hash
 //! let hash = hash_file(file).unwrap();
 //!
 //! // Normalize path relative to base
 //! let path = normalize_path(file, base).unwrap();
-//! assert_eq!(path, "sql/users.sql");
+//! assert_eq!(path, "tables/users.sql");
 //!
 //! // Create file reference for manifest
 //! let file_ref = FileRef { path, hash };
@@ -122,7 +122,7 @@ pub enum FileRefError {
 ///
 /// use dataset_authoring::files::hash_file;
 ///
-/// let hash = hash_file(Path::new("sql/users.sql")).unwrap();
+/// let hash = hash_file(Path::new("tables/users.sql")).unwrap();
 /// println!("File hash: {}", hash);
 /// ```
 pub fn hash_file(path: &Path) -> Result<Hash, io::Error> {
@@ -206,10 +206,10 @@ pub enum PathError {
 /// use dataset_authoring::files::normalize_path;
 ///
 /// let base = Path::new("/project");
-/// let file = Path::new("/project/sql/users.sql");
+/// let file = Path::new("/project/tables/users.sql");
 ///
 /// let normalized = normalize_path(file, base).unwrap();
-/// assert_eq!(normalized, "sql/users.sql");
+/// assert_eq!(normalized, "tables/users.sql");
 /// ```
 pub fn normalize_path(path: &Path, base: &Path) -> Result<String, PathError> {
     // Get canonical forms to handle symlinks and relative components
@@ -374,28 +374,28 @@ mod tests {
     fn normalize_path_with_simple_relative_path_succeeds() {
         //* Given
         let base = Path::new("/project");
-        let path = Path::new("/project/sql/users.sql");
+        let path = Path::new("/project/tables/users.sql");
 
         //* When
         let result = normalize_path(path, base);
 
         //* Then
         let normalized = result.expect("normalization should succeed");
-        assert_eq!(normalized, "sql/users.sql");
+        assert_eq!(normalized, "tables/users.sql");
     }
 
     #[test]
     fn normalize_path_with_nested_path_uses_posix_separators() {
         //* Given
         let base = Path::new("/project");
-        let path = Path::new("/project/sql/tables/users.sql");
+        let path = Path::new("/project/tables/nested/users.sql");
 
         //* When
         let result = normalize_path(path, base);
 
         //* Then
         let normalized = result.expect("normalization should succeed");
-        assert_eq!(normalized, "sql/tables/users.sql");
+        assert_eq!(normalized, "tables/nested/users.sql");
         assert!(!normalized.contains('\\'), "should not contain backslashes");
     }
 
@@ -454,7 +454,7 @@ mod tests {
         //* Given
         let base = Path::new("/project");
         // This path technically resolves within base, but contains ..
-        let path = Path::new("/project/sql/../sql/users.sql");
+        let path = Path::new("/project/tables/../tables/users.sql");
 
         //* When
         let result = normalize_path(path, base);
@@ -489,7 +489,7 @@ mod tests {
     fn normalize_path_result_is_not_absolute() {
         //* Given
         let base = Path::new("/project");
-        let path = Path::new("/project/sql/users.sql");
+        let path = Path::new("/project/tables/users.sql");
 
         //* When
         let result = normalize_path(path, base);
@@ -509,7 +509,7 @@ mod tests {
     #[test]
     fn file_ref_new_creates_instance() {
         //* Given
-        let path = "sql/users.sql".to_string();
+        let path = "tables/users.sql".to_string();
         let hash: Hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
             .parse()
             .expect("should parse hash");
@@ -526,9 +526,9 @@ mod tests {
     fn file_ref_from_file_creates_instance() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        std::fs::create_dir(&sql_dir).expect("should create sql dir");
-        let file_path = sql_dir.join("users.sql");
+        let tables_dir = dir.path().join("tables");
+        std::fs::create_dir(&tables_dir).expect("should create tables dir");
+        let file_path = tables_dir.join("users.sql");
         std::fs::write(&file_path, b"SELECT * FROM users").expect("should write file");
 
         //* When
@@ -536,7 +536,7 @@ mod tests {
 
         //* Then
         let file_ref = result.expect("should create file ref");
-        assert_eq!(file_ref.path, "sql/users.sql");
+        assert_eq!(file_ref.path, "tables/users.sql");
         // Verify hash is computed correctly
         let expected_hash = hash_file(&file_path).expect("should hash file");
         assert_eq!(file_ref.hash, expected_hash);
@@ -564,7 +564,7 @@ mod tests {
     fn file_ref_serializes_to_json() {
         //* Given
         let file_ref = FileRef {
-            path: "sql/users.sql".to_string(),
+            path: "tables/users.sql".to_string(),
             hash: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
                 .parse()
                 .expect("should parse hash"),
@@ -575,7 +575,7 @@ mod tests {
 
         //* Then
         let json_str = json.expect("serialization should succeed");
-        assert!(json_str.contains("sql/users.sql"));
+        assert!(json_str.contains("tables/users.sql"));
         assert!(
             json_str.contains("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
         );
@@ -584,14 +584,14 @@ mod tests {
     #[test]
     fn file_ref_deserializes_from_json() {
         //* Given
-        let json = r#"{"path":"sql/users.sql","hash":"b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"}"#;
+        let json = r#"{"path":"tables/users.sql","hash":"b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"}"#;
 
         //* When
         let result: Result<FileRef, _> = serde_json::from_str(json);
 
         //* Then
         let file_ref = result.expect("deserialization should succeed");
-        assert_eq!(file_ref.path, "sql/users.sql");
+        assert_eq!(file_ref.path, "tables/users.sql");
         assert_eq!(
             file_ref.hash.as_str(),
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"

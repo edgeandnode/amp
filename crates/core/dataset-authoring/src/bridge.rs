@@ -138,7 +138,7 @@ impl<'a> LegacyBridge<'a> {
     /// Creates a new legacy bridge with the specified base path.
     ///
     /// The base path is used to resolve relative file paths in the authoring
-    /// manifest (e.g., `sql/transfers.sql` becomes `<base_path>/sql/transfers.sql`).
+    /// manifest (e.g., `tables/transfers.sql` becomes `<base_path>/tables/transfers.sql`).
     pub fn new(base_path: &'a Path) -> Self {
         Self { base_path }
     }
@@ -332,19 +332,19 @@ mod tests {
     }
 
     fn setup_test_files(dir: &TempDir) {
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir_all(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
         // Create SQL file
         fs::write(
-            sql_dir.join("transfers.sql"),
+            tables_dir.join("transfers.sql"),
             "CREATE TABLE transfers AS SELECT * FROM source.transactions",
         )
         .expect("should write sql");
 
-        // Create schema file
+        // Create schema file (still JSON format for legacy bridge compatibility)
         fs::write(
-            sql_dir.join("transfers.schema.json"),
+            tables_dir.join("transfers.schema.json"),
             r#"{"fields":[{"name":"id","type":"UInt64","nullable":false}]}"#,
         )
         .expect("should write schema");
@@ -412,10 +412,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -452,10 +455,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -487,10 +493,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "arbitrum-one".parse().expect("valid network"),
             },
         );
@@ -521,10 +530,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -548,10 +560,10 @@ mod tests {
     fn convert_manifest_fails_on_missing_schema_file() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir_all(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir_all(&tables_dir).expect("should create tables dir");
         fs::write(
-            sql_dir.join("transfers.sql"),
+            tables_dir.join("transfers.sql"),
             "CREATE TABLE transfers AS SELECT 1",
         )
         .expect("should write sql");
@@ -562,10 +574,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -715,10 +730,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -751,10 +769,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -846,10 +867,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -907,10 +931,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
@@ -1053,10 +1080,13 @@ mod tests {
             "transfers".parse().expect("valid table name"),
             TableDef {
                 sql: Some(FileRef::new(
-                    "sql/transfers.sql".to_string(),
+                    "tables/transfers.sql".to_string(),
                     create_test_hash(),
                 )),
-                ipc: FileRef::new("sql/transfers.schema.json".to_string(), create_test_hash()),
+                ipc: FileRef::new(
+                    "tables/transfers.schema.json".to_string(),
+                    create_test_hash(),
+                ),
                 network: "mainnet".parse().expect("valid network"),
             },
         );
