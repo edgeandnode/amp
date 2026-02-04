@@ -302,7 +302,7 @@ When contributing to `metadata-db`, ensure you follow these requirements:
 - [ ] Format: `just fmt-file <file>` (or `just fmt-rs` for all Rust files)
 - [ ] Check: `just check-crate metadata-db` and `just check-rs`
 - [ ] Lint: `just clippy-crate metadata-db` and `just clippy` (fix ALL warnings)
-- [ ] Test: `just test-local`
+- [ ] Test: `just test-local` (run outside the sandbox with escalation in Codex)
 - [ ] Verify no secrets committed
 - [ ] Verify proper transaction boundaries
 - [ ] Confirm SQL wrapper module is `pub(crate)` with `pub` functions
