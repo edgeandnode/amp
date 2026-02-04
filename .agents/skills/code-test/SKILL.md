@@ -102,6 +102,7 @@ All test commands automatically detect nextest availability:
 ### Pre-approved Commands
 This test command is pre-approved and can be run without user permission:
 - `just test-local` - The ONLY test command that should be used for local development
+  - In Codex, still request escalation to run this outside the sandbox.
 
 ### Test Workflow Recommendations
 
@@ -109,6 +110,7 @@ This test command is pre-approved and can be run without user permission:
 2. **Before commits (local)**: Run `just test-local` to validate changes
 3. **In CI environments**: The CI system will run `just test` or other commands with proper service configurations
 4. **DO NOT run locally**: `just test`, `just test-unit`, `just test-it`, or `just test-ampup` unless you have explicitly configured all external services
+5. **Codex sandbox**: Run `just test-local` with escalation (outside the sandbox)
 
 ### External Dependencies Required by Non-Local Tests
 
