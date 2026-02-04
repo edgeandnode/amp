@@ -40,17 +40,17 @@ fn schema() -> Schema {
     Schema::new(fields)
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct Reward {
-    pub(crate) pubkey: String,
-    pub(crate) lamports: i64,
-    pub(crate) post_balance: u64,
-    pub(crate) reward_type: Option<RewardType>,
-    pub(crate) commission: Option<u8>,
+#[derive(Debug, Default, PartialEq)]
+pub struct Reward {
+    pub pubkey: String,
+    pub lamports: i64,
+    pub post_balance: u64,
+    pub reward_type: Option<RewardType>,
+    pub commission: Option<u8>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum RewardType {
+#[derive(Debug, PartialEq)]
+pub enum RewardType {
     /// The `Unspecified` variant only in the protobuf version of
     /// RewardType, it is not defined by the Solana spec.
     Unspecified,
@@ -156,10 +156,10 @@ impl From<solana_reward_info::RewardType> for RewardType {
 }
 
 /// Solana block rewards.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct BlockRewards {
-    pub(crate) slot: Slot,
-    pub(crate) rewards: Vec<Reward>,
+#[derive(Debug, Default, PartialEq)]
+pub struct BlockRewards {
+    pub slot: Slot,
+    pub rewards: Vec<Reward>,
 }
 
 impl BlockRewards {

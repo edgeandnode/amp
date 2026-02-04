@@ -16,7 +16,7 @@ use crate::metrics;
 ///
 /// If provided with a [meter](monitoring::telemetry::metrics::Meter), the client will record
 /// JSON-RPC related metrics.
-pub(crate) struct SolanaRpcClient {
+pub struct SolanaRpcClient {
     inner: solana_client::nonblocking::rpc_client::RpcClient,
     rate_limiter: Option<governor::DefaultDirectRateLimiter>,
     provider: String,
@@ -24,7 +24,7 @@ pub(crate) struct SolanaRpcClient {
 }
 
 impl SolanaRpcClient {
-    pub(crate) fn new(
+    pub fn new(
         url: Url,
         max_calls_per_second: Option<NonZeroU32>,
         provider: String,
@@ -48,7 +48,7 @@ impl SolanaRpcClient {
     /// ### RPC Reference
     ///
     /// [getSlot](https://solana.com/docs/rpc/http/getslot)
-    pub(crate) async fn get_slot(
+    pub async fn get_slot(
         &self,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> solana_rpc_client_api::client_error::Result<Slot> {
@@ -80,7 +80,7 @@ impl SolanaRpcClient {
     /// ### RPC Reference
     ///
     /// [getBlock](https://solana.com/docs/rpc/http/getblock)
-    pub(crate) async fn get_block(
+    pub async fn get_block(
         &self,
         slot: Slot,
         config: rpc_config::RpcBlockConfig,

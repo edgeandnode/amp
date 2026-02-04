@@ -25,14 +25,14 @@ mod dataset_kind;
 pub mod error;
 mod extractor;
 mod metrics;
-mod of1_client;
-mod rpc_client;
+pub mod of1_client;
+pub mod rpc_client;
 pub mod tables;
 
 pub use self::{
     dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
-    extractor::SolanaExtractor,
+    extractor::{non_empty_of1_slot, non_empty_rpc_slot, SolanaExtractor},
 };
 use crate::error::ExtractorError;
 

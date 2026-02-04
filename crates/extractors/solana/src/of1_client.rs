@@ -27,7 +27,7 @@ type PendingMessageMap = HashMap<Epoch, Vec<tokio::sync::oneshot::Sender<bool>>>
 /// NOTE: The interest data type should match max dump parallelism data type.
 type FileInterestMap = HashMap<Epoch, u16>;
 
-pub(crate) enum CarManagerMessage {
+pub enum CarManagerMessage {
     /// Request to download the CAR file for the given epoch. The oneshot sender will be
     /// notified when the download is complete. The boolean indicates whether the file
     /// was successfully downloaded (true) or if no file is available (false).
@@ -37,34 +37,34 @@ pub(crate) enum CarManagerMessage {
     FileProcessed(Epoch),
 }
 
-pub(crate) type DecodedTransactionStatusMeta = DecodedField<
+pub type DecodedTransactionStatusMeta = DecodedField<
     solana_storage_proto::confirmed_block::TransactionStatusMeta,
     solana_storage_proto::StoredTransactionStatusMeta,
 >;
 
-pub(crate) type DecodedBlockRewards = DecodedField<
+pub type DecodedBlockRewards = DecodedField<
     solana_storage_proto::confirmed_block::Rewards,
     solana_storage_proto::StoredExtendedRewards,
 >;
 
-pub(crate) enum DecodedField<P, B> {
+pub enum DecodedField<P, B> {
     Proto(P),
     Bincode(B),
 }
 
-pub(crate) struct DecodedSlot {
-    pub(crate) slot: Slot,
-    pub(crate) parent_slot: Slot,
-    pub(crate) blockhash: [u8; 32],
-    pub(crate) prev_blockhash: [u8; 32],
-    pub(crate) block_height: Option<u64>,
-    pub(crate) blocktime: i64,
-    pub(crate) transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
-    pub(crate) transaction_metas: Vec<Option<DecodedTransactionStatusMeta>>,
-    pub(crate) block_rewards: Option<DecodedBlockRewards>,
+pub struct DecodedSlot {
+    pub slot: Slot,
+    pub parent_slot: Slot,
+    pub blockhash: [u8; 32],
+    pub prev_blockhash: [u8; 32],
+    pub block_height: Option<u64>,
+    pub blocktime: i64,
+    pub transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
+    pub transaction_metas: Vec<Option<DecodedTransactionStatusMeta>>,
+    pub block_rewards: Option<DecodedBlockRewards>,
 }
 
-pub(crate) async fn car_file_manager(
+pub async fn car_file_manager(
     mut car_manager_rx: tokio::sync::mpsc::Receiver<CarManagerMessage>,
     car_directory: PathBuf,
     keep_car_files: bool,
@@ -207,7 +207,7 @@ pub(crate) async fn car_file_manager(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn stream(
+pub fn stream(
     start: solana_clock::Slot,
     end: solana_clock::Slot,
     car_directory: PathBuf,
