@@ -25,7 +25,7 @@ use std::{
 };
 
 use dataset_authoring::{
-    arrow_json,
+    arrow_ipc,
     cache::Cache,
     config::{self, AmpYaml},
     lockfile::{Lockfile, LockfileError, RootInfo},
@@ -191,25 +191,26 @@ pub async fn run(args: Args) -> Result<(), Error> {
     }
 
     // 6. Create output directories
-    let sql_dir = output.join("sql");
+    let tables_dir = output.join("tables");
     let functions_dir = output.join("functions");
-    fs::create_dir_all(&sql_dir).map_err(|e| Error::CreateDirectory {
-        path: sql_dir.clone(),
+    fs::create_dir_all(&tables_dir).map_err(|e| Error::CreateDirectory {
+        path: tables_dir.clone(),
         source: e,
     })?;
 
     // 7. Write table artifacts
     tracing::info!("Writing table artifacts");
     for (table_name, table) in &validated_tables {
-        let sql_output_path = sql_dir.join(format!("{table_name}.sql"));
+        let sql_output_path = tables_dir.join(format!("{table_name}.sql"));
         fs::write(&sql_output_path, &table.rendered_sql).map_err(|e| Error::WriteFile {
             path: sql_output_path,
             source: e,
         })?;
 
-        let schema_output_path = sql_dir.join(format!("{table_name}.schema.json"));
-        arrow_json::write_schema_file(&table.schema.arrow, &schema_output_path).map_err(|e| {
-            Error::WriteSchemaFile {
+        let ipc_output_path = tables_dir.join(format!("{table_name}.ipc"));
+        let schema_ref = table.schema.arrow.clone().into_schema_ref();
+        arrow_ipc::write_ipc_schema(&schema_ref, &ipc_output_path).map_err(|e| {
+            Error::WriteIpcSchema {
                 table: table_name.clone(),
                 source: e,
             }
@@ -236,9 +237,15 @@ pub async fn run(args: Args) -> Result<(), Error> {
 
     // 9. Generate manifest
     tracing::info!("Generating manifest");
-    let manifest = ManifestBuilder::new(&config, &dep_graph, &output, &sql_dir, &discovered_tables)
-        .build()
-        .map_err(Error::ManifestGeneration)?;
+    let manifest = ManifestBuilder::new(
+        &config,
+        &dep_graph,
+        &output,
+        &tables_dir,
+        &discovered_tables,
+    )
+    .build()
+    .map_err(Error::ManifestGeneration)?;
 
     // Write manifest.json (canonical JSON for identity verification)
     let manifest_json = manifest
@@ -350,12 +357,12 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// Failed to write schema file.
-    #[error("failed to write schema for table '{table}'")]
-    WriteSchemaFile {
+    /// Failed to write IPC schema file.
+    #[error("failed to write IPC schema for table '{table}'")]
+    WriteIpcSchema {
         table: TableName,
         #[source]
-        source: dataset_authoring::arrow_json::SchemaFileError,
+        source: dataset_authoring::arrow_ipc::IpcSchemaError,
     },
 
     /// Failed to copy function file.
