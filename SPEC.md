@@ -261,10 +261,10 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `docs/features/dataset-authoring.md`, `tests/src/tests/it_dataset_authoring.rs`, CLI help markdown files, `playground/`
 
 **8.1) Update `docs/features/dataset-authoring.md`**
-- [ ] Replace all `models/` references with `tables/`
-- [ ] Update build output structure section
-- [ ] Update `amp.yaml` schema documentation
-- [ ] Document `.ipc` schema format
+- [ ] Replace all `models/` references with `tables/` (currently 11 occurrences)
+- [ ] Update build output structure section (currently shows `sql/` layout)
+- [ ] Update `amp.yaml` schema documentation (config field `models` → `tables`)
+- [ ] Document `.ipc` schema format (replace `.schema.json` references)
 - [ ] Update CLI examples
 
 **8.2) Update tests**
@@ -303,8 +303,10 @@ Quick reference for key files and line numbers (verified 2026-02-04):
 | `package.rs` | 164-187 | `from_directory()` reads `sql/` and `functions/` |
 | `cache.rs` | 131-133, 145-163, 173-200 | `manifest_path()`, `get()`, `put()` |
 | `arrow_json.rs` | 74-104 | `write_schema_file()`, `read_schema_file()` |
-| `validation.rs` | 105 | `discovered_models` field |
+| `validation.rs` | 105, 429-470, 591 | `discovered_models` field and usage |
 | `lib.rs` | 1-29 | Module docstring with workflow description |
+| `files.rs` | docstrings, tests | Path examples use `sql/` throughout |
+| `bridge.rs` | tests | Test fixtures use `sql/` paths extensively |
 | `playground/amp.yaml` | 1-8 | Sample config using `models` default |
 
 ---
@@ -337,6 +339,7 @@ Each phase should be completable in one commit/PR.
 ## Blockers
 
 None identified. All dependencies (Arrow, IPC support) are already available in the workspace.
+- Arrow IPC verified in use at: `crates/services/server/src/flight.rs:595`, `crates/clients/flight/src/store/mod.rs:195`
 
 ---
 
