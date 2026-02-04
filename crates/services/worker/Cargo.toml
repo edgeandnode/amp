@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+amp-config = { path = "../../config" }
 amp-data-store = { path = "../../core/data-store" }
 async-trait.workspace = true
 backon.workspace = true
