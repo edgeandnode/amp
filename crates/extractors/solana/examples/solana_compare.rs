@@ -78,11 +78,12 @@ async fn main() -> anyhow::Result<()> {
         None,
     );
 
+    let mut expected_slot_num = start_slot;
     let mut mismatched_slots = 0u8;
 
     {
         let mut of1_stream_pin = std::pin::pin!(of1_stream);
-        while let Some(of1_result) = of1_stream_pin.next().await {
+        'blocks: while let Some(of1_result) = of1_stream_pin.next().await {
             let of1_decoded = match of1_result {
                 Ok(slot) => slot,
                 Err(e) => {
@@ -93,42 +94,73 @@ async fn main() -> anyhow::Result<()> {
 
             let slot_num = of1_decoded.slot;
 
-            let rpc_block = match rpc_client.get_block(slot_num, get_block_config, None).await {
-                Ok(block) => block,
-                Err(e) => {
-                    if rpc_client::is_block_missing_err(&e) {
-                        tracing::warn!(slot = slot_num, "slot missing via RPC but present in OF1");
-                    } else {
-                        tracing::error!(slot = slot_num, error = %e, "error fetching block via RPC");
+            let slots_match = 'slots_match: {
+                if slot_num != expected_slot_num {
+                    // If OF1 stream skipped slots, make sure those slots are also missing via RPC.
+                    for skipped_slot in expected_slot_num..slot_num {
+                        match rpc_client.get_block(slot_num, get_block_config, None).await {
+                            Ok(_) => {
+                                tracing::warn!(
+                                    slot = skipped_slot,
+                                    "slot missing in OF1 but present via RPC"
+                                );
+                                break 'slots_match false;
+                            }
+                            Err(e) => {
+                                if !rpc_client::is_block_missing_err(&e) {
+                                    tracing::error!(slot = skipped_slot, error = %e, "error fetching block via RPC");
+                                    break 'blocks;
+                                }
+                            }
+                        }
                     }
-                    continue;
                 }
+
+                let rpc_block = match rpc_client.get_block(slot_num, get_block_config, None).await {
+                    Ok(block) => block,
+                    Err(e) => {
+                        if rpc_client::is_block_missing_err(&e) {
+                            tracing::warn!(
+                                slot = slot_num,
+                                "slot missing via RPC but present in OF1"
+                            );
+                            break 'slots_match false;
+                        } else {
+                            tracing::error!(slot = slot_num, error = %e, "error fetching block via RPC");
+                            break 'blocks;
+                        }
+                    }
+                };
+
+                let of1_slot = match non_empty_of1_slot(of1_decoded) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!(slot = slot_num, error = %e, "OF1 conversion error");
+                        break 'blocks;
+                    }
+                };
+
+                let rpc_slot = match non_empty_rpc_slot(slot_num, rpc_block) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!(slot = slot_num, error = %e, "RPC conversion error");
+                        break 'blocks;
+                    }
+                };
+
+                slots_match(slot_num, of1_slot, rpc_slot)
             };
 
-            let of1_slot = match non_empty_of1_slot(of1_decoded) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!(slot = slot_num, error = %e, "OF1 conversion error");
-                    continue;
-                }
-            };
-
-            let rpc_slot = match non_empty_rpc_slot(slot_num, rpc_block) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!(slot = slot_num, error = %e, "RPC conversion error");
-                    continue;
-                }
-            };
-
-            if !slots_match(slot_num, of1_slot, rpc_slot) {
+            if !slots_match {
                 mismatched_slots += 1;
 
                 if mismatched_slots == SLOT_MISMATCH_LIMIT {
                     tracing::warn!("too many mismatched slots, aborting comparison");
-                    break;
+                    break 'blocks;
                 }
             }
+
+            expected_slot_num = slot_num + 1;
         }
     }
 
