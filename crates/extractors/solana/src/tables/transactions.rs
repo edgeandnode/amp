@@ -459,7 +459,7 @@ impl TransactionStatusMeta {
 pub struct TransactionTokenBalance {
     pub account_index: u8,
     pub mint: String,
-    ui_token_amount: TokenAmount,
+    pub ui_token_amount: TokenAmount,
     pub owner: Option<String>,
     pub program_id: Option<String>,
 }
@@ -522,11 +522,11 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
 }
 
 #[derive(Debug, Default, PartialEq)]
-struct TokenAmount {
-    ui_amount: Option<f64>,
-    decimals: u8,
-    amount: String,
-    ui_amount_string: String,
+pub struct TokenAmount {
+    pub ui_amount: Option<f64>,
+    pub decimals: u8,
+    pub amount: String,
+    pub ui_amount_string: String,
 }
 
 #[derive(Debug, Default, PartialEq)]
