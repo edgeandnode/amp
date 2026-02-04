@@ -28,7 +28,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Arrow IPC Module | **Complete** |
-| 2 | Rename `models` → `tables` | Not started |
+| 2 | Rename `models` → `tables` | **Complete** |
 | 3 | Build Output Layout (`sql/` → `tables/`) | Not started |
 | 4 | Schema Type Refactor | Not started |
 | 5 | Manifest Table Shape Changes | **Complete** |
@@ -99,25 +99,27 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `config.rs`, `discovery.rs`, `validation.rs`, CLI commands, integration tests
 
 **2.1) Update `config.rs`**
-- [ ] Rename field `models: PathBuf` to `tables: PathBuf` (line 109 in `AmpYaml`)
-- [ ] Update default function `default_models_dir()` → `default_tables_dir()` returning `"tables"` (line 156-158)
-- [ ] Update `AmpYamlV1` struct similarly (line 141)
-- [ ] Update `validate()` to reference "tables directory" instead of "models directory" (line 208)
-- [ ] Update all tests using `models` field (lines 507-852 test module)
+- [x] Rename field `models: PathBuf` to `tables: PathBuf` (line 109 in `AmpYaml`)
+- [x] Update default function `default_models_dir()` → `default_tables_dir()` returning `"tables"` (line 156-158)
+- [x] Update `AmpYamlV1` struct similarly (line 141)
+- [x] Update `validate()` to reference "tables directory" instead of "models directory" (line 208)
+- [x] Update all tests using `models` field (lines 507-852 test module)
 
 **2.2) Update `discovery.rs`**
-- [ ] Rename function `discover_models()` → `discover_tables()` (line 97)
-- [ ] Update variable name `models` → `tables` in function body (line 108)
-- [ ] Update `DiscoveryError` variants: `DuplicateModelName` → `DuplicateTableName`, etc.
-- [ ] Update `DiscoveredModel` → `DiscoveredTable` struct
-- [ ] Update documentation and error messages throughout
+- [x] Rename function `discover_models()` → `discover_tables()` (line 97)
+- [x] Update variable name `models` → `tables` in function body (line 108)
+- [x] Update `DiscoveryError` variants: `DuplicateModelName` → `DuplicateTableName`, etc.
+- [x] Update `DiscoveredModel` → `DiscoveredTable` struct
+- [x] Update documentation and error messages throughout
 
 **2.3) Update call sites**
-- [ ] Update `validation.rs` field `discovered_models` → `discovered_tables` (line 105 in `ValidationResult`)
-- [ ] Update `validate_network_inference()` parameters (line 591)
-- [ ] Update all callers of discovery functions in validation/build flows
+- [x] Update `validation.rs` field `discovered_models` → `discovered_tables` (line 105 in `ValidationResult`)
+- [x] Update `validate_network_inference()` parameters (line 591)
+- [x] Update all callers of discovery functions in validation/build flows
+- [x] Update CLI commands (check.rs, build.rs) to use new field/function names
+- [x] Update integration tests (it_dataset_authoring.rs) with new paths and imports
 
-**Acceptance criteria**: `amp.yaml` accepts `tables:` field (with `tables` as default). `models:` is no longer recognized.
+**Acceptance criteria**: `amp.yaml` accepts `tables:` field (with `tables` as default). `models:` is no longer recognized. **VERIFIED**
 
 ---
 
@@ -328,11 +330,11 @@ Each phase should be completable in one commit/PR.
 
 ---
 
-## Open Questions
+## Answered Questions
 
-1. **Deprecation period for `models`?** - Current plan: no backwards compatibility. Confirm this is acceptable.
-2. **Cache migration?** - Should we clear old cache entries or support both formats during transition?
-3. **Raw table authoring?** - When will authoring support raw tables (no SQL)? This plan prepares the manifest shape but doesn't implement discovery.
+1. **Deprecation period for `models`?** - No backwards compatibility. No deprecation period. None of this code is released yet.
+2. **Cache migration?** - No migration. Clear old cache entries. No backwards compatibility. None of this code is released yet.
+3. **Raw table authoring?** - Raw datasets are currently defined by extractor code. Eventually this will change and raw datasets will also have their table schemas declared and discoverable in a registry. But this is out of scope for this plan.
 
 ---
 

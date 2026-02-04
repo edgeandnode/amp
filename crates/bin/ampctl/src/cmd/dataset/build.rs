@@ -2,15 +2,15 @@
 //!
 //! Builds a derived dataset from `amp.yaml` configuration by:
 //! 1. Parsing the `amp.yaml` configuration file
-//! 2. Discovering models from the `models/` directory
+//! 2. Discovering tables from the `tables/` directory
 //! 3. Resolving dependencies from the admin API
 //! 4. Rendering Jinja SQL templates with context
 //! 5. Validating SELECT statements and incremental constraints
 //! 6. Inferring table schemas via DataFusion planning
 //! 7. Writing output files to the output directory:
 //!    - `manifest.json` (canonical)
-//!    - `sql/<table>.sql` (rendered SQL)
-//!    - `sql/<table>.schema.json` (inferred schema)
+//!    - `tables/<table>.sql` (rendered SQL)
+//!    - `tables/<table>.ipc` (inferred schema)
 //!    - `functions/` (if any)
 //! 8. Updating or creating `amp.lock` lockfile
 //!
@@ -81,7 +81,7 @@ struct BuildResult {
     status: &'static str,
     output: String,
     manifest_hash: String,
-    models: usize,
+    tables: usize,
     functions: usize,
 }
 
@@ -90,7 +90,7 @@ impl std::fmt::Display for BuildResult {
         writeln!(f, "Build complete")?;
         writeln!(f, "  Output: {}", self.output)?;
         writeln!(f, "  Manifest hash: {}", self.manifest_hash)?;
-        writeln!(f, "  Models: {}", self.models)?;
+        writeln!(f, "  Tables: {}", self.tables)?;
         if self.functions > 0 {
             writeln!(f, "  Functions: {}", self.functions)?;
         }
@@ -166,9 +166,9 @@ pub async fn run(args: Args) -> Result<(), Error> {
 
     let validation::ValidationOutput {
         config,
-        discovered_models,
+        discovered_tables,
         dependencies: dep_graph,
-        validated_models,
+        validated_tables,
         ..
     } = validation_output;
 
@@ -176,7 +176,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
         namespace = %config.namespace,
         name = %config.name,
         version = %config.version,
-        models = discovered_models.len(),
+        tables = discovered_tables.len(),
         "Loaded configuration"
     );
     tracing::debug!(
@@ -198,17 +198,17 @@ pub async fn run(args: Args) -> Result<(), Error> {
         source: e,
     })?;
 
-    // 7. Write model artifacts
-    tracing::info!("Writing model artifacts");
-    for (table_name, model) in &validated_models {
+    // 7. Write table artifacts
+    tracing::info!("Writing table artifacts");
+    for (table_name, table) in &validated_tables {
         let sql_output_path = sql_dir.join(format!("{table_name}.sql"));
-        fs::write(&sql_output_path, &model.rendered_sql).map_err(|e| Error::WriteFile {
+        fs::write(&sql_output_path, &table.rendered_sql).map_err(|e| Error::WriteFile {
             path: sql_output_path,
             source: e,
         })?;
 
         let schema_output_path = sql_dir.join(format!("{table_name}.schema.json"));
-        arrow_json::write_schema_file(&model.schema.arrow, &schema_output_path).map_err(|e| {
+        arrow_json::write_schema_file(&table.schema.arrow, &schema_output_path).map_err(|e| {
             Error::WriteSchemaFile {
                 table: table_name.clone(),
                 source: e,
@@ -236,7 +236,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
 
     // 9. Generate manifest
     tracing::info!("Generating manifest");
-    let manifest = ManifestBuilder::new(&config, &dep_graph, &output, &sql_dir, &discovered_models)
+    let manifest = ManifestBuilder::new(&config, &dep_graph, &output, &sql_dir, &discovered_tables)
         .build()
         .map_err(Error::ManifestGeneration)?;
 
@@ -262,7 +262,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
         status: "ok",
         output: output.display().to_string(),
         manifest_hash: identity.to_string(),
-        models: discovered_models.len(),
+        tables: discovered_tables.len(),
         functions,
     };
     global.print(&result).map_err(Error::JsonFormattingError)?;

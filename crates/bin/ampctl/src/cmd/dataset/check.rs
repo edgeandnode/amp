@@ -2,7 +2,7 @@
 //!
 //! Validates a derived dataset project without writing build artifacts by:
 //! 1. Parsing the authoring configuration
-//! 2. Discovering models from the `models/` directory
+//! 2. Discovering tables from the `tables/` directory
 //! 3. Resolving dependencies from the admin API
 //! 4. Rendering Jinja SQL templates with context
 //! 5. Validating SELECT statements and incremental constraints
@@ -62,7 +62,7 @@ struct CheckResult {
     namespace: String,
     name: String,
     version: String,
-    models: usize,
+    tables: usize,
     dependencies: DependencySummary,
     functions: usize,
 }
@@ -82,7 +82,7 @@ impl std::fmt::Display for CheckResult {
             "  Dataset: {}/{} v{}",
             self.namespace, self.name, self.version
         )?;
-        writeln!(f, "  Models: {}", self.models)?;
+        writeln!(f, "  Tables: {}", self.tables)?;
         writeln!(
             f,
             "  Dependencies: {} direct, {} total",
@@ -163,7 +163,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
     let validation::ValidationOutput {
         config_path,
         config,
-        discovered_models,
+        discovered_tables,
         dependencies: dep_graph,
         ..
     } = validation_output;
@@ -172,7 +172,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
         namespace = %config.namespace,
         name = %config.name,
         version = %config.version,
-        models = discovered_models.len(),
+        tables = discovered_tables.len(),
         "Loaded configuration"
     );
     tracing::debug!(
@@ -189,7 +189,7 @@ pub async fn run(args: Args) -> Result<(), Error> {
         namespace: config.namespace.to_string(),
         name: config.name.to_string(),
         version: config.version.to_string(),
-        models: discovered_models.len(),
+        tables: discovered_tables.len(),
         dependencies: DependencySummary {
             direct: dep_graph.direct.len(),
             transitive: dep_graph.len(),

@@ -12,7 +12,7 @@
 //! version: 1.0.0
 //! dependencies:
 //!   eth: my_namespace/eth_mainnet@1.0.0
-//! models: models  # optional; defaults to "models"
+//! tables: tables  # optional; defaults to "tables"
 //! functions:  # optional
 //!   myFunc:
 //!     input_types: [Int64, Utf8]
@@ -100,13 +100,13 @@ pub struct AmpYaml {
     /// Maps dependency aliases to their references (namespace/name@version or hash).
     #[serde(default)]
     pub dependencies: BTreeMap<DepAlias, DepReference>,
-    /// Directory containing model SQL files (`**/*.sql`).
+    /// Directory containing table SQL files (`**/*.sql`).
     ///
     /// Each `.sql` file in this directory (recursively) defines a table.
     /// The table name is derived from the file stem (must be unique across all files).
-    /// Defaults to `models` when omitted.
-    #[serde(default = "default_models_dir")]
-    pub models: PathBuf,
+    /// Defaults to `tables` when omitted.
+    #[serde(default = "default_tables_dir")]
+    pub tables: PathBuf,
     /// Optional user-defined function definitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub functions: Option<BTreeMap<FuncName, FunctionDef>>,
@@ -132,13 +132,13 @@ struct AmpYamlV1 {
     /// Maps dependency aliases to their references (namespace/name@version or hash).
     #[serde(default)]
     pub dependencies: BTreeMap<DepAlias, DepReference>,
-    /// Directory containing model SQL files (`**/*.sql`).
+    /// Directory containing table SQL files (`**/*.sql`).
     ///
     /// Each `.sql` file in this directory (recursively) defines a table.
     /// The table name is derived from the file stem (must be unique across all files).
-    /// Defaults to `models` when omitted.
-    #[serde(default = "default_models_dir")]
-    pub models: PathBuf,
+    /// Defaults to `tables` when omitted.
+    #[serde(default = "default_tables_dir")]
+    pub tables: PathBuf,
     /// Optional user-defined function definitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub functions: Option<BTreeMap<FuncName, FunctionDef>>,
@@ -153,8 +153,8 @@ enum AmpYamlVersioned {
     V1(AmpYamlV1),
 }
 
-fn default_models_dir() -> PathBuf {
-    PathBuf::from("models")
+fn default_tables_dir() -> PathBuf {
+    PathBuf::from("tables")
 }
 
 impl AmpYaml {
@@ -204,8 +204,8 @@ impl AmpYaml {
     /// Returns [`ConfigError::Validation`] if the configuration is invalid.
     /// Returns [`ConfigError::InvalidPath`] if any path is absolute or uses `..` traversal.
     fn validate(&self) -> Result<(), ConfigError> {
-        // Validate models directory path
-        validate_path(&self.models, "models directory")?;
+        // Validate tables directory path
+        validate_path(&self.tables, "tables directory")?;
 
         // Validate function source paths
         if let Some(functions) = &self.functions {
@@ -225,7 +225,7 @@ impl AmpYaml {
                 name: v1.name,
                 version: v1.version,
                 dependencies: v1.dependencies,
-                models: v1.models,
+                tables: v1.tables,
                 functions: v1.functions,
                 vars: v1.vars,
             }),
@@ -511,7 +511,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -524,7 +524,7 @@ models: models
         assert_eq!(config.name, "my_dataset");
         assert_eq!(config.version.to_string(), "1.0.0");
         assert!(config.dependencies.is_empty());
-        assert_eq!(config.models, PathBuf::from("models"));
+        assert_eq!(config.tables, PathBuf::from("tables"));
         assert!(config.functions.is_none());
         assert!(config.vars.is_none());
     }
@@ -540,7 +540,7 @@ version: 1.2.3
 dependencies:
   eth: my_namespace/eth_mainnet@1.0.0
   other: other_ns/other_dataset@0.5.0
-models: sql/models
+tables: sql/tables
 functions:
   myFunc:
     input_types: [Int64, Utf8]
@@ -561,7 +561,7 @@ vars:
         assert_eq!(config.name, "my_dataset");
         assert_eq!(config.version.to_string(), "1.2.3");
         assert_eq!(config.dependencies.len(), 2);
-        assert_eq!(config.models, PathBuf::from("sql/models"));
+        assert_eq!(config.tables, PathBuf::from("sql/tables"));
         assert!(config.functions.is_some());
         let funcs = config.functions.as_ref().expect("should have functions");
         assert_eq!(funcs.len(), 1);
@@ -578,7 +578,7 @@ vars:
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -597,7 +597,7 @@ amp: not-a-version
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -617,7 +617,7 @@ namespace: my_namespace
 name: my_dataset
 version: 1.0.0
 start_block: 12345678
-models: models
+tables: tables
 "#;
 
         //* When
@@ -635,7 +635,7 @@ amp: 123
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -654,7 +654,7 @@ amp: 2.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -675,7 +675,7 @@ name: my_dataset
 version: 1.0.0
 dependencies:
   eth: my_namespace/eth_mainnet@b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
-models: models
+tables: tables
 "#;
 
         //* When
@@ -687,7 +687,7 @@ models: models
     }
 
     #[test]
-    fn default_models_when_missing() {
+    fn default_tables_when_missing() {
         //* Given
         let yaml = r#"
 amp: 1.0.0
@@ -700,8 +700,8 @@ version: 1.0.0
         let result = AmpYaml::from_yaml(yaml);
 
         //* Then
-        let config = result.expect("should default models field");
-        assert_eq!(config.models, PathBuf::from("models"));
+        let config = result.expect("should default tables field");
+        assert_eq!(config.tables, PathBuf::from("tables"));
     }
 
     #[test]
@@ -713,7 +713,7 @@ namespace: my_namespace
 name: my_dataset
 version: 1.0.0
 unknown_field: some_value
-models: models
+tables: tables
 "#;
 
         //* When
@@ -732,7 +732,7 @@ amp: 1.0.0
 namespace: Invalid-Namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -751,7 +751,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: Invalid-Name
 version: 1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -770,7 +770,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: not-a-version
-models: models
+tables: tables
 "#;
 
         //* When
@@ -790,7 +790,7 @@ namespace: my_namespace
 name: my_dataset
 version: 1.0.0
 kind: derived
-models: models
+tables: tables
 "#;
 
         //* When
@@ -819,7 +819,7 @@ name: my_dataset
 version: 1.0.0
 dependencies:
   123invalid: my_namespace/eth_mainnet@1.0.0
-models: models
+tables: tables
 "#;
 
         //* When
@@ -840,7 +840,7 @@ name: my_dataset
 version: 1.0.0
 dependencies:
   eth: my_namespace/eth_mainnet@latest
-models: models
+tables: tables
 "#;
 
         //* When
@@ -859,7 +859,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   myFunc:
     input_types: [Int64]
@@ -884,7 +884,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: sql/models
+tables: sql/tables
 functions:
   helper:
     input_types: [Int64]
@@ -900,21 +900,21 @@ functions:
     }
 
     #[test]
-    fn validate_absolute_path_fails_for_models() {
+    fn validate_absolute_path_fails_for_tables() {
         //* Given
         let yaml = r#"
 amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: /abs/path/models
+tables: /abs/path/tables
 "#;
 
         //* When
         let result = AmpYaml::from_yaml(yaml);
 
         //* Then
-        let err = result.expect_err("should reject absolute path in models");
+        let err = result.expect_err("should reject absolute path in tables");
         assert!(
             matches!(err, ConfigError::InvalidPath { .. }),
             "expected InvalidPath error, got: {err:?}"
@@ -934,7 +934,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   helper:
     input_types: [Int64]
@@ -966,7 +966,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: "C:\\path\\models"
+tables: "C:\\path\\tables"
 "#;
 
         //* When
@@ -981,21 +981,21 @@ models: "C:\\path\\models"
     }
 
     #[test]
-    fn validate_parent_traversal_fails_for_models() {
+    fn validate_parent_traversal_fails_for_tables() {
         //* Given
         let yaml = r#"
 amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: sql/../models
+tables: sql/../tables
 "#;
 
         //* When
         let result = AmpYaml::from_yaml(yaml);
 
         //* Then
-        let err = result.expect_err("should reject parent traversal in models path");
+        let err = result.expect_err("should reject parent traversal in tables path");
         assert!(
             matches!(err, ConfigError::InvalidPath { .. }),
             "expected InvalidPath error, got: {err:?}"
@@ -1015,7 +1015,7 @@ amp: 1.0.0
 namespace: my_namespace
 name: my_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   helper:
     input_types: [Int64]

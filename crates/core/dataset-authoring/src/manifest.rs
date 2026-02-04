@@ -272,7 +272,7 @@ impl AuthoringManifest {
 /// - The parsed `amp.yaml` configuration
 /// - The resolved dependency graph
 /// - The base path for file reference normalization
-/// - The directory containing rendered SQL and schema files
+/// - The directory containing rendered SQL and IPC schema files
 /// - The discovered tables (from model discovery)
 /// - A network resolver for inferring table networks
 ///
@@ -281,7 +281,7 @@ impl AuthoringManifest {
 /// ```ignore
 /// use dataset_authoring::manifest::ManifestBuilder;
 ///
-/// let manifest = ManifestBuilder::new(&config, &dep_graph, project_dir, &sql_dir, &tables)
+/// let manifest = ManifestBuilder::new(&config, &dep_graph, project_dir, &tables_dir, &tables)
 ///     .with_network_resolver(|table, deps| infer_network(table, deps))
 ///     .build()?;
 /// ```
@@ -289,7 +289,7 @@ pub struct ManifestBuilder<'a, F> {
     config: &'a AmpYaml,
     dep_graph: &'a DependencyGraph,
     base_path: &'a Path,
-    sql_dir: &'a Path,
+    tables_dir: &'a Path,
     /// Discovered tables (table name -> SQL file path relative to base_path).
     /// This replaces the old `config.tables` field.
     tables: &'a BTreeMap<TableName, PathBuf>,
@@ -307,20 +307,20 @@ impl<'a> ManifestBuilder<'a, fn(&TableName, &DependencyGraph) -> Result<NetworkI
     /// * `config` - The parsed amp.yaml configuration
     /// * `dep_graph` - The resolved dependency graph
     /// * `base_path` - Base path for file reference normalization
-    /// * `sql_dir` - Directory containing rendered SQL and schema files
+    /// * `tables_dir` - Directory containing rendered SQL and IPC schema files
     /// * `tables` - Discovered tables (table name -> SQL file path relative to base_path)
     pub fn new(
         config: &'a AmpYaml,
         dep_graph: &'a DependencyGraph,
         base_path: &'a Path,
-        sql_dir: &'a Path,
+        tables_dir: &'a Path,
         tables: &'a BTreeMap<TableName, PathBuf>,
     ) -> Self {
         Self {
             config,
             dep_graph,
             base_path,
-            sql_dir,
+            tables_dir,
             tables,
             network_resolver: default_network_resolver,
         }
@@ -342,7 +342,7 @@ where
             config: self.config,
             dep_graph: self.dep_graph,
             base_path: self.base_path,
-            sql_dir: self.sql_dir,
+            tables_dir: self.tables_dir,
             tables: self.tables,
             network_resolver: resolver,
         }
@@ -408,8 +408,8 @@ where
         let mut tables = BTreeMap::new();
 
         for table_name in self.tables.keys() {
-            // SQL file path: sql/<table_name>.sql (rendered output)
-            let sql_file_path = self.sql_dir.join(format!("{}.sql", table_name));
+            // SQL file path: tables/<table_name>.sql (rendered output)
+            let sql_file_path = self.tables_dir.join(format!("{}.sql", table_name));
             let sql_ref = FileRef::from_file(&sql_file_path, self.base_path).map_err(|err| {
                 ManifestError::SqlFileRef {
                     table_name: table_name.clone(),
@@ -417,9 +417,8 @@ where
                 }
             })?;
 
-            // IPC schema file path: sql/<table_name>.schema.json
-            // Note: Path will change to tables/<table_name>.ipc in Phase 3
-            let ipc_file_path = self.sql_dir.join(format!("{}.schema.json", table_name));
+            // IPC schema file path: tables/<table_name>.ipc
+            let ipc_file_path = self.tables_dir.join(format!("{}.ipc", table_name));
             let ipc_ref = FileRef::from_file(&ipc_file_path, self.base_path).map_err(|err| {
                 ManifestError::IpcFileRef {
                     table_name: table_name.clone(),
@@ -843,7 +842,7 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
         AmpYaml::from_yaml(yaml).expect("valid config")
     }
@@ -852,7 +851,7 @@ models: models
         let mut tables = BTreeMap::new();
         tables.insert(
             "transfers".parse().expect("valid table name"),
-            PathBuf::from("models/transfers.sql"),
+            PathBuf::from("tables/transfers.sql"),
         );
         tables
     }
@@ -901,16 +900,12 @@ models: models
     fn manifest_builder_builds_minimal_manifest() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir(&tables_dir).expect("should create tables dir");
 
-        // Create SQL and schema files
-        fs::write(sql_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
-        fs::write(
-            sql_dir.join("transfers.schema.json"),
-            r#"{"arrow":{"fields":[]}}"#,
-        )
-        .expect("should write schema");
+        // Create SQL and IPC schema files
+        fs::write(tables_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
+        fs::write(tables_dir.join("transfers.ipc"), b"dummy ipc").expect("should write ipc");
 
         let config = create_test_config();
         let tables = create_test_tables();
@@ -918,7 +913,7 @@ models: models
 
         //* When
         let result =
-            ManifestBuilder::new(&config, &dep_graph, dir.path(), &sql_dir, &tables).build();
+            ManifestBuilder::new(&config, &dep_graph, dir.path(), &tables_dir, &tables).build();
 
         //* Then
         let manifest = result.expect("build should succeed");
@@ -933,15 +928,11 @@ models: models
     fn manifest_builder_infers_network_from_deps() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir(&tables_dir).expect("should create tables dir");
 
-        fs::write(sql_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
-        fs::write(
-            sql_dir.join("transfers.schema.json"),
-            r#"{"arrow":{"fields":[]}}"#,
-        )
-        .expect("should write schema");
+        fs::write(tables_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
+        fs::write(tables_dir.join("transfers.ipc"), b"dummy ipc").expect("should write ipc");
 
         let config = create_test_config();
         let tables = create_test_tables();
@@ -949,7 +940,7 @@ models: models
 
         //* When
         let result =
-            ManifestBuilder::new(&config, &dep_graph, dir.path(), &sql_dir, &tables).build();
+            ManifestBuilder::new(&config, &dep_graph, dir.path(), &tables_dir, &tables).build();
 
         //* Then
         let manifest = result.expect("build should succeed");
@@ -964,8 +955,8 @@ models: models
     fn manifest_builder_fails_on_missing_sql_file() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir(&tables_dir).expect("should create tables dir");
         // Don't create the SQL file
 
         let config = create_test_config();
@@ -974,7 +965,7 @@ models: models
 
         //* When
         let result =
-            ManifestBuilder::new(&config, &dep_graph, dir.path(), &sql_dir, &tables).build();
+            ManifestBuilder::new(&config, &dep_graph, dir.path(), &tables_dir, &tables).build();
 
         //* Then
         assert!(result.is_err());
@@ -990,11 +981,11 @@ models: models
     fn manifest_builder_fails_on_missing_ipc_file() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir(&tables_dir).expect("should create tables dir");
 
         // Create SQL but not IPC schema
-        fs::write(sql_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
+        fs::write(tables_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
 
         let config = create_test_config();
         let tables = create_test_tables();
@@ -1002,7 +993,7 @@ models: models
 
         //* When
         let result =
-            ManifestBuilder::new(&config, &dep_graph, dir.path(), &sql_dir, &tables).build();
+            ManifestBuilder::new(&config, &dep_graph, dir.path(), &tables_dir, &tables).build();
 
         //* Then
         assert!(result.is_err());
@@ -1018,15 +1009,11 @@ models: models
     fn manifest_builder_with_custom_network_resolver() {
         //* Given
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
-        fs::create_dir(&sql_dir).expect("should create sql dir");
+        let tables_dir = dir.path().join("tables");
+        fs::create_dir(&tables_dir).expect("should create tables dir");
 
-        fs::write(sql_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
-        fs::write(
-            sql_dir.join("transfers.schema.json"),
-            r#"{"arrow":{"fields":[]}}"#,
-        )
-        .expect("should write schema");
+        fs::write(tables_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
+        fs::write(tables_dir.join("transfers.ipc"), b"dummy ipc").expect("should write ipc");
 
         let config = create_test_config();
         let tables = create_test_tables();
@@ -1039,7 +1026,7 @@ models: models
             };
 
         //* When
-        let result = ManifestBuilder::new(&config, &dep_graph, dir.path(), &sql_dir, &tables)
+        let result = ManifestBuilder::new(&config, &dep_graph, dir.path(), &tables_dir, &tables)
             .with_network_resolver(custom_resolver)
             .build();
 
@@ -1102,7 +1089,7 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   my_func:
     source: lib/helpers/my_func.js
@@ -1114,18 +1101,14 @@ functions:
 
         // Set up directory with canonical output structure
         let dir = TempDir::new().expect("should create temp dir");
-        let sql_dir = dir.path().join("sql");
+        let tables_dir = dir.path().join("tables");
         let functions_dir = dir.path().join("functions");
-        fs::create_dir_all(&sql_dir).expect("should create sql dir");
+        fs::create_dir_all(&tables_dir).expect("should create tables dir");
         fs::create_dir_all(&functions_dir).expect("should create functions dir");
 
         // Create required files at canonical locations
-        fs::write(sql_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
-        fs::write(
-            sql_dir.join("transfers.schema.json"),
-            r#"{"arrow":{"fields":[]}}"#,
-        )
-        .expect("should write schema");
+        fs::write(tables_dir.join("transfers.sql"), "SELECT 1").expect("should write sql");
+        fs::write(tables_dir.join("transfers.ipc"), b"dummy ipc").expect("should write ipc");
 
         // Function file at CANONICAL path (build.rs copies to this location)
         fs::write(
@@ -1138,7 +1121,7 @@ functions:
 
         //* When
         let result =
-            ManifestBuilder::new(&config, &dep_graph, dir.path(), &sql_dir, &tables).build();
+            ManifestBuilder::new(&config, &dep_graph, dir.path(), &tables_dir, &tables).build();
 
         //* Then
         let manifest = result.expect("build should succeed");

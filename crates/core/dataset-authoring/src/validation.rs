@@ -40,7 +40,7 @@ use datasets_derived::{
 
 use crate::{
     config::{self, AmpYaml},
-    discovery::{DiscoveryError, discover_models},
+    discovery::{DiscoveryError, discover_tables},
     jinja::{JinjaContext, RenderError, render_sql},
     lockfile::Lockfile,
     manifest,
@@ -101,17 +101,17 @@ pub struct ValidationOutput {
     pub config_path: PathBuf,
     /// Parsed authoring configuration.
     pub config: AmpYaml,
-    /// Discovered models (table -> file path).
-    pub discovered_models: BTreeMap<TableName, PathBuf>,
+    /// Discovered tables (table -> file path).
+    pub discovered_tables: BTreeMap<TableName, PathBuf>,
     /// Resolved dependency graph.
     pub dependencies: DependencyGraph,
-    /// Rendered SQL and inferred schemas for each model.
-    pub validated_models: BTreeMap<TableName, ValidatedModel>,
+    /// Rendered SQL and inferred schemas for each table.
+    pub validated_tables: BTreeMap<TableName, ValidatedTable>,
 }
 
-/// Validated model output.
+/// Validated table output.
 #[derive(Debug, Clone)]
-pub struct ValidatedModel {
+pub struct ValidatedTable {
     /// Path to the source SQL file, relative to the project root.
     pub source_path: PathBuf,
     /// Rendered SQL after Jinja templating.
@@ -426,8 +426,8 @@ pub async fn validate_project_with_config<F: ManifestFetcher>(
     validate_function_types(&config)?;
     validate_function_sources(dir, &config)?;
 
-    let discovered_models =
-        discover_models(dir, &config.models).map_err(ValidationError::Discovery)?;
+    let discovered_tables =
+        discover_tables(dir, &config.tables).map_err(ValidationError::Discovery)?;
 
     let dependencies = match resolution {
         ResolutionMode::Resolve => resolver
@@ -447,9 +447,9 @@ pub async fn validate_project_with_config<F: ManifestFetcher>(
     register_dependency_udfs(&mut schema_ctx, &dependencies)?;
     register_self_udfs(&mut schema_ctx, &config)?;
 
-    let mut validated_models = BTreeMap::new();
-    for (table_name, sql_path) in &discovered_models {
-        let validated = validate_model(
+    let mut validated_tables = BTreeMap::new();
+    for (table_name, sql_path) in &discovered_tables {
+        let validated = validate_table(
             table_name,
             sql_path,
             dir,
@@ -459,17 +459,17 @@ pub async fn validate_project_with_config<F: ManifestFetcher>(
             &dependencies,
         )
         .await?;
-        validated_models.insert(table_name.clone(), validated);
+        validated_tables.insert(table_name.clone(), validated);
     }
 
-    validate_network_inference(&discovered_models, &dependencies)?;
+    validate_network_inference(&discovered_tables, &dependencies)?;
 
     Ok(ValidationOutput {
         config_path,
         config,
-        discovered_models,
+        discovered_tables,
         dependencies,
-        validated_models,
+        validated_tables,
     })
 }
 
@@ -588,10 +588,10 @@ fn parse_function_signature(
 }
 
 fn validate_network_inference(
-    discovered_models: &BTreeMap<TableName, PathBuf>,
+    discovered_tables: &BTreeMap<TableName, PathBuf>,
     dependencies: &DependencyGraph,
 ) -> Result<(), ValidationError> {
-    for table_name in discovered_models.keys() {
+    for table_name in discovered_tables.keys() {
         manifest::default_network_resolver(table_name, dependencies).map_err(|source| {
             ValidationError::NetworkInference {
                 table: table_name.clone(),
@@ -674,7 +674,7 @@ fn register_self_udfs(ctx: &mut SchemaContext, config: &AmpYaml) -> Result<(), V
     Ok(())
 }
 
-fn validate_model_references(
+fn validate_table_references(
     table_name: &TableName,
     stmt: &datafusion::sql::parser::Statement,
     config: &AmpYaml,
@@ -803,7 +803,7 @@ fn validate_model_references(
     Ok(())
 }
 
-async fn validate_model(
+async fn validate_table(
     table_name: &TableName,
     sql_path: &Path,
     project_dir: &Path,
@@ -811,7 +811,7 @@ async fn validate_model(
     schema_ctx: &SchemaContext,
     config: &AmpYaml,
     dependencies: &DependencyGraph,
-) -> Result<ValidatedModel, ValidationError> {
+) -> Result<ValidatedTable, ValidationError> {
     let template_path = project_dir.join(sql_path);
     let template =
         fs::read_to_string(&template_path).map_err(|source| ValidationError::ReadSqlFile {
@@ -843,7 +843,7 @@ async fn validate_model(
         }
     })?;
 
-    validate_model_references(table_name, &stmt, config, dependencies)?;
+    validate_table_references(table_name, &stmt, config, dependencies)?;
 
     let schema = schema_ctx
         .infer_schema(&select_info.query)
@@ -855,7 +855,7 @@ async fn validate_model(
 
     validate_incremental_constraints(&select_info.query, schema_ctx, table_name).await?;
 
-    Ok(ValidatedModel {
+    Ok(ValidatedTable {
         source_path: sql_path.to_path_buf(),
         rendered_sql,
         schema,
@@ -908,7 +908,7 @@ mod tests {
 
     use super::{
         AmpYaml, ValidationError, validate_cli_vars, validate_incremental_constraints,
-        validate_model_references,
+        validate_table_references,
     };
     use crate::{
         dependency_manifest::{DependencyManifest, DependencyTable},
@@ -1002,14 +1002,14 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 "#;
         AmpYaml::from_yaml(yaml).expect("should parse config")
     }
 
     fn config_with_functions(functions: &[&str]) -> AmpYaml {
         let mut yaml = String::from(
-            "amp: 1.0.0\nnamespace: test_ns\nname: test_dataset\nversion: 1.0.0\nmodels: models\n",
+            "amp: 1.0.0\nnamespace: test_ns\nname: test_dataset\nversion: 1.0.0\ntables: tables\n",
         );
 
         if !functions.is_empty() {
@@ -1110,7 +1110,7 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   myFunc:
     input_types: [Int64]
@@ -1136,7 +1136,7 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   missingFunc:
     input_types: [Utf8]
@@ -1167,7 +1167,7 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   myFunc:
     input_types: [NotAType]
@@ -1197,7 +1197,7 @@ amp: 1.0.0
 namespace: test_ns
 name: test_dataset
 version: 1.0.0
-models: models
+tables: tables
 functions:
   myFunc:
     input_types: [Utf8]
@@ -1224,16 +1224,16 @@ functions:
         use super::*;
 
         #[test]
-        fn validate_model_references_rejects_unqualified_table_reference() {
+        fn validate_table_references_rejects_unqualified_table_reference() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("evm-rpc", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("eth", manifest);
             let stmt = parse_statement("SELECT * FROM blocks");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject unqualified table reference");
@@ -1244,16 +1244,16 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_rejects_catalog_qualified_table_reference() {
+        fn validate_table_references_rejects_catalog_qualified_table_reference() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("evm-rpc", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("eth", manifest);
             let stmt = parse_statement("SELECT * FROM catalog.schema.table");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject catalog-qualified table reference");
@@ -1264,16 +1264,16 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_rejects_unknown_dependency_alias() {
+        fn validate_table_references_rejects_unknown_dependency_alias() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("evm-rpc", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("eth", manifest);
             let stmt = parse_statement("SELECT * FROM missing.blocks");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject unknown dependency alias");
@@ -1284,16 +1284,16 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_rejects_missing_dependency_table() {
+        fn validate_table_references_rejects_missing_dependency_table() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("evm-rpc", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("eth", manifest);
             let stmt = parse_statement("SELECT * FROM eth.missing_table");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject missing dependency table");
@@ -1304,30 +1304,30 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_accepts_self_function_reference() {
+        fn validate_table_references_accepts_self_function_reference() {
             //* Given
             let config = config_with_functions(&["myFunc"]);
             let dep_graph = DependencyGraph::new();
             let stmt = parse_statement("SELECT self.myFunc(1)");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             assert!(result.is_ok(), "self function reference should be accepted");
         }
 
         #[test]
-        fn validate_model_references_rejects_missing_self_function() {
+        fn validate_table_references_rejects_missing_self_function() {
             //* Given
             let config = minimal_config();
             let dep_graph = DependencyGraph::new();
             let stmt = parse_statement("SELECT self.missingFunc(1)");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject missing self function");
@@ -1335,16 +1335,16 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_accepts_dependency_function_reference() {
+        fn validate_table_references_accepts_dependency_function_reference() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("manifest", &["blocks"], &["depFunc"]);
             let dep_graph = make_dependency_graph("dep", manifest);
             let stmt = parse_statement("SELECT dep.depFunc(1)");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             assert!(
@@ -1354,16 +1354,16 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_rejects_missing_dependency_function() {
+        fn validate_table_references_rejects_missing_dependency_function() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("manifest", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("dep", manifest);
             let stmt = parse_statement("SELECT dep.missingFunc(1)");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject missing dependency function");
@@ -1374,32 +1374,32 @@ functions:
         }
 
         #[test]
-        fn validate_model_references_accepts_eth_call_for_evm_rpc_dependency() {
+        fn validate_table_references_accepts_eth_call_for_evm_rpc_dependency() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("evm-rpc", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("dep", manifest);
             let stmt = parse_statement("SELECT dep.eth_call(NULL, NULL, NULL, 'latest') AS result");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             assert!(result.is_ok(), "eth_call should be accepted for evm-rpc");
         }
 
         #[test]
-        fn validate_model_references_rejects_eth_call_for_non_evm_dependency() {
+        fn validate_table_references_rejects_eth_call_for_non_evm_dependency() {
             //* Given
             let config = minimal_config();
             let manifest = make_dependency_manifest("firehose", &["blocks"], &[]);
             let dep_graph = make_dependency_graph("dep", manifest);
             let stmt = parse_statement("SELECT dep.eth_call(NULL, NULL, NULL, 'latest') AS result");
-            let table: TableName = "model".parse().expect("valid table name");
+            let table: TableName = "my_table".parse().expect("valid table name");
 
             //* When
-            let result = validate_model_references(&table, &stmt, &config, &dep_graph);
+            let result = validate_table_references(&table, &stmt, &config, &dep_graph);
 
             //* Then
             let err = result.expect_err("should reject eth_call for non-evm dependency");

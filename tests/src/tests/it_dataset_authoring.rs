@@ -17,7 +17,7 @@ use dataset_authoring::{
     bridge::LegacyBridge,
     canonical,
     config::AmpYaml,
-    discovery::discover_models,
+    discovery::discover_tables,
     files::{FileRef, hash_file, normalize_path},
     jinja::{JinjaContext, render_sql},
     lockfile::{Lockfile, RootInfo},
@@ -43,7 +43,7 @@ fn create_minimal_amp_yaml(namespace: &str, name: &str) -> String {
         namespace: {namespace}
         name: {name}
         version: "1.0.0"
-        models: models
+        tables: tables
     "#}
 }
 
@@ -55,8 +55,8 @@ fn create_simple_sql() -> String {
 /// Set up a minimal dataset project directory.
 fn setup_minimal_project(dir: &Path, namespace: &str, name: &str) {
     // Create directories
-    let models_dir = dir.join("models");
-    fs::create_dir_all(&models_dir).expect("should create models dir");
+    let tables_dir = dir.join("tables");
+    fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
     // Write amp.yaml
     let amp_yaml = create_minimal_amp_yaml(namespace, name);
@@ -64,13 +64,13 @@ fn setup_minimal_project(dir: &Path, namespace: &str, name: &str) {
 
     // Write SQL file (SELECT-only, table name from filename)
     let sql = create_simple_sql();
-    fs::write(models_dir.join("transfers.sql"), sql).expect("should write sql file");
+    fs::write(tables_dir.join("transfers.sql"), sql).expect("should write sql file");
 }
 
 /// Set up a dataset project with variables for Jinja testing.
 fn setup_project_with_vars(dir: &Path) {
-    let models_dir = dir.join("models");
-    fs::create_dir_all(&models_dir).expect("should create models dir");
+    let tables_dir = dir.join("tables");
+    fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
     // amp.yaml with variables
     let amp_yaml = indoc::indoc! {r#"
@@ -78,7 +78,7 @@ fn setup_project_with_vars(dir: &Path) {
         namespace: test_ns
         name: test_dataset
         version: "1.0.0"
-        models: models
+        tables: tables
         vars:
           filter_value: "100"
     "#};
@@ -90,7 +90,7 @@ fn setup_project_with_vars(dir: &Path) {
         FROM (SELECT 1 AS id, 200 AS amount)
         WHERE amount > {{ var('filter_value') }}
     "#};
-    fs::write(models_dir.join("filtered.sql"), sql).expect("should write sql file");
+    fs::write(tables_dir.join("filtered.sql"), sql).expect("should write sql file");
 }
 
 // ============================================================
@@ -112,10 +112,10 @@ fn parse_amp_yaml_from_file() {
     assert_eq!(config.namespace.to_string(), "test_ns");
     assert_eq!(config.name.to_string(), "test_dataset");
     assert_eq!(config.version.to_string(), "1.0.0");
-    assert_eq!(config.models.to_string_lossy(), "models");
+    assert_eq!(config.tables.to_string_lossy(), "tables");
 
-    // Discover models from the directory
-    let discovered = discover_models(dir.path(), &config.models).expect("should discover models");
+    // Discover tables from the directory
+    let discovered = discover_tables(dir.path(), &config.tables).expect("should discover tables");
     assert_eq!(discovered.len(), 1);
     assert!(discovered.contains_key(&"transfers".parse().unwrap()));
 }
@@ -133,7 +133,7 @@ fn jinja_renders_sql_with_variables() {
     setup_project_with_vars(dir.path());
 
     let sql_template =
-        fs::read_to_string(dir.path().join("models/filtered.sql")).expect("should read sql");
+        fs::read_to_string(dir.path().join("tables/filtered.sql")).expect("should read sql");
 
     let yaml_vars: std::collections::HashMap<String, String> =
         [("filter_value".to_string(), "100".to_string())]
@@ -441,8 +441,8 @@ fn package_builder_includes_all_required_files() {
     let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
     assert!(paths.contains(&"manifest.json"), "should include manifest");
     assert!(
-        paths.iter().any(|p| p.starts_with("sql/")),
-        "should include sql files"
+        paths.iter().any(|p| p.starts_with("tables/")),
+        "should include table files"
     );
 }
 
@@ -471,8 +471,8 @@ fn package_writes_valid_tgz() {
 
 /// Helper to set up a build output directory for packaging tests.
 fn setup_build_output(dir: &Path) {
-    let sql_dir = dir.join("sql");
-    fs::create_dir_all(&sql_dir).expect("should create sql dir");
+    let tables_dir = dir.join("tables");
+    fs::create_dir_all(&tables_dir).expect("should create tables dir");
 
     // Create manifest.json
     let manifest = serde_json::json!({
@@ -482,8 +482,8 @@ fn setup_build_output(dir: &Path) {
         "dependencies": {},
         "tables": {
             "transfers": {
-                "sql": {"path": "sql/transfers.sql", "hash": "sha256:abc123"},
-                "schema": {"path": "sql/transfers.schema.json", "hash": "sha256:def456"},
+                "sql": {"path": "tables/transfers.sql", "hash": "sha256:abc123"},
+                "ipc": {"path": "tables/transfers.ipc", "hash": "sha256:def456"},
                 "network": "mainnet"
             }
         },
@@ -497,20 +497,20 @@ fn setup_build_output(dir: &Path) {
 
     // Create SQL file
     fs::write(
-        sql_dir.join("transfers.sql"),
+        tables_dir.join("transfers.sql"),
         "CREATE TABLE transfers AS SELECT 1 AS id",
     )
     .expect("should write sql");
 
-    // Create schema file
+    // Create IPC schema file (JSON format for now - bridge reads JSON)
     let schema = serde_json::json!({
         "fields": [{"name": "id", "type": "Int64", "nullable": false}]
     });
     fs::write(
-        sql_dir.join("transfers.schema.json"),
+        tables_dir.join("transfers.ipc"),
         serde_json::to_string(&schema).unwrap(),
     )
-    .expect("should write schema");
+    .expect("should write ipc");
 }
 
 // ============================================================
@@ -665,9 +665,9 @@ async fn full_build_pipeline_without_dependencies() {
         fs::read_to_string(project_dir.path().join("amp.yaml")).expect("should read amp.yaml");
     let config = AmpYaml::from_yaml(&config_content).expect("should parse amp.yaml");
 
-    // Discover models
-    let discovered_models =
-        discover_models(project_dir.path(), &config.models).expect("should discover models");
+    // Discover tables
+    let discovered_tables =
+        discover_tables(project_dir.path(), &config.tables).expect("should discover tables");
 
     // Set up output directories
     let sql_output_dir = output_dir.path().join("sql");
@@ -680,8 +680,8 @@ async fn full_build_pipeline_without_dependencies() {
     let schema_ctx = SchemaContext::new();
 
     //* When
-    // Process each discovered model
-    for (table_name, sql_path) in &discovered_models {
+    // Process each discovered table
+    for (table_name, sql_path) in &discovered_tables {
         // Read template
         let template_path = project_dir.path().join(sql_path);
         let template = fs::read_to_string(&template_path).expect("should read sql template");
@@ -778,10 +778,10 @@ async fn full_package_and_bridge_pipeline() {
         "transfers".parse().expect("valid table name"),
         TableDef {
             sql: Some(FileRef::new(
-                "sql/transfers.sql".to_string(),
+                "tables/transfers.sql".to_string(),
                 test_hash.clone(),
             )),
-            ipc: FileRef::new("sql/transfers.schema.json".to_string(), test_hash),
+            ipc: FileRef::new("tables/transfers.ipc".to_string(), test_hash),
             network: "mainnet".parse().expect("valid network"),
         },
     );
