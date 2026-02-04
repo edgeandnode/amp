@@ -31,7 +31,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 | 2 | Rename `models` → `tables` | Not started |
 | 3 | Build Output Layout (`sql/` → `tables/`) | Not started |
 | 4 | Schema Type Refactor | Not started |
-| 5 | Manifest Table Shape Changes | Not started |
+| 5 | Manifest Table Shape Changes | **Complete** |
 | 6 | Adapter Layer (Legacy ↔ Package) | Not started |
 | 7 | Cache Updates | Not started |
 | 8 | Documentation & Tests | Not started |
@@ -177,20 +177,20 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `manifest.rs` (TableDef struct and builder)
 
 **5.1) Update `TableDef` in `manifest.rs`**
-- [ ] Change `schema: FileRef` to `ipc: FileRef` (line 173)
-- [ ] Make `sql: FileRef` optional: `sql: Option<FileRef>` (line 171)
-- [ ] Add `#[serde(skip_serializing_if = "Option::is_none")]` to `sql` field
-- [ ] Update `ManifestError::SchemaFileRef` → `ManifestError::IpcFileRef` (lines 78-87)
+- [x] Change `schema: FileRef` to `ipc: FileRef` (line 173)
+- [x] Make `sql: FileRef` optional: `sql: Option<FileRef>` (line 171)
+- [x] Add `#[serde(skip_serializing_if = "Option::is_none")]` to `sql` field
+- [x] Update `ManifestError::SchemaFileRef` → `ManifestError::IpcFileRef` (lines 78-87)
 
 **5.2) Update manifest builder**
-- [ ] Update `build_tables()` to create `TableDef` with optional `sql` (lines 401-438)
-- [ ] Handle derived tables: write both `sql: Some(...)` and `ipc: ...`
-- [ ] Prepare for raw tables: `sql: None`, only `ipc` field (future support)
+- [x] Update `build_tables()` to create `TableDef` with optional `sql` (lines 401-438)
+- [x] Handle derived tables: write both `sql: Some(...)` and `ipc: ...`
+- [x] Prepare for raw tables: `sql: None`, only `ipc` field (future support)
 
 **5.3) Update tests**
-- [ ] Update `table_def_serializes_correctly` test (lines 727-753)
-- [ ] Add test for optional SQL field serialization
-- [ ] Add test for raw table (no SQL) serialization
+- [x] Update `table_def_serializes_correctly` test (lines 727-753)
+- [x] Add test for optional SQL field serialization
+- [x] Add test for raw table (no SQL) serialization
 
 **Acceptance criteria**: Manifest JSON has `"ipc"` field instead of `"schema"`. SQL field can be optional.
 
