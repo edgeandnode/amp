@@ -15,6 +15,7 @@
 //! - **Caching**: Global cache for resolved dependencies ([`cache`])
 //! - **Lockfile**: Dependency lockfile for reproducible builds ([`lockfile`])
 //! - **Legacy bridge**: Conversion to legacy inline manifest format ([`bridge`])
+//! - **Legacy adapter**: Conversion from legacy inline manifest to package format ([`adapter`])
 //!
 //! ## Authoring Workflow
 //!
@@ -28,6 +29,7 @@
 //! 8. Generate canonical manifest with file hashes
 //! 9. Package for deployment
 
+pub mod adapter;
 pub mod arrow_ipc;
 pub mod arrow_json;
 pub mod bridge;

@@ -32,7 +32,7 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 | 3 | Build Output Layout (`sql/` → `tables/`) | **Complete** |
 | 4 | Schema Type Refactor | **Complete** |
 | 5 | Manifest Table Shape Changes | **Complete** |
-| 6 | Adapter Layer (Legacy ↔ Package) | Not started |
+| 6 | Adapter Layer (Legacy ↔ Package) | **In Progress** (6.1 done, 6.2 done, 6.3 pending) |
 | 7 | Cache Updates | Not started |
 | 8 | Documentation & Tests | Not started |
 
@@ -203,14 +203,14 @@ Based on codebase exploration (2026-02-04, verified via code search):
 **Files**: `bridge.rs` (extend), `cache.rs` (adapter calls), `resolver.rs` (use adapter)
 
 **6.1) Admin API fetch adapter (legacy → package)**
-- [ ] Create adapter function to convert legacy manifest JSON to canonical package format
-- [ ] When fetching from admin API:
+- [x] Create adapter function to convert legacy manifest JSON to canonical package format
+- [x] When fetching from admin API:
   - Parse legacy `manifest.json`
   - Extract inline SQL content → write to `tables/<table>.sql`
   - Convert inline schema JSON → write to `tables/<table>.ipc`
   - Copy function sources → `functions/`
   - Write canonical `manifest.json` with file refs
-- [ ] Store canonical package in cache directory
+- [x] Store canonical package in cache directory (via `LegacyAdapter` writing to target dir)
 
 **6.2) Register adapter (package → legacy)**
 - [x] Create adapter function to convert package format to legacy manifest JSON
