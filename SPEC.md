@@ -23,18 +23,37 @@ Refactor dataset-authoring to use Arrow IPC **file format** for schemas and move
 
 ---
 
+## Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Arrow IPC Module | Not started |
+| 2 | Rename `models` → `tables` | Not started |
+| 3 | Build Output Layout (`sql/` → `tables/`) | Not started |
+| 4 | Schema Type Refactor | Not started |
+| 5 | Manifest Table Shape Changes | Not started |
+| 6 | Adapter Layer (Legacy ↔ Package) | Not started |
+| 7 | Cache Updates | Not started |
+| 8 | Documentation & Tests | Not started |
+
+---
+
 ## Gap Analysis
 
 Based on codebase exploration (2026-02-04):
 
 ### Currently Implemented
 - `amp.yaml` parsing with `models` field (default `"models"`) in `config.rs:108-109`
-- Model discovery from `models/**.sql` in `discovery.rs:97-162`
+- Model discovery from `models/**/*.sql` in `discovery.rs:97-162`
 - Build output to `sql/<table>.sql` and `sql/<table>.schema.json` in `manifest.rs:405-415`
 - Arrow JSON schema read/write in `arrow_json.rs`
-- Package assembly including `sql/` directory in `package.rs:174-177`
+- Package assembly including `sql/` directory in `package.rs:175-177`
 - Cache storing `manifest.json` only in `cache.rs`
 - Legacy bridge converting authoring manifest to runtime format in `bridge.rs`
+- Jinja templating with `ref`, `source`, `var`, `env_var`, `this` helpers in `jinja.rs`
+- SQL validation (SELECT-only, incremental constraints) in `query.rs`
+- Lockfile (`amp.lock`) for reproducible builds in `lockfile.rs`
+- CLI commands: `build`, `check`, `package`, `register` in `ampctl`
 
 ### Not Yet Implemented
 - Arrow IPC file I/O (no `arrow_ipc.rs` module exists)
@@ -43,8 +62,8 @@ Based on codebase exploration (2026-02-04):
 - `tables` config field (currently `models`)
 - Support for raw tables (tables without SQL) in authoring manifest
 - Canonical package format in cache (currently legacy manifest JSON)
-- Admin API fetch → canonical package conversion
-- Register → legacy manifest conversion from package format
+- Admin API fetch → canonical package conversion (adapter layer)
+- IPC → legacy schema JSON conversion for register (adapter layer)
 
 ---
 
@@ -267,3 +286,11 @@ Each phase should be completable in one commit/PR.
 ## Blockers
 
 None identified. All dependencies (Arrow, IPC support) are already available in the workspace.
+
+---
+
+## Next Steps
+
+1. Begin with **Phase 1** (Arrow IPC module) - self-contained, no breaking changes
+2. Implementation should follow the recommended sequence in "Implementation Order"
+3. Each phase should be one atomic commit/PR
