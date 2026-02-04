@@ -227,12 +227,21 @@ pub struct Config {
     pub worker_events: WorkerEventsConfig,
 }
 
+fn default_progress_interval_secs() -> u64 {
+    10
+}
+
 /// Configuration for worker event streaming.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct WorkerEventsConfig {
     /// Enable/disable event emission (default: false)
     #[serde(default)]
     pub enabled: bool,
+
+    /// Progress event emission interval in seconds (default: 10).
+    /// Progress events are emitted at most once per this interval when there is new progress.
+    #[serde(default = "default_progress_interval_secs")]
+    pub progress_interval_secs: u64,
 
     /// Kafka-specific configuration
     pub kafka: Option<KafkaEventsConfig>,

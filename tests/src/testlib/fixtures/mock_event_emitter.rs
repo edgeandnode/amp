@@ -94,22 +94,6 @@ impl MockEventEmitter {
             .collect()
     }
 
-    /// Get unique progress percentages (calculated from current_block).
-    ///
-    /// Assumes start_block is at 0% and calculates percentage based on
-    /// the difference between current_block and start_block.
-    pub fn progress_percentages(&self, total_blocks: u64) -> Vec<u64> {
-        self.progress_events()
-            .iter()
-            .filter_map(|p| {
-                p.progress.as_ref().map(|progress| {
-                    let blocks_done = progress.current_block.saturating_sub(progress.start_block);
-                    (blocks_done * 100) / total_blocks
-                })
-            })
-            .collect()
-    }
-
     /// Clear all recorded events.
     pub fn clear(&self) {
         self.events.lock().unwrap().clear();
@@ -145,15 +129,14 @@ impl EventEmitter for MockEventEmitter {
     }
 
     async fn emit_sync_progress(&self, event: proto::SyncProgress) {
-        let (percentage, current_block, end_block) = event
+        let (current_block, end_block) = event
             .progress
             .as_ref()
-            .map(|p| (p.percentage, p.current_block, p.end_block))
+            .map(|p| (p.current_block, p.end_block))
             .unwrap_or_default();
         tracing::info!(
             job_id = event.job_id,
             table = %event.table_name,
-            percentage = ?percentage,
             current_block = current_block,
             end_block = ?end_block,
             "[EVENT] sync.progress"
@@ -244,7 +227,6 @@ mod tests {
                     start_block: 0,
                     current_block: 50,
                     end_block: Some(100),
-                    percentage: Some(50),
                     files_count: 1,
                     total_size_bytes: 1000,
                 }),
@@ -265,33 +247,5 @@ mod tests {
         assert_eq!(emitter.started_events().len(), 1);
         assert_eq!(emitter.progress_events().len(), 1);
         assert_eq!(emitter.completed_events().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_progress_percentages() {
-        let emitter = MockEventEmitter::new();
-        let total_blocks = 100;
-
-        // Emit progress at 25%, 50%, 75%
-        for pct in [25u64, 50, 75] {
-            emitter
-                .emit_sync_progress(proto::SyncProgress {
-                    job_id: 1,
-                    dataset: Some(test_dataset_info()),
-                    table_name: "blocks".to_string(),
-                    progress: Some(proto::ProgressInfo {
-                        start_block: 0,
-                        current_block: pct,
-                        end_block: Some(100),
-                        percentage: Some(pct as u32),
-                        files_count: 0,
-                        total_size_bytes: 0,
-                    }),
-                })
-                .await;
-        }
-
-        let percentages = emitter.progress_percentages(total_blocks);
-        assert_eq!(percentages, vec![25, 50, 75]);
     }
 }

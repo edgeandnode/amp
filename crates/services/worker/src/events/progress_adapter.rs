@@ -38,17 +38,6 @@ impl WorkerProgressReporter {
 
 impl dump::ProgressReporter for WorkerProgressReporter {
     fn report_progress(&self, update: ProgressUpdate) {
-        // Calculate percentage only if we have an end block (not in continuous mode)
-        let percentage = update.end_block.map(|end_block| {
-            let total_blocks = end_block.saturating_sub(update.start_block) + 1;
-            let blocks_done = update.current_block.saturating_sub(update.start_block) + 1;
-            if total_blocks > 0 {
-                ((blocks_done as f64 / total_blocks as f64) * 100.0).min(100.0) as u32
-            } else {
-                0
-            }
-        });
-
         let event = proto::SyncProgress {
             job_id: *self.job_id,
             dataset: Some(self.dataset_info.clone()),
@@ -57,7 +46,6 @@ impl dump::ProgressReporter for WorkerProgressReporter {
                 start_block: update.start_block,
                 current_block: update.current_block,
                 end_block: update.end_block,
-                percentage,
                 files_count: update.files_count,
                 total_size_bytes: update.total_size_bytes,
             }),

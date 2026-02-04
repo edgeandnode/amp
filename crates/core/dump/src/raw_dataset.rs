@@ -83,10 +83,10 @@ use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
     sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use amp_data_store::DataStore;
@@ -571,7 +571,10 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     // For continuous mode, chain_head is used instead of job_end_block for percentage calculation.
     let progress_tracker = Arc::new(ProgressTracker {
         last_logged_percent: AtomicUsize::new(0),
-        last_emitted_percent: AtomicUsize::new(0),
+        last_emission_time: Mutex::new(Instant::now() - ctx.config.progress_interval),
+        last_emitted_block: AtomicU64::new(0),
+        has_emitted: AtomicBool::new(false),
+        interval: ctx.config.progress_interval,
         progress_reporter: progress_reporter.clone(),
         table_names,
         job_start_block,
@@ -638,8 +641,14 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
 struct ProgressTracker {
     /// Last percentage that was logged (for throttling log output)
     last_logged_percent: AtomicUsize,
-    /// Last percentage that triggered a report (for 1% increment events)
-    last_emitted_percent: AtomicUsize,
+    /// Time of last progress event emission (for time-based throttling)
+    last_emission_time: Mutex<Instant>,
+    /// Last block that triggered a progress event
+    last_emitted_block: AtomicU64,
+    /// Whether we've emitted at least one progress event
+    has_emitted: AtomicBool,
+    /// Minimum interval between progress events
+    interval: Duration,
     /// Optional progress reporter for external event streaming
     progress_reporter: Option<Arc<dyn ProgressReporter>>,
     /// Table names for progress reporting
@@ -655,7 +664,7 @@ struct ProgressTracker {
 impl ProgressTracker {
     /// Signal to the progress tracker that another block has been covered.
     fn block_covered(&self, current_block: BlockNum) {
-        // Calculate current percentage based on chain head position.
+        // Calculate current percentage based on chain head position (for logging).
         // For bounded jobs: percentage = (current - start) / (end - start) * 100
         // For continuous jobs: percentage = (current - start) / (chain_head - start) * 100
         let effective_end = self.job_end_block.unwrap_or(self.chain_head);
@@ -680,25 +689,41 @@ impl ProgressTracker {
                 .store(current_percent, Ordering::SeqCst);
         }
 
-        // Report progress on every 1% increment
+        // Time-based progress event emission
+        // Only emit if: interval has elapsed AND we have new progress
         if let Some(ref reporter) = self.progress_reporter {
-            let last_emitted = self.last_emitted_percent.load(Ordering::SeqCst);
-            if current_percent > last_emitted {
-                // Report for each table
-                for table_name in &self.table_names {
-                    reporter.report_progress(ProgressUpdate {
-                        table_name: table_name.clone(),
-                        start_block: self.job_start_block,
-                        current_block,
-                        end_block: self.job_end_block,
-                        // File and byte counts are tracked at the writer level and
-                        // reported via metrics. Progress reports focus on block progress.
-                        files_count: 0,
-                        total_size_bytes: 0,
-                    });
+            let last_block = self.last_emitted_block.load(Ordering::SeqCst);
+            let has_emitted = self.has_emitted.load(Ordering::SeqCst);
+
+            // Check if we have new progress: either first emission or current > last
+            let progress_made = !has_emitted || current_block > last_block;
+
+            if progress_made {
+                let mut last_time = self.last_emission_time.lock().unwrap();
+                let now = Instant::now();
+
+                if now.duration_since(*last_time) >= self.interval {
+                    // Update state before emitting
+                    *last_time = now;
+                    drop(last_time); // Release lock before emitting
+                    self.last_emitted_block
+                        .store(current_block, Ordering::SeqCst);
+                    self.has_emitted.store(true, Ordering::SeqCst);
+
+                    // Report for each table
+                    for table_name in &self.table_names {
+                        reporter.report_progress(ProgressUpdate {
+                            table_name: table_name.clone(),
+                            start_block: self.job_start_block,
+                            current_block,
+                            end_block: self.job_end_block,
+                            // File and byte counts are tracked at the writer level and
+                            // reported via metrics. Progress reports focus on block progress.
+                            files_count: 0,
+                            total_size_bytes: 0,
+                        });
+                    }
                 }
-                self.last_emitted_percent
-                    .store(current_percent, Ordering::SeqCst);
             }
         }
     }
@@ -948,7 +973,13 @@ pub enum RunRangeError {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Mutex, atomic::AtomicUsize};
+    use std::{
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, AtomicU64, AtomicUsize},
+        },
+        time::{Duration, Instant},
+    };
 
     use datasets_common::table_name::TableName;
 
@@ -991,20 +1022,23 @@ mod test {
     }
 
     #[test]
-    fn progress_tracker_emits_at_every_one_percent() {
+    fn progress_tracker_emits_on_time_interval() {
         // Initialize logging so we can see the events
         let _ = tracing_subscriber::fmt()
             .with_env_filter("info")
             .with_test_writer()
             .try_init();
 
-        // Given: A ProgressTracker with 100 total blocks (1 block = 1%)
+        // Given: A ProgressTracker with zero interval (emits on every update)
         let reporter = Arc::new(MockProgressReporter::new());
         let table_name: TableName = "blocks".parse().unwrap();
 
         let tracker = ProgressTracker {
             last_logged_percent: AtomicUsize::new(0),
-            last_emitted_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO, // Zero interval for testing
             progress_reporter: Some(reporter.clone()),
             table_names: vec![table_name.clone()],
             job_start_block: 0,
@@ -1017,14 +1051,14 @@ mod test {
             tracker.block_covered(block);
         }
 
-        // Then: Should have emitted ~100 progress updates (1% to 100%)
+        // Then: With zero interval, should emit on every unique block
         let updates = reporter.get_updates();
 
-        // We expect approximately 100 updates (one per percentage point)
-        // Some small variance is acceptable due to integer division in percentage calc
-        assert!(
-            updates.len() >= 95 && updates.len() <= 100,
-            "Expected ~100 progress updates (1% to 100%), got {}",
+        // We expect 100 updates (one per block with new progress)
+        assert_eq!(
+            updates.len(),
+            100,
+            "Expected 100 progress updates, got {}",
             updates.len()
         );
 
@@ -1035,19 +1069,11 @@ mod test {
             assert_eq!(update.end_block, Some(99));
         }
 
-        // Verify first and last updates are at expected percentages
+        // Verify first and last blocks
         let first_block = updates.first().unwrap().current_block;
         let last_block = updates.last().unwrap().current_block;
-        assert!(
-            first_block <= 1,
-            "First update should be at ~1%, got block {}",
-            first_block
-        );
-        assert!(
-            last_block >= 98,
-            "Last update should be at ~100%, got block {}",
-            last_block
-        );
+        assert_eq!(first_block, 0, "First update should be at block 0");
+        assert_eq!(last_block, 99, "Last update should be at block 99");
     }
 
     #[test]
@@ -1062,7 +1088,10 @@ mod test {
 
         let tracker = ProgressTracker {
             last_logged_percent: AtomicUsize::new(0),
-            last_emitted_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO, // Zero interval for testing
             progress_reporter: Some(reporter.clone()),
             table_names: tables.clone(),
             job_start_block: 0,
@@ -1070,7 +1099,7 @@ mod test {
             chain_head: 99,
         };
 
-        // When: Process 10 blocks (10%)
+        // When: Process 10 blocks
         for block in 0..10 {
             tracker.block_covered(block);
         }
@@ -1079,26 +1108,23 @@ mod test {
         let updates = reporter.get_updates();
         assert_eq!(
             updates.len(),
-            30, // 10% * 3 tables
-            "Expected 30 progress updates (10% * 3 tables), got {}",
+            30, // 10 blocks * 3 tables
+            "Expected 30 progress updates (10 blocks * 3 tables), got {}",
             updates.len()
         );
 
-        // Verify each percentage has updates for all 3 tables
-        for pct in 1..=10 {
-            let pct_updates: Vec<_> = updates
+        // Verify each block has updates for all 3 tables
+        for block in 0..10u64 {
+            let block_updates: Vec<_> = updates
                 .iter()
-                .filter(|u| {
-                    let block_pct = ((u.current_block + 1) as f64 / 100.0 * 100.0) as u64;
-                    block_pct == pct
-                })
+                .filter(|u| u.current_block == block)
                 .collect();
             assert_eq!(
-                pct_updates.len(),
+                block_updates.len(),
                 3,
-                "Expected 3 table updates at {}%, got {}",
-                pct,
-                pct_updates.len()
+                "Expected 3 table updates at block {}, got {}",
+                block,
+                block_updates.len()
             );
         }
     }
@@ -1108,7 +1134,10 @@ mod test {
         // Given: A ProgressTracker with no reporter
         let tracker = ProgressTracker {
             last_logged_percent: AtomicUsize::new(0),
-            last_emitted_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO,
             progress_reporter: None,
             table_names: vec!["blocks".parse().unwrap()],
             job_start_block: 0,
@@ -1127,13 +1156,16 @@ mod test {
 
     #[test]
     fn progress_tracker_large_block_range() {
-        // Given: A ProgressTracker with 10,000 blocks
+        // Given: A ProgressTracker with 10,000 blocks and zero interval
         let reporter = Arc::new(MockProgressReporter::new());
         let table_name: TableName = "blocks".parse().unwrap();
 
         let tracker = ProgressTracker {
             last_logged_percent: AtomicUsize::new(0),
-            last_emitted_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO, // Zero interval for testing
             progress_reporter: Some(reporter.clone()),
             table_names: vec![table_name],
             job_start_block: 1000, // Non-zero start block
@@ -1146,12 +1178,12 @@ mod test {
             tracker.block_covered(block);
         }
 
-        // Then: Should have 100 progress updates (1% to 100%)
+        // Then: Should have 10,000 progress updates (one per block with zero interval)
         let updates = reporter.get_updates();
         assert_eq!(
             updates.len(),
-            100,
-            "Expected 100 progress updates (1% to 100%), got {}",
+            10000,
+            "Expected 10000 progress updates (one per block), got {}",
             updates.len()
         );
 
@@ -1160,6 +1192,40 @@ mod test {
             assert_eq!(update.start_block, 1000);
             assert_eq!(update.end_block, Some(10999));
         }
+    }
+
+    #[test]
+    fn progress_tracker_throttles_with_non_zero_interval() {
+        // Given: A ProgressTracker with a 1 hour interval (won't elapse during test)
+        let reporter = Arc::new(MockProgressReporter::new());
+        let table_name: TableName = "blocks".parse().unwrap();
+
+        let tracker = ProgressTracker {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now()), // Just now
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::from_secs(3600), // 1 hour - won't elapse
+            progress_reporter: Some(reporter.clone()),
+            table_names: vec![table_name],
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process all 100 blocks
+        for block in 0..100 {
+            tracker.block_covered(block);
+        }
+
+        // Then: Should have NO progress updates because interval hasn't elapsed
+        let updates = reporter.get_updates();
+        assert_eq!(
+            updates.len(),
+            0,
+            "Expected 0 progress updates (interval not elapsed), got {}",
+            updates.len()
+        );
     }
 
     #[test]

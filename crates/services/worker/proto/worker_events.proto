@@ -5,7 +5,7 @@
 //
 // Event Flow:
 //   1. sync.started  - Emitted when a sync job begins processing a table
-//   2. sync.progress - Emitted periodically (every 1% or configured interval)
+//   2. sync.progress - Emitted periodically (configurable time interval)
 //   3. sync.completed OR sync.failed - Emitted when the job finishes
 //
 // Partition Key Format: {namespace}/{name}/{manifest_hash}/{table_name}
@@ -101,12 +101,12 @@ message ProgressInfo {
 
   // Target end block number (bounded jobs only).
   // Not set for continuous/live sync jobs that follow chain head.
+  // Consumers can calculate percentage as: (current_block - start_block) / (end_block - start_block) * 100
   optional uint64 end_block = 3;
 
-  // Completion percentage (0-100, bounded jobs only).
-  // Calculated as: (current_block - start_block) / (end_block - start_block) * 100
-  // Not set for continuous jobs since there's no fixed endpoint.
-  optional uint32 percentage = 4;
+  // Reserved: Previously used for percentage field.
+  // Percentage is now calculated by consumers from start_block, current_block, and end_block.
+  reserved 4;
 
   // Number of parquet files written so far.
   // Useful for monitoring output volume.
@@ -148,9 +148,8 @@ message SyncStarted {
 //
 // Event type: "sync.progress"
 //
-// Emission frequency is configurable (default: every 1% progress OR
-// every N seconds, whichever comes first). This prevents event flooding
-// while ensuring timely updates.
+// Emission frequency is time-based (configurable interval, default 10s).
+// Events are only emitted when there is new progress to report.
 message SyncProgress {
   // Database ID of the job.
   int64 job_id = 1;

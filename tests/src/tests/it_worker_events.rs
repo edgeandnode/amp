@@ -1,7 +1,7 @@
 //! Integration tests for worker event streaming.
 //!
 //! These tests verify that the worker event streaming functionality correctly:
-//! - Emits progress events at percentage increments
+//! - Emits progress events at time intervals
 //! - Emits lifecycle events (started, completed, failed)
 //! - Handles continuous ingestion with microbatch events
 
@@ -91,41 +91,6 @@ async fn test_progress_reporter_forwards_to_emitter() {
         assert_eq!(dataset.name, "dataset");
         assert_eq!(event.table_name, "blocks");
     }
-}
-
-/// Test that percentage calculation from progress events is accurate.
-#[tokio::test]
-async fn test_progress_percentages_calculation() {
-    logging::init();
-
-    // Given
-    let emitter = Arc::new(MockEventEmitter::new());
-    let total_blocks = 100u64;
-
-    // Emit progress at 0%, 25%, 50%, 75%, 100%
-    for pct in [0u64, 25, 50, 75, 100] {
-        emitter
-            .emit_sync_progress(proto::SyncProgress {
-                job_id: 1,
-                dataset: Some(test_dataset_info("test", "dataset", TEST_HASH)),
-                table_name: "blocks".to_string(),
-                progress: Some(proto::ProgressInfo {
-                    start_block: 0,
-                    current_block: pct,
-                    end_block: Some(100),
-                    percentage: Some(pct as u32),
-                    files_count: 0,
-                    total_size_bytes: 0,
-                }),
-            })
-            .await;
-    }
-
-    // When
-    let percentages = emitter.progress_percentages(total_blocks);
-
-    // Then
-    assert_eq!(percentages, vec![0, 25, 50, 75, 100]);
 }
 
 /// Test that started events are recorded correctly.
@@ -233,8 +198,8 @@ async fn test_full_job_lifecycle_events() {
         })
         .await;
 
-    // Progress at EVERY 1% from 1 to 99 (0% is start, 100% is completed)
-    for pct in 1u64..100 {
+    // Progress at blocks 1 to 99
+    for block in 1u64..100 {
         emitter
             .emit_sync_progress(proto::SyncProgress {
                 job_id: 1,
@@ -242,11 +207,10 @@ async fn test_full_job_lifecycle_events() {
                 table_name: "blocks".to_string(),
                 progress: Some(proto::ProgressInfo {
                     start_block: 0,
-                    current_block: pct,
+                    current_block: block,
                     end_block: Some(100),
-                    percentage: Some(pct as u32),
                     files_count: 1,
-                    total_size_bytes: pct * 100,
+                    total_size_bytes: block * 100,
                 }),
             })
             .await;
@@ -295,8 +259,8 @@ async fn test_mock_emitter_clear() {
 
 /// Test continuous ingestion scenario (no end block).
 ///
-/// In continuous ingestion mode, events should be emitted on each microbatch
-/// completion rather than at percentage intervals.
+/// In continuous ingestion mode, events are emitted on time intervals
+/// with no fixed end block.
 #[tokio::test]
 async fn test_continuous_ingestion_events() {
     logging::init();
@@ -317,7 +281,7 @@ async fn test_continuous_ingestion_events() {
         .await;
 
     // Emit progress for each microbatch (simulating continuous ingestion)
-    // In continuous mode, end_block and percentage are None (no fixed target)
+    // In continuous mode, end_block is None (no fixed target)
     for batch_end in [1010u64, 1020, 1030, 1040, 1050] {
         emitter
             .emit_sync_progress(proto::SyncProgress {
@@ -328,7 +292,6 @@ async fn test_continuous_ingestion_events() {
                     start_block: 1000,
                     current_block: batch_end,
                     end_block: None, // No fixed end in continuous mode
-                    percentage: None,
                     files_count: 1,
                     total_size_bytes: 500,
                 }),
@@ -336,7 +299,7 @@ async fn test_continuous_ingestion_events() {
             .await;
     }
 
-    // Then - all progress events should be recorded (no throttling in continuous mode)
+    // Then - all progress events should be recorded
     let progress_events = emitter.progress_events();
     assert_eq!(progress_events.len(), 5);
 
