@@ -5,6 +5,16 @@ license-file.workspace = true
 edition.workspace = true
 
 [dependencies]
-pgtemp.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+backon.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
+nix = { workspace = true, features = ["signal"] }
+percent-encoding.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "sync", "time"] }
 tracing.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres"] }

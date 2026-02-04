@@ -1,7 +1,7 @@
 //! Service context
 use std::sync::Arc;
 
-use amp_config::BuildInfo;
+use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;

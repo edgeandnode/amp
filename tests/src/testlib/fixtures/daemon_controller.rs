@@ -6,12 +6,12 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
+use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
 use common::BoxError;
-use controller::config::Config;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -22,7 +22,6 @@ use tokio::task::JoinHandle;
 /// to the Admin API endpoint. The fixture automatically handles controller lifecycle
 /// and cleanup by aborting the controller task when dropped.
 pub struct DaemonController {
-    config: Arc<Config>,
     metadata_db: MetadataDb,
     dataset_store: DatasetStore,
     admin_api_addr: SocketAddr,
@@ -35,7 +34,9 @@ impl DaemonController {
     ///
     /// Starts a Amp controller with the provided configuration and metadata database.
     /// The controller will be automatically shut down when the fixture is dropped.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
+        build_info: BuildInfo,
         config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
         datasets_registry: DatasetsRegistry,
@@ -44,12 +45,10 @@ impl DaemonController {
         dataset_store: DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, BoxError> {
-        // Convert common config to controller config
-        let admin_api_addr = config.addrs.admin_api_addr;
-        let config = Arc::new(controller_config_from_common(&config));
+        let admin_api_addr = config.controller_addrs.admin_api_addr;
 
         let (admin_api_addr, controller_server) = controller::service::new(
-            config.clone(),
+            build_info,
             metadata_db.clone(),
             datasets_registry,
             providers_registry,
@@ -63,20 +62,11 @@ impl DaemonController {
         let controller_task = tokio::spawn(controller_server);
 
         Ok(Self {
-            config,
             metadata_db,
             dataset_store,
             admin_api_addr,
             _task: controller_task,
         })
-    }
-
-    /// Get the controller-specific configuration.
-    ///
-    /// Returns the `controller::config::Config` that can be used directly with
-    /// controller-related operations.
-    pub fn config(&self) -> &Arc<Config> {
-        &self.config
     }
 
     /// Get a reference to the metadata database.
@@ -104,12 +94,5 @@ impl Drop for DaemonController {
     fn drop(&mut self) {
         tracing::debug!("Aborting daemon controller task");
         self._task.abort();
-    }
-}
-
-/// Convert common config to controller config
-fn controller_config_from_common(config: &amp_config::Config) -> Config {
-    Config {
-        build_info: config.build_info.clone(),
     }
 }

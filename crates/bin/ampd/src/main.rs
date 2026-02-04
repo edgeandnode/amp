@@ -1,5 +1,9 @@
-use amp_config::Config;
+use std::{env, path::PathBuf};
 
+use amp_config::{DEFAULT_AMP_DIR_NAME, DEFAULT_CONFIG_FILENAME};
+
+mod build_info;
+mod config;
 mod controller_cmd;
 mod migrate_cmd;
 mod server_cmd;
@@ -16,7 +20,7 @@ struct Args {
     /// The configuration file to use. This file defines where to look for dataset definitions and
     /// providers, along with many other configuration options.
     #[arg(long, env = "AMP_CONFIG")]
-    config: Option<String>,
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -27,6 +31,10 @@ enum Command {
     /// Run Amp in local development mode with all services
     #[command(alias = "dev")]
     Solo {
+        /// Directory for Amp daemon state and data. Defaults to `<cwd>/.amp/`.
+        /// If `--config` is not provided, searches for `config.toml` within this directory.
+        #[arg(long, env = "AMP_DIR")]
+        amp_dir: Option<PathBuf>,
         /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
@@ -92,27 +100,47 @@ async fn main_inner() -> Result<(), Error> {
 
     match command {
         Command::Solo {
+            amp_dir,
             mut flight_server,
             mut jsonl_server,
             mut admin_server,
         } => {
-            // If neither of the flags are set, enable all servers
             if !flight_server && !jsonl_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
                 admin_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), true)
-                .await
-                .map_err(Error::LoadConfig)?;
+            // Resolve the amp state directory, creating it if needed.
+            let amp_dir = match amp_dir {
+                Some(dir) => dir,
+                None => env::current_dir()
+                    .map_err(Error::CurrentDir)?
+                    .join(DEFAULT_AMP_DIR_NAME),
+            };
+            amp_config::ensure_amp_dir_root(&amp_dir).map_err(Error::AmpDirRoot)?;
+            amp_config::ensure_amp_base_directories(&amp_dir).map_err(Error::AmpBaseDirs)?;
 
-            let (_providers, meter) =
-                monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
+            // Use explicit --config if provided, otherwise look for config.toml in amp_dir.
+            let config_path = config_path.or_else(|| {
+                let path = amp_dir.join(DEFAULT_CONFIG_FILENAME);
+                path.exists().then_some(path)
+            });
+            if let Some(path) = &config_path
+                && !path.is_file()
+            {
+                return Err(Error::ConfigNotAFile(path.clone()));
+            }
 
-            solo_cmd::run(config, meter, flight_server, jsonl_server, admin_server)
-                .await
-                .map_err(Error::Solo)?;
+            solo_cmd::run(
+                amp_dir,
+                config_path,
+                flight_server,
+                jsonl_server,
+                admin_server,
+            )
+            .await
+            .map_err(Error::Solo)?;
             Ok(())
         }
         Command::Server {
@@ -125,57 +153,78 @@ async fn main_inner() -> Result<(), Error> {
                 jsonl_server = true;
             }
 
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
-            let addrs = config.addrs.clone();
+            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
+            let config = config::load(config_path).map_err(Error::LoadConfig)?;
+            let metadata_db_config = amp_config::metadb::load(config_path, None)
+                .ok_or(Error::MissingMetadataDbConfig)?;
+            let addrs = config.server_addrs.clone();
 
             let (_providers, meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
-            server_cmd::run(config, meter, &addrs, flight_server, jsonl_server)
-                .await
-                .map_err(Error::Server)?;
+            server_cmd::run(
+                config,
+                &metadata_db_config,
+                meter,
+                &addrs,
+                flight_server,
+                jsonl_server,
+            )
+            .await
+            .map_err(Error::Server)?;
             Ok(())
         }
         Command::Worker { node_id } => {
             let node_id = node_id.parse().map_err(Error::ParseNodeId)?;
 
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
+            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
+            let config = config::load(config_path).map_err(Error::LoadConfig)?;
+            let metadata_db_config = amp_config::metadb::load(config_path, None)
+                .ok_or(Error::MissingMetadataDbConfig)?;
 
             let (_providers, meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
-            worker_cmd::run(config, meter, node_id)
+            let build_info = build_info::load();
+            worker_cmd::run(build_info, config, &metadata_db_config, meter, node_id)
                 .await
                 .map_err(Error::Worker)?;
             Ok(())
         }
         Command::Controller => {
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
-            let admin_api_addr = config.addrs.admin_api_addr;
+            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
+            let config = config::load(config_path).map_err(Error::LoadConfig)?;
+            let metadata_db_config = amp_config::metadb::load(config_path, None)
+                .ok_or(Error::MissingMetadataDbConfig)?;
+            let admin_api_addr = config.controller_addrs.admin_api_addr;
 
             let (_providers, meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
-            controller_cmd::run(config, meter, admin_api_addr)
-                .await
-                .map_err(Error::Controller)?;
+            let build_info = build_info::load();
+            controller_cmd::run(
+                build_info,
+                config,
+                &metadata_db_config,
+                meter,
+                admin_api_addr,
+            )
+            .await
+            .map_err(Error::Controller)?;
             Ok(())
         }
         Command::Migrate => {
-            let config = load_config(config_path.as_ref(), false)
-                .await
-                .map_err(Error::LoadConfig)?;
+            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
+            let config = config::load(config_path).map_err(Error::LoadConfig)?;
+            let metadata_db_config = amp_config::metadb::load(config_path, None)
+                .ok_or(Error::MissingMetadataDbConfig)?;
 
             let (_providers, _meter) =
                 monitoring::init(config.opentelemetry.as_ref()).map_err(Error::Monitoring)?;
 
-            migrate_cmd::run(config).await.map_err(Error::Migrate)?;
+            migrate_cmd::run(&metadata_db_config)
+                .await
+                .map_err(Error::Migrate)?;
             Ok(())
         }
     }
@@ -187,9 +236,35 @@ async fn main_inner() -> Result<(), Error> {
 /// for the main entry point while preserving the full error chain.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Failed to determine current working directory.
+    #[error("Failed to determine current directory: {0}")]
+    CurrentDir(#[source] std::io::Error),
+
+    /// Failed to create amp directory root.
+    #[error("Failed to create amp directory root: {0}")]
+    AmpDirRoot(#[source] amp_config::EnsureAmpDirRootError),
+
+    /// Failed to create amp base directories.
+    #[error("Failed to create amp base directories: {0}")]
+    AmpBaseDirs(#[source] amp_config::EnsureAmpBaseDirectoriesError),
+
+    /// Config path exists but is not a file.
+    #[error("config path is not a file: {0}")]
+    ConfigNotAFile(PathBuf),
+
+    /// Config path argument is required but was not provided.
+    #[error("--config parameter is mandatory")]
+    MissingConfigPath,
+
     /// Failed to load configuration.
     #[error("Failed to load config: {0}")]
-    LoadConfig(#[source] LoadConfigError),
+    LoadConfig(#[source] config::LoadError),
+
+    /// Missing required metadata database configuration.
+    #[error(
+        "Missing required metadata database configuration. Provide metadata_db.url via TOML config file or AMP_CONFIG_METADATA_DB__URL environment variable"
+    )]
+    MissingMetadataDbConfig,
 
     /// Failed to initialize monitoring/telemetry.
     #[error("Failed to initialize monitoring: {0}")]
@@ -218,41 +293,6 @@ pub enum Error {
     /// Migrate command failed.
     #[error("Migrate command failed: {0}")]
     Migrate(#[source] migrate_cmd::Error),
-}
-
-async fn load_config(
-    config_path: Option<&String>,
-    allow_temp_db: bool,
-) -> Result<Config, LoadConfigError> {
-    let Some(config) = config_path else {
-        return Err(LoadConfigError::MissingConfigPath);
-    };
-
-    // Gather build info from environment variables set by vergen
-    let build_info = amp_config::BuildInfo {
-        version: env!("VERGEN_GIT_DESCRIBE").to_string(),
-        commit_sha: env!("VERGEN_GIT_SHA").to_string(),
-        commit_timestamp: env!("VERGEN_GIT_COMMIT_TIMESTAMP").to_string(),
-        build_date: env!("VERGEN_BUILD_DATE").to_string(),
-    };
-
-    let config = Config::load(config, true, None, allow_temp_db, build_info)
-        .await
-        .map_err(LoadConfigError::Config)?;
-    Ok(config)
-}
-
-/// Error type for [`load_config`](crate::load_config).
-#[derive(Debug, thiserror::Error)]
-#[allow(clippy::large_enum_variant)]
-pub enum LoadConfigError {
-    /// Config path argument is required but was not provided.
-    #[error("--config parameter is mandatory")]
-    MissingConfigPath,
-
-    /// Failed to load configuration from file.
-    #[error("Failed to load config: {0}")]
-    Config(#[source] amp_config::ConfigError),
 }
 
 /// Builds an error chain string from an error and its sources.

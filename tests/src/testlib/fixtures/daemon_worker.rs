@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use amp_config::build_info::BuildInfo;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::BoxError;
@@ -35,6 +36,7 @@ impl DaemonWorker {
     /// Starts a Amp worker with the provided configuration, metadata database, and worker ID.
     /// The worker will be automatically shut down when the fixture is dropped.
     pub async fn new(
+        build_info: BuildInfo,
         config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
         data_store: DataStore,
@@ -43,7 +45,7 @@ impl DaemonWorker {
         node_id: NodeId,
     ) -> Result<Self, BoxError> {
         // Two-phase worker initialization
-        let worker_config = worker_config_from_common(&config);
+        let worker_config = worker_config_from_common(&config, &build_info);
         let worker_fut = worker::service::new(
             worker_config.clone(),
             metadata_db.clone(),
@@ -103,7 +105,7 @@ impl Drop for DaemonWorker {
 }
 
 /// Convert config::Config to worker::config::Config for tests
-fn worker_config_from_common(config: &amp_config::Config) -> Config {
+fn worker_config_from_common(config: &amp_config::Config, build_info: &BuildInfo) -> Config {
     Config {
         microbatch_max_interval: config.microbatch_max_interval,
         poll_interval: config.poll_interval,
@@ -113,10 +115,10 @@ fn worker_config_from_common(config: &amp_config::Config) -> Config {
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
         worker_info: worker::info::WorkerInfo {
-            version: Some(config.build_info.version.clone()),
-            commit_sha: Some(config.build_info.commit_sha.clone()),
-            commit_timestamp: Some(config.build_info.commit_timestamp.clone()),
-            build_date: Some(config.build_info.build_date.clone()),
+            version: Some(build_info.version.clone()),
+            commit_sha: Some(build_info.commit_sha.clone()),
+            commit_timestamp: Some(build_info.commit_timestamp.clone()),
+            build_date: Some(build_info.build_date.clone()),
         },
     }
 }

@@ -2,6 +2,7 @@
 name: "app-ampd-solo"
 description: "ampd solo mode for local development and testing. Load when asking about solo mode, development setup, or single-node deployments"
 type: feature
+status: "unstable"
 components: "app:ampd,service:server,service:controller,service:worker"
 ---
 
@@ -9,7 +10,7 @@ components: "app:ampd,service:server,service:controller,service:worker"
 
 ## Summary
 
-Solo mode is ampd's single-node development mode that combines server, controller, and worker into a single process. It provides a simplified all-in-one deployment for local development, testing, and CI/CD pipelines. Solo mode automatically spawns an embedded worker and starts all query interfaces and admin API.
+Solo mode is ampd's single-node development mode that combines server, controller, and worker into a single process. It provides a simplified all-in-one deployment for local development, testing, and CI/CD pipelines. By default, solo mode automatically spawns an embedded worker and starts all query interfaces plus the admin API. Service flags can limit which query/admin endpoints are enabled.
 
 For detailed deployment patterns and when to use distributed modes, see [Operational Modes](../modes.md).
 
@@ -18,7 +19,8 @@ For detailed deployment patterns and when to use distributed modes, see [Operati
 1. [Key Concepts](#key-concepts)
 2. [Architecture](#architecture)
 3. [Configuration](#configuration)
-4. [References](#references)
+4. [Usage](#usage)
+5. [References](#references)
 
 ## Key Concepts
 
@@ -51,6 +53,10 @@ Solo mode runs all three ampd services in a single process: query server (Flight
 
 ## Configuration
 
+Solo mode supports an optional `--config` (or `AMP_CONFIG`) file. If no config is provided, it auto-discovers `<amp_dir>/config.toml` and falls back to zero-config defaults. See [app-ampd-solo-ampdir](app-ampd-solo-ampdir.md) for amp dir and config discovery details.
+
+## Usage
+
 ### Default Behavior
 
 By default, `ampd solo` starts all services:
@@ -62,17 +68,17 @@ ampd solo
 
 ### Optional Service Control
 
-Disable specific interfaces using flags:
+Disable specific interfaces by enabling only the ones you want using `--flight-server`, `--jsonl-server`, and `--admin-server`. If any of these flags are set, only the flagged services are enabled.
 
 ```bash
 # Solo with only Flight queries (no JSONL, no Admin API)
-ampd solo --flight
+ampd solo --flight-server
 
 # Solo with Flight and Admin API (no JSONL)
-ampd solo --flight --admin-server
+ampd solo --flight-server --admin-server
 
 # Solo with JSONL only (no Flight, no Admin API)
-ampd solo --jsonl
+ampd solo --jsonl-server
 ```
 
 **Note:** The embedded worker always runs regardless of flags.
