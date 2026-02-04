@@ -57,6 +57,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// - If `Some(emitter)` is provided, it will be used directly.
 /// - If `None` is provided, an emitter will be created based on the configuration
 ///   (either [`KafkaEventEmitter`] if events are enabled, or [`NoOpEmitter`] otherwise).
+#[allow(clippy::too_many_arguments)]
 pub async fn new(
     config: Config,
     build_info: impl Into<BuildInfo>,
