@@ -3,7 +3,7 @@
 //! This crate provides the authoring workflow for derived datasets, including:
 //!
 //! - **Configuration**: `amp.yaml` parsing and validation ([`config`])
-//! - **Model discovery**: dbt-style model file discovery ([`discovery`])
+//! - **Table discovery**: dbt-style table file discovery ([`discovery`])
 //! - **Templating**: Jinja2-compatible SQL templating ([`jinja`])
 //! - **SQL validation**: SELECT statement validation ([`query`])
 //! - **Schema inference**: Arrow schema inference via DataFusion planning ([`schema`])
@@ -20,7 +20,7 @@
 //! ## Authoring Workflow
 //!
 //! 1. Parse `amp.yaml` configuration
-//! 2. Discover models from `models/` directory
+//! 2. Discover tables from `tables/` directory
 //! 3. Resolve dependencies from registry
 //! 4. Render Jinja SQL templates
 //! 5. Validate SELECT statements

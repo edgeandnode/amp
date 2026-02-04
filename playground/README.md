@@ -1,12 +1,12 @@
 # Dataset Authoring Playground (dbt-style)
 
 This playground is a small dataset for trying the new authoring workflow with
-models discovery and Jinja templating.
+table discovery and Jinja templating.
 
 ## What it includes
 
 - `amp.yaml` with basic metadata, dependencies, and default `vars`
-- A `models/` directory with two SELECT-only models
+- A `tables/` directory with SELECT-only table definitions
 - Jinja usage via `ref()` and `var()`
 
 ## Prerequisites (run Amp + register raw dataset)
@@ -56,7 +56,7 @@ cargo run -p ampctl dataset package --dir playground/build
 
 ## Notes
 
-- Every `models/**/*.sql` file becomes a table; the model name is the file stem.
+- Every `tables/**/*.sql` file becomes a table; the table name is the file stem.
 - SQL must be a single SELECT statement.
 - Dependencies are resolved to their hash. Update `dependencies` in `amp.yaml`
   to point at datasets available in your registry (or local amp server)
