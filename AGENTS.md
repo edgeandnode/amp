@@ -48,7 +48,7 @@ Feature documentation lives in `docs/features/` with YAML frontmatter for dynami
 **Navigation:**
 
 - Need to understand a feature? → `/feature-discovery`
-- Writing feature docs? → `/feature-fmt-check` + [docs/code/feature-docs.md](docs/code/feature-docs.md)
+- Writing feature docs? → `/feature-fmt-check` + [docs/__meta__/feature-docs.md](docs/__meta__/feature-docs.md)
 - Validate implementation aligns with feature claims? → `/feature-validate`
 
 
@@ -80,7 +80,7 @@ Coding pattern documentation lives in `docs/code/` with YAML frontmatter for dyn
 **Navigation:**
 
 - Need to understand patterns? → `/code-pattern-discovery`
-- Writing pattern docs? → `/code-pattern-fmt-check` + [docs/code/code-pattern-docs.md](docs/code/code-pattern-docs.md)
+- Writing pattern docs? → `/code-pattern-fmt-check` + [docs/__meta__/code-pattern-docs.md](docs/__meta__/code-pattern-docs.md)
 - All patterns located in `docs/code/`
 
 

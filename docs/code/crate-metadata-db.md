@@ -1,5 +1,5 @@
 ---
-name: "metadata-db-crate"
+name: "crate-metadata-db"
 description: "Database design patterns, API conventions for metadata-db. Load when working on metadata-db crate"
 type: crate
 scope: "crate:metadata-db"
@@ -298,7 +298,7 @@ When contributing to `metadata-db`, ensure you follow these requirements:
 
 **Before Submitting:**
 
-- [ ] **🔐 SECURITY REVIEW**: Complete the security checklist in [security.md](./security.md)
+- [ ] **🔐 SECURITY REVIEW**: Complete the security checklist in [crate-metadata-db-security.md](./crate-metadata-db-security.md)
 - [ ] Format: `just fmt-file <file>` (or `just fmt-rs` for all Rust files)
 - [ ] Check: `just check-crate metadata-db` and `just check-rs`
 - [ ] Lint: `just clippy-crate metadata-db` and `just clippy` (fix ALL warnings)
@@ -318,7 +318,7 @@ Security is fundamental to the metadata-db crate due to its role in managing sen
 - **Transaction management** requiring proper isolation and consistency
 - **Audit logging** for compliance with financial and regulatory standards
 
-**🚨 MANDATORY: Review [security.md](./security.md) before making any changes to this crate.**
+**🚨 MANDATORY: Review [crate-metadata-db-security.md](./crate-metadata-db-security.md) before making any changes to this crate.**
 
 The security guidelines cover:
 - SQL injection prevention and parameterized query requirements
@@ -334,7 +334,7 @@ The security guidelines cover:
 - Compliance violations
 - Data breach risks
 
-All contributors MUST complete the security checklist in [security.md](./security.md) as part of their development process.
+All contributors MUST complete the security checklist in [crate-metadata-db-security.md](./crate-metadata-db-security.md) as part of their development process.
 
 ## Crate Structure
 

@@ -1,5 +1,5 @@
 ---
-name: "rust-type-design"
+name: "rust-types"
 description: "Type-driven design, newtypes, state machines, builder pattern. Load when designing APIs or data types"
 type: core
 scope: "global"

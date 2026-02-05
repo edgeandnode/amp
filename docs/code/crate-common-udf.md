@@ -1,5 +1,5 @@
 ---
-name: "udf-documentation"
+name: "crate-common-udf"
 description: "UDF documentation patterns for common crate. Load when documenting UDFs in common crate"
 type: crate
 scope: "crate:common"

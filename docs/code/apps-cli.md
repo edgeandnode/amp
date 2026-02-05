@@ -1,5 +1,5 @@
 ---
-name: "cli-patterns"
+name: "apps-cli"
 description: "Patterns for command line interfaces (output formatting, logs, etc.). Load when adding or updating commands."
 type: core
 scope: "global"
