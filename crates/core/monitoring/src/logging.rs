@@ -95,6 +95,7 @@ const AMP_CRATES: &[&str] = &[
     "solana_datasets",
     "solana_storage_proto",
     "tests",
+    "verification",
     "worker",
 ];
 

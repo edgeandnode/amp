@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 admin-client = { path = "../../clients/admin" }
+alloy.workspace = true
 amp-object-store = { path = "../../core/object-store" }
 anyhow.workspace = true
 clap.workspace = true
@@ -35,6 +36,7 @@ tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 url.workspace = true
+verification = { path = "../../core/verification" }
 worker = { path = "../../services/worker" }
 
 [build-dependencies]

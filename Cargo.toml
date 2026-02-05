@@ -23,6 +23,7 @@ members = [
     "crates/core/metadata-db",
     "crates/core/monitoring",
     "crates/core/object-store",
+    "crates/core/verification",
     "crates/extractors/evm-rpc",
     "crates/extractors/evm-rpc/gen",
     "crates/extractors/firehose",
@@ -53,7 +54,7 @@ version = "0.1.0"
 license-file = "LICENSE"
 
 [workspace.dependencies]
-alloy = { version = "1.2.1", default-features = false, features = [
+alloy = { version = "1.4", default-features = false, features = [
     "contract",
     "dyn-abi",
     "json-abi",
@@ -93,6 +94,7 @@ fs-err = "3.0.0"
 futures = "0.3"
 governor = "0.10.0"
 hex = "0.4.3"
+indicatif = "0.18"
 indoc = "2.0.6"
 itertools = "0.14.0"
 opentelemetry = { version = "0.31", features = ["trace"] }
@@ -135,6 +137,7 @@ http = "1.3"
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.32", features = ["default"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+typed-arrow = { git = "https://github.com/tonbo-io/typed-arrow", rev = "9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc", default-features = false, features = ["derive", "views", "arrow-57"] }
 url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.11.0", features = ["v7"] }
 nix = { version = "0.30.1", default-features = false, features = ["signal"] }
