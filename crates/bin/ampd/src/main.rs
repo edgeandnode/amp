@@ -36,22 +36,22 @@ enum Command {
         #[arg(long, env = "AMP_DIR")]
         amp_dir: Option<PathBuf>,
         /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "FLIGHT_SERVER")]
+        #[arg(long, env = "AMP_FLIGHT_SERVER")]
         flight_server: bool,
         /// Enable JSON Lines Server.
-        #[arg(long, env = "JSONL_SERVER")]
+        #[arg(long, env = "AMP_JSONL_SERVER")]
         jsonl_server: bool,
         /// Enable Admin API Server.
-        #[arg(long, env = "ADMIN_SERVER")]
+        #[arg(long, env = "AMP_ADMIN_SERVER")]
         admin_server: bool,
     },
     /// Run query server (Arrow Flight, JSON Lines)
     Server {
         /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "FLIGHT_SERVER")]
+        #[arg(long, env = "AMP_FLIGHT_SERVER")]
         flight_server: bool,
         /// Enable JSON Lines Server.
-        #[arg(long, env = "JSONL_SERVER")]
+        #[arg(long, env = "AMP_JSONL_SERVER")]
         jsonl_server: bool,
     },
     /// Run a distributed worker node
@@ -68,6 +68,9 @@ enum Command {
 
 #[tokio::main]
 async fn main() {
+    // Migrate deprecated env vars before clap parsing
+    migrate_deprecated_env_vars();
+
     if let Err(err) = main_inner().await {
         // Manually print the error so we can control the format.
         let err = error_with_causes(&err);
@@ -308,5 +311,32 @@ fn error_with_causes(err: &dyn std::error::Error) -> String {
         err.to_string()
     } else {
         format!("{} | Caused by: {}", err, error_chain.join(" -> "))
+    }
+}
+
+/// Migrates deprecated environment variables to their new names.
+///
+/// This function checks for deprecated env var names and copies their values
+/// to the new standardized names (with `AMP_` prefix), emitting a warning.
+/// This provides backward compatibility during the deprecation period.
+///
+/// Call this before clap parsing so the new env var names are available.
+fn migrate_deprecated_env_vars() {
+    const MIGRATIONS: &[(&str, &str)] = &[
+        ("FLIGHT_SERVER", "AMP_FLIGHT_SERVER"),
+        ("JSONL_SERVER", "AMP_JSONL_SERVER"),
+        ("ADMIN_SERVER", "AMP_ADMIN_SERVER"),
+    ];
+
+    for (old, new) in MIGRATIONS {
+        if let Ok(val) = env::var(old)
+            && env::var(new).is_err()
+        {
+            // SAFETY: This runs at startup before any threads are spawned,
+            // so there are no concurrent accesses to the environment.
+            unsafe { env::set_var(new, &val) };
+            // We use eprintln! because tracing isn't initialized yet (runs before clap parsing).
+            eprintln!("Warning: environment variable {old} is deprecated, use {new} instead");
+        }
     }
 }
