@@ -6,7 +6,7 @@ use std::{
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
 use common::query_context::QueryEnv;
 use datafusion::error::DataFusionError;
-use dump::ParquetConfig;
+use dump::{ConfigDuration, ParquetConfig};
 use fs_err as fs;
 use monitoring::config::OpenTelemetryConfig;
 
@@ -227,10 +227,6 @@ pub struct Config {
     pub worker_events: WorkerEventsConfig,
 }
 
-fn default_progress_interval_secs() -> u64 {
-    10
-}
-
 /// Configuration for worker event streaming.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct WorkerEventsConfig {
@@ -238,10 +234,10 @@ pub struct WorkerEventsConfig {
     #[serde(default)]
     pub enabled: bool,
 
-    /// Progress event emission interval in seconds (default: 10).
+    /// Progress event emission interval (default: 10 seconds).
     /// Progress events are emitted at most once per this interval when there is new progress.
-    #[serde(default = "default_progress_interval_secs")]
-    pub progress_interval_secs: u64,
+    #[serde(default, alias = "progress_interval_secs")]
+    pub progress_interval: ConfigDuration<10>,
 
     /// Kafka-specific configuration
     pub kafka: Option<KafkaEventsConfig>,

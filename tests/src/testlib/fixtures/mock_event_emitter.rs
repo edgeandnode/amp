@@ -8,15 +8,6 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use worker::{events::EventEmitter, kafka::proto};
 
-/// Recorded events from the mock emitter.
-#[derive(Debug, Clone)]
-pub enum RecordedEvent {
-    Started(proto::SyncStarted),
-    Progress(proto::SyncProgress),
-    Completed(proto::SyncCompleted),
-    Failed(proto::SyncFailed),
-}
-
 /// A mock event emitter that records all events for testing.
 ///
 /// This implementation is thread-safe and can be shared across async tasks.
@@ -186,4 +177,15 @@ impl EventEmitter for MockEventEmitter {
             .unwrap()
             .push(RecordedEvent::Failed(event));
     }
+}
+
+// --- Helper types below ---
+
+/// Recorded events from the mock emitter.
+#[derive(Debug, Clone)]
+pub enum RecordedEvent {
+    Started(proto::SyncStarted),
+    Progress(proto::SyncProgress),
+    Completed(proto::SyncCompleted),
+    Failed(proto::SyncFailed),
 }

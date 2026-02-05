@@ -39,35 +39,6 @@ use crate::{
 /// Frequency on which to send a heartbeat.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Creates an event emitter based on configuration.
-///
-/// Returns a [`NoOpEmitter`] if events are disabled, Kafka config is missing,
-/// or Kafka producer creation fails.
-async fn create_event_emitter(
-    events_config: &WorkerEventsConfig,
-    node_id: &NodeId,
-) -> Arc<dyn EventEmitter> {
-    if !events_config.enabled {
-        return Arc::new(NoOpEmitter);
-    }
-
-    let Some(kafka_config) = &events_config.kafka else {
-        tracing::warn!("Events enabled but no Kafka config provided, events disabled");
-        return Arc::new(NoOpEmitter);
-    };
-
-    let producer = match crate::kafka::KafkaProducer::new(kafka_config).await {
-        Ok(producer) => producer,
-        Err(e) => {
-            tracing::warn!(error = %e, "Failed to create Kafka producer, events disabled");
-            return Arc::new(NoOpEmitter);
-        }
-    };
-
-    tracing::info!("Kafka event streaming enabled");
-    Arc::new(KafkaEventEmitter::new(Arc::new(producer), node_id.clone()))
-}
-
 /// Run the worker service
 ///
 /// This function creates and runs a worker instance with the provided configuration
@@ -499,6 +470,41 @@ impl Worker {
         self.job_set.abort(job_id);
         Ok(())
     }
+}
+
+// --- Private helpers below ---
+
+/// Creates an event emitter based on configuration.
+///
+/// Returns a [`NoOpEmitter`] if events are disabled, Kafka config is missing,
+/// or Kafka producer creation fails.
+async fn create_event_emitter(
+    events_config: &WorkerEventsConfig,
+    node_id: &NodeId,
+) -> Arc<dyn EventEmitter> {
+    if !events_config.enabled {
+        return Arc::new(NoOpEmitter);
+    }
+
+    let Some(kafka_config) = &events_config.kafka else {
+        tracing::warn!("Events enabled but no Kafka config provided, events disabled");
+        return Arc::new(NoOpEmitter);
+    };
+
+    let producer = match crate::kafka::KafkaProducer::new(kafka_config).await {
+        Ok(producer) => producer,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                error_source = logging::error_source(&err),
+                "Failed to create Kafka producer, events disabled"
+            );
+            return Arc::new(NoOpEmitter);
+        }
+    };
+
+    tracing::info!("Kafka event streaming enabled");
+    Arc::new(KafkaEventEmitter::new(Arc::new(producer), node_id.clone()))
 }
 
 /// Registers a worker in the metadata DB.

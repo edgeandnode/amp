@@ -91,7 +91,7 @@ Event streaming is **opt-in** (disabled by default). When disabled, the [Job Pro
 ```toml
 [worker_events]
 enabled = true
-progress_interval_secs = 10  # Emit progress events at most every 10 seconds
+progress_interval = 10  # Emit progress events at most every 10 seconds
 
 [worker_events.kafka]
 brokers = ["kafka-1:9092", "kafka-2:9092"]
@@ -102,7 +102,7 @@ partitions = 16
 | Setting                     | Default               | Description                                           |
 | --------------------------- | --------------------- | ----------------------------------------------------- |
 | `enabled`                   | `false`               | Enable/disable event emission                         |
-| `progress_interval_secs`    | `10`                  | Time interval for progress events (in seconds)        |
+| `progress_interval`         | `10`                  | Time interval for progress events (in seconds)        |
 | `kafka.brokers`             | -                     | Kafka broker addresses                                |
 | `kafka.topic`               | `"amp.worker.events"` | Kafka topic name                                      |
 | `kafka.partitions`          | `16`                  | Number of partitions (must match actual topic config) |
@@ -147,7 +147,7 @@ If the topic doesn't exist, event sends will retry then log a warning and drop t
 ```toml
 [worker_events]
 enabled = true
-progress_interval_secs = 10  # Optional: emit progress every 10s (default)
+progress_interval = 10  # Optional: emit progress every 10s (default)
 
 [worker_events.kafka]
 brokers = ["localhost:9092"]

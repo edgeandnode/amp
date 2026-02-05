@@ -21,34 +21,20 @@ pub(super) fn new(
     job_id: JobId,
     job_desc: JobDescriptor,
 ) -> impl Future<Output = Result<(), DumpError>> {
-    let (end_block, max_writers, reference, dataset_kind, dataset_info) = match job_desc {
-        JobDescriptor::Dump {
-            end_block,
-            max_writers,
-            dataset_namespace,
-            dataset_name,
-            manifest_hash,
-            dataset_kind,
-        } => {
-            let hash_reference = HashReference::new(
-                dataset_namespace.clone(),
-                dataset_name.clone(),
-                manifest_hash.clone(),
-            );
-            let dataset_info = proto::DatasetInfo {
-                namespace: dataset_namespace.to_string(),
-                name: dataset_name.to_string(),
-                manifest_hash: manifest_hash.to_string(),
-            };
-            (
-                end_block,
-                max_writers,
-                hash_reference,
-                dataset_kind,
-                dataset_info,
-            )
-        }
-    };
+    let JobDescriptor::Dump {
+        end_block,
+        max_writers,
+        dataset_namespace,
+        dataset_name,
+        manifest_hash,
+        dataset_kind,
+    } = job_desc;
+
+    let reference = HashReference::new(
+        dataset_namespace.clone(),
+        dataset_name.clone(),
+        manifest_hash.clone(),
+    );
 
     let metrics = job_ctx
         .meter
@@ -57,9 +43,18 @@ pub(super) fn new(
 
     // Create progress reporter for event streaming
     // Always create the reporter - NoOpEmitter will discard events if not needed
-    let progress_reporter: Option<Arc<dyn ProgressReporter>> = Some(Arc::new(
-        WorkerProgressReporter::new(job_id, dataset_info, job_ctx.event_emitter.clone()),
-    ));
+    let progress_reporter: Option<Arc<dyn ProgressReporter>> = {
+        let dataset_info = proto::DatasetInfo {
+            namespace: dataset_namespace.to_string(),
+            name: dataset_name.to_string(),
+            manifest_hash: manifest_hash.to_string(),
+        };
+        Some(Arc::new(WorkerProgressReporter::new(
+            job_id,
+            dataset_info,
+            job_ctx.event_emitter.clone(),
+        )))
+    };
 
     // Create Ctx instance for job execution
     let ctx = Ctx {

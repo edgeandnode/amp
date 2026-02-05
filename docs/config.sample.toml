@@ -104,7 +104,7 @@ url = "postgres://<pg_url>"
 # Worker configuration
 [worker_events]
 # enabled = false                  # Enable event streaming to Kafka (default: false)
-# progress_interval_secs = 10     # Interval in seconds for emitting progress events (default: 10)
+# progress_interval = 10          # Interval in seconds for emitting progress events (default: 10)
 
 [worker_events.kafka]
 # brokers = ["localhost:9092"]    # Kafka broker addresses (required if events enabled)

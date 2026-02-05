@@ -7,6 +7,8 @@ mod emitter;
 mod kafka;
 mod progress_adapter;
 
-pub use emitter::{EventEmitter, NoOpEmitter};
-pub use kafka::KafkaEventEmitter;
-pub use progress_adapter::WorkerProgressReporter;
+pub use self::{
+    emitter::{EventEmitter, NoOpEmitter},
+    kafka::KafkaEventEmitter,
+    progress_adapter::WorkerProgressReporter,
+};

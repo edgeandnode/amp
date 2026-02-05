@@ -19,15 +19,6 @@ use worker::{
 const TEST_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 const TEST_HASH_2: &str = "0000000000000000000000000000000000000000000000000000000000000002";
 
-/// Helper to create a test DatasetInfo.
-fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> proto::DatasetInfo {
-    proto::DatasetInfo {
-        namespace: namespace.to_string(),
-        name: name.to_string(),
-        manifest_hash: hash.to_string(),
-    }
-}
-
 use crate::testlib::fixtures::MockEventEmitter;
 
 /// WorkerProgressReporter correctly forwards progress updates to the event emitter.
@@ -525,4 +516,15 @@ async fn e2e_anvil_sync_captures_lifecycle_events() {
         progress_events.len(),
         completed_events.len()
     );
+}
+
+// --- Test helpers below ---
+
+/// Creates a test DatasetInfo with the given namespace, name, and hash.
+fn test_dataset_info(namespace: &str, name: &str, hash: &str) -> proto::DatasetInfo {
+    proto::DatasetInfo {
+        namespace: namespace.to_string(),
+        name: name.to_string(),
+        manifest_hash: hash.to_string(),
+    }
 }

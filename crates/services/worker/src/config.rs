@@ -48,7 +48,7 @@ impl Config {
             query_max_mem_mb: self.query_max_mem_mb,
             spill_location: self.spill_location.clone(),
             parquet: self.parquet.clone(),
-            progress_interval: Duration::from_secs(self.events_config.progress_interval_secs),
+            progress_interval: self.events_config.progress_interval.clone().into(),
         }
     }
 }

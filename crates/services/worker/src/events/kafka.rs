@@ -12,37 +12,6 @@ use crate::{
     node_id::NodeId,
 };
 
-/// Creates the partition key for Kafka events.
-///
-/// Format: `{namespace}/{name}/{manifest_hash}/{table_name}`
-fn partition_key(dataset: &proto::DatasetInfo, table_name: &str) -> String {
-    format!(
-        "{}/{}/{}/{}",
-        dataset.namespace, dataset.name, dataset.manifest_hash, table_name
-    )
-}
-
-/// Event type discriminator for worker events.
-#[derive(Debug, Clone, Copy)]
-enum EventType {
-    Started,
-    Progress,
-    Completed,
-    Failed,
-}
-
-impl std::fmt::Display for EventType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::Started => "sync.started",
-            Self::Progress => "sync.progress",
-            Self::Completed => "sync.completed",
-            Self::Failed => "sync.failed",
-        };
-        f.write_str(s)
-    }
-}
-
 /// Kafka-based event emitter.
 ///
 /// Sends worker events to a Kafka topic using protobuf encoding.
@@ -159,4 +128,37 @@ impl EventEmitter for KafkaEventEmitter {
         );
         self.emit(EventType::Failed, &key, envelope).await;
     }
+}
+
+// --- Private helpers below ---
+
+/// Event type discriminator for worker events.
+#[derive(Debug, Clone, Copy)]
+enum EventType {
+    Started,
+    Progress,
+    Completed,
+    Failed,
+}
+
+impl std::fmt::Display for EventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Started => "sync.started",
+            Self::Progress => "sync.progress",
+            Self::Completed => "sync.completed",
+            Self::Failed => "sync.failed",
+        };
+        f.write_str(s)
+    }
+}
+
+/// Creates the partition key for Kafka events.
+///
+/// Format: `{namespace}/{name}/{manifest_hash}/{table_name}`
+fn partition_key(dataset: &proto::DatasetInfo, table_name: &str) -> String {
+    format!(
+        "{}/{}/{}/{}",
+        dataset.namespace, dataset.name, dataset.manifest_hash, table_name
+    )
 }
