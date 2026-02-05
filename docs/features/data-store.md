@@ -31,6 +31,7 @@ Data Store-specific concepts:
 - **File Registration**: The process of recording parquet file metadata (size, e_tag, version, parquet stats, raw footer bytes) in the metadata database after writing to object storage, enabling queries without scanning object storage.
 - **Restoration**: Recovering table revision state from object storage when the metadata database is empty (e.g., after database reset or migration). The system scans object storage, identifies revisions, and registers the latest as active.
 - **Metadata Caching**: In-memory caching of parsed parquet metadata with memory-weighted eviction. For caching architecture details, see [data-metadata-caching](data-metadata-caching.md).
+- **Physical Table Revision**: A storage location (object store path) that physical tables link to. Multiple physical tables can share the same revision (many-to-one), enabling data sharing across datasets without copying files. Each physical table has one `active_revision_id` pointing to its queryable revision.
 
 ## Usage
 
@@ -131,6 +132,11 @@ When a writer job claims a revision, it updates the `writer` column to reference
 This prevents concurrent writes and enables the system to track which job is responsible for a revision's contents.
 If a job fails, the lock can be released by clearing the writer reference.
 
+**Linking** enables associating external data directories with logical tables.
+Because physical tables are decoupled from storage paths, any compatible directory can be registered as a new revision.
+The revision's `metadata` JSONB field can store informative data for debugging (e.g., the dataset associated at dump time).
+To make a linked revision queryable, update the physical table's `active_revision_id` to point to it.
+
 ### Parquet File Management
 
 DataStore manages the lifecycle of parquet files within revisions:
@@ -184,17 +190,22 @@ Domain components like PhysicalTable delegate all storage operations to DataStor
 
 ### Database Schema
 
-The metadata database uses two primary tables to track revisions and files:
+The metadata database uses a three-table architecture to track physical tables, their revisions, and files:
 
-**`physical_tables`** - Stores table revision records.
-Each row represents a revision with its storage path and active status.
-Key columns: `id` (LocationId), `manifest_hash`, `dataset_namespace`, `dataset_name`, `table_name`, `path`, `active`, `writer` (job reference).
-The `active` boolean ensures only one revision per table is queryable.
+**`physical_tables`** - Stores table identity (meta table).
+Each row represents a logical physical table within a dataset.
+Key columns: `id` (table primary key), `manifest_hash`, `dataset_namespace`, `dataset_name`, `table_name`, `active_revision_id` (foreign key to revisions).
+The `active_revision_id` points to the currently active revision for queries (NULL if no revision is active).
+
+**`physical_table_revisions`** - Stores storage locations for table revisions.
+Each row represents an immutable snapshot of table data at a specific path.
+Key columns: `id` (RevisionId), `path` (unique storage path), `writer` (job reference for write locking), `metadata` (JSONB for informative data), `created_at`, `updated_at`.
 The `path` column stores the relative revision path (`<dataset_name>/<table_name>/<uuid>`).
+The `metadata` JSONB stores informative data for debugging and diagnosis (e.g., the dataset associated at dump time, schema versions). This is extensible for management purposes but not used in DB operations.
 
 **`file_metadata`** - Stores parquet file records within revisions.
 Each row represents a single parquet file with its object store metadata.
-Key columns: `id` (FileId), `location_id` (foreign key to physical_tables), `file_name`, `url` (full file URL), `object_size`, `object_e_tag`, `object_version`, `metadata` (parquet stats as JSON), `footer` (raw footer bytes).
+Key columns: `id` (FileId), `location_id` (foreign key to physical_table_revisions), `file_name`, `url` (full file URL), `object_size`, `object_e_tag`, `object_version`, `metadata` (parquet stats as JSON), `footer` (raw footer bytes).
 Files are linked to revisions via `location_id`, enabling cascade deletes when revisions are removed.
 
 **`footer_cache`** - Stores raw parquet footer bytes for cache population.
@@ -204,20 +215,26 @@ The cache table enables efficient footer retrieval without loading full file rec
 
 **Relationships:**
 
-- **Revision → Files**: A revision (`physical_tables`) has many files (`file_metadata`) via `location_id`.
-  Deleting a revision cascades to delete all its files.
-- **Revision → Writer**: A revision can be locked by a writer job via the `writer` column (foreign key to `jobs`).
-  This prevents concurrent writes by associating the revision with a specific job.
-  Only the owning job should write files to that revision.
-- **File → Footer Cache**: Each file has a corresponding entry in `footer_cache` via `file_id`.
-  The footer is stored in both `file_metadata` and `footer_cache` to allow efficient streaming of file metadata without loading large footer blobs during bulk operations.
+- **Table → Revisions**: A physical table (`physical_tables`) has `active_revision_id` pointing to one revision. A single revision (one storage path in `physical_table_revisions`) can be linked as the active revision by multiple physical tables—enabling data sharing across datasets that use the same underlying data.
+- **Revision → Files**: A revision has many files (`file_metadata`) via `location_id`. Deleting a revision cascades to delete all its files.
+- **Revision → Writer**: A revision can be locked by a writer job via the `writer` column (foreign key to `jobs`). Only the owning job should write files to that revision.
+- **File → Footer Cache**: Each file has a corresponding entry in `footer_cache` via `file_id`. The footer is stored in both tables to allow efficient streaming without loading large footer blobs during bulk operations.
+
+**Revision Linking:**
+
+The decoupled architecture enables data sharing across datasets:
+
+- Multiple physical tables can point to the same revision (many-to-one), enabling data sharing across datasets without duplicating storage
+- External data directories can be linked by registering new revisions with existing paths
+- The `metadata` JSONB provides extensible storage for informative data (e.g., associated dataset at dump time) useful for debugging and diagnosis
+- Switching active revision is atomic (update `active_revision_id` pointer)
 
 ### Source Files
 
 - `crates/core/data-store/src/lib.rs` - `DataStore` struct providing revision lifecycle (create, restore, lock, get active), file registration, streaming file metadata, and cached parquet metadata access. Also defines `PhyTableRevision` (the core revision handle) and `PhyTableRevisionFileMetadata`.
 - `crates/core/data-store/src/physical_table.rs` - Path and URL types: `PhyTableRevisionPath` (relative path like `dataset/table/uuid`), `PhyTablePath` (table directory path without revision), `PhyTableUrl` (full object store URL).
 - `crates/core/data-store/src/file_name.rs` - `FileName` type for validated parquet filenames with format `{block_num:09}-{suffix:016x}.parquet` (9-digit block number, 16-char hex suffix).
-- `crates/core/metadata-db/src/physical_table.rs` - Database operations for `physical_tables`: register, get active, mark active/inactive, assign writer.
+- `crates/core/metadata-db/src/physical_table.rs` - Database operations for `physical_tables` and `physical_table_revisions`: register tables and revisions, get active revision, mark active/inactive by updating `active_revision_id`, assign writer to revisions.
 - `crates/core/metadata-db/src/files.rs` - Database operations for `file_metadata` and `footer_cache`: register files with footers, stream by location, get footer bytes.
 
 ## References
