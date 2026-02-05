@@ -24,16 +24,17 @@ pub fn all(network: &NetworkId) -> Vec<datasets_common::dataset::Table> {
 }
 
 /// A Solana slot that contains a confirmed block.
-pub(crate) struct NonEmptySlot {
-    pub(crate) slot: Slot,
-    pub(crate) parent_slot: Slot,
-    pub(crate) blockhash: [u8; 32],
-    pub(crate) prev_blockhash: [u8; 32],
-    pub(crate) block_height: Option<u64>,
-    pub(crate) blocktime: Option<i64>,
-    pub(crate) transactions: Vec<transactions::Transaction>,
-    pub(crate) messages: Vec<messages::Message>,
-    pub(crate) block_rewards: block_rewards::BlockRewards,
+#[derive(Debug)]
+pub struct NonEmptySlot {
+    pub slot: Slot,
+    pub parent_slot: Slot,
+    pub blockhash: [u8; 32],
+    pub prev_blockhash: [u8; 32],
+    pub block_height: Option<u64>,
+    pub blocktime: Option<i64>,
+    pub transactions: Vec<transactions::Transaction>,
+    pub messages: Vec<messages::Message>,
+    pub block_rewards: block_rewards::BlockRewards,
 }
 
 pub(crate) fn convert_slot_to_db_rows(

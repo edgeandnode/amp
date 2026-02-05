@@ -76,18 +76,18 @@ fn address_table_lookups_dtype() -> DataType {
     )))
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct Message {
-    pub(crate) slot: Slot,
-    pub(crate) tx_index: u32,
+#[derive(Debug, Default, PartialEq)]
+pub struct Message {
+    pub slot: Slot,
+    pub tx_index: u32,
 
-    pub(crate) num_required_signatures: u8,
-    pub(crate) num_readonly_signed_accounts: u8,
-    pub(crate) num_readonly_unsigned_accounts: u8,
-    pub(crate) instructions: Vec<super::instructions::Instruction>,
-    pub(crate) address_table_lookups: Option<Vec<AddressTableLookup>>,
-    pub(crate) account_keys: Vec<String>,
-    pub(crate) recent_block_hash: String,
+    pub num_required_signatures: u8,
+    pub num_readonly_signed_accounts: u8,
+    pub num_readonly_unsigned_accounts: u8,
+    pub instructions: Vec<super::instructions::Instruction>,
+    pub address_table_lookups: Option<Vec<AddressTableLookup>>,
+    pub account_keys: Vec<String>,
+    pub recent_block_hash: String,
 }
 
 impl Message {
@@ -186,11 +186,11 @@ impl Message {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct AddressTableLookup {
-    account_key: String,
-    writable_indexes: Vec<u8>,
-    readonly_indexes: Vec<u8>,
+#[derive(Debug, Default, PartialEq)]
+pub struct AddressTableLookup {
+    pub account_key: String,
+    pub writable_indexes: Vec<u8>,
+    pub readonly_indexes: Vec<u8>,
 }
 
 /// A builder for converting [Message]s into [TableRows].

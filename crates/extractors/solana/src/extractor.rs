@@ -334,7 +334,7 @@ impl BlockStreamer for SolanaExtractor {
 
 /// Converts [of1_client::DecodedSlot] to [tables::NonEmptySlot]. This conversion can fail if any
 /// of the decoded fields do not match the expected format/values.
-fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<tables::NonEmptySlot> {
+pub fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<tables::NonEmptySlot> {
     let of1_client::DecodedSlot {
         slot,
         parent_slot,
@@ -385,7 +385,7 @@ fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<tables::N
 
 /// Converts a JSON-RPC confirmed block into a [tables::NonEmptySlot]. This conversion
 /// can fail if the JSON-RPC response does not match the expected format in any way.
-fn non_empty_rpc_slot(
+pub fn non_empty_rpc_slot(
     slot: Slot,
     confirmed_block: rpc_client::UiConfirmedBlock,
 ) -> anyhow::Result<tables::NonEmptySlot> {

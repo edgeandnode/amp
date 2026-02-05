@@ -12,7 +12,6 @@ use datasets_raw::{
     },
     rows::{TableRowError, TableRows},
 };
-use serde::Deserialize;
 use solana_clock::Slot;
 
 pub const TABLE_NAME: &str = "instructions";
@@ -49,14 +48,14 @@ fn schema() -> Schema {
     Schema::new(fields)
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
-pub(crate) struct Instruction {
-    pub(crate) slot: Slot,
-    pub(crate) tx_index: u32,
+#[derive(Debug, Default, PartialEq)]
+pub struct Instruction {
+    pub slot: Slot,
+    pub tx_index: u32,
 
-    pub(crate) program_id_index: u8,
-    pub(crate) accounts: Vec<u8>,
-    pub(crate) data: Vec<u8>,
+    pub program_id_index: u8,
+    pub accounts: Vec<u8>,
+    pub data: Vec<u8>,
 
     /// If the fields below are present, this instruction is an inner instruction.
     /// Otherwise, it is a message instruction.
@@ -64,8 +63,8 @@ pub(crate) struct Instruction {
     /// ## Reference
     ///
     /// <https://solana.com/docs/rpc/json-structures#inner-instructions>
-    pub(crate) inner_index: Option<u32>,
-    pub(crate) inner_stack_height: Option<u32>,
+    pub inner_index: Option<u32>,
+    pub inner_stack_height: Option<u32>,
 }
 
 pub(crate) struct InstructionRowsBuilder {

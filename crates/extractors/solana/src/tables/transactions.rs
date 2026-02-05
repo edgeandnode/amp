@@ -120,13 +120,13 @@ fn reward_dtype() -> DataType {
     ]))
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct Transaction {
-    pub(crate) slot: Slot,
-    pub(crate) index: u32,
+#[derive(Debug, Default, PartialEq)]
+pub struct Transaction {
+    pub slot: Slot,
+    pub index: u32,
 
-    pub(crate) signatures: Vec<String>,
-    pub(crate) transaction_status_meta: Option<TransactionStatusMeta>,
+    pub signatures: Vec<String>,
+    pub transaction_status_meta: Option<TransactionStatusMeta>,
 }
 
 impl Transaction {
@@ -176,22 +176,22 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct TransactionStatusMeta {
+#[derive(Debug, Default, PartialEq)]
+pub struct TransactionStatusMeta {
     // `true` if the transaction succeeded, `false` otherwise.
-    pub(crate) status: bool,
-    pub(crate) fee: u64,
-    pub(crate) pre_balances: Vec<u64>,
-    pub(crate) post_balances: Vec<u64>,
-    pub(crate) inner_instructions: Option<Vec<Vec<tables::instructions::Instruction>>>,
-    pub(crate) log_messages: Option<Vec<String>>,
-    pub(crate) pre_token_balances: Option<Vec<TransactionTokenBalance>>,
-    pub(crate) post_token_balances: Option<Vec<TransactionTokenBalance>>,
-    pub(crate) rewards: Option<Vec<tables::block_rewards::Reward>>,
-    pub(crate) loaded_addresses: Option<LoadedAddresses>,
-    pub(crate) return_data: Option<TransactionReturnData>,
-    pub(crate) compute_units_consumed: Option<u64>,
-    pub(crate) cost_units: Option<u64>,
+    pub status: bool,
+    pub fee: u64,
+    pub pre_balances: Vec<u64>,
+    pub post_balances: Vec<u64>,
+    pub inner_instructions: Option<Vec<Vec<tables::instructions::Instruction>>>,
+    pub log_messages: Option<Vec<String>>,
+    pub pre_token_balances: Option<Vec<TransactionTokenBalance>>,
+    pub post_token_balances: Option<Vec<TransactionTokenBalance>>,
+    pub rewards: Option<Vec<tables::block_rewards::Reward>>,
+    pub loaded_addresses: Option<LoadedAddresses>,
+    pub return_data: Option<TransactionReturnData>,
+    pub compute_units_consumed: Option<u64>,
+    pub cost_units: Option<u64>,
 }
 
 impl TransactionStatusMeta {
@@ -455,13 +455,13 @@ impl TransactionStatusMeta {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct TransactionTokenBalance {
-    account_index: u8,
-    mint: String,
-    ui_token_amount: TokenAmount,
-    owner: Option<String>,
-    program_id: Option<String>,
+#[derive(Debug, Default, PartialEq)]
+pub struct TransactionTokenBalance {
+    pub account_index: u8,
+    pub mint: String,
+    pub ui_token_amount: TokenAmount,
+    pub owner: Option<String>,
+    pub program_id: Option<String>,
 }
 
 impl From<rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
@@ -521,24 +521,24 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
     }
 }
 
-#[derive(Debug, Default, Clone)]
-struct TokenAmount {
-    ui_amount: Option<f64>,
-    decimals: u8,
-    amount: String,
-    ui_amount_string: String,
+#[derive(Debug, Default, PartialEq)]
+pub struct TokenAmount {
+    pub ui_amount: Option<f64>,
+    pub decimals: u8,
+    pub amount: String,
+    pub ui_amount_string: String,
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct LoadedAddresses {
-    writable: Vec<String>,
-    readonly: Vec<String>,
+#[derive(Debug, Default, PartialEq)]
+pub struct LoadedAddresses {
+    pub writable: Vec<String>,
+    pub readonly: Vec<String>,
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct TransactionReturnData {
-    program_id: String,
-    data: Vec<u8>,
+#[derive(Debug, Default, PartialEq)]
+pub struct TransactionReturnData {
+    pub program_id: String,
+    pub data: Vec<u8>,
 }
 
 pub(crate) struct TransactionRowsBuilder {
