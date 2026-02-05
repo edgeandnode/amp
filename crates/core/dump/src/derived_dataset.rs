@@ -99,7 +99,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use amp_data_store::file_name::FileName;
 use amp_dataset_store::ResolveRevisionError;
 use common::{
-    BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
+    BlockNum, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
     catalog::{
         logical::for_dump as logical_catalog,
         physical::{
@@ -127,7 +127,7 @@ use tracing::{Instrument, instrument};
 
 use crate::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
-    block_ranges::ResolutionError,
+    block_ranges::{GetLatestBlockError, ResolutionError},
     check::consistency_check,
     compaction::{AmpCompactor, AmpCompactorTaskError},
     metrics,
@@ -135,7 +135,9 @@ use crate::{
         CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
         ParquetFileWriterOutput, commit_metadata,
     },
-    streaming_query::{QueryMessage, StreamingQuery},
+    streaming_query::{
+        QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
+    },
     tasks::{self, TryWaitAllError},
 };
 
@@ -531,7 +533,7 @@ async fn dump_table(
                         .await?;
                     // For now, all materialized tables only support single networks.
                     assert_eq!(max_end_blocks.len(), 1);
-                    Ok::<Option<BlockNum>, BoxError>(max_end_blocks.into_values().next())
+                    Ok::<Option<BlockNum>, GetLatestBlockError>(max_end_blocks.into_values().next())
                 })
                 .await
                 .map_err(DumpTableSpawnError::ResolveEndBlock)?;
@@ -916,5 +918,5 @@ pub enum DumpSqlQueryError {
     /// This occurs when the streaming query execution encounters an error
     /// while producing result batches.
     #[error("failed to get next message: {0}")]
-    StreamingQuery(#[source] BoxError),
+    StreamingQuery(#[source] MessageStreamError),
 }

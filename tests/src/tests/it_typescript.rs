@@ -9,10 +9,9 @@
 
 use std::process::Stdio;
 
-use common::BoxError;
 use monitoring::logging;
 
-use crate::testlib;
+use crate::{BoxError, testlib};
 
 /// Run a single TypeScript test file with isolated infrastructure.
 ///

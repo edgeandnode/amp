@@ -1,8 +1,6 @@
 //! Test step for mining blocks on Anvil.
 
-use common::BoxError;
-
-use crate::testlib::ctx::TestCtx;
+use crate::{BoxError, testlib::ctx::TestCtx};
 
 /// Test step that mines blocks on the Anvil blockchain.
 ///

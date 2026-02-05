@@ -1,8 +1,9 @@
 //! Test step for deploying dataset packages.
 
-use common::BoxError;
-
-use crate::testlib::{ctx::TestCtx, fixtures::DatasetPackage};
+use crate::{
+    BoxError,
+    testlib::{ctx::TestCtx, fixtures::DatasetPackage},
+};
 
 /// Test step that deploys and registers dataset packages.
 ///

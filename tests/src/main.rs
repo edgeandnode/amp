@@ -59,7 +59,6 @@ use amp_datasets_registry::{
 };
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use clap::Parser;
-use common::BoxError;
 use datasets_common::reference::Reference;
 use datasets_derived::{
     Dataset as DerivedDataset,
@@ -69,13 +68,16 @@ use dump::consistency_check;
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use monitoring::logging;
-use tests::testlib::{
-    build_info,
-    fixtures::{
-        Ampctl, DaemonConfigBuilder, DaemonController, DaemonWorker,
-        MetadataDb as MetadataDbFixture,
+use tests::{
+    BoxError,
+    testlib::{
+        build_info,
+        fixtures::{
+            Ampctl, DaemonConfigBuilder, DaemonController, DaemonWorker,
+            MetadataDb as MetadataDbFixture,
+        },
+        helpers as test_helpers,
     },
-    helpers as test_helpers,
 };
 
 /// Command-line interface for test support operations.

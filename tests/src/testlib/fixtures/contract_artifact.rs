@@ -6,8 +6,9 @@
 use std::path::Path;
 
 use alloy::{hex, json_abi::JsonAbi, primitives::Bytes};
-use common::BoxError;
 use fs_err as fs;
+
+use crate::BoxError;
 
 /// Contract artifact loaded from a Forge compilation output JSON file.
 ///

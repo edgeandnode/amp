@@ -8,14 +8,14 @@ use std::{
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
+use amp_dataset_store::{DatasetStore, ResolveRevisionError};
 use common::{
-    BlockNum, BlockRange, BoxError, DetachedLogicalPlan, LogicalCatalog, PlanningContext,
-    QueryContext, ResumeWatermark, SPECIAL_BLOCK_NUM, Watermark,
+    BlockNum, BlockRange, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
+    ResumeWatermark, SPECIAL_BLOCK_NUM, Watermark,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::{
         logical::LogicalTable,
-        physical::{Catalog, PhysicalTable},
+        physical::{CanonicalChainError, Catalog, PhysicalTable},
     },
     incrementalizer::incrementalize_plan,
     metadata::segments::{Segment, WatermarkNotFoundError},
@@ -31,11 +31,14 @@ use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{LocationId, NotificationMultiplexerHandle};
 use tokio::{
     sync::{mpsc, watch},
+    task::JoinError,
     time::MissedTickBehavior,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{Instrument, instrument};
+
+use crate::streaming_query::message_stream_with_block_complete::MessageStreamError;
 
 /// Errors that occur when spawning a streaming query
 ///
@@ -112,7 +115,7 @@ pub enum SpawnError {
     /// Without a blocks table, the streaming query cannot determine block ranges
     /// or detect chain reorganizations.
     #[error("failed to resolve blocks table for network")]
-    ResolveBlocksTable(#[source] BoxError),
+    ResolveBlocksTable(#[source] ResolveBlocksTableError),
 
     /// Failed to convert resume watermark to target network
     ///
@@ -236,11 +239,11 @@ impl StreamDirection {
 /// Aborts the query task when dropped.
 pub struct StreamingQueryHandle {
     rx: mpsc::Receiver<QueryMessage>,
-    join_handle: AbortOnDropHandle<Result<(), BoxError>>,
+    join_handle: AbortOnDropHandle<Result<(), StreamingQueryExecutionError>>,
 }
 
 impl StreamingQueryHandle {
-    pub fn into_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
+    pub fn into_stream(self) -> BoxStream<'static, Result<QueryMessage, MessageStreamError>> {
         let data_stream = MessageStreamWithBlockComplete::new(ReceiverStream::new(self.rx).map(Ok));
 
         let join = self.join_handle;
@@ -250,16 +253,14 @@ impl StreamingQueryHandle {
         let get_task_result = async move {
             match tokio::time::timeout(Duration::from_secs(1), join).await {
                 Ok(Ok(Ok(()))) => None,
-                Ok(Ok(Err(e))) => Some(Err(e)),
-                Ok(Err(join_err)) => {
-                    Some(Err(
-                        format!("Streaming task failed to join: {}", join_err).into()
-                    ))
-                }
+                Ok(Ok(Err(e))) => Some(Err(e.into())),
+                Ok(Err(join_err)) => Some(Err(
+                    StreamingQueryExecutionError::StreamingTaskFailedToJoin(join_err).into(),
+                )),
 
                 // This would only happen under extreme CPU or tokio scheduler contention.
                 // Or blocking `Drop` implementations.
-                Err(_) => Some(Err("Streaming task join timed out".into())),
+                Err(_) => Some(Err(StreamingQueryExecutionError::TaskTimeout.into())),
             }
         };
 
@@ -395,7 +396,7 @@ impl StreamingQuery {
     /// 3. Stream out time-ordered results
     /// 4. Once execution of batch is exhausted, send completion trigger
     #[instrument(skip_all, err)]
-    async fn execute(mut self) -> Result<(), BoxError> {
+    async fn execute(mut self) -> Result<(), StreamingQueryExecutionError> {
         loop {
             self.table_updates.changed().await;
 
@@ -406,11 +407,14 @@ impl StreamingQuery {
                 self.data_store.clone(),
                 false,
             )
-            .await?;
+            .await
+            .map_err(StreamingQueryExecutionError::QueryContext)?;
 
             // Get the next execution range
-            let Some(MicrobatchRange { range, direction }) =
-                self.next_microbatch_range(&ctx).await?
+            let Some(MicrobatchRange { range, direction }) = self
+                .next_microbatch_range(&ctx)
+                .await
+                .map_err(StreamingQueryExecutionError::NextMicrobatchRange)?
             else {
                 continue;
             };
@@ -419,15 +423,21 @@ impl StreamingQuery {
 
             let plan = {
                 // Incrementalize the plan
-                let plan = self.plan.clone().attach_to(&ctx)?;
-                let mut plan = incrementalize_plan(plan, range.start(), range.end())?;
+                let plan = self
+                    .plan
+                    .clone()
+                    .attach_to(&ctx)
+                    .map_err(StreamingQueryExecutionError::AttachToPlan)?;
+                let mut plan = incrementalize_plan(plan, range.start(), range.end())
+                    .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
 
                 // Enforce `order by _block_num`.
                 plan = order_by_block_num(plan);
 
                 // Remove `_block_num` if not needed in the output.
                 if !self.preserve_block_num {
-                    plan = unproject_special_block_num_column(plan)?
+                    plan = unproject_special_block_num_column(plan)
+                        .map_err(StreamingQueryExecutionError::UnprojectSpecialBlockNumColumn)?
                 }
                 plan
             };
@@ -435,7 +445,9 @@ impl StreamingQuery {
             let keep_alive_interval = self.keep_alive_interval.max(30);
             let schema = Arc::new(plan.schema().as_arrow().clone());
             let mut stream = keep_alive_stream(
-                ctx.execute_plan(plan, false).await?,
+                ctx.execute_plan(plan, false)
+                    .await
+                    .map_err(StreamingQueryExecutionError::ExecutePlan)?,
                 schema,
                 keep_alive_interval,
             );
@@ -451,7 +463,7 @@ impl StreamingQuery {
 
             // Drain the microbatch completely
             while let Some(item) = stream.next().await {
-                let item = item?;
+                let item = item.map_err(StreamingQueryExecutionError::StreamItem)?;
 
                 // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
                 // aborted, so we don't bother checking for errors when sending a message.
@@ -476,7 +488,7 @@ impl StreamingQuery {
     async fn next_microbatch_range(
         &mut self,
         ctx: &QueryContext,
-    ) -> Result<Option<MicrobatchRange>, BoxError> {
+    ) -> Result<Option<MicrobatchRange>, NextMicrobatchRangeError> {
         // Gather the chains for each source table.
         let chains = ctx
             .catalog()
@@ -504,11 +516,16 @@ impl StreamingQuery {
                 self.data_store.clone(),
                 false,
             )
-            .await?
+            .await
+            .map_err(NextMicrobatchRangeError::QueryContext)?
         };
 
         // The latest common watermark across the source tables.
-        let Some(common_watermark) = self.latest_src_watermark(&blocks_ctx, chains).await? else {
+        let Some(common_watermark) = self
+            .latest_src_watermark(&blocks_ctx, chains)
+            .await
+            .map_err(NextMicrobatchRangeError::LatestSrcWatermark)?
+        else {
             // No common watermark across source tables.
             tracing::debug!("no common watermark found");
             return Ok(None);
@@ -519,14 +536,19 @@ impl StreamingQuery {
             return Ok(None);
         }
 
-        let Some(direction) = self.next_microbatch_start(&blocks_ctx).await? else {
+        let Some(direction) = self
+            .next_microbatch_start(&blocks_ctx)
+            .await
+            .map_err(NextMicrobatchRangeError::NextMicrobatchStart)?
+        else {
             tracing::debug!("no next microbatch start found");
             return Ok(None);
         };
         let start = direction.segment_start();
         let Some(end) = self
             .next_microbatch_end(&blocks_ctx, start, common_watermark)
-            .await?
+            .await
+            .map_err(NextMicrobatchRangeError::NextMicrobatchEnd)?
         else {
             tracing::debug!("no next microbatch end found");
             return Ok(None);
@@ -546,15 +568,23 @@ impl StreamingQuery {
     async fn next_microbatch_start(
         &self,
         ctx: &QueryContext,
-    ) -> Result<Option<StreamDirection>, BoxError> {
+    ) -> Result<Option<StreamDirection>, NextMicrobatchStartError> {
         match &self.prev_watermark {
             // start stream
             None => {
-                let block = self.blocks_table_fetch(ctx, self.start_block, None).await?;
+                let block = self
+                    .blocks_table_fetch(ctx, self.start_block, None)
+                    .await
+                    .map_err(NextMicrobatchStartError::BlocksTableFetch)?;
                 Ok(block.map(|b| StreamDirection::ForwardFrom(b.into())))
             }
             // continue stream
-            Some(prev) if self.blocks_table_contains(ctx, prev).await? => {
+            Some(prev)
+                if self
+                    .blocks_table_contains(ctx, prev)
+                    .await
+                    .map_err(NextMicrobatchStartError::BlocksTableContains)? =>
+            {
                 let segment_start = SegmentStart {
                     number: prev.number + 1,
                     prev_hash: prev.hash,
@@ -563,7 +593,10 @@ impl StreamingQuery {
             }
             // rewind stream due to reorg
             Some(prev) => {
-                let block = self.reorg_base(ctx, prev).await?;
+                let block = self
+                    .reorg_base(ctx, prev)
+                    .await
+                    .map_err(NextMicrobatchStartError::ReorgBase)?;
                 Ok(block.map(|b| StreamDirection::ReorgFrom(b.into())))
             }
         }
@@ -575,7 +608,7 @@ impl StreamingQuery {
         ctx: &QueryContext,
         start: &SegmentStart,
         common_watermark: Watermark,
-    ) -> Result<Option<Watermark>, BoxError> {
+    ) -> Result<Option<Watermark>, NextMicrobatchEndError> {
         let number = {
             let end = self
                 .end_block
@@ -601,6 +634,7 @@ impl StreamingQuery {
             self.blocks_table_fetch(ctx, number, None)
                 .await
                 .map(|r| r.map(|r| r.watermark()))
+                .map_err(NextMicrobatchEndError)
         }
     }
 
@@ -609,13 +643,17 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
         chains: impl Iterator<Item = &[Segment]>,
-    ) -> Result<Option<Watermark>, BoxError> {
+    ) -> Result<Option<Watermark>, LatestSrcWatermarkError> {
         // For each chain, collect the latest segment
         let mut latest_src_watermarks: Vec<Watermark> = Default::default();
         'chain_loop: for chain in chains {
             for segment in chain.iter().rev() {
                 let watermark = (&segment.range).into();
-                if self.blocks_table_contains(ctx, &watermark).await? {
+                if self
+                    .blocks_table_contains(ctx, &watermark)
+                    .await
+                    .map_err(LatestSrcWatermarkError)?
+                {
                     latest_src_watermarks.push(watermark);
                     continue 'chain_loop;
                 }
@@ -639,7 +677,7 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
         prev_watermark: &Watermark,
-    ) -> Result<Option<BlockRow>, BoxError> {
+    ) -> Result<Option<BlockRow>, ReorgBaseError> {
         // context for querying forked blocks
         let fork_ctx = {
             let catalog = Catalog::new(
@@ -647,15 +685,21 @@ impl StreamingQuery {
                 ctx.catalog().logical().clone(),
             );
             QueryContext::for_catalog(catalog, ctx.env.clone(), self.data_store.clone(), true)
-                .await?
+                .await
+                .map_err(ReorgBaseError::QueryContext)?
         };
 
         let mut min_fork_block_num = prev_watermark.number;
         let mut fork: Option<BlockRow> = self
             .blocks_table_fetch(&fork_ctx, prev_watermark.number, Some(&prev_watermark.hash))
-            .await?;
+            .await
+            .map_err(ReorgBaseError::BlocksTableFetch)?;
         while let Some(block) = fork.take() {
-            if self.blocks_table_contains(ctx, &block.watermark()).await? {
+            if self
+                .blocks_table_contains(ctx, &block.watermark())
+                .await
+                .map_err(ReorgBaseError::BlocksTableContains)?
+            {
                 break;
             }
             min_fork_block_num = block.number;
@@ -665,13 +709,17 @@ impl StreamingQuery {
                     block.number.saturating_sub(1),
                     Some(&block.prev_hash),
                 )
-                .await?;
+                .await
+                .map_err(ReorgBaseError::BlocksTableFetch)?;
         }
 
         // If we're dumping a derived dataset, we must rewind to the start of the canonical segment
         // boudary. Otherwise, the new segments may not form a canonical chain.
         if let Some(destination) = self.destination.as_ref()
-            && let Some(destination_chain) = destination.canonical_chain().await?
+            && let Some(destination_chain) = destination
+                .canonical_chain()
+                .await
+                .map_err(ReorgBaseError::CanonicalChain)?
         {
             min_fork_block_num = *destination_chain
                 .0
@@ -683,7 +731,9 @@ impl StreamingQuery {
                 .start();
         }
 
-        self.blocks_table_fetch(ctx, min_fork_block_num, None).await
+        self.blocks_table_fetch(ctx, min_fork_block_num, None)
+            .await
+            .map_err(ReorgBaseError::BlocksTableFetch)
     }
 
     #[instrument(skip_all, err)]
@@ -691,7 +741,7 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
         watermark: &Watermark,
-    ) -> Result<bool, BoxError> {
+    ) -> Result<bool, BlocksTableContainsError> {
         // Panic safety: The `blocks_ctx` always has a single table.
         let blocks_segments = &ctx.catalog().table_snapshots()[0];
 
@@ -714,6 +764,7 @@ impl StreamingQuery {
         self.blocks_table_fetch(ctx, watermark.number, Some(&watermark.hash))
             .await
             .map(|row| row.is_some())
+            .map_err(BlocksTableContainsError)
     }
 
     #[instrument(skip(self, ctx), err)]
@@ -722,7 +773,7 @@ impl StreamingQuery {
         ctx: &QueryContext,
         number: BlockNum,
         hash: Option<&BlockHash>,
-    ) -> Result<Option<BlockRow>, BoxError> {
+    ) -> Result<Option<BlockRow>, BlocksTableFetchError> {
         let hash_constraint = hash
             .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
             .unwrap_or_default();
@@ -736,33 +787,264 @@ impl StreamingQuery {
         // SAFETY: Validation is deferred to the SQL parser which will return appropriate errors
         // for empty or invalid SQL. The format! macro ensures non-empty output.
         let sql_str = SqlStr::new_unchecked(sql);
-        let query = common::sql::parse(&sql_str)?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
+        let query = common::sql::parse(&sql_str).map_err(BlocksTableFetchError::ParseSql)?;
+        let plan = ctx
+            .plan_sql(query)
+            .await
+            .map_err(BlocksTableFetchError::PlanSql)?;
+        let results = ctx
+            .execute_and_concat(plan)
+            .await
+            .map_err(BlocksTableFetchError::ExecuteSql)?;
         if results.num_rows() == 0 {
             tracing::debug!("blocks table missing block {} {:?}", number, hash);
             return Ok(None);
         }
-        let get_hash_value = |column_name: &str| -> Result<BlockHash, BoxError> {
+        let get_hash_value = |column_name: &str| -> Result<BlockHash, GetHashValueError> {
             let column = results
                 .column_by_name(column_name)
-                .ok_or_else(|| format!("blocks table missing column: {column_name}"))?;
-            let column = as_fixed_size_binary_array(column)?;
+                .ok_or_else(|| GetHashValueError::MissingColumn(column_name.to_string()))?;
+            let column = as_fixed_size_binary_array(column).map_err(GetHashValueError::Downcast)?;
             column
                 .iter()
                 .flatten()
                 .next()
                 .and_then(|b| BlockHash::try_from(b).ok())
-                .ok_or_else(|| {
-                    format!("blocks table missing block hash value for column {column_name}").into()
-                })
+                .ok_or_else(|| GetHashValueError::MissingBlockHashValue(column_name.to_string()))
         };
         Ok(Some(BlockRow {
             number,
-            hash: get_hash_value("hash")?,
-            prev_hash: get_hash_value("parent_hash")?,
+            hash: get_hash_value("hash").map_err(BlocksTableFetchError::GetHashValue)?,
+            prev_hash: get_hash_value("parent_hash")
+                .map_err(BlocksTableFetchError::GetHashValue)?,
         }))
     }
+}
+
+/// Errors that occur during streaming query execution
+///
+/// This error type is used by `StreamingQuery::execute()`.
+#[derive(Debug, thiserror::Error)]
+pub enum StreamingQueryExecutionError {
+    /// Streaming task failed to join
+    ///
+    /// This occurs when the streaming query task panics or is cancelled unexpectedly.
+    /// The JoinError contains information about why the task failed to complete.
+    #[error("streaming task failed to join: {0}")]
+    StreamingTaskFailedToJoin(#[source] JoinError),
+
+    /// Streaming task join timed out
+    ///
+    /// This occurs when the streaming query task does not complete within the expected
+    /// timeout period (1 second) after being signaled to stop. This indicates extreme
+    /// CPU or tokio scheduler contention, or blocking `Drop` implementations.
+    #[error("streaming task join timed out")]
+    TaskTimeout,
+
+    /// Failed to create a query context
+    ///
+    /// This occurs when the query context cannot be created.
+    #[error("failed to create query context: {0}")]
+    QueryContext(#[source] common::query_context::Error),
+
+    /// Failed to get the next microbatch range
+    ///
+    /// This occurs when the next microbatch range cannot be found.
+    #[error("failed to get next microbatch range: {0}")]
+    NextMicrobatchRange(#[source] NextMicrobatchRangeError),
+
+    /// Failed to attach the plan to the query context
+    ///
+    /// This occurs when the plan cannot be attached to the query context.
+    #[error("failed to attach the plan to the query context: {0}")]
+    AttachToPlan(#[source] common::query_context::Error),
+
+    /// Failed to incrementalize the plan
+    ///
+    /// This occurs when the plan cannot be incrementalized.
+    #[error("failed to incrementalize the plan: {0}")]
+    IncrementalizePlan(#[source] DataFusionError),
+
+    /// Failed to unproject the special block num column
+    ///
+    /// This occurs when the special block num column cannot be unprojected.
+    #[error("failed to unproject the special block num column: {0}")]
+    UnprojectSpecialBlockNumColumn(#[source] DataFusionError),
+
+    /// Failed to execute the plan
+    ///
+    /// This occurs when the plan cannot be executed.
+    #[error("failed to execute the plan: {0}")]
+    ExecutePlan(#[source] common::query_context::Error),
+
+    /// Failed to stream item
+    ///
+    /// This occurs when the item cannot be streamed.
+    #[error("failed to stream item: {0}")]
+    StreamItem(#[source] DataFusionError),
+}
+
+/// Errors that occur when determining the next microbatch range
+///
+/// This error type is used by `StreamingQuery::next_microbatch_range()`.
+#[derive(Debug, thiserror::Error)]
+pub enum NextMicrobatchRangeError {
+    /// Failed to create a query context
+    ///
+    /// This occurs when the query context cannot be created.
+    #[error("failed to create query context: {0}")]
+    QueryContext(#[source] common::query_context::Error),
+
+    /// Failed to get the latest source watermark
+    ///
+    /// This occurs when the latest source watermark cannot be found.
+    #[error("failed to get latest source watermark: {0}")]
+    LatestSrcWatermark(#[source] LatestSrcWatermarkError),
+
+    /// Failed to get the next microbatch start
+    ///
+    /// This occurs when the next microbatch start cannot be found.
+    #[error("failed to get next microbatch start: {0}")]
+    NextMicrobatchStart(#[source] NextMicrobatchStartError),
+
+    /// Failed to get the next microbatch end
+    ///
+    /// This occurs when the next microbatch end cannot be found.
+    #[error("failed to get next microbatch end: {0}")]
+    NextMicrobatchEnd(#[source] NextMicrobatchEndError),
+}
+
+/// Errors that occur when determining the next microbatch start position
+///
+/// This error type is used by `StreamingQuery::next_microbatch_start()`.
+#[derive(Debug, thiserror::Error)]
+pub enum NextMicrobatchStartError {
+    /// Failed to fetch the blocks table
+    ///
+    /// This occurs when the blocks table cannot be fetched.
+    #[error("failed to fetch the blocks table: {0}")]
+    BlocksTableFetch(#[source] BlocksTableFetchError),
+
+    /// Failed to check if the blocks table contains the watermark
+    ///
+    /// This occurs when the blocks table cannot be checked if it contains the watermark.
+    #[error("failed to check if the blocks table contains the watermark: {0}")]
+    BlocksTableContains(#[source] BlocksTableContainsError),
+
+    /// Failed to get the reorg base
+    ///
+    /// This occurs when the reorg base cannot be found.
+    #[error("failed to get the reorg base: {0}")]
+    ReorgBase(#[source] ReorgBaseError),
+}
+
+/// Failed to fetch the blocks table
+///
+/// This occurs when the blocks table cannot be fetched.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to fetch the blocks table: {0}")]
+pub struct NextMicrobatchEndError(#[source] BlocksTableFetchError);
+
+/// Failed to get the latest source watermark
+///
+/// This error is returned by `latest_src_watermark()` when checking if blocks
+/// are present in the blocks table fails.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to get latest source watermark: {0}")]
+pub struct LatestSrcWatermarkError(#[source] BlocksTableContainsError);
+
+/// Errors that occur when finding the reorg base block
+///
+/// This error type is used by `StreamingQuery::reorg_base()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ReorgBaseError {
+    /// Failed to create a query context
+    ///
+    /// This occurs when the query context cannot be created.
+    #[error("failed to create query context: {0}")]
+    QueryContext(#[source] common::query_context::Error),
+
+    /// Failed to fetch the blocks table
+    ///
+    /// This occurs when the blocks table cannot be fetched.
+    #[error("failed to fetch the blocks table: {0}")]
+    BlocksTableFetch(#[source] BlocksTableFetchError),
+
+    /// Failed to check if the blocks table contains the watermark
+    ///
+    /// This occurs when the blocks table cannot be checked if it contains the watermark.
+    #[error("failed to check if the blocks table contains the watermark: {0}")]
+    BlocksTableContains(#[source] BlocksTableContainsError),
+
+    /// Failed to get the canonical chain
+    ///
+    /// This occurs when the canonical chain cannot be found.
+    #[error("failed to get the canonical chain: {0}")]
+    CanonicalChain(#[source] CanonicalChainError),
+}
+
+/// Failed to check if the blocks table contains a watermark
+///
+/// This error type is used by `StreamingQuery::blocks_table_contains()`.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to fetch the blocks table: {0}")]
+pub struct BlocksTableContainsError(#[source] BlocksTableFetchError);
+
+/// Errors that occur when fetching block data from the blocks table
+///
+/// This error type is used by `StreamingQuery::blocks_table_fetch()`.
+#[derive(Debug, thiserror::Error)]
+pub enum BlocksTableFetchError {
+    /// Failed to parse the SQL
+    ///
+    /// This occurs when the SQL cannot be parsed.
+    #[error("failed to parse the SQL: {0}")]
+    ParseSql(#[source] common::sql::ParseSqlError),
+
+    /// Failed to plan the SQL
+    ///
+    /// This occurs when the SQL cannot be planned.
+    #[error("failed to plan the SQL: {0}")]
+    PlanSql(#[source] common::query_context::Error),
+
+    /// Failed to execute the SQL
+    ///
+    /// This occurs when the SQL cannot be executed.
+    #[error("failed to execute the SQL: {0}")]
+    ExecuteSql(#[source] common::query_context::Error),
+
+    /// Failed to get the hash value
+    ///
+    /// This occurs when the hash value cannot be found.
+    #[error("failed to get the hash value: {0}")]
+    GetHashValue(#[source] GetHashValueError),
+}
+
+/// Errors that occur when extracting hash values from block query results
+///
+/// This error type is used internally by `blocks_table_fetch()` when extracting
+/// block hash and parent hash values from query results.
+#[derive(Debug, thiserror::Error)]
+pub enum GetHashValueError {
+    /// Blocks table missing expected column
+    ///
+    /// This occurs when the blocks table does not contain the expected column
+    /// (e.g., 'hash' or 'parent_hash').
+    #[error("blocks table missing column: {0}")]
+    MissingColumn(String),
+
+    /// Failed to downcast the column
+    ///
+    /// This occurs when the column cannot be downcast.
+    #[error("failed to downcast the column: {0}")]
+    Downcast(#[source] DataFusionError),
+
+    /// Blocks table missing block hash value
+    ///
+    /// This occurs when the blocks table column exists but does not contain
+    /// a valid block hash value (either null or not convertible to BlockHash).
+    #[error("blocks table missing block hash value for column {0}")]
+    MissingBlockHashValue(String),
 }
 
 struct BlockRow {
@@ -829,32 +1111,28 @@ async fn resolve_blocks_table(
     data_store: DataStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &NetworkId,
-) -> Result<PhysicalTable, BoxError> {
-    let dataset =
-        search_dependencies_for_raw_dataset(dataset_store, root_dataset_refs, network).await?;
+) -> Result<PhysicalTable, ResolveBlocksTableError> {
+    let dataset = search_dependencies_for_raw_dataset(dataset_store, root_dataset_refs, network)
+        .await
+        .map_err(ResolveBlocksTableError::SearchDependencies)?;
 
     let table = dataset
         .tables()
         .iter()
         .find(|t| t.name() == "blocks")
-        .ok_or_else(|| -> BoxError {
-            format!(
-                "dataset '{}' does not have a 'blocks' table",
-                dataset.reference()
-            )
-            .into()
+        .ok_or_else(|| {
+            ResolveBlocksTableError::BlocksTableNotFound(dataset.reference().to_string())
         })?;
 
     let revision = data_store
         .get_table_active_revision(dataset.reference(), table.name())
-        .await?
-        .ok_or_else(|| -> BoxError {
-            format!(
-                "table '{}.{}' has not been synced",
-                dataset.reference(),
-                table.name()
+        .await
+        .map_err(ResolveBlocksTableError::GetActivePhysicalTable)?
+        .ok_or_else(|| {
+            ResolveBlocksTableError::TableNotSynced(
+                dataset.reference().to_string(),
+                table.name().to_string(),
             )
-            .into()
         })?;
 
     let sql_table_ref_schema = dataset.reference().to_reference().to_string();
@@ -868,15 +1146,48 @@ async fn resolve_blocks_table(
     ))
 }
 
+/// Errors that occur when resolving the blocks table for a network
+///
+/// This error type is used by `resolve_blocks_table()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ResolveBlocksTableError {
+    /// Failed to search dependencies for raw dataset
+    ///
+    /// This occurs when searching for a raw dataset matching the target network fails.
+    #[error("Failed to search dependencies for raw dataset")]
+    SearchDependencies(#[source] SearchDependenciesForRawDatasetError),
+
+    /// Blocks table not found
+    ///
+    /// This occurs when the blocks table is not found in the dataset.
+    #[error("'blocks' table not found in dataset '{0}'")]
+    BlocksTableNotFound(String),
+
+    /// Failed to get active physical table revision
+    ///
+    /// This occurs when querying for an active physical table revision fails.
+    #[error("Failed to get active physical table revision")]
+    GetActivePhysicalTable(#[source] amp_data_store::GetTableActiveRevisionError),
+
+    /// Table not synced
+    ///
+    /// This occurs when the table has not been synced.
+    #[error("table '{0}.{1}' has not been synced")]
+    TableNotSynced(String, String),
+}
+
 // Breadth-first search over dataset dependencies to find a raw dataset matching the target network.
 async fn search_dependencies_for_raw_dataset(
     dataset_store: &DatasetStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &NetworkId,
-) -> Result<Arc<dyn Dataset>, BoxError> {
+) -> Result<Arc<dyn Dataset>, SearchDependenciesForRawDatasetError> {
     let mut queue: VecDeque<Arc<dyn datasets_common::dataset::Dataset>> = VecDeque::new();
     for hash_ref in root_dataset_refs {
-        let dataset = dataset_store.get_dataset(hash_ref).await?;
+        let dataset = dataset_store
+            .get_dataset(hash_ref)
+            .await
+            .map_err(SearchDependenciesForRawDatasetError::GetDataset)?;
         queue.push_back(dataset);
     }
 
@@ -904,18 +1215,57 @@ async fn search_dependencies_for_raw_dataset(
                 // Resolve the reference to a hash reference first
                 let hash_ref = dataset_store
                     .resolve_revision(dep.to_reference())
-                    .await?
-                    .ok_or_else(|| -> BoxError {
-                        format!("dependency '{}' not found", dep.to_reference()).into()
+                    .await
+                    .map_err(SearchDependenciesForRawDatasetError::ResolveRevision)?
+                    .ok_or_else(|| {
+                        SearchDependenciesForRawDatasetError::NotFound(
+                            dep.to_reference().to_string(),
+                        )
                     })?;
-                let dataset = dataset_store.get_dataset(&hash_ref).await?;
+                let dataset = dataset_store
+                    .get_dataset(&hash_ref)
+                    .await
+                    .map_err(SearchDependenciesForRawDatasetError::GetDataset)?;
 
                 queue.push_back(dataset);
             }
         }
     }
 
-    Err(format!("no raw dataset found for network '{network}'",).into())
+    Err(SearchDependenciesForRawDatasetError::NoRawDatasetFound {
+        network: network.clone(),
+    })
+}
+
+/// Errors that occur when searching dataset dependencies for a raw dataset
+///
+/// This error type is used by `search_dependencies_for_raw_dataset()`.
+#[derive(Debug, thiserror::Error)]
+pub enum SearchDependenciesForRawDatasetError {
+    /// Failed to get dataset from dataset store
+    ///
+    /// This occurs when retrieving the dataset instance from the dataset store fails.
+    /// The dataset store loads dataset manifests and parses them into Dataset instances.
+    #[error("Failed to get dataset")]
+    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+
+    /// Failed to resolve revision
+    ///
+    /// This occurs when resolving a dataset revision fails.
+    #[error("Failed to resolve revision")]
+    ResolveRevision(#[source] ResolveRevisionError),
+
+    /// Failed to find dependency
+    ///
+    /// This occurs when a dependency is not found.
+    #[error("dependency '{0}' not found")]
+    NotFound(String),
+
+    /// No raw dataset found for network
+    ///
+    /// This occurs when no raw dataset is found for the target network.
+    #[error("no raw dataset found for network '{network}'")]
+    NoRawDatasetFound { network: NetworkId },
 }
 
 #[cfg(test)]

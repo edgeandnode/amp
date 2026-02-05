@@ -55,7 +55,7 @@
 
 use std::path::{Path, PathBuf};
 
-use common::BoxError;
+use crate::BoxError;
 
 /// Source directories to search for dataset manifests
 const DATASET_MANIFESTS_FIXTURE_DIRS: [&str; 2] = ["tests/config/manifests", "config/manifests"];

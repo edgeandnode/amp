@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use common::{BlockNum, BoxError};
+use common::BlockNum;
 use tracing::instrument;
 
 /// End block configuration for dump operations.
@@ -39,6 +39,9 @@ pub enum ResolvedEndBlock {
     NoDataAvailable,
 }
 
+/// Error type for the `get_latest` future in [`EndBlock::resolve`].
+pub type GetLatestBlockError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
 impl EndBlock {
     /// Resolves the end block configuration to a concrete result.
     ///
@@ -61,7 +64,7 @@ impl EndBlock {
         get_latest: F,
     ) -> Result<ResolvedEndBlock, ResolutionError>
     where
-        F: Future<Output = Result<Option<BlockNum>, BoxError>>,
+        F: Future<Output = Result<Option<BlockNum>, GetLatestBlockError>>,
     {
         match self {
             EndBlock::None => Ok(ResolvedEndBlock::Continuous),
@@ -205,6 +208,7 @@ impl ResolutionError {
 #[cfg(test)]
 mod tests {
     use super::{EndBlock, ResolutionError, ResolvedEndBlock, resolve_relative};
+    use crate::block_ranges::GetLatestBlockError;
 
     #[test]
     fn resolve_block_range_variants() {
@@ -254,7 +258,9 @@ mod tests {
     async fn end_block_resolve_none() {
         let end_block = EndBlock::None;
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(0, async {
+                Ok::<Option<u64>, GetLatestBlockError>(Some(100))
+            })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Continuous);
@@ -264,7 +270,9 @@ mod tests {
     async fn end_block_resolve_latest() {
         let end_block = EndBlock::Latest;
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(0, async {
+                Ok::<Option<u64>, GetLatestBlockError>(Some(100))
+            })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Block(100));
@@ -274,7 +282,9 @@ mod tests {
     async fn end_block_resolve_absolute() {
         let end_block = EndBlock::Absolute(100);
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(200)) })
+            .resolve(0, async {
+                Ok::<Option<u64>, GetLatestBlockError>(Some(200))
+            })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Block(100));
@@ -284,7 +294,9 @@ mod tests {
     async fn end_block_resolve_latest_minus() {
         let end_block = EndBlock::LatestMinus(50);
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(0, async {
+                Ok::<Option<u64>, GetLatestBlockError>(Some(100))
+            })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::Block(50));
@@ -294,7 +306,9 @@ mod tests {
     async fn end_block_resolve_absolute_validation() {
         let end_block = EndBlock::Absolute(10);
         let result = end_block
-            .resolve(50, async { Ok::<Option<u64>, common::BoxError>(Some(100)) })
+            .resolve(50, async {
+                Ok::<Option<u64>, GetLatestBlockError>(Some(100))
+            })
             .await;
         assert!(result.is_err());
     }
@@ -303,7 +317,7 @@ mod tests {
     async fn end_block_resolve_latest_no_data() {
         let end_block = EndBlock::Latest;
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(None) })
+            .resolve(0, async { Ok::<Option<u64>, GetLatestBlockError>(None) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::NoDataAvailable);
@@ -313,7 +327,7 @@ mod tests {
     async fn end_block_resolve_latest_minus_no_data() {
         let end_block = EndBlock::LatestMinus(50);
         let result = end_block
-            .resolve(0, async { Ok::<Option<u64>, common::BoxError>(None) })
+            .resolve(0, async { Ok::<Option<u64>, GetLatestBlockError>(None) })
             .await
             .unwrap();
         assert_eq!(result, ResolvedEndBlock::NoDataAvailable);

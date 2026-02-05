@@ -3,7 +3,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use common::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, arrow::array::RecordBatch};
+use common::{
+    BlockNum, SPECIAL_BLOCK_NUM,
+    arrow::{array::RecordBatch, error::ArrowError},
+};
+use datasets_raw::arrow::DataType;
 use futures::{Stream, ready};
 
 use super::QueryMessage;
@@ -25,9 +29,12 @@ pub struct MessageStreamWithBlockComplete<S> {
     pending_block_complete: Option<BlockNum>,
 }
 
+/// Error type for [`MessageStreamWithBlockComplete`] stream items.
+pub type MessageStreamError = Box<dyn std::error::Error + Sync + Send + 'static>;
+
 impl<S> MessageStreamWithBlockComplete<S>
 where
-    S: Stream<Item = Result<QueryMessage, BoxError>>,
+    S: Stream<Item = Result<QueryMessage, MessageStreamError>>,
 {
     pub fn new(inner: S) -> Self {
         Self {
@@ -41,9 +48,9 @@ where
 
 impl<S> Stream for MessageStreamWithBlockComplete<S>
 where
-    S: Stream<Item = Result<QueryMessage, BoxError>> + Unpin,
+    S: Stream<Item = Result<QueryMessage, MessageStreamError>> + Unpin,
 {
-    type Item = Result<QueryMessage, BoxError>;
+    type Item = Result<QueryMessage, MessageStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -105,7 +112,7 @@ where
                         this.last_block_num = Some(block_num);
                         Poll::Ready(Some(Ok(QueryMessage::Data(batch))))
                     }
-                    Err(e) => Poll::Ready(Some(Err(e))),
+                    Err(e) => Poll::Ready(Some(Err(e.into()))),
                 }
             }
             QueryMessage::MicrobatchEnd(range) => {
@@ -139,7 +146,7 @@ enum BatchProcessResult {
 fn process_data_batch(
     batch: RecordBatch,
     last_block_num: Option<BlockNum>,
-) -> Result<BatchProcessResult, BoxError> {
+) -> Result<BatchProcessResult, ProcessDataBatchError> {
     // Find the _block_num column
     let block_num_column = batch.column_by_name(SPECIAL_BLOCK_NUM);
 
@@ -149,14 +156,15 @@ fn process_data_batch(
     };
 
     // Extract block numbers from the array
-    let block_nums = extract_block_numbers(block_num_array)?;
+    let block_nums = extract_block_numbers(block_num_array)
+        .map_err(ProcessDataBatchError::ExtractBlockNumbers)?;
 
     if block_nums.is_empty() {
         return Ok(BatchProcessResult::PassThrough(batch));
     }
 
     // Always validate ordering
-    validate_block_ordering(&block_nums)?;
+    validate_block_ordering(&block_nums).map_err(ProcessDataBatchError::ValidateBlockOrdering)?;
 
     let first_block = block_nums[0];
     let last_block = block_nums[block_nums.len() - 1];
@@ -174,7 +182,8 @@ fn process_data_batch(
                 } else {
                     // Batch spans multiple blocks, need to split
                     let split_index = block_nums.iter().position(|&n| n > current_block).unwrap(); // Safe: we know last_block > current_block from condition above
-                    let (current_batch, next_batch) = split_record_batch(&batch, split_index)?;
+                    let (current_batch, next_batch) = split_record_batch(&batch, split_index)
+                        .map_err(ProcessDataBatchError::SplitRecordBatch)?;
 
                     Ok(BatchProcessResult::Split {
                         current_block_batch: Some(current_batch),
@@ -200,9 +209,33 @@ fn process_data_batch(
     }
 }
 
+/// Errors that occur when processing a data batch for block alignment
+///
+/// This error type is used by `process_data_batch()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessDataBatchError {
+    /// Failed to extract block numbers
+    ///
+    /// This occurs when the block numbers cannot be extracted from the batch.
+    #[error("Failed to extract block numbers")]
+    ExtractBlockNumbers(#[source] ExtractBlockNumbersError),
+
+    /// Failed to validate block ordering
+    ///
+    /// This occurs when the block numbers are not ordered.
+    #[error("Failed to validate block ordering")]
+    ValidateBlockOrdering(#[source] ValidateBlockOrderingError),
+
+    /// Failed to split record batch
+    ///
+    /// This occurs when the record batch cannot be split.
+    #[error("Failed to split record batch")]
+    SplitRecordBatch(#[source] SplitRecordBatchError),
+}
+
 fn extract_block_numbers(
     array: &dyn common::arrow::array::Array,
-) -> Result<Vec<BlockNum>, BoxError> {
+) -> Result<Vec<BlockNum>, ExtractBlockNumbersError> {
     use common::arrow::{array::*, datatypes::DataType};
 
     let block_nums = match array.data_type() {
@@ -210,43 +243,78 @@ fn extract_block_numbers(
             let uint64_array = array
                 .as_any()
                 .downcast_ref::<UInt64Array>()
-                .ok_or("Failed to downcast to UInt64Array")?;
+                .ok_or(ExtractBlockNumbersError::Downcast)?;
             uint64_array
                 .iter()
                 .collect::<Option<Vec<_>>>()
-                .ok_or("Found null values in _block_num column")?
+                .ok_or(ExtractBlockNumbersError::NullValues)?
         }
         _ => {
-            return Err(format!(
-                "Unsupported _block_num column type: {:?}",
-                array.data_type()
-            )
-            .into());
+            return Err(ExtractBlockNumbersError::UnsupportedType(
+                array.data_type().clone(),
+            ));
         }
     };
 
     Ok(block_nums)
 }
 
-fn validate_block_ordering(block_nums: &[BlockNum]) -> Result<(), BoxError> {
+/// Errors that occur when extracting block numbers from an array
+///
+/// This error type is used by `extract_block_numbers()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ExtractBlockNumbersError {
+    /// Failed to downcast to UInt64Array
+    ///
+    /// This occurs when the array cannot be downcast to a UInt64Array.
+    #[error("Failed to downcast to UInt64Array")]
+    Downcast,
+
+    /// Found null values in _block_num column
+    ///
+    /// This occurs when the array contains null values.
+    #[error("Found null values in _block_num column")]
+    NullValues,
+
+    /// Unsupported _block_num column type
+    ///
+    /// This occurs when the array is of an unsupported type.
+    #[error("Unsupported _block_num column type: {0}")]
+    UnsupportedType(DataType),
+}
+
+fn validate_block_ordering(block_nums: &[BlockNum]) -> Result<(), ValidateBlockOrderingError> {
     for window in block_nums.windows(2) {
         if window[0] > window[1] {
-            return Err(format!("Block numbers not ordered: {} > {}", window[0], window[1]).into());
+            return Err(ValidateBlockOrderingError {
+                previous_block: window[0],
+                current_block: window[1],
+            });
         }
     }
     Ok(())
 }
 
+/// Block numbers not ordered
+///
+/// This occurs when the block numbers are not ordered.
+#[derive(Debug, thiserror::Error)]
+#[error("Block numbers not ordered: {previous_block} > {current_block}")]
+pub struct ValidateBlockOrderingError {
+    previous_block: BlockNum,
+    current_block: BlockNum,
+}
+
 fn split_record_batch(
     batch: &RecordBatch,
     split_index: usize,
-) -> Result<(RecordBatch, RecordBatch), BoxError> {
+) -> Result<(RecordBatch, RecordBatch), SplitRecordBatchError> {
     if split_index == 0 {
-        return Err("Split index is 0, cannot split".into());
+        return Err(SplitRecordBatchError::SplitIndexZero);
     }
 
     if split_index >= batch.num_rows() {
-        return Err("Split index is out of bounds".into());
+        return Err(SplitRecordBatchError::SplitIndexOutOfBounds(split_index));
     }
 
     let first_batch_arrays: Vec<_> = batch
@@ -261,10 +329,36 @@ fn split_record_batch(
         .map(|array| array.slice(split_index, batch.num_rows() - split_index))
         .collect();
 
-    let first_batch = RecordBatch::try_new(batch.schema(), first_batch_arrays)?;
-    let second_batch = RecordBatch::try_new(batch.schema(), second_batch_arrays)?;
+    let first_batch = RecordBatch::try_new(batch.schema(), first_batch_arrays)
+        .map_err(SplitRecordBatchError::CreateRecordBatch)?;
+    let second_batch = RecordBatch::try_new(batch.schema(), second_batch_arrays)
+        .map_err(SplitRecordBatchError::CreateRecordBatch)?;
 
     Ok((first_batch, second_batch))
+}
+
+/// Errors that occur when splitting a record batch at a given index
+///
+/// This error type is used by `split_record_batch()`.
+#[derive(Debug, thiserror::Error)]
+pub enum SplitRecordBatchError {
+    /// Split index is 0, cannot split
+    ///
+    /// This occurs when the split index is 0, cannot split.
+    #[error("Split index is 0, cannot split")]
+    SplitIndexZero,
+
+    /// Split index is out of bounds
+    ///
+    /// This occurs when the split index is out of bounds.
+    #[error("Split index is out of bounds: {0}")]
+    SplitIndexOutOfBounds(usize),
+
+    /// Failed to create RecordBatch
+    ///
+    /// This occurs when the RecordBatch cannot be created.
+    #[error("Failed to create RecordBatch")]
+    CreateRecordBatch(#[source] ArrowError),
 }
 
 #[cfg(test)]
@@ -304,8 +398,8 @@ mod tests {
     }
 
     async fn collect_messages(
-        messages: Vec<Result<QueryMessage, BoxError>>,
-    ) -> Vec<Result<QueryMessage, BoxError>> {
+        messages: Vec<Result<QueryMessage, MessageStreamError>>,
+    ) -> Vec<Result<QueryMessage, MessageStreamError>> {
         let input_stream = stream::iter(messages);
         let mut aligned_stream = MessageStreamWithBlockComplete::new(input_stream);
 
@@ -316,7 +410,7 @@ mod tests {
         results
     }
 
-    fn expect_data_blocks(msg: &Result<QueryMessage, BoxError>) -> Vec<u64> {
+    fn expect_data_blocks(msg: &Result<QueryMessage, MessageStreamError>) -> Vec<u64> {
         if let Ok(QueryMessage::Data(batch)) = msg {
             extract_block_numbers(batch.column_by_name(SPECIAL_BLOCK_NUM).unwrap()).unwrap()
         } else {

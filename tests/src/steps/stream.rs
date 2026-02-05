@@ -1,8 +1,6 @@
 //! Test step for registering streams with the Flight client.
 
-use common::BoxError;
-
-use crate::testlib::fixtures::FlightClient;
+use crate::{BoxError, testlib::fixtures::FlightClient};
 
 /// Test step that registers a stream with the Flight client.
 ///

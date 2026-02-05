@@ -8,7 +8,7 @@ use std::{
     process::Stdio,
 };
 
-use common::BoxError;
+use crate::BoxError;
 
 /// Compile Solidity contracts using Foundry's forge build.
 ///

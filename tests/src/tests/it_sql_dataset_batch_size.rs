@@ -5,7 +5,7 @@ use std::{
 };
 
 use amp_dataset_store::DatasetStore;
-use common::{BoxError, metadata::Generation};
+use common::metadata::Generation;
 use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},
@@ -13,10 +13,13 @@ use dump::{
 };
 use monitoring::logging;
 
-use crate::testlib::{
-    self,
-    fixtures::{DaemonConfigBuilder, DatasetPackage},
-    helpers as test_helpers,
+use crate::{
+    BoxError,
+    testlib::{
+        self,
+        fixtures::{DaemonConfigBuilder, DatasetPackage},
+        helpers as test_helpers,
+    },
 };
 
 #[tokio::test]

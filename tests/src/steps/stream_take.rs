@@ -1,8 +1,6 @@
 //! Test step for taking data from registered streams.
 
-use common::BoxError;
-
-use crate::testlib::fixtures::FlightClient;
+use crate::{BoxError, testlib::fixtures::FlightClient};
 
 /// Test step that takes a specified number of rows from a registered stream.
 ///

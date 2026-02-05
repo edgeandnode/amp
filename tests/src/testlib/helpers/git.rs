@@ -5,7 +5,7 @@
 
 use std::{path::Path, process::Stdio};
 
-use common::BoxError;
+use crate::BoxError;
 
 /// Initialize git submodules in the specified directory.
 ///

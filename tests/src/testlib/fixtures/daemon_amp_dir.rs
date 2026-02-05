@@ -22,10 +22,9 @@ use amp_config::{
     DEFAULT_AMP_DIR_NAME, DEFAULT_CONFIG_FILENAME, DEFAULT_DATA_DIRNAME, DEFAULT_MANIFESTS_DIRNAME,
     DEFAULT_METADB_DIRNAME, DEFAULT_PROVIDERS_DIRNAME,
 };
-use common::BoxError;
 use fs_err as fs;
 
-use crate::testlib::config;
+use crate::{BoxError, testlib::config};
 
 /// Create a builder for configuring [`DaemonAmpDir`] with custom paths.
 ///

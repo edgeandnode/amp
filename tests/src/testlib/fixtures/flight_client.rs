@@ -10,16 +10,15 @@ use arrow_flight::{
     FlightData, decode::FlightRecordBatchStream, flight_service_client::FlightServiceClient,
     sql::client::FlightSqlServiceClient,
 };
-use common::{
-    BoxError,
-    arrow::{
-        array::RecordBatch, compute::concat_batches, datatypes::SchemaRef, ipc as arrow_ipc,
-        json::writer::ArrayWriter,
-    },
+use common::arrow::{
+    array::RecordBatch, compute::concat_batches, datatypes::SchemaRef, ipc as arrow_ipc,
+    json::writer::ArrayWriter,
 };
 use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 use tonic::transport::Channel;
+
+use crate::BoxError;
 
 /// Flight client fixture for connecting to Amp servers via Arrow Flight SQL.
 ///

@@ -1,8 +1,6 @@
 //! Test step for initializing Anvil blockchain fixture.
 
-use common::BoxError;
-
-use crate::testlib::ctx::TestCtx;
+use crate::{BoxError, testlib::ctx::TestCtx};
 
 /// Test step that validates Anvil is available for the test.
 ///

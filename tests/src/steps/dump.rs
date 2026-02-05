@@ -2,10 +2,12 @@
 
 use std::time::Duration;
 
-use common::BoxError;
 use datasets_common::reference::Reference;
 
-use crate::testlib::{ctx::TestCtx, helpers as test_helpers};
+use crate::{
+    BoxError,
+    testlib::{ctx::TestCtx, helpers as test_helpers},
+};
 
 /// Test step that dumps dataset data from blockchain sources to storage.
 ///
