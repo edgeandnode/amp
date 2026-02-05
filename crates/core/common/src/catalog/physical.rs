@@ -504,6 +504,7 @@ impl TableSnapshot {
             numbers: start.range.start()..=end.range.end(),
             hash: end.range.hash,
             prev_hash: start.range.prev_hash,
+            timestamp: end.range.timestamp,
         })
     }
 

@@ -640,6 +640,7 @@ fn rpc_to_rows(
         network: network.clone(),
         hash: header.hash.into(),
         prev_hash: header.parent_hash.into(),
+        timestamp: Some(header.timestamp.0.as_secs()),
     };
 
     let header_row = {

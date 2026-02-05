@@ -124,6 +124,7 @@ impl Chain {
             network: self.first().network.clone(),
             hash: self.last().hash,
             prev_hash: self.first().prev_hash,
+            timestamp: self.last().timestamp,
         }
     }
 }
@@ -391,6 +392,7 @@ mod test {
             } else {
                 test_hash(*numbers.start() as u8 - 1, fork.0)
             },
+            timestamp: None,
         }
     }
 
