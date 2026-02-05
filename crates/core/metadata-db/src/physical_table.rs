@@ -30,16 +30,20 @@ use crate::{
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
-    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
-    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug + serde::Serialize,
+    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug + serde::Serialize,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug + serde::Serialize,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
     path: impl Into<TablePath<'_>> + std::fmt::Debug,
-    active: bool,
 ) -> Result<LocationId, Error>
 where
     E: Executor<'c>,
 {
+    let metadata = serde_json::json!({
+        "dataset_namespace": dataset_namespace,
+        "dataset_name": dataset_name,
+        "manifest_hash": manifest_hash,
+    });
     sql::insert(
         exe,
         dataset_namespace.into(),
@@ -47,13 +51,13 @@ where
         manifest_hash.into(),
         table_name.into(),
         path.into(),
-        active,
+        metadata,
     )
     .await
     .map_err(Error::Database)
 }
 
-/// Get a physical table location by its ID
+/// Get a physical table location by its ID (Only returns active revision)
 #[tracing::instrument(skip(exe), err)]
 pub async fn get_by_id<'c, E>(
     exe: E,
@@ -128,15 +132,23 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_inactive_by_table_id<'c, E>(
     exe: E,
+    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
-    sql::mark_inactive_by_table_id(exe, manifest_hash.into(), table_name.into())
-        .await
-        .map_err(Error::Database)
+    sql::mark_inactive_by_table_id(
+        exe,
+        dataset_namespace.into(),
+        dataset_name.into(),
+        manifest_hash.into(),
+        table_name.into(),
+    )
+    .await
+    .map_err(Error::Database)
 }
 
 /// Mark a specific location as active
@@ -151,15 +163,19 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_active_by_id<'c, E>(
     exe: E,
-    location_id: impl Into<LocationId> + std::fmt::Debug,
+    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+    location_id: impl Into<LocationId> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
     sql::mark_active_by_id(
         exe,
+        dataset_namespace.into(),
+        dataset_name.into(),
         manifest_hash.into(),
         table_name.into(),
         location_id.into(),
@@ -258,10 +274,14 @@ where
         .map_err(|err| Error::Database(err.0))
 }
 
-/// Basic location information from the database
+/// Physical table revision information from the database
+///
+/// Represents a specific revision (storage location) of a physical table.
+/// The `active` field indicates whether this revision is the currently active
+/// one for its parent physical table.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PhysicalTable {
-    /// Unique identifier for the location
+    /// Unique identifier for the revision (location_id)
     pub id: LocationId,
     /// Manifest hash identifying the dataset version
     pub manifest_hash: ManifestHashOwned,
@@ -274,7 +294,7 @@ pub struct PhysicalTable {
     pub table_name: TableNameOwned,
     /// Relative path to the storage location
     pub path: TablePathOwned,
-    /// Whether this location is currently active for queries
+    /// Whether this revision is currently active for queries
     pub active: bool,
     /// Writer job ID (if one exists)
     pub writer: Option<JobId>,
