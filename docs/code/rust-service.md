@@ -1,26 +1,13 @@
 ---
-name: "services-pattern"
-description: "Two-phase service creation pattern for services/*. Load when creating or modifying service crates"
-type: arch
+name: "rust-service"
+description: "Two-phase handle+fut service pattern: init phase returns (handle, impl Future), separated init/runtime errors. Load when implementing service functions or working with impl Future service patterns"
+type: core
 scope: "global"
 ---
 
-# Service Pattern: Two-Phase Service Creation
+# Two-Phase Service Pattern (Handle + Future)
 
-**Applies to**: All crates under `crates/services/` **EXCEPT** `admin-api`
-
-## Pattern Overview
-
-Services in `crates/services/` follow a **two-phase functional initialization pattern**:
-
-1. **Phase 1: Initialization** - Setup, resource allocation, dependency resolution (sync or async)
-2. **Phase 2: Service Future** - Long-running service logic returned as `impl Future`
-
-This separation enables:
-- Early error detection (init phase fails fast)
-- Service composition via `tokio::select!`
-- Flexible lifecycle management
-- Clear separation of setup vs runtime errors
+**MANDATORY for all service functions returning `impl Future`**
 
 ## Core Pattern
 
@@ -161,15 +148,76 @@ pub async fn new(
 - Graceful shutdown via `shutdown_signal()`
 - Background task spawning with `AbortOnDropHandle`
 
-## Requirements Checklist for AI Agents
+## Anti-Patterns
 
-When implementing or modifying a service in `crates/services/`, ensure:
+### Exporting Internal Structs
+```rust
+// DON'T: Expose internal implementation
+pub struct Worker { /* ... */ }
 
-### Module Structure
-- [ ] Service module named `service` in `src/service.rs`
-- [ ] Export in `lib.rs`: `pub mod service;`
-- [ ] Internal implementation in `src/service/` subdirectory (if needed)
-- [ ] No public exports of internal `Worker`/`Service` structs
+impl Worker {
+    pub fn new() -> Self { /* ... */ }
+    pub async fn run(self) -> Result<(), Error> { /* ... */ }
+}
+```
+
+### Using `async fn` Return Type
+```rust
+// DON'T: This prevents proper type erasure
+pub async fn new() -> Result<(), Error> {
+    // ...
+}
+
+// DO: Return impl Future explicitly
+pub fn new() -> impl Future<Output = Result<(), Error>> {
+    async move {
+        // ...
+    }
+}
+```
+
+### Creating Dependencies Internally
+```rust
+// DON'T: Create dependencies inside the function
+pub fn new(config_path: &str) -> impl Future<Output = Result<(), Error>> {
+    async move {
+        let config = load_config(config_path)?; // Hidden dependency
+        // ...
+    }
+}
+
+// DO: Inject all dependencies
+pub fn new(config: Arc<Config>) -> impl Future<Output = Result<(), Error>> {
+    async move {
+        // ...
+    }
+}
+```
+
+### Mixing Init and Runtime Errors
+```rust
+// DON'T: Single error type for both phases
+pub async fn new() -> impl Future<Output = Result<(), Error>> {
+    // Initialization can fail but caller can't distinguish
+}
+
+// DO: Separate error types
+pub async fn new() -> Result<(Addr, impl Future<Output = Result<(), RuntimeError>>), InitError> {
+    // Init phase errors returned as InitError
+    let addr = bind().await?;
+
+    // Runtime phase errors in future
+    let fut = async move {
+        // Runtime errors returned as RuntimeError
+    };
+
+    Ok((addr, fut))
+}
+```
+
+## Checklist
+
+When implementing a service function with `impl Future`:
 
 ### Function Signature
 - [ ] `pub fn new()` or `pub async fn new()` (not a struct method)
@@ -192,97 +240,6 @@ When implementing or modifying a service in `crates/services/`, ensure:
 - [ ] With metadata: `Result<(Metadata, impl Future), InitError>`
 - [ ] HTTP servers: Return bound address + future
 
-## Service Composition Example
+## References
 
-Services are designed to compose via `tokio::select!`:
-
-```rust
-// In ampd/src/solo_cmd.rs
-let controller_fut = controller::service::new(config.clone(), meter.as_ref(), admin_addr).await?;
-let server_fut = server::service::new(config.clone(), metadata_db.clone(), flight_addr, jsonl_addr, meter.as_ref()).await?;
-let worker_fut = worker::service::new(worker_id, config.clone(), metadata_db, meter);
-
-// Compose services - all run concurrently, first error/completion wins
-tokio::select! {biased;
-    res = controller_fut => res.map_err(Error::ControllerRuntime)?,
-    res = worker_fut => res.map_err(Error::WorkerRuntime)?,
-    res = server_fut => res.map_err(Error::ServerRuntime)?,
-}
-```
-
-## Anti-Patterns to Avoid
-
-### ❌ Exporting Internal Structs
-```rust
-// DON'T: Expose internal implementation
-pub struct Worker { /* ... */ }
-
-impl Worker {
-    pub fn new() -> Self { /* ... */ }
-    pub async fn run(self) -> Result<(), Error> { /* ... */ }
-}
-```
-
-### ❌ Using `async fn` Return Type
-```rust
-// DON'T: This prevents proper type erasure
-pub async fn new() -> Result<(), Error> {
-    // ...
-}
-
-// DO: Return impl Future explicitly
-pub fn new() -> impl Future<Output = Result<(), Error>> {
-    async move {
-        // ...
-    }
-}
-```
-
-### ❌ Creating Dependencies Internally
-```rust
-// DON'T: Create dependencies inside the function
-pub fn new(config_path: &str) -> impl Future<Output = Result<(), Error>> {
-    async move {
-        let config = load_config(config_path)?; // ❌ Hidden dependency
-        // ...
-    }
-}
-
-// DO: Inject all dependencies
-pub fn new(config: Arc<Config>) -> impl Future<Output = Result<(), Error>> {
-    async move {
-        // ...
-    }
-}
-```
-
-### ❌ Mixing Init and Runtime Errors
-```rust
-// DON'T: Single error type for both phases
-pub async fn new() -> impl Future<Output = Result<(), Error>> {
-    // Initialization can fail but caller can't distinguish
-}
-
-// DO: Separate error types
-pub async fn new() -> Result<(Addr, impl Future<Output = Result<(), RuntimeError>>), InitError> {
-    // Init phase errors returned as InitError
-    let addr = bind().await?;
-
-    // Runtime phase errors in future
-    let fut = async move {
-        // Runtime errors returned as RuntimeError
-    };
-
-    Ok((addr, fut))
-}
-```
-
-## Reference Implementation
-
-**Current services implementing this pattern**:
-- `crates/services/worker/src/service.rs` - Sync init, event loop service
-- `crates/services/server/src/service.rs` - Async init, multiple servers, conditional startup
-- `crates/services/controller/src/service.rs` - Async init, HTTP server with router
-
-**Not a service** (different pattern):
-- `crates/services/admin-api` - Library providing HTTP handlers and router, not a standalone service
+- [services](services.md) - Related: Architectural service organization

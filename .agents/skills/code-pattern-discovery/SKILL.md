@@ -81,21 +81,25 @@ Read the full content of matched pattern docs using the Read tool.
 ### Pattern Types
 
 **Core Patterns** (`type: core`):
-- Error handling: "rust-error-handling", "error-reporting"
+- Error handling: "errors-handling", "errors-reporting"
 - Module organization: "rust-modules"
-- Type design: "rust-type-design"
-- Logging: "logging"
-- Documentation: "documentation"
+- Type design: "rust-types"
+- Logging: "logging", "logging-errors"
+- Documentation: "rust-documentation"
 - Testing: "test-functions", "test-files", "test-strategy"
+- CLI: "apps-cli"
+- Service pattern: "rust-service"
 
 **Architectural Patterns** (`type: arch`):
-- Service patterns: "services-pattern"
-- Workspace structure: "cargo-workspace-patterns"
+- Service architecture: "services"
+- Workspace structure: "rust-workspace"
+- Crate manifests: "rust-crate"
+- Data extraction: "extractors"
 
 **Crate-Specific Patterns** (`type: crate`):
-- Admin API: "admin-api-crate", "admin-api-security"
-- Metadata DB: "metadata-db-crate", "metadata-db-security"
-- Common: "udf-documentation"
+- Admin API: "crate-admin-api", "crate-admin-api-security"
+- Metadata DB: "crate-metadata-db", "crate-metadata-db-security"
+- Common: "crate-common-udf"
 
 **Meta Patterns** (`type: meta`):
 - Pattern format: "code-pattern-docs"
@@ -103,7 +107,7 @@ Read the full content of matched pattern docs using the Read tool.
 
 ### Exact Matches
 
-- User asks "how do I handle errors?" -> match `name: "rust-error-handling"`
+- User asks "how do I handle errors?" -> match `name: "errors-handling"`
 - User asks "module organization" -> match `name: "rust-modules"`
 - User working in `admin-api` crate -> match `scope: "crate:admin-api"`
 - User asks "how to write tests?" -> match "test-functions", "test-files", or "test-strategy"
@@ -112,7 +116,7 @@ Read the full content of matched pattern docs using the Read tool.
 
 - User asks "how do I log errors?" -> match description "Load when adding logs or debugging"
 - User asks "how to document functions?" -> match description "Load when documenting code or writing docs"
-- User creating a service -> match description "Load when creating or modifying service crates"
+- User creating a service -> match "rust-service" and "services"
 - User defining error types -> match description "Load when defining errors or handling error types"
 
 ### Scope-Based Matches
@@ -133,7 +137,7 @@ These tools/commands can run without user permission:
 
 Load multiple pattern docs when:
 - User task requires multiple aspects (e.g., error handling + logging)
-- Core patterns that commonly go together (e.g., error-reporting + rust-error-handling)
+- Core patterns that commonly go together (e.g., errors-reporting + errors-handling)
 - Crate-specific patterns should include related core patterns
 - User is implementing a complex feature requiring multiple patterns
 
@@ -141,12 +145,13 @@ Load multiple pattern docs when:
 
 **IMPORTANT**: This skill should be used proactively based on context:
 
-- **Before editing code**: Load relevant core patterns (error-handling, modules, type-design)
+- **Before editing code**: Load relevant core patterns (error-handling, modules, types)
 - **Before adding logs**: Load logging pattern
 - **Before writing tests**: Load test-functions, test-files, test-strategy
-- **Before documenting**: Load documentation pattern
-- **When creating crates**: Load cargo-workspace-patterns
-- **When creating services**: Load services-pattern
+- **Before documenting**: Load rust-documentation pattern
+- **When creating crates**: Load rust-workspace, rust-crate
+- **When creating services**: Load rust-service, services
+- **When working on extractors**: Load extractors
 - **Crate-specific work**: Load crate-specific patterns automatically
 
 ### When NOT to Use This Skill
@@ -164,8 +169,8 @@ Load multiple pattern docs when:
 
 1. Run the discovery command to extract all pattern metadata
 2. Match "error" against pattern names and descriptions
-3. Find matches: `rust-error-handling` and `error-reporting`
-4. Load both `docs/code/rust-error-handling.md` and `docs/code/error-reporting.md`
+3. Find matches: `errors-handling` and `errors-reporting`
+4. Load both `docs/code/errors-handling.md` and `docs/code/errors-reporting.md`
 5. Provide guidance from loaded patterns
 
 ### Example 2: User Working on Admin API
@@ -173,9 +178,9 @@ Load multiple pattern docs when:
 **Context**: User editing `crates/services/admin-api/src/handlers.rs`
 
 1. Run the discovery command to extract pattern metadata
-2. Match `scope: "crate:admin-api"` patterns
-3. Find matches: `admin-api-crate`, `admin-api-security`
-4. Load relevant core patterns: `rust-error-handling`, `logging`, `documentation`
+2. Match `scope: "crate:admin-api"` patterns (prefix: `crate-admin-api`)
+3. Find matches: `crate-admin-api`, `crate-admin-api-security`
+4. Load relevant core patterns: `errors-handling`, `logging`, `documentation`
 5. Load all matched pattern docs
 6. Provide context-aware guidance
 
@@ -195,8 +200,8 @@ Load multiple pattern docs when:
 
 1. Run the discovery command to extract pattern metadata
 2. Match "service" and "crate" against pattern descriptions
-3. Find matches: `services-pattern`, `cargo-workspace-patterns`
-4. Load both pattern docs
+3. Find matches: `rust-service`, `services`, `rust-workspace`, `rust-crate`
+4. Load all matched pattern docs
 5. Provide step-by-step guidance following patterns
 
 ### Example 5: No Specific Match
@@ -204,7 +209,7 @@ Load multiple pattern docs when:
 **Query**: "How should I structure this code?"
 
 1. Run the discovery command to extract pattern metadata
-2. Load general core patterns: `rust-modules`, `rust-type-design`, `rust-error-handling`
+2. Load general core patterns: `rust-modules`, `rust-types`, `errors-handling`
 3. Provide general guidance based on loaded patterns
 4. Ask clarifying questions if needed
 

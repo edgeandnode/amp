@@ -1,5 +1,5 @@
 ---
-name: "admin-api-crate"
+name: "crate-admin-api"
 description: "HTTP handler patterns using Axum and RequestError trait. Load when working on admin-api crate handlers or routes"
 type: crate
 scope: "crate:admin-api"
@@ -784,7 +784,7 @@ fn handler() -> Router {
 
 ### 🛡️ Security Requirements
 
-- **[security.md](./security.md)** - **🚨 MANDATORY SECURITY REVIEW** for all `admin-api` changes. Contains comprehensive security checklist covering HTTP API security, plain HTTP server requirements, input validation, injection prevention, and network isolation patterns.
+- **[crate-admin-api-security.md](./crate-admin-api-security.md)** - **🚨 MANDATORY SECURITY REVIEW** for all `admin-api` changes. Contains comprehensive security checklist covering HTTP API security, plain HTTP server requirements, input validation, injection prevention, and network isolation patterns.
 
 **Key Security Requirements:**
 1. **Input validation**: Always validate and sanitize input parameters using Axum extractors

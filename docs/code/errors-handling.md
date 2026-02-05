@@ -1,5 +1,5 @@
 ---
-name: "rust-error-handling"
+name: "errors-handling"
 description: "Error handling patterns, unwrap/expect prohibition, pattern matching. Load when handling errors or dealing with Result/Option types"
 type: core
 scope: "global"
@@ -234,7 +234,7 @@ Before committing Rust code, verify:
 ### Code Quality
 
 - [ ] Functions return `Result<T, E>` for all fallible operations
-- [ ] Error types provide rich context (see `error-reporting.md`)
+- [ ] Error types provide rich context (see `errors-reporting.md`)
 - [ ] No panic-inducing code without documentation and proof
 
 ## 🎓 RATIONALE
@@ -247,3 +247,6 @@ These patterns prioritize:
 4. **Test Clarity** - Tests that fail clearly with descriptive messages
 
 **Remember**: Every `.unwrap()` or `.expect()` in production code is a potential crash waiting to happen.
+
+## References
+- [errors-reporting](errors-reporting.md) - Related: Error type design patterns

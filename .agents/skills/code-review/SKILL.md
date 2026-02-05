@@ -35,7 +35,7 @@ Identify panic branches that cannot be locally proven to be unreachable:
 - Indexing operations
 - Panicking operations on external data
 
-**Note**: This overlaps with the error handling patterns documented in `docs/code/rust-error-handling.md`. Verify compliance with the project's error handling standards.
+**Note**: This overlaps with the error handling patterns documented in `docs/code/errors-handling.md`. Verify compliance with the project's error handling standards.
 
 ### 3. Dead Code
 
@@ -96,32 +96,60 @@ Evaluate test coverage and quality:
 
 ### 10. Coding Pattern Violations
 
-**Use `/code-pattern-discovery` to load relevant patterns based on the crates being modified, then verify the code changes comply with those patterns.**
+Review the changeset against coding pattern groups. Follow these three steps in order.
 
-**Process:**
+#### Step 1: Discover pattern groups
 
-1. **Identify affected crates**: Determine which crates are modified by the changes
-2. **Load patterns**: Invoke `/code-pattern-discovery` to load applicable patterns:
-   - Core patterns (error handling, module structure, type design)
-   - Architectural patterns (services, workspace structure)
-   - Crate-specific patterns (admin-api, metadata-db, etc.)
-3. **Review compliance**: Check the code changes against each loaded pattern
-4. **Flag violations**: Report any deviations from documented patterns
+Run the Glob tool with pattern `docs/code/*.md`. For each file, extract the **first kebab-case segment** of the filename (everything before the first `-`, or the whole name if there is no `-`). Group files that share the same first segment. Files whose first segment is unique form a single-file group.
 
-**Key patterns to verify** (loaded automatically by `/code-pattern-discovery`):
+Always include all non-crate groups. Only include `crate-<crate-name>` groups when the diff modifies files inside that crate's directory.
 
-- **Error handling**: Proper use of `Result<T, E>`, error types, error context
-- **Module structure**: Correct module organization and visibility
-- **Type design**: Appropriate use of newtypes, enums, and type aliases
-- **Services pattern**: Adherence to service architecture (if applicable)
-- **Security patterns**: For admin-api and metadata-db crates
-- **Testing patterns**: Test organization and coverage standards
-- **Documentation patterns**: UDF documentation for query layer (if applicable)
+Examples of current groups:
 
-**References:**
-- Pattern documentation: `docs/code/` directory
-- AGENTS.md: See [Coding Patterns](#2-coding-patterns) section
-- Use `/code-pattern-discovery` skill to load and review patterns dynamically
+- `errors` — errors-handling, errors-reporting
+- `rust` — rust-modules, rust-modules-members, rust-types, rust-documentation, rust-service, rust-crate, rust-workspace
+- `test` — test-strategy, test-files, test-functions
+- `logging` — logging, logging-errors
+- `apps` — apps-cli
+- `services` — services
+- `extractors` — extractors
+- `crate-<crate-name>` — all `crate-<crate-name>*` files for that crate (e.g., `crate-admin-api` includes crate-admin-api and crate-admin-api-security)
+
+#### Step 2: Spawn one Task agent per group — in parallel
+
+For **every** applicable group from Step 1, spawn a `general-purpose` Task agent. Send **all** Task tool calls in a single message so they run concurrently.
+
+Each agent's prompt MUST include:
+
+1. **Which pattern files to read** — list the full paths (e.g., `docs/code/errors-handling.md`, `docs/code/errors-reporting.md`).
+2. **How to obtain the diff** — instruct the agent to run `git diff main...HEAD` (or the appropriate base) via the Bash tool.
+3. **What to do** — read every pattern file in the group, then review the diff for violations of any rule described in those patterns.
+4. **What to return** — a list of violations, each with: file path, line number or range, the violated rule (quote or paraphrase), and a brief explanation. If no violations are found, return `No violations found for group: <group>`.
+
+Example prompt for the `errors` group:
+
+> You are a code-review agent. Your job is to check a code diff for violations of the coding patterns in your assigned group.
+>
+> **Your group**: errors
+>
+> **Step 1**: Read these pattern docs using the Read tool:
+> - `docs/code/errors-handling.md`
+> - `docs/code/errors-reporting.md`
+>
+> **Step 2**: Get the diff by running: `git diff main...HEAD`
+>
+> **Step 3**: Review every changed line in the diff against every rule in the pattern docs you read. Only flag actual violations — do not flag code that is compliant.
+>
+> **Step 4**: Return your findings as a list. Each item must include:
+> - File path and line number(s)
+> - The specific rule violated (quote or paraphrase from the pattern doc)
+> - Brief explanation of why it is a violation
+>
+> If no violations are found, return: `No violations found for group: errors`
+
+#### Step 3: Collect findings and report
+
+After all Task agents complete, compile their results into the review output. Deduplicate any overlapping findings. Omit groups that reported no violations.
 
 ### 11. Documentation Validation
 
@@ -162,7 +190,7 @@ Pattern violations should be treated seriously as they:
 - May introduce security vulnerabilities (in security-sensitive crates)
 - Conflict with established architectural decisions
 
-Always invoke `/code-pattern-discovery` before completing a code review to ensure pattern compliance.
+Always run the pattern violation review (section 10) as part of every code review.
 
 ### Review Priority
 

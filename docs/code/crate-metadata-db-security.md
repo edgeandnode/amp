@@ -1,5 +1,5 @@
 ---
-name: "metadata-db-security"
+name: "crate-metadata-db-security"
 description: "Security patterns for database operations, SQL injection prevention. Load when modifying metadata-db crate code"
 type: crate
 scope: "crate:metadata-db"
