@@ -414,7 +414,8 @@ fn known_ui_amount_mismatch(
                 continue;
             };
 
-            if (of1_amount - rpc_amount).abs() < 0.0001 {
+            let delta = (of1_amount - rpc_amount).abs();
+            if delta > 0.0 && delta < 0.0001 {
                 return true;
             }
         }
