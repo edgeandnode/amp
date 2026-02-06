@@ -38,7 +38,6 @@ dependencies = [
  "datafusion",
  "datasets-common",
  "datasets-derived",
- "dump",
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
@@ -69,7 +68,6 @@ name = "admin-client"
 version = "0.1.0"
 dependencies = [
  "datasets-common",
- "dump",
  "monitoring",
  "reqwest 0.13.1",
  "serde",
@@ -1113,7 +1111,6 @@ dependencies = [
  "console",
  "datasets-common",
  "datasets-derived",
- "dump",
  "evm-rpc-datasets",
  "firehose-datasets",
  "monitoring",
@@ -2953,7 +2950,6 @@ dependencies = [
  "async-trait",
  "axum",
  "datasets-common",
- "dump",
  "metadata-db",
  "monitoring",
  "opentelemetry-instrumentation-tower",

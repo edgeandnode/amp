@@ -1,6 +1,5 @@
 use datasets_common::{
-    dataset::{BlockNum, Table},
-    dataset_kind_str::DatasetKindStr,
+    block_num::BlockNum, dataset::Table, dataset_kind_str::DatasetKindStr,
     hash_reference::HashReference,
 };
 

@@ -108,6 +108,7 @@ use tracing::{Instrument, instrument};
 
 use crate::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    block_ranges::resolve_end_block,
     check::consistency_check,
     compaction::AmpCompactor,
     metrics,
@@ -230,8 +231,7 @@ pub async fn dump(
     tracing::info!("connected to provider: {provider_name}");
 
     let start = dataset.start_block().unwrap_or(0);
-    let resolved = end
-        .resolve(start, client.latest_block(finalized_blocks_only))
+    let resolved = resolve_end_block(&end, start, client.latest_block(finalized_blocks_only))
         .await
         .map_err(Error::ResolveEndBlock)?;
 

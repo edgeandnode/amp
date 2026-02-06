@@ -11,7 +11,7 @@ use amp_data_store::DataStore;
 use amp_dataset_store::{DatasetStore, ResolveRevisionError};
 use common::{
     BlockNum, BlockRange, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
-    ResumeWatermark, SPECIAL_BLOCK_NUM, Watermark,
+    ResumeWatermark, Watermark,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::{
         logical::LogicalTable,
@@ -24,7 +24,10 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use datasets_common::{dataset::Dataset, hash_reference::HashReference, network_id::NetworkId};
+use datasets_common::{
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, dataset::Dataset, hash_reference::HashReference,
+    network_id::NetworkId,
+};
 use datasets_derived::dataset::Dataset as DerivedDataset;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
@@ -324,7 +327,7 @@ impl StreamingQuery {
                 .schema()
                 .fields()
                 .iter()
-                .any(|f| f.name() == SPECIAL_BLOCK_NUM);
+                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME);
 
         // This plan is the starting point of each microbatch execution. Transformations applied to it:œ
         // - Propagate the `_block_num` column.

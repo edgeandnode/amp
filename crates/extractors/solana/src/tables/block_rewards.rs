@@ -2,8 +2,7 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
 use datasets_common::{
-    block_range::BlockRange,
-    dataset::{SPECIAL_BLOCK_NUM, Table},
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, dataset::Table,
     network_id::NetworkId,
 };
 use datasets_raw::{
@@ -28,7 +27,7 @@ pub fn table(network: NetworkId) -> Table {
 /// Prefer using the pre-computed [SCHEMA].
 fn schema() -> Schema {
     let fields = vec![
-        Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+        Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
         Field::new("slot", DataType::UInt64, false),
         Field::new("pubkey", DataType::Utf8, false),
         Field::new("lamports", DataType::Int64, false),

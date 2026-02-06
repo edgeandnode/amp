@@ -127,7 +127,7 @@ use tracing::{Instrument, instrument};
 
 use crate::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
-    block_ranges::{GetLatestBlockError, ResolutionError},
+    block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
     check::consistency_check,
     compaction::{AmpCompactor, AmpCompactorTaskError},
     metrics,
@@ -519,24 +519,23 @@ async fn dump_table(
             }
             let start = manifest_start_block.unwrap_or(dependency_earliest_block);
 
-            let resolved = end
-                .resolve(start, async {
-                    let query_ctx = QueryContext::for_catalog(
-                        catalog.clone(),
-                        env.clone(),
-                        ctx.data_store.clone(),
-                        false,
-                    )
+            let resolved = resolve_end_block(&end, start, async {
+                let query_ctx = QueryContext::for_catalog(
+                    catalog.clone(),
+                    env.clone(),
+                    ctx.data_store.clone(),
+                    false,
+                )
+                .await?;
+                let max_end_blocks = query_ctx
+                    .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
                     .await?;
-                    let max_end_blocks = query_ctx
-                        .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
-                        .await?;
-                    // For now, all materialized tables only support single networks.
-                    assert_eq!(max_end_blocks.len(), 1);
-                    Ok::<Option<BlockNum>, GetLatestBlockError>(max_end_blocks.into_values().next())
-                })
-                .await
-                .map_err(DumpTableSpawnError::ResolveEndBlock)?;
+                // For now, all materialized tables only support single networks.
+                assert_eq!(max_end_blocks.len(), 1);
+                Ok::<Option<BlockNum>, GetLatestBlockError>(max_end_blocks.into_values().next())
+            })
+            .await
+            .map_err(DumpTableSpawnError::ResolveEndBlock)?;
 
             let end = match resolved {
                 ResolvedEndBlock::Continuous => None,

@@ -6,8 +6,7 @@
 
 use ampctl::client::datasets::NodeSelector;
 use anyhow::{Result, anyhow};
-use datasets_common::{hash::Hash, reference::Reference};
-use dump::EndBlock;
+use datasets_common::{end_block::EndBlock, hash::Hash, reference::Reference};
 use serde_json::value::RawValue;
 use url::Url;
 
