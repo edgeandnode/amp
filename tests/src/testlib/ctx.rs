@@ -32,7 +32,6 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
-use common::BoxError;
 use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
 
@@ -41,10 +40,13 @@ use super::fixtures::{
     DaemonServer, DaemonWorker, FlightClient, JsonlClient, MetadataDb as MetadataDbFixture,
     builder as daemon_amp_dir_builder,
 };
-use crate::testlib::{
-    build_info,
-    config::{read_manifest_fixture, read_provider_fixture},
-    env_dir::TestEnvDir,
+use crate::{
+    BoxError,
+    testlib::{
+        build_info,
+        config::{read_manifest_fixture, read_provider_fixture},
+        env_dir::TestEnvDir,
+    },
 };
 
 enum AnvilMode {

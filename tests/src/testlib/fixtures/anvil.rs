@@ -17,10 +17,11 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use backon::{ConstantBuilder, Retryable as _};
-use common::{BlockNum, BoxError};
+use common::BlockNum;
 use tempfile::NamedTempFile;
 
 use super::contract_artifact::ContractArtifact;
+use crate::BoxError;
 
 /// Default retry interval for Anvil readiness checks.
 const ANVIL_RETRY_INTERVAL: Duration = Duration::from_millis(200);

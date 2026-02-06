@@ -2,10 +2,9 @@
 
 use std::path::PathBuf;
 
-use common::BoxError;
 use fs_err as fs;
 
-use crate::testlib::ctx::TestCtx;
+use crate::{BoxError, testlib::ctx::TestCtx};
 
 /// Test step that cleans up dump location directories.
 ///

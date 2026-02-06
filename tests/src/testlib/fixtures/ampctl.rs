@@ -5,11 +5,12 @@
 //! the ampctl admin API client for direct programmatic access.
 
 use ampctl::client::datasets::NodeSelector;
-use common::BoxError;
 use datasets_common::{hash::Hash, reference::Reference};
 use dump::EndBlock;
 use serde_json::value::RawValue;
 use url::Url;
+
+use crate::BoxError;
 
 /// ampctl fixture for registering dataset manifests and provider configurations.
 ///

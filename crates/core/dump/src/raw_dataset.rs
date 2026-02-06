@@ -91,7 +91,7 @@ use std::{
 
 use amp_data_store::DataStore;
 use common::{
-    BlockNum, BoxError, LogicalCatalog,
+    BlockNum, LogicalCatalog,
     catalog::{
         logical::LogicalTable,
         physical::{Catalog, MissingRangesError, PhysicalTable},
@@ -463,7 +463,7 @@ pub enum Error {
     /// Note: The `TryWaitAllError` type cannot use `#[source]` due to Rust trait system
     /// limitations with `BoxError`, but the error is displayed via `Display` implementation.
     #[error("Partition task failed: {0}")]
-    PartitionTask(TryWaitAllError<BoxError>),
+    PartitionTask(TryWaitAllError<RunRangeError>),
 
     /// Failure during blockchain client cleanup
     ///
@@ -532,7 +532,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
 
     // Spawn the writers, starting them with a 1-second delay between each.
     // Note that tasks spawned in the join set start executing immediately in parallel
-    let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
+    let mut join_set = FailFastJoinSet::<Result<(), RunRangeError>>::new();
     for writer in writers {
         let span = tracing::info_span!("dump_partition", partition_id = writer.id);
         join_set.spawn(writer.run().instrument(span));
@@ -545,7 +545,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             TryWaitAllError::Error(err) => {
                 tracing::error!(
                     error=%err,
-                    error_source=logging::error_source(&**err),
+                    error_source=logging::error_source(&err),
                     "dataset dump failed: partition task error"
                 );
             }
@@ -679,7 +679,7 @@ struct DumpPartition<S: BlockStreamer> {
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
-    async fn run(self) -> Result<(), BoxError> {
+    async fn run(self) -> Result<(), RunRangeError> {
         tracing::info!(
             "ranges to scan: {}",
             self.ranges

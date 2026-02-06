@@ -8,7 +8,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
-use common::BoxError;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{
@@ -16,6 +15,8 @@ use server::{
     service::{BoundAddrs, ServeError},
 };
 use tokio::task::JoinHandle;
+
+use crate::BoxError;
 
 /// Fixture for managing Amp daemon server instances in tests.
 ///

@@ -1,10 +1,8 @@
 //! Test step for executing SQL queries.
 
-use common::BoxError;
-
 // Re-export SqlTestResult from stream_take for compatibility
 pub use super::stream_take::SqlTestResult;
-use crate::testlib::fixtures::FlightClient;
+use crate::{BoxError, testlib::fixtures::FlightClient};
 
 /// Test step that executes SQL queries and validates results.
 ///

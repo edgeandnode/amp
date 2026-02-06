@@ -4,8 +4,9 @@
 //! JSON Lines server and parsing the responses. It handles the HTTP communication and
 //! JSON deserialization, making it easy to write tests that verify query results.
 
-use common::BoxError;
 use serde::de::DeserializeOwned;
+
+use crate::BoxError;
 
 /// JSONL client fixture for querying the Amp JSON Lines server.
 ///

@@ -28,8 +28,6 @@ pub use self::{
     query_context::{Error as QueryError, QueryContext},
 };
 
-pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
-
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;
 pub const EVM_ADDRESS_TYPE: DataType = DataType::FixedSizeBinary(20);

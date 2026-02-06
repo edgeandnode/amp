@@ -13,13 +13,15 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use common::{
-    BoxError, LogicalCatalog, QueryContext,
+    LogicalCatalog, QueryContext,
     catalog::{
         logical::LogicalTable,
         physical::{Catalog, PhysicalTable},
     },
 };
 use server::config::Config;
+
+use crate::BoxError;
 
 /// Snapshot context fixture for comparing dataset snapshots in tests.
 ///

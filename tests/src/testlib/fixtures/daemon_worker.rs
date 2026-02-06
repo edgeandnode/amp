@@ -8,13 +8,12 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
-use common::BoxError;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
 
-use crate::testlib::build_info::BuildInfo;
+use crate::{BoxError, testlib::build_info::BuildInfo};
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///

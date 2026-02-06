@@ -1,8 +1,6 @@
 //! Test step for triggering blockchain reorganizations on Anvil.
 
-use common::BoxError;
-
-use crate::testlib::ctx::TestCtx;
+use crate::{BoxError, testlib::ctx::TestCtx};
 
 /// Test step that triggers a blockchain reorganization on Anvil.
 ///

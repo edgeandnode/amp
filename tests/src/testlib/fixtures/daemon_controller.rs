@@ -10,12 +10,11 @@ use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
-use common::BoxError;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 
-use crate::testlib::build_info::BuildInfo;
+use crate::{BoxError, testlib::build_info::BuildInfo};
 
 /// Fixture for managing Amp daemon controller instances in tests.
 ///

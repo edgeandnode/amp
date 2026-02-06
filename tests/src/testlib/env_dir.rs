@@ -19,10 +19,10 @@
 
 use std::path::PathBuf;
 
-use common::BoxError;
 use tempfile::TempDir;
 
 use super::debug;
+use crate::BoxError;
 
 /// Wrapper around [`TempDir`] that provides a temporary test environment directory.
 ///

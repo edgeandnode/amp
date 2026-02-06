@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use common::{
-    BlockRange, BoxError, LogicalCatalog,
+    BlockRange, LogicalCatalog,
     arrow::array::RecordBatch,
     catalog::{
         logical::LogicalTable,
@@ -26,6 +26,7 @@ use dump::consistency_check;
 use worker::job::JobId;
 
 use super::fixtures::SnapshotContext;
+use crate::BoxError;
 
 /// Wait for a job to reach a completion state.
 ///

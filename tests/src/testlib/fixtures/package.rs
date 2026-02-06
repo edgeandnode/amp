@@ -6,12 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use common::BoxError;
-
 use super::{AmpCli, ContractArtifact};
-use crate::testlib::{
-    config::resolve_package_source_dir,
-    helpers::{forge, git},
+use crate::{
+    BoxError,
+    testlib::{
+        config::resolve_package_source_dir,
+        helpers::{forge, git},
+    },
 };
 
 /// Dataset package fixture for managing dataset operations.

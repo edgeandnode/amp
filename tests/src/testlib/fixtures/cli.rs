@@ -6,7 +6,7 @@
 
 use std::{path::Path, process::Stdio};
 
-use common::BoxError;
+use crate::BoxError;
 
 /// amp CLI fixture for executing dataset commands.
 ///
