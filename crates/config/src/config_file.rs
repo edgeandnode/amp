@@ -17,7 +17,9 @@
 //! | 1 (highest) | `AMP_CONFIG_*` env vars | `merge` — always wins |
 //! | 2 | TOML file values | `merge` — base configuration |
 //! | 3 | Deprecated flat keys (`metadata_db_url`, `dataset_defs_dir`) | `join` — fallback only |
-//! | 4 (lowest) | Caller-provided `ConfigDefaultsOverride`s | `join` — fallback only |
+//! | 4 | Server flag env vars (`AMP_FLIGHT_SERVER`, `AMP_JSONL_SERVER`, `AMP_ADMIN_SERVER`) | `join` — fallback only |
+//! | 5 | Deprecated env vars (`FLIGHT_SERVER`, `JSONL_SERVER`, `ADMIN_SERVER`) | `join` — fallback only |
+//! | 6 (lowest) | Caller-provided `ConfigDefaultsOverride`s | `join` — fallback only |
 //!
 //! ## Environment variables
 //!
@@ -25,7 +27,10 @@
 //! separate nested keys. For example, `AMP_CONFIG_METADATA_DB__URL` maps to
 //! `metadata_db.url` in the config file.
 
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use dump::{ConfigDuration, ParquetConfig};
 use figment::{
@@ -33,6 +38,16 @@ use figment::{
     providers::{Env, Format as _, Serialized, Toml},
 };
 use monitoring::config::OpenTelemetryConfig;
+
+/// Environment variable migrations for server enable flags.
+///
+/// Each tuple contains (new_name, deprecated_name, config_key). The new env var names
+/// use the `AMP_*` prefix for consistency with other CLI env vars (AMP_CONFIG, AMP_DIR, AMP_NODE_ID).
+const SERVER_FLAG_ENV_VARS: &[(&str, &str, &str)] = &[
+    ("AMP_FLIGHT_SERVER", "FLIGHT_SERVER", "flight_server"),
+    ("AMP_JSONL_SERVER", "JSONL_SERVER", "jsonl_server"),
+    ("AMP_ADMIN_SERVER", "ADMIN_SERVER", "admin_server"),
+];
 
 /// Default data directory name - stores Parquet files
 pub const DEFAULT_DATA_DIRNAME: &str = "data";
@@ -128,6 +143,25 @@ pub fn load(
         figment = figment.join(Serialized::default("manifests_dir", value));
     }
 
+    // Handle server flag env vars (AMP_FLIGHT_SERVER, etc.) and their deprecated names
+    // Priority: TOML/AMP_CONFIG_* (already merged above) > AMP_*_SERVER > FLIGHT_SERVER (deprecated)
+    for (new_env, deprecated_env, config_key) in SERVER_FLAG_ENV_VARS {
+        // Check new env var first (AMP_FLIGHT_SERVER)
+        if let Ok(value) = env::var(new_env) {
+            let bool_value = parse_bool_env(&value);
+            figment = figment.join(Serialized::default(config_key, bool_value));
+        }
+        // Fall back to deprecated env var (FLIGHT_SERVER) with warning
+        else if let Ok(value) = env::var(deprecated_env) {
+            tracing::warn!(
+                "environment variable `{deprecated_env}` is deprecated; \
+                use `{new_env}` instead"
+            );
+            let bool_value = parse_bool_env(&value);
+            figment = figment.join(Serialized::default(config_key, bool_value));
+        }
+    }
+
     // Caller-provided ConfigDefaultsOverride (lowest priority — fills gaps only)
     for ConfigDefaultsOverride(provider) in defaults {
         figment = figment.join(provider);
@@ -186,6 +220,17 @@ pub struct ConfigFile {
     pub jsonl_addr: Option<String>,
     /// Admin API server address (default: "0.0.0.0:1610")
     pub admin_api_addr: Option<String>,
+
+    // Service enable flags (for solo/server modes)
+    /// Enable Arrow Flight RPC server (default: false, env: AMP_FLIGHT_SERVER)
+    #[serde(default)]
+    pub flight_server: bool,
+    /// Enable JSON Lines server (default: false, env: AMP_JSONL_SERVER)
+    #[serde(default)]
+    pub jsonl_server: bool,
+    /// Enable Admin API server (default: false, env: AMP_ADMIN_SERVER)
+    #[serde(default)]
+    pub admin_server: bool,
 
     // Observability
     pub opentelemetry: Option<OpenTelemetryConfig>,
@@ -246,3 +291,8 @@ fn default_keep_alive_interval() -> u64 {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to load configuration file")]
 pub struct LoadConfigFileError(#[source] pub Box<figment::Error>);
+
+/// Parses a string as a boolean. Truthy values: "1", "true", "yes", "on" (case-insensitive).
+fn parse_bool_env(value: &str) -> bool {
+    matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}

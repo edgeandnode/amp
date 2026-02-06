@@ -34,6 +34,32 @@ The following optional configuration keys allow you to control the hostname and 
 - `jsonl_addr`: JSON Lines server address (default: `0.0.0.0:1603`)
 - `admin_api_addr`: Admin API server address (default: `0.0.0.0:1610`)
 
+# Service enable flags
+
+These boolean flags control which services are started. They can be set via config file, environment variables, or CLI flags. CLI flags take precedence over config/env values.
+
+| Config Key | Environment Variable | CLI Flag | Description |
+|------------|---------------------|----------|-------------|
+| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server` | Enable Arrow Flight RPC server |
+| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server` | Enable JSON Lines server |
+| `admin_server` | `AMP_ADMIN_SERVER` | `--admin-server` | Enable Admin API server (solo mode only) |
+
+**Default behavior:** If none of these flags are explicitly set (via any method), all applicable services are enabled by default. Setting any flag explicitly means only the flagged services will start.
+
+**Precedence:** CLI flag > Config file / Environment variable
+
+**Environment variable values:** Accepts `1`, `true`, `yes`, `on` (case-insensitive) as truthy values.
+
+### Deprecated environment variables
+
+The following environment variable names are deprecated and will emit warnings. They continue to work for backward compatibility:
+
+| Deprecated | Replacement |
+|------------|-------------|
+| `FLIGHT_SERVER` | `AMP_FLIGHT_SERVER` |
+| `JSONL_SERVER` | `AMP_JSONL_SERVER` |
+| `ADMIN_SERVER` | `AMP_ADMIN_SERVER` |
+
 ## Logging
 
 Simplified control of the logging verbosity level is offered by the `AMP_LOG` env var. It accepts

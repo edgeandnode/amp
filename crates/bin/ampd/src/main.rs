@@ -35,23 +35,23 @@ enum Command {
         /// If `--config` is not provided, searches for `config.toml` within this directory.
         #[arg(long, env = "AMP_DIR")]
         amp_dir: Option<PathBuf>,
-        /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "AMP_FLIGHT_SERVER")]
+        /// Enable Arrow Flight RPC Server (env: AMP_FLIGHT_SERVER).
+        #[arg(long)]
         flight_server: bool,
-        /// Enable JSON Lines Server.
-        #[arg(long, env = "AMP_JSONL_SERVER")]
+        /// Enable JSON Lines Server (env: AMP_JSONL_SERVER).
+        #[arg(long)]
         jsonl_server: bool,
-        /// Enable Admin API Server.
-        #[arg(long, env = "AMP_ADMIN_SERVER")]
+        /// Enable Admin API Server (env: AMP_ADMIN_SERVER).
+        #[arg(long)]
         admin_server: bool,
     },
     /// Run query server (Arrow Flight, JSON Lines)
     Server {
-        /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "AMP_FLIGHT_SERVER")]
+        /// Enable Arrow Flight RPC Server (env: AMP_FLIGHT_SERVER).
+        #[arg(long)]
         flight_server: bool,
-        /// Enable JSON Lines Server.
-        #[arg(long, env = "AMP_JSONL_SERVER")]
+        /// Enable JSON Lines Server (env: AMP_JSONL_SERVER).
+        #[arg(long)]
         jsonl_server: bool,
     },
     /// Run a distributed worker node
@@ -68,9 +68,6 @@ enum Command {
 
 #[tokio::main]
 async fn main() {
-    // Migrate deprecated env vars before clap parsing
-    migrate_deprecated_env_vars();
-
     if let Err(err) = main_inner().await {
         // Manually print the error so we can control the format.
         let err = error_with_causes(&err);
@@ -104,16 +101,10 @@ async fn main_inner() -> Result<(), Error> {
     match command {
         Command::Solo {
             amp_dir,
-            mut flight_server,
-            mut jsonl_server,
-            mut admin_server,
+            flight_server,
+            jsonl_server,
+            admin_server,
         } => {
-            if !flight_server && !jsonl_server && !admin_server {
-                flight_server = true;
-                jsonl_server = true;
-                admin_server = true;
-            }
-
             // Resolve the amp state directory, creating it if needed.
             let amp_dir = match amp_dir {
                 Some(dir) => dir,
@@ -147,17 +138,21 @@ async fn main_inner() -> Result<(), Error> {
             Ok(())
         }
         Command::Server {
-            mut flight_server,
-            mut jsonl_server,
+            flight_server: cli_flight_server,
+            jsonl_server: cli_jsonl_server,
         } => {
-            // If neither of the flags are set, enable both servers
+            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
+            let config = config::load(config_path).map_err(Error::LoadConfig)?;
+
+            // Merge CLI flags with config values (CLI takes precedence)
+            let mut flight_server = cli_flight_server || config.flight_server;
+            let mut jsonl_server = cli_jsonl_server || config.jsonl_server;
+
+            // If neither flag is set (CLI or config), enable both servers
             if !flight_server && !jsonl_server {
                 flight_server = true;
                 jsonl_server = true;
             }
-
-            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
-            let config = config::load(config_path).map_err(Error::LoadConfig)?;
             let metadata_db_config = amp_config::metadb::load(config_path, None)
                 .ok_or(Error::MissingMetadataDbConfig)?;
             let addrs = config.server_addrs.clone();
@@ -311,32 +306,5 @@ fn error_with_causes(err: &dyn std::error::Error) -> String {
         err.to_string()
     } else {
         format!("{} | Caused by: {}", err, error_chain.join(" -> "))
-    }
-}
-
-/// Migrates deprecated environment variables to their new names.
-///
-/// This function checks for deprecated env var names and copies their values
-/// to the new standardized names (with `AMP_` prefix), emitting a warning.
-/// This provides backward compatibility during the deprecation period.
-///
-/// Call this before clap parsing so the new env var names are available.
-fn migrate_deprecated_env_vars() {
-    const MIGRATIONS: &[(&str, &str)] = &[
-        ("FLIGHT_SERVER", "AMP_FLIGHT_SERVER"),
-        ("JSONL_SERVER", "AMP_JSONL_SERVER"),
-        ("ADMIN_SERVER", "AMP_ADMIN_SERVER"),
-    ];
-
-    for (old, new) in MIGRATIONS {
-        if let Ok(val) = env::var(old)
-            && env::var(new).is_err()
-        {
-            // SAFETY: This runs at startup before any threads are spawned,
-            // so there are no concurrent accesses to the environment.
-            unsafe { env::set_var(new, &val) };
-            // We use eprintln! because tracing isn't initialized yet (runs before clap parsing).
-            eprintln!("Warning: environment variable {old} is deprecated, use {new} instead");
-        }
     }
 }

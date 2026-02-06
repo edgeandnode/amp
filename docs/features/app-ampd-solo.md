@@ -55,6 +55,22 @@ Solo mode runs all three ampd services in a single process: query server (Flight
 
 Solo mode supports an optional `--config` (or `AMP_CONFIG`) file. If no config is provided, it auto-discovers `<amp_dir>/config.toml` and falls back to zero-config defaults. See [app-ampd-solo-ampdir](app-ampd-solo-ampdir.md) for amp dir and config discovery details.
 
+### Service Enable Flags
+
+Control which services are started via CLI flags, config file, or environment variables. CLI flags take precedence.
+
+| Config Key | Environment Variable | CLI Flag | Description |
+|------------|---------------------|----------|-------------|
+| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server` | Enable Arrow Flight server |
+| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server` | Enable JSON Lines server |
+| `admin_server` | `AMP_ADMIN_SERVER` | `--admin-server` | Enable Admin API server |
+
+**Default behavior:** If no flags are explicitly set (via any method), all services are enabled.
+
+**Environment variable values:** Accepts `1`, `true`, `yes`, `on` (case-insensitive).
+
+**Deprecated environment variables:** `FLIGHT_SERVER`, `JSONL_SERVER`, `ADMIN_SERVER` still work but emit warnings. Use the `AMP_*` prefixed versions instead.
+
 ## Usage
 
 ### Default Behavior

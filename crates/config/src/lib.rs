@@ -103,6 +103,9 @@ fn resolve_config(
         config_path,
         poll_interval: config_file.poll_interval_secs.into(),
         keep_alive_interval: config_file.keep_alive_interval,
+        flight_server: config_file.flight_server,
+        jsonl_server: config_file.jsonl_server,
+        admin_server: config_file.admin_server,
     })
 }
 
@@ -219,6 +222,12 @@ pub struct Config {
     pub poll_interval: Duration,
     /// Keep-alive interval for streaming server (in seconds).
     pub keep_alive_interval: u64,
+    /// Enable Arrow Flight RPC server (env: AMP_FLIGHT_SERVER).
+    pub flight_server: bool,
+    /// Enable JSON Lines server (env: AMP_JSONL_SERVER).
+    pub jsonl_server: bool,
+    /// Enable Admin API server (env: AMP_ADMIN_SERVER).
+    pub admin_server: bool,
 }
 
 impl Config {
