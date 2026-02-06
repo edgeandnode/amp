@@ -1,6 +1,7 @@
 //! Test step for taking data from registered streams.
+use anyhow::Result;
 
-use crate::{BoxError, testlib::fixtures::FlightClient};
+use crate::testlib::fixtures::FlightClient;
 
 /// Test step that takes a specified number of rows from a registered stream.
 ///
@@ -24,7 +25,7 @@ impl Step {
     ///
     /// Retrieves the specified number of rows from the named stream using
     /// the Flight client, then validates the actual results against expected results.
-    pub async fn run(&self, client: &mut FlightClient) -> Result<(), BoxError> {
+    pub async fn run(&self, client: &mut FlightClient) -> Result<()> {
         tracing::debug!("Taking {} rows from stream '{}'", self.take, self.stream);
 
         let actual_result = client.take_from_stream(&self.stream, self.take).await;
@@ -58,8 +59,8 @@ impl SqlTestResult {
     /// For failure cases, checks that the error message contains the expected substring.
     pub(crate) fn assert_eq(
         &self,
-        actual_result: Result<(serde_json::Value, usize), BoxError>,
-    ) -> Result<(), BoxError> {
+        actual_result: Result<(serde_json::Value, usize)>,
+    ) -> Result<()> {
         match self {
             SqlTestResult::Success {
                 results: expected_json_str,

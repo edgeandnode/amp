@@ -17,6 +17,7 @@ amp-client = { path = "../crates/clients/flight" }
 amp-data-store = { path = "../crates/core/data-store" }
 amp-object-store = { path = "../crates/core/object-store" }
 ampctl = { path = "../crates/bin/ampctl" }
+anyhow.workspace = true
 arrow-flight.workspace = true
 backon.workspace = true
 clap.workspace = true
@@ -62,6 +63,7 @@ tracing.workspace = true
 url.workspace = true
 verification = { path = "../crates/core/verification" }
 worker = { path = "../crates/services/worker" }
+
 
 [build-dependencies]
 vergen-gitcl = { version = "9.1.0", features = ["build"] }

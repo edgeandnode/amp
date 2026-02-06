@@ -8,6 +8,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
+use anyhow::Result;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{
@@ -15,8 +16,6 @@ use server::{
     service::{BoundAddrs, ServeError},
 };
 use tokio::task::JoinHandle;
-
-use crate::BoxError;
 
 /// Fixture for managing Amp daemon server instances in tests.
 ///
@@ -48,8 +47,8 @@ impl DaemonServer {
         meter: Option<Meter>,
         enable_flight: bool,
         enable_jsonl: bool,
-    ) -> Result<Self, BoxError> {
-        let flight_at = if enable_flight {
+    ) -> Result<Self> {
+        let flight_at: Option<SocketAddr> = if enable_flight {
             Some(config.server_addrs.flight_addr)
         } else {
             None

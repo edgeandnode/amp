@@ -6,9 +6,8 @@
 use std::path::Path;
 
 use alloy::{hex, json_abi::JsonAbi, primitives::Bytes};
+use anyhow::{Result, anyhow};
 use fs_err as fs;
-
-use crate::BoxError;
 
 /// Contract artifact loaded from a Forge compilation output JSON file.
 ///
@@ -27,12 +26,12 @@ impl ContractArtifact {
     ///
     /// The artifact_path should point to a file like `out/Counter.sol/Counter.json`
     /// produced by `forge build`. Extracts the ABI and bytecode for deployment.
-    pub fn load(path: &Path) -> Result<Self, BoxError> {
+    pub fn load(path: &Path) -> Result<Self> {
         tracing::debug!(path = %path.display(), "Loading contract artifact");
 
         // Read and parse the forge artifact JSON
         let artifact_json = fs::read_to_string(path).map_err(|err| {
-            format!(
+            anyhow!(
                 "Failed to read artifact file at '{}': {}",
                 path.display(),
                 err
@@ -40,7 +39,7 @@ impl ContractArtifact {
         })?;
 
         let artifact: ForgeArtifact = serde_json::from_str(&artifact_json).map_err(|err| {
-            format!(
+            anyhow!(
                 "Failed to parse artifact JSON from '{}': {}",
                 path.display(),
                 err
@@ -55,7 +54,7 @@ impl ContractArtifact {
             .unwrap_or(&artifact.bytecode.object);
         let bytecode = Bytes::from(
             hex::decode(bytecode_hex)
-                .map_err(|err| format!("Failed to decode bytecode hex: {}", err))?,
+                .map_err(|err| anyhow!("Failed to decode bytecode hex: {}", err))?,
         );
 
         tracing::debug!(
@@ -74,15 +73,15 @@ impl ContractArtifact {
     ///
     /// Returns the 4-byte function selector as bytes.
     /// If multiple overloaded functions exist, returns the selector for the first one.
-    pub fn function_selector(&self, function_name: &str) -> Result<Bytes, BoxError> {
+    pub fn function_selector(&self, function_name: &str) -> Result<Bytes> {
         let functions = self
             .abi
             .function(function_name)
-            .ok_or_else(|| format!("Function '{}' not found in contract ABI", function_name))?;
+            .ok_or_else(|| anyhow!("Function '{}' not found in contract ABI", function_name))?;
 
         let function = functions
             .first()
-            .ok_or_else(|| format!("Function '{}' exists but has no entries", function_name))?;
+            .ok_or_else(|| anyhow!("Function '{}' exists but has no entries", function_name))?;
 
         let selector = function.selector();
         Ok(Bytes::from(selector.to_vec()))
@@ -92,7 +91,7 @@ impl ContractArtifact {
     ///
     /// Returns the 4-byte function selector as a hex string (without 0x prefix).
     /// If multiple overloaded functions exist, returns the selector for the first one.
-    pub fn function_selector_hex(&self, function_name: &str) -> Result<String, BoxError> {
+    pub fn function_selector_hex(&self, function_name: &str) -> Result<String> {
         let selector_bytes = self.function_selector(function_name)?;
         Ok(hex::encode(selector_bytes))
     }

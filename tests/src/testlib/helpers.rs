@@ -11,6 +11,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
+use anyhow::{Result, anyhow};
 use common::{
     BlockRange, LogicalCatalog,
     arrow::array::RecordBatch,
@@ -26,7 +27,6 @@ use dump::consistency_check;
 use worker::job::JobId;
 
 use super::fixtures::SnapshotContext;
-use crate::BoxError;
 
 /// Wait for a job to reach a completion state.
 ///
@@ -65,7 +65,7 @@ pub async fn wait_for_job_completion(
     is_continuous: bool,
     timeout: Duration,
     poll_interval: Duration,
-) -> Result<ampctl::client::jobs::JobInfo, BoxError> {
+) -> Result<ampctl::client::jobs::JobInfo> {
     let start = tokio::time::Instant::now();
 
     loop {
@@ -73,18 +73,18 @@ pub async fn wait_for_job_completion(
             .jobs()
             .get(&job_id)
             .await?
-            .ok_or_else(|| format!("Job {} not found", job_id))?;
+            .ok_or_else(|| anyhow!("Job {} not found", job_id))?;
 
         match job_info.status.as_str() {
             "RUNNING" if is_continuous => return Ok(job_info),
             "COMPLETED" | "STOPPED" | "FAILED" => return Ok(job_info),
             _ => {
                 if start.elapsed() > timeout {
-                    return Err(format!(
+                    return Err(anyhow!(
                         "Timeout waiting for job {} to complete (status: {})",
-                        job_id, job_info.status
-                    )
-                    .into());
+                        job_id,
+                        job_info.status
+                    ));
                 }
                 tokio::time::sleep(poll_interval).await;
             }
@@ -131,7 +131,7 @@ pub async fn deploy_and_wait(
     dataset_ref: &Reference,
     end_block: Option<u64>,
     timeout: Duration,
-) -> Result<ampctl::client::jobs::JobInfo, BoxError> {
+) -> Result<ampctl::client::jobs::JobInfo> {
     let is_continuous = end_block.is_none();
     let job_id = ampctl
         .dataset_deploy(
@@ -180,7 +180,7 @@ pub async fn load_physical_tables(
     dataset_store: &DatasetStore,
     data_store: &DataStore,
     dataset_ref: &Reference,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+) -> Result<Vec<Arc<PhysicalTable>>> {
     let dataset_ref = dataset_store
         .resolve_revision(&dataset_ref)
         .await
@@ -221,10 +221,7 @@ pub async fn load_physical_tables(
 /// all registered files in the metadata database actually exist in the object
 /// store, and that no extra files are present. This helps detect data corruption
 /// or synchronization issues between metadata and storage.
-pub async fn check_table_consistency(
-    table: &Arc<PhysicalTable>,
-    store: &DataStore,
-) -> Result<(), BoxError> {
+pub async fn check_table_consistency(table: &Arc<PhysicalTable>, store: &DataStore) -> Result<()> {
     consistency_check(table, store).await.map_err(Into::into)
 }
 
@@ -244,7 +241,7 @@ pub async fn restore_dataset_snapshot(
     dataset_store: &DatasetStore,
     data_store: &DataStore,
     dataset_ref: &Reference,
-) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+) -> Result<Vec<Arc<PhysicalTable>>> {
     // 1. Restore via Admin API (indexes files into metadata DB)
     let restored_info = ampctl.restore_dataset(dataset_ref).await?;
 
@@ -258,7 +255,7 @@ pub async fn restore_dataset_snapshot(
     let dataset_ref = dataset_store
         .resolve_revision(dataset_ref)
         .await?
-        .ok_or_else(|| format!("dataset '{}' not found", dataset_ref))?;
+        .ok_or_else(|| anyhow!("dataset '{}' not found", dataset_ref))?;
     let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
     // 3. Load PhysicalTable objects for each restored table
@@ -271,9 +268,10 @@ pub async fn restore_dataset_snapshot(
             .iter()
             .find(|info| info.table_name == table_name)
             .ok_or_else(|| {
-                format!(
+                anyhow!(
                     "Table '{}' not found in restored tables for dataset '{}'",
-                    table_name, dataset_ref
+                    table_name,
+                    dataset_ref
                 )
             })?;
 
@@ -289,7 +287,7 @@ pub async fn restore_dataset_snapshot(
             .get_table_active_revision(dataset.reference(), table_def.name())
             .await?
             .ok_or_else(|| {
-                format!(
+                anyhow!(
                     "Failed to load active PhysicalTable for '{}' after restoration. \
                     This indicates the restore operation did not properly activate the table.",
                     table_name
@@ -435,7 +433,7 @@ pub async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &DatasetStore,
     data_store: &DataStore,
-) -> Result<Catalog, BoxError> {
+) -> Result<Catalog> {
     let dataset_ref = {
         let reference: Reference = format!("_/{dataset_name}@latest")
             .parse()
@@ -443,7 +441,7 @@ pub async fn catalog_for_dataset(
         dataset_store
             .resolve_revision(&reference)
             .await?
-            .ok_or_else(|| format!("dataset '{}' not found", reference))?
+            .ok_or_else(|| anyhow!("dataset '{}' not found", reference))?
     };
 
     let dataset = dataset_store.get_dataset(&dataset_ref).await?;

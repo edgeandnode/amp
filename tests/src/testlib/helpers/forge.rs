@@ -8,14 +8,14 @@ use std::{
     process::Stdio,
 };
 
-use crate::BoxError;
+use anyhow::{Result, anyhow};
 
 /// Compile Solidity contracts using Foundry's forge build.
 ///
 /// Runs `forge build` in the specified contracts directory and returns paths
 /// to the build output directories. Requires Foundry installed and git
 /// submodules initialized (use `git::init_submodules` first).
-pub async fn build(contracts_dir: &Path) -> Result<ForgeBuildOutput, BoxError> {
+pub async fn build(contracts_dir: &Path) -> Result<ForgeBuildOutput> {
     tracing::debug!(
         dir = %contracts_dir.display(),
         "Compiling Solidity contracts with forge build"
@@ -32,13 +32,12 @@ pub async fn build(contracts_dir: &Path) -> Result<ForgeBuildOutput, BoxError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
+        return Err(anyhow!(
             "Failed to compile contracts in '{}': {}\n{}",
             contracts_dir.display(),
             stderr.trim(),
             stdout.trim()
-        )
-        .into());
+        ));
     }
 
     let out_dir = contracts_dir.join("out");
@@ -57,7 +56,7 @@ pub async fn build(contracts_dir: &Path) -> Result<ForgeBuildOutput, BoxError> {
 ///
 /// Runs `forge clean` to remove the `out/` and `cache/` directories,
 /// forcing a fresh compilation on the next build.
-pub async fn clean(contracts_dir: &Path) -> Result<(), BoxError> {
+pub async fn clean(contracts_dir: &Path) -> Result<()> {
     tracing::debug!(
         dir = %contracts_dir.display(),
         "Cleaning forge build artifacts"
@@ -73,12 +72,11 @@ pub async fn clean(contracts_dir: &Path) -> Result<(), BoxError> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
+        return Err(anyhow!(
             "Failed to clean contracts in '{}': {}",
             contracts_dir.display(),
             stderr.trim()
-        )
-        .into());
+        ));
     }
 
     Ok(())

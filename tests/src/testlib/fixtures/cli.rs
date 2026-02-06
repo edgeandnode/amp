@@ -6,7 +6,7 @@
 
 use std::{path::Path, process::Stdio};
 
-use crate::BoxError;
+use anyhow::{Result, anyhow};
 
 /// amp CLI fixture for executing dataset commands.
 ///
@@ -39,7 +39,7 @@ impl AmpCli {
     /// Runs `pnpm amp build` in the specified dataset directory.
     /// Optionally accepts a config file parameter.
     #[tracing::instrument(skip_all, err)]
-    pub async fn build(&self, path: &Path, config: Option<&str>) -> Result<(), BoxError> {
+    pub async fn build(&self, path: &Path, config: Option<&str>) -> Result<()> {
         tracing::debug!(
             "Running 'amp build' in `{}` with config: {:?}",
             path.to_string_lossy(),
@@ -66,7 +66,7 @@ impl AmpCli {
         dataset_path: &Path,
         tag: impl Into<Option<&str>>,
         config: Option<&str>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<()> {
         let tag = tag.into();
         tracing::debug!(
             "Running 'amp register' in `{}` with tag: {:?}, config: {:?}",
@@ -104,7 +104,7 @@ impl AmpCli {
         reference: Option<&str>,
         end_block: Option<u64>,
         config: Option<&str>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<()> {
         tracing::debug!(
             "Running 'amp deploy' in `{}` with reference: {:?}, end block: {:?}, config: {:?}",
             path.to_string_lossy(),
@@ -146,7 +146,7 @@ async fn run_amp_command(
     path: &Path,
     args: &[&str],
     command_name: &str,
-) -> Result<(), BoxError> {
+) -> Result<()> {
     tracing::debug!("Executing amp command");
 
     let output = tokio::process::Command::new("pnpm")
@@ -169,7 +169,7 @@ async fn run_amp_command(
             output.status,
             combined_output.trim()
         );
-        return Err(BoxError::from(error_msg));
+        return Err(anyhow!(error_msg));
     }
 
     Ok(())

@@ -55,7 +55,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::BoxError;
+use anyhow::{Result, anyhow};
 
 /// Source directories to search for dataset manifests
 const DATASET_MANIFESTS_FIXTURE_DIRS: [&str; 2] = ["tests/config/manifests", "config/manifests"];
@@ -137,13 +137,13 @@ fn resolve_fixture_source_dir(fixture_dirs: &[&str], name: &Path) -> Option<Path
 /// Returns an error if:
 /// - The manifest file cannot be found in any of the predefined fixture directories
 /// - The file cannot be read
-pub(super) async fn read_manifest_fixture(manifest_name: &str) -> Result<String, BoxError> {
+pub(super) async fn read_manifest_fixture(manifest_name: &str) -> Result<String> {
     let mut path = PathBuf::from(manifest_name);
     path.set_extension("json");
 
     // Resolve source directory by searching known fixture locations
     let source_file_path = resolve_dataset_manifest_source_file(&path).ok_or_else(|| {
-        format!(
+        anyhow!(
             "Could not find dataset manifest fixture '{}'",
             manifest_name
         )
@@ -155,7 +155,7 @@ pub(super) async fn read_manifest_fixture(manifest_name: &str) -> Result<String,
     let content = tokio::fs::read_to_string(&source_file_path)
         .await
         .map_err(|err| {
-            format!(
+            anyhow!(
                 "Failed to read manifest fixture '{}': {}",
                 source_file_path.display(),
                 err
@@ -177,13 +177,13 @@ pub(super) async fn read_manifest_fixture(manifest_name: &str) -> Result<String,
 /// Returns an error if:
 /// - The provider file cannot be found in any of the predefined fixture directories
 /// - The file cannot be read
-pub(super) async fn read_provider_fixture(provider_name: &str) -> Result<String, BoxError> {
+pub(super) async fn read_provider_fixture(provider_name: &str) -> Result<String> {
     let mut path = PathBuf::from(provider_name);
     path.set_extension("toml");
 
     // Resolve source directory by searching known fixture locations
     let source_file_path = resolve_provider_config_source_file(&path)
-        .ok_or_else(|| format!("Could not find provider config fixture '{}'", provider_name))?;
+        .ok_or_else(|| anyhow!("Could not find provider config fixture '{}'", provider_name))?;
 
     tracing::debug!("Reading provider fixture: {}", source_file_path.display());
 
@@ -191,7 +191,7 @@ pub(super) async fn read_provider_fixture(provider_name: &str) -> Result<String,
     let content = tokio::fs::read_to_string(&source_file_path)
         .await
         .map_err(|err| {
-            format!(
+            anyhow!(
                 "Failed to read provider fixture '{}': {}",
                 source_file_path.display(),
                 err

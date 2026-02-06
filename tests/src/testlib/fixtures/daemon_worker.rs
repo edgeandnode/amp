@@ -8,12 +8,13 @@ use std::sync::Arc;
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
+use anyhow::Result;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
 
-use crate::{BoxError, testlib::build_info::BuildInfo};
+use crate::testlib::build_info::BuildInfo;
 
 /// Fixture for managing Amp daemon worker instances in tests.
 ///
@@ -43,7 +44,7 @@ impl DaemonWorker {
         dataset_store: DatasetStore,
         meter: Option<Meter>,
         node_id: NodeId,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self> {
         let worker_config = worker_config_from_common(&config);
         let worker_fut = worker::service::new(
             worker_config.clone(),
@@ -54,8 +55,7 @@ impl DaemonWorker {
             meter,
             node_id.clone(),
         )
-        .await
-        .map_err(Box::new)?;
+        .await?;
         let worker_task = tokio::spawn(worker_fut);
 
         Ok(Self {

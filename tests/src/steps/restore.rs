@@ -1,11 +1,9 @@
 //! Test step for restoring dataset snapshots.
 
+use anyhow::Result;
 use datasets_common::reference::Reference;
 
-use crate::{
-    BoxError,
-    testlib::{ctx::TestCtx, helpers as test_helpers},
-};
+use crate::testlib::{ctx::TestCtx, helpers as test_helpers};
 
 /// Test step that restores dataset snapshots from storage.
 ///
@@ -25,7 +23,7 @@ impl Step {
     ///
     /// Uses the test helper functions to restore a dataset snapshot from
     /// storage back into the metadata database via the Admin API.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!("Restoring dataset snapshot '{}'", self.snapshot_name);
 
         let ampctl = ctx.new_ampctl();

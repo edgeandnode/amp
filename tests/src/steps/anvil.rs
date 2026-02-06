@@ -1,6 +1,8 @@
 //! Test step for initializing Anvil blockchain fixture.
 
-use crate::{BoxError, testlib::ctx::TestCtx};
+use anyhow::Result;
+
+use crate::testlib::ctx::TestCtx;
 
 /// Test step that validates Anvil is available for the test.
 ///
@@ -31,7 +33,7 @@ impl Step {
     ///
     /// This method checks that the test context was configured with Anvil support.
     /// If Anvil is not available, it returns an error with guidance on how to fix it.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!("Validating Anvil fixture is available");
 
         // This will panic if Anvil is not configured, which is the expected behavior

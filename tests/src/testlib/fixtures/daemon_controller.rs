@@ -10,11 +10,12 @@ use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
+use anyhow::Result;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
 
-use crate::{BoxError, testlib::build_info::BuildInfo};
+use crate::testlib::build_info::BuildInfo;
 
 /// Fixture for managing Amp daemon controller instances in tests.
 ///
@@ -44,7 +45,7 @@ impl DaemonController {
         data_store: DataStore,
         dataset_store: DatasetStore,
         meter: Option<Meter>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self> {
         let admin_api_addr = config.controller_addrs.admin_api_addr;
 
         let (admin_api_addr, controller_server) = controller::service::new(

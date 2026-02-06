@@ -32,6 +32,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
+use anyhow::{Result, anyhow};
 use datasets_common::reference::Reference;
 use worker::node_id::NodeId;
 
@@ -40,13 +41,10 @@ use super::fixtures::{
     DaemonServer, DaemonWorker, FlightClient, JsonlClient, MetadataDb as MetadataDbFixture,
     builder as daemon_amp_dir_builder,
 };
-use crate::{
-    BoxError,
-    testlib::{
-        build_info,
-        config::{read_manifest_fixture, read_provider_fixture},
-        env_dir::TestEnvDir,
-    },
+use crate::testlib::{
+    build_info,
+    config::{read_manifest_fixture, read_provider_fixture},
+    env_dir::TestEnvDir,
 };
 
 enum AnvilMode {
@@ -294,7 +292,7 @@ impl TestCtxBuilder {
     ///
     /// Creates a temporary directory structure, generates the configuration file,
     /// copies requested datasets and providers, and returns a ready-to-use test environment.
-    pub async fn build(self) -> Result<TestCtx, BoxError> {
+    pub async fn build(self) -> Result<TestCtx> {
         // Load environment variables from .env file (if present)
         let _ = dotenvy::dotenv_override();
 
@@ -466,9 +464,11 @@ impl TestCtxBuilder {
                     .register_manifest(&registration.dataset_ref, &manifest_content)
                     .await
                     .map_err(|err| {
-                        format!(
+                        anyhow!(
                             "Failed to register manifest '{}' as '{}': {}",
-                            registration.manifest_file, registration.dataset_ref, err
+                            registration.manifest_file,
+                            registration.dataset_ref,
+                            err
                         )
                     })?;
 
@@ -506,9 +506,11 @@ impl TestCtxBuilder {
                         .register_provider(&registration.provider_name, &provider_toml)
                         .await
                         .map_err(|err| {
-                            format!(
+                            anyhow!(
                                 "Failed to register provider '{}' as '{}': {}",
-                                registration.provider_file, registration.provider_name, err
+                                registration.provider_file,
+                                registration.provider_name,
+                                err
                             )
                         })?;
 
@@ -527,7 +529,7 @@ impl TestCtxBuilder {
                 ampctl
                     .register_provider("anvil_rpc", &anvil_config)
                     .await
-                    .map_err(|err| format!("Failed to register dynamic Anvil provider: {}", err))?;
+                    .map_err(|err| anyhow!("Failed to register dynamic Anvil provider: {}", err))?;
 
                 tracing::info!("Successfully registered dynamic Anvil provider");
             }
@@ -634,7 +636,7 @@ impl TestCtx {
     /// daemon server's Flight endpoint.
     ///
     /// Returns a new FlightClient instance ready to execute SQL queries.
-    pub async fn new_flight_client(&self) -> Result<FlightClient, BoxError> {
+    pub async fn new_flight_client(&self) -> Result<FlightClient> {
         FlightClient::new(self.daemon_server_fixture.flight_server_url()).await
     }
 
