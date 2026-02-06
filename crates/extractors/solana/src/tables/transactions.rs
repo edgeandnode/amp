@@ -263,13 +263,14 @@ impl TransactionStatusMeta {
             post_balances: rpc_tx_meta.post_balances,
             inner_instructions,
             log_messages: rpc_tx_meta.log_messages,
-            pre_token_balances,
-            post_token_balances,
-            rewards,
             loaded_addresses: Some(loaded_addresses),
             return_data,
             compute_units_consumed: rpc_tx_meta.compute_units_consumed,
             cost_units: rpc_tx_meta.cost_units,
+            // Use empty vectors if balances/rewards are missing to match JSON-RPC behavior.
+            pre_token_balances: Some(pre_token_balances.unwrap_or_default()),
+            post_token_balances: Some(post_token_balances.unwrap_or_default()),
+            rewards: Some(rewards.unwrap_or_default()),
         }
     }
 
@@ -492,8 +493,17 @@ impl From<rpc_client::TransactionTokenBalance> for TransactionTokenBalance {
             account_index: value.account_index,
             mint: value.mint,
             ui_token_amount,
-            owner: Some(value.owner),
-            program_id: Some(value.program_id),
+            // Convert empty strings to `None` to match JSON-RPC behavior.
+            owner: if value.owner.is_empty() {
+                None
+            } else {
+                Some(value.owner)
+            },
+            program_id: if value.program_id.is_empty() {
+                None
+            } else {
+                Some(value.program_id)
+            },
         }
     }
 }
@@ -503,7 +513,12 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
         let ui_token_amount = value
             .ui_token_amount
             .map(|token_amount| TokenAmount {
-                ui_amount: Some(token_amount.ui_amount),
+                // Convert 0.0 ui_amount to `None` to match JSON-RPC behavior.
+                ui_amount: if token_amount.ui_amount == 0.0 {
+                    None
+                } else {
+                    Some(token_amount.ui_amount)
+                },
                 decimals: token_amount.decimals as u8,
                 amount: token_amount.amount,
                 ui_amount_string: token_amount.ui_amount_string,
@@ -514,8 +529,17 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
             account_index: value.account_index as u8,
             mint: value.mint,
             ui_token_amount,
-            owner: Some(value.owner),
-            program_id: Some(value.program_id),
+            // Convert empty strings to `None` to match JSON-RPC behavior.
+            owner: if value.owner.is_empty() {
+                None
+            } else {
+                Some(value.owner)
+            },
+            program_id: if value.program_id.is_empty() {
+                None
+            } else {
+                Some(value.program_id)
+            },
         }
     }
 }
