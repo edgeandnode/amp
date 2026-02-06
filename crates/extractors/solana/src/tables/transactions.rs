@@ -277,9 +277,9 @@ impl TransactionStatusMeta {
     pub(crate) fn from_proto_meta(
         slot: Slot,
         tx_index: u32,
-        of_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
+        proto_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> anyhow::Result<Self> {
-        let inner_instructions = of_tx_meta
+        let inner_instructions: Vec<Vec<tables::instructions::Instruction>> = proto_tx_meta
             .inner_instructions
             .into_iter()
             .map(|inner| {
@@ -299,38 +299,38 @@ impl TransactionStatusMeta {
             })
             .collect();
 
-        let pre_token_balances = of_tx_meta
+        let pre_token_balances = proto_tx_meta
             .pre_token_balances
             .into_iter()
             .map(TransactionTokenBalance::from)
             .collect();
-        let post_token_balances = of_tx_meta
+        let post_token_balances = proto_tx_meta
             .post_token_balances
             .into_iter()
             .map(TransactionTokenBalance::from)
             .collect();
 
-        let rewards: Vec<tables::block_rewards::Reward> = of_tx_meta
+        let rewards: Vec<tables::block_rewards::Reward> = proto_tx_meta
             .rewards
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()
-            .context("converting of1 tx rewards")?;
+            .context("converting proto tx rewards")?;
 
         let loaded_addresses = LoadedAddresses {
-            writable: of_tx_meta
+            writable: proto_tx_meta
                 .loaded_writable_addresses
                 .iter()
                 .map(|a| bs58::encode(&a).into_string())
                 .collect(),
-            readonly: of_tx_meta
+            readonly: proto_tx_meta
                 .loaded_readonly_addresses
                 .iter()
                 .map(|a| bs58::encode(&a).into_string())
                 .collect(),
         };
 
-        let return_data = of_tx_meta.return_data.map(|return_data| {
+        let return_data = proto_tx_meta.return_data.map(|return_data| {
             let program_id = bs58::encode(&return_data.program_id).into_string();
             TransactionReturnData {
                 program_id,
@@ -339,19 +339,19 @@ impl TransactionStatusMeta {
         });
 
         Ok(TransactionStatusMeta {
-            status: of_tx_meta.err.is_none(),
-            fee: of_tx_meta.fee,
-            pre_balances: of_tx_meta.pre_balances,
-            post_balances: of_tx_meta.post_balances,
+            status: proto_tx_meta.err.is_none(),
+            fee: proto_tx_meta.fee,
+            pre_balances: proto_tx_meta.pre_balances,
+            post_balances: proto_tx_meta.post_balances,
             inner_instructions: Some(inner_instructions),
-            log_messages: Some(of_tx_meta.log_messages),
+            log_messages: Some(proto_tx_meta.log_messages),
             pre_token_balances: Some(pre_token_balances),
             post_token_balances: Some(post_token_balances),
             rewards: Some(rewards),
             loaded_addresses: Some(loaded_addresses),
             return_data,
-            compute_units_consumed: of_tx_meta.compute_units_consumed,
-            cost_units: of_tx_meta.cost_units,
+            compute_units_consumed: proto_tx_meta.compute_units_consumed,
+            cost_units: proto_tx_meta.cost_units,
         })
     }
 
