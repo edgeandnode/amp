@@ -101,7 +101,7 @@
             "type": "boolean",
             "default": false
           },
-          "x-environment": "FLIGHT_SERVER"
+          "x-environment": "AMP_FLIGHT_SERVER"
         },
         {
           "name": "jsonl-server",
@@ -112,7 +112,7 @@
             "type": "boolean",
             "default": false
           },
-          "x-environment": "JSONL_SERVER"
+          "x-environment": "AMP_JSONL_SERVER"
         }
       ],
       "responses": {
@@ -151,7 +151,7 @@
             "type": "boolean",
             "default": false
           },
-          "x-environment": "FLIGHT_SERVER"
+          "x-environment": "AMP_FLIGHT_SERVER"
         },
         {
           "name": "jsonl-server",
@@ -162,7 +162,7 @@
             "type": "boolean",
             "default": false
           },
-          "x-environment": "JSONL_SERVER"
+          "x-environment": "AMP_JSONL_SERVER"
         },
         {
           "name": "admin-server",
@@ -173,7 +173,7 @@
             "type": "boolean",
             "default": false
           },
-          "x-environment": "ADMIN_SERVER"
+          "x-environment": "AMP_ADMIN_SERVER"
         }
       ],
       "responses": {

@@ -116,6 +116,22 @@ psql -c "SELECT * FROM _amp_migrations ORDER BY id;"
 
 ## Version-Specific Notes
 
+### Upcoming: Environment Variable Naming Standardization
+
+#### Deprecated Environment Variables
+
+The following environment variables have been renamed to use the `AMP_` prefix for consistency:
+
+| Old Name | New Name |
+|----------|----------|
+| `FLIGHT_SERVER` | `AMP_FLIGHT_SERVER` |
+| `JSONL_SERVER` | `AMP_JSONL_SERVER` |
+| `ADMIN_SERVER` | `AMP_ADMIN_SERVER` |
+
+**Migration**: The old names still work but will emit a deprecation warning at startup. Update your configuration to use the new names. Old names will be removed in a future release.
+
+**Action required**: Update your environment variables, deployment scripts, and container definitions to use the new `AMP_*` names.
+
 ### Future Releases
 
 Check the release notes for each version for specific upgrade instructions and breaking changes.

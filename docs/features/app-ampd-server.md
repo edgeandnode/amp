@@ -55,6 +55,19 @@ ampd server
 | `flight_addr` | `0.0.0.0:1602` | Arrow Flight server binding |
 | `jsonl_addr` | `0.0.0.0:1603` | JSON Lines server binding |
 
+### Service Enable Flags
+
+Control which servers are started via CLI flags, config file, or environment variables. CLI flags take precedence.
+
+| Config Key | Environment Variable | CLI Flag | Description |
+|------------|---------------------|----------|-------------|
+| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server` | Enable Arrow Flight server |
+| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server` | Enable JSON Lines server |
+
+**Default behavior:** If no flags are explicitly set, both servers are enabled.
+
+**Environment variable values:** Accepts `1`, `true`, `yes`, `on` (case-insensitive).
+
 ### Streaming Settings
 
 | Setting | Default | Description |

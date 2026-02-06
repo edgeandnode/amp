@@ -81,6 +81,18 @@ pub async fn run(
     )
     .map_err(Error::ConfigLoad)?;
 
+    // Merge CLI flags with config values (CLI takes precedence)
+    let mut flight_server = flight_server || config.flight_server;
+    let mut jsonl_server = jsonl_server || config.jsonl_server;
+    let mut admin_server = admin_server || config.admin_server;
+
+    // If no servers are explicitly enabled (CLI or config), enable all
+    if !flight_server && !jsonl_server && !admin_server {
+        flight_server = true;
+        jsonl_server = true;
+        admin_server = true;
+    }
+
     // 4. Init monitoring
     let (_providers, meter) =
         monitoring::init(config.opentelemetry.as_ref()).map_err(Error::MonitoringInit)?;

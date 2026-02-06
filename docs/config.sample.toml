@@ -42,6 +42,14 @@ manifests_dir = "manifests"
 # jsonl_addr = "0.0.0.0:1603"       # JSON Lines server address (default: "0.0.0.0:1603")
 # admin_api_addr = "0.0.0.0:1610"   # Admin API server address (default: "0.0.0.0:1610")
 
+# Service enable flags (for solo/server modes)
+# These can also be set via environment variables or CLI flags.
+# CLI flags take precedence over config file values.
+# If none are explicitly enabled, all applicable services start by default.
+# flight_server = false    # Enable Arrow Flight server (env: AMP_FLIGHT_SERVER)
+# jsonl_server = false     # Enable JSON Lines server (env: AMP_JSONL_SERVER)
+# admin_server = false     # Enable Admin API server (env: AMP_ADMIN_SERVER, solo mode only)
+
 # ================================
 # Table sections
 # ================================
