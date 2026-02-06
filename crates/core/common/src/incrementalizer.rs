@@ -14,12 +14,11 @@ use datafusion::{
     prelude::{col, lit},
     sql::TableReference,
 };
+use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::{
-    BlockNum, SPECIAL_BLOCK_NUM, catalog::physical::TableSnapshot, plan_visitors::NonIncrementalOp,
-};
+use crate::{BlockNum, catalog::physical::TableSnapshot, plan_visitors::NonIncrementalOp};
 
 /// Assuming that output table has been synced up to `start - 1`, and that the input tables are immutable (all of our tables currently are), this will return the _incremental version_ of `plan` that computes the microbatch `[start, end]`.
 ///
@@ -212,10 +211,10 @@ fn constrain_by_range(
         match range {
             // `where start <= _block_num and _block_num <= end`
             RelationRange::Delta => lit(delta_start)
-                .lt_eq(col(SPECIAL_BLOCK_NUM))
-                .and(col(SPECIAL_BLOCK_NUM).lt_eq(lit(delta_end))),
+                .lt_eq(col(RESERVED_BLOCK_NUM_COLUMN_NAME))
+                .and(col(RESERVED_BLOCK_NUM_COLUMN_NAME).lt_eq(lit(delta_end))),
             // `where _block_num < start`
-            RelationRange::History => col(SPECIAL_BLOCK_NUM).lt(lit(delta_start)),
+            RelationRange::History => col(RESERVED_BLOCK_NUM_COLUMN_NAME).lt(lit(delta_start)),
         }
     };
 

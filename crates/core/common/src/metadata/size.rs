@@ -13,12 +13,10 @@ use datafusion::{
     arrow::array::ArrowNativeTypeOp,
     parquet::{arrow::arrow_reader::ArrowReaderMetadata, file::metadata::RowGroupMetaData},
 };
+use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    SPECIAL_BLOCK_NUM,
-    metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
-};
+use crate::metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta};
 
 /// Represents the generation of a file, used to track how many times it has been compacted.
 /// Each compaction operation increments the generation by 1.
@@ -751,7 +749,7 @@ impl Mul<i32> for SegmentSize {
 pub fn get_block_count(rg: &RowGroupMetaData, pmax: &mut i64) -> i64 {
     if let Some(column) = rg.columns().iter().find(|c| {
         let name = c.column_descr().name();
-        name == SPECIAL_BLOCK_NUM
+        name == RESERVED_BLOCK_NUM_COLUMN_NAME
     }) && let Some(statistics) = column.statistics()
         && let Some(Ok(Some(max))) = statistics.max_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
         && let Some(Ok(Some(min))) = statistics.min_bytes_opt().map(le_bytes_to_nonzero_i64_opt)
@@ -832,10 +830,12 @@ pub fn le_bytes_to_nonzero_i64_opt(bytes: &[u8]) -> Result<Option<NonZeroI64>, T
         .map(NonZeroI64::new)
 }
 
-pub mod test {
+#[cfg(test)]
+mod test {
     use std::sync::Arc;
 
     use amp_data_store::file_name::FileName;
+    use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 
     use crate::{
         Timestamp,
@@ -1059,7 +1059,7 @@ pub mod test {
 
         fn schema_descr() -> SchemaDescriptor {
             let block_num =
-                Type::primitive_type_builder(crate::SPECIAL_BLOCK_NUM, PhysicalType::INT64)
+                Type::primitive_type_builder(RESERVED_BLOCK_NUM_COLUMN_NAME, PhysicalType::INT64)
                     .with_repetition(Repetition::REQUIRED)
                     .build()
                     .unwrap()
@@ -1078,7 +1078,7 @@ pub mod test {
             let primitive_type = schema_descr.column(0).self_type_ptr();
             let max_def_level = schema_descr.column(0).max_def_level();
             let max_rep_level = schema_descr.column(0).max_rep_level();
-            let path = ColumnPath::new(vec![crate::SPECIAL_BLOCK_NUM.to_string()]);
+            let path = ColumnPath::new(vec![RESERVED_BLOCK_NUM_COLUMN_NAME.to_string()]);
             ColumnDescriptor::new(primitive_type, max_def_level, max_rep_level, path)
         }
 

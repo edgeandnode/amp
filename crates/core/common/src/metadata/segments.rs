@@ -368,7 +368,7 @@ mod test {
 
     use alloy::primitives::BlockHash;
     use chrono::DateTime;
-    use datasets_common::BlockNum;
+    use datasets_common::block_num::BlockNum;
     use metadata_db::files::FileId;
     use object_store::ObjectMeta;
     use rand::{Rng as _, RngCore as _, SeedableRng as _, rngs::StdRng, seq::SliceRandom};

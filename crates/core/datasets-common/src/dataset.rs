@@ -17,12 +17,12 @@ use datafusion::arrow::datatypes::SchemaRef;
 use downcast_rs::{DowncastSync, impl_downcast};
 
 use crate::{
-    dataset_kind_str::DatasetKindStr, hash_reference::HashReference, network_id::NetworkId,
+    block_num::{BlockNum, RESERVED_BLOCK_NUM_COLUMN_NAME},
+    dataset_kind_str::DatasetKindStr,
+    hash_reference::HashReference,
+    network_id::NetworkId,
     table_name::TableName,
 };
-
-pub const SPECIAL_BLOCK_NUM: &str = "_block_num";
-pub type BlockNum = u64;
 
 /// Core trait representing a dataset definition.
 ///
@@ -93,7 +93,7 @@ impl Table {
         sorted_by: Vec<String>,
     ) -> Self {
         let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
-        sorted_by.insert(SPECIAL_BLOCK_NUM.to_string());
+        sorted_by.insert(RESERVED_BLOCK_NUM_COLUMN_NAME.to_string());
         Self {
             name,
             schema,

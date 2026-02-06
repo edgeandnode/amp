@@ -33,10 +33,9 @@ use admin_api::scheduler::{
 };
 use async_trait::async_trait;
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference, name::Name,
-    namespace::Namespace,
+    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
+    hash_reference::HashReference, name::Name, namespace::Namespace,
 };
-use dump::EndBlock;
 use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
 use rand::seq::IndexedRandom as _;
 use worker::{

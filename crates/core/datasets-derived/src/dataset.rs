@@ -2,8 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF};
 use datasets_common::{
-    dataset::{BlockNum, Table},
-    dataset_kind_str::DatasetKindStr,
+    block_num::BlockNum, dataset::Table, dataset_kind_str::DatasetKindStr,
     hash_reference::HashReference,
 };
 use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};

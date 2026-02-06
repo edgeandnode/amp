@@ -6,7 +6,6 @@ license-file.workspace = true
 
 [dependencies]
 datasets-common = { path = "../../core/datasets-common" }
-dump = { path = "../../core/dump" }
 monitoring = { path = "../../core/monitoring" }
 reqwest.workspace = true
 serde.workspace = true

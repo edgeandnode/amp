@@ -5,8 +5,7 @@ use arrow::{
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
 use datasets_common::{
-    block_range::BlockRange,
-    dataset::{SPECIAL_BLOCK_NUM, Table},
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, dataset::Table,
     network_id::NetworkId,
 };
 
@@ -39,7 +38,7 @@ pub const TABLE_NAME: &str = "blocks";
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
     Schema::new(vec![
-        Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+        Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
         Field::new("block_num", DataType::UInt64, false),
         Field::new("timestamp", timestamp_type(), false),
         Field::new("hash", BYTES32_TYPE, false),

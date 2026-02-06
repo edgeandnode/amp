@@ -15,7 +15,8 @@
 use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
 
 use datasets_common::{
-    dataset::BlockNum, hash_reference::HashReference, manifest::TableSchema, network_id::NetworkId,
+    block_num::BlockNum, hash_reference::HashReference, manifest::TableSchema,
+    network_id::NetworkId,
 };
 use serde_with::serde_as;
 use url::Url;

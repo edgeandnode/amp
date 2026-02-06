@@ -86,7 +86,7 @@ use crate::{
 /// 2. **Load Datasets**: Retrieves dataset definitions from the registry for all referenced datasets
 /// 3. **Create Planning Context**: Builds planning context with real table schemas from stored datasets
 /// 4. **Infer Schema**: Uses DataFusion's query planner to determine output schema without executing the query
-/// 5. **Prepend Special Fields**: Adds `SPECIAL_BLOCK_NUM` field to the output schema
+/// 5. **Prepend Special Fields**: Adds `RESERVED_BLOCK_NUM_COLUMN_NAME` field to the output schema
 /// 6. **Extract Networks**: Identifies which blockchain networks are referenced by the query
 #[instrument(skip_all, err)]
 #[cfg_attr(

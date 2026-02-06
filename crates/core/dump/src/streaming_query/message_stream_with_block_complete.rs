@@ -4,9 +4,10 @@ use std::{
 };
 
 use common::{
-    BlockNum, SPECIAL_BLOCK_NUM,
+    BlockNum,
     arrow::{array::RecordBatch, error::ArrowError},
 };
+use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 use datasets_raw::arrow::DataType;
 use futures::{Stream, ready};
 
@@ -148,7 +149,7 @@ fn process_data_batch(
     last_block_num: Option<BlockNum>,
 ) -> Result<BatchProcessResult, ProcessDataBatchError> {
     // Find the _block_num column
-    let block_num_column = batch.column_by_name(SPECIAL_BLOCK_NUM);
+    let block_num_column = batch.column_by_name(RESERVED_BLOCK_NUM_COLUMN_NAME);
 
     let Some(block_num_array) = block_num_column else {
         // No _block_num column, pass through unchanged
@@ -378,7 +379,7 @@ mod tests {
 
     fn create_test_batch(block_nums: Vec<u64>, data: Vec<u64>) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![
-            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
             Field::new("data", DataType::UInt64, false),
         ]));
 
@@ -412,7 +413,12 @@ mod tests {
 
     fn expect_data_blocks(msg: &Result<QueryMessage, MessageStreamError>) -> Vec<u64> {
         if let Ok(QueryMessage::Data(batch)) = msg {
-            extract_block_numbers(batch.column_by_name(SPECIAL_BLOCK_NUM).unwrap()).unwrap()
+            extract_block_numbers(
+                batch
+                    .column_by_name(RESERVED_BLOCK_NUM_COLUMN_NAME)
+                    .unwrap(),
+            )
+            .unwrap()
         } else {
             panic!("Expected Data message");
         }

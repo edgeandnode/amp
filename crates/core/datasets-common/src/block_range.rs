@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 use alloy::primitives::BlockHash;
 use serde::{Deserialize, Serialize};
 
-use crate::{BlockNum, network_id::NetworkId};
+use crate::{block_num::BlockNum, network_id::NetworkId};
 
 /// Block range for data extraction and segment management.
 ///
