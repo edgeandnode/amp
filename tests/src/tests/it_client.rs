@@ -218,6 +218,10 @@ struct Records {
 }
 
 /// Stream blocks from client with optional resumption cursor.
+///
+/// This function accumulates data from all batches and returns when it receives
+/// a completion batch (`ranges_complete: true`) for the target block. This ensures
+/// we don't exit early on an empty completion marker before data batches arrive.
 async fn stream_blocks(
     client: &mut AmpClient,
     query: &str,
@@ -234,6 +238,8 @@ async fn stream_blocks(
 
     while let Some(result) = stream.next().await {
         let batch = result.expect("Failed to get batch result from stream");
+
+        // Accumulate data from all batches (data batches have rows, completion batches don't)
         let block_num_array = batch
             .data
             .column(0)
@@ -261,10 +267,15 @@ async fn stream_blocks(
             });
         }
 
-        let end_block = batch.metadata.ranges[0].end();
-        let cursor = Cursor::from_ranges(&batch.metadata.ranges);
-        if end_block == latest_block {
-            return Records { records, cursor };
+        // Only check completion when we receive a completion marker (ranges_complete: true).
+        // This ensures we don't exit early on an empty completion batch that arrived
+        // before data batches due to async buffering.
+        if batch.metadata.ranges_complete {
+            let end_block = batch.metadata.ranges[0].end();
+            let cursor = Cursor::from_ranges(&batch.metadata.ranges);
+            if end_block == latest_block {
+                return Records { records, cursor };
+            }
         }
     }
 
