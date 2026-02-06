@@ -16,8 +16,7 @@
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
 use admin_client::datasets::NodeSelector;
-use datasets_common::reference::Reference;
-use dump::EndBlock;
+use datasets_common::{end_block::EndBlock, reference::Reference};
 use worker::job::JobId;
 
 use crate::args::GlobalArgs;

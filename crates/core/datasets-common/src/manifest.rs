@@ -26,7 +26,7 @@ pub struct Manifest {
 /// A serializable representation of a collection of Arrow schemas without metadata.
 ///
 /// This structure maps table names to their field definitions, providing a way to serialize
-/// and deserialize Arrow schemas while filtering out the special `SPECIAL_BLOCK_NUM` field.
+/// and deserialize Arrow schemas while filtering out the special `RESERVED_BLOCK_NUM_COLUMN_NAME` field.
 ///
 /// Structure: table name -> field name -> data type
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

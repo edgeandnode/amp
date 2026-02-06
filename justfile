@@ -206,7 +206,7 @@ GEN_TABLE_SCHEMAS_OUTDIR := "docs/schemas"
 # Run all codegen tasks
 [group: 'codegen']
 gen:
-    RUSTFLAGS="--cfg gen_schema_manifest --cfg gen_schema_tables --cfg gen_openapi_spec" cargo check --workspace
+    RUSTFLAGS="--cfg gen_schema_manifest --cfg gen_schema_tables --cfg gen_openapi_spec --cfg gen_worker_proto" cargo check --workspace
     @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}} {{GEN_TABLE_SCHEMAS_OUTDIR}}
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
@@ -306,6 +306,11 @@ gen-firehose-datasets-proto:
 [group: 'codegen']
 gen-solana-storage-proto:
     RUSTFLAGS="--cfg gen_proto" cargo check -p solana-storage-proto
+
+# Generate worker events protobuf bindings (RUSTFLAGS="--cfg gen_worker_proto" cargo check)
+[group: 'codegen']
+gen-worker-events-proto:
+    RUSTFLAGS="--cfg gen_worker_proto" cargo check -p worker
 
 # Update solana-storage-proto .proto files from upstream agave repo
 [group: 'codegen']

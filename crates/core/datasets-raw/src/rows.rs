@@ -4,7 +4,11 @@ use arrow::{
     array::{ArrayRef, AsArray as _, RecordBatch},
     datatypes::UInt64Type,
 };
-use datasets_common::{BlockNum, SPECIAL_BLOCK_NUM, block_range::BlockRange, dataset::Table};
+use datasets_common::{
+    block_num::{BlockNum, RESERVED_BLOCK_NUM_COLUMN_NAME},
+    block_range::BlockRange,
+    dataset::Table,
+};
 
 pub struct Rows(Vec<TableRows>);
 
@@ -68,7 +72,7 @@ impl TableRows {
         }
 
         let block_nums = rows
-            .column_by_name(SPECIAL_BLOCK_NUM)
+            .column_by_name(RESERVED_BLOCK_NUM_COLUMN_NAME)
             .ok_or(CheckInvariantsError::MissingBlockNumColumn)?;
         let block_nums = block_nums
             .as_primitive_opt::<UInt64Type>()

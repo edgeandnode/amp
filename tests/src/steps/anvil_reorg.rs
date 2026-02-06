@@ -1,6 +1,6 @@
 //! Test step for triggering blockchain reorganizations on Anvil.
 
-use common::BoxError;
+use anyhow::Result;
 
 use crate::testlib::ctx::TestCtx;
 
@@ -23,7 +23,7 @@ impl Step {
     ///
     /// Uses the Anvil fixture from the test context to trigger a reorg.
     /// Requires that the test context was configured with Anvil support.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!("Triggering reorg with depth {}", self.anvil_reorg);
 
         ctx.anvil().reorg(self.anvil_reorg).await?;

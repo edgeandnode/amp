@@ -5,7 +5,8 @@ use std::{
 };
 
 use amp_dataset_store::DatasetStore;
-use common::{BoxError, metadata::Generation};
+use anyhow::Result;
+use common::metadata::Generation;
 use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},
@@ -123,7 +124,7 @@ impl TestCtx {
     }
 
     /// Create a new Flight client for this test context.
-    async fn new_flight_client(&self) -> Result<testlib::fixtures::FlightClient, BoxError> {
+    async fn new_flight_client(&self) -> Result<testlib::fixtures::FlightClient> {
         self.ctx.new_flight_client().await
     }
 
@@ -140,7 +141,7 @@ impl TestCtx {
     async fn catalog_for_dataset(
         &self,
         dataset_name: &str,
-    ) -> Result<common::catalog::physical::Catalog, BoxError> {
+    ) -> Result<common::catalog::physical::Catalog> {
         test_helpers::catalog_for_dataset(
             dataset_name,
             self.ctx.daemon_server().dataset_store(),

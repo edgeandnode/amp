@@ -77,6 +77,12 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), Error> {
+    // Install rustls crypto provider before any TLS operations.
+    // Required when both ring and aws-lc-rs are available in the dependency tree.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install default crypto provider");
+
     // Initialize tokio-console subscriber if feature is enabled
     #[cfg(feature = "console-subscriber")]
     {

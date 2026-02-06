@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_stream::stream;
-use datasets_common::{dataset::BlockNum, network_id::NetworkId};
+use datasets_common::{block_num::BlockNum, network_id::NetworkId};
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     rows::Rows,

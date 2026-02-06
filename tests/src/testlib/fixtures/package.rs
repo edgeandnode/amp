@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use common::BoxError;
+use anyhow::Result;
 
 use super::{AmpCli, ContractArtifact};
 use crate::testlib::{
@@ -73,7 +73,7 @@ impl DatasetPackage {
     ///
     /// Runs `pnpm amp build` in the dataset directory using the provided CLI.
     #[tracing::instrument(skip_all, err)]
-    pub async fn build(&self, cli: &AmpCli) -> Result<(), BoxError> {
+    pub async fn build(&self, cli: &AmpCli) -> Result<()> {
         cli.build(&self.path, self.config.as_deref()).await
     }
 
@@ -82,11 +82,7 @@ impl DatasetPackage {
     /// Runs `pnpm amp register` in the dataset directory using the provided CLI.
     /// Optionally accepts a version tag (semantic version or "dev").
     #[tracing::instrument(skip_all, err)]
-    pub async fn register(
-        &self,
-        cli: &AmpCli,
-        tag: impl Into<Option<&str>>,
-    ) -> Result<(), BoxError> {
+    pub async fn register(&self, cli: &AmpCli, tag: impl Into<Option<&str>>) -> Result<()> {
         cli.register(&self.path, tag.into(), self.config.as_deref())
             .await
     }
@@ -101,7 +97,7 @@ impl DatasetPackage {
         cli: &AmpCli,
         reference: Option<&str>,
         end_block: Option<u64>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<()> {
         cli.deploy(&self.path, reference, end_block, self.config.as_deref())
             .await
     }
@@ -113,7 +109,7 @@ impl DatasetPackage {
     pub async fn build_contracts<const N: usize>(
         &self,
         contract_names: [&str; N],
-    ) -> Result<Vec<ContractArtifact>, BoxError> {
+    ) -> Result<Vec<ContractArtifact>> {
         let contracts_dir = self.contracts_dir.as_ref().expect(
             "contracts_dir not set - use DatasetPackage::builder().contracts_dir() to set it",
         );

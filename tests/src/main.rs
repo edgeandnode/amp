@@ -58,8 +58,8 @@ use amp_datasets_registry::{
     DatasetsRegistry, error::ResolveRevisionError, manifests::DatasetManifestsStore,
 };
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
+use anyhow::{Result, anyhow};
 use clap::Parser;
-use common::BoxError;
 use datasets_common::reference::Reference;
 use datasets_derived::{
     Dataset as DerivedDataset,
@@ -307,26 +307,26 @@ async fn bless(
     data_store: DataStore,
     dataset: Reference,
     end: u64,
-) -> Result<(), BoxError> {
+) -> Result<()> {
     // Resolve dataset dependencies and restore them first
     tracing::debug!(%dataset, "Resolving dataset dependencies");
     let deps = {
         let mut ds_and_deps = dataset_and_dependencies(&dataset_store, dataset.clone())
             .await
             .map_err(|err| {
-                format!(
+                anyhow!(
                     "Failed to resolve dependencies for dataset '{}': {}",
-                    dataset, err
+                    dataset,
+                    err
                 )
             })?;
 
         // Remove the dataset itself from the list, leaving only dependencies
         if ds_and_deps.pop() != Some(dataset.clone()) {
-            return Err(format!(
+            return Err(anyhow!(
                 "Dataset '{}' not found in resolved dependencies list",
                 dataset
-            )
-            .into());
+            ));
         }
 
         ds_and_deps
@@ -337,9 +337,11 @@ async fn bless(
         test_helpers::restore_dataset_snapshot(ampctl, &dataset_store, &data_store, &dep)
             .await
             .map_err(|err| {
-                format!(
+                anyhow!(
                     "Failed to restore dependency '{}' for dataset '{}': {}",
-                    dep, dataset, err
+                    dep,
+                    dataset,
+                    err
                 )
             })?;
     }
@@ -347,7 +349,7 @@ async fn bless(
     // Clear existing dataset data if it exists
     let store = data_store.as_datafusion_object_store();
     let path = object_store::path::Path::parse(dataset.name())
-        .map_err(|err| format!("Invalid dataset name '{}': {}", dataset.name(), err))?;
+        .map_err(|err| anyhow!("Invalid dataset name '{}': {}", dataset.name(), err))?;
 
     // Check if dataset exists using head operation
     match store.head(&path).await {
@@ -359,9 +361,10 @@ async fn bless(
                 .try_collect::<Vec<_>>()
                 .await
                 .map_err(|err: object_store::Error| {
-                    format!(
+                    anyhow!(
                         "Failed to clear existing data for dataset '{}': {}",
-                        dataset, err
+                        dataset,
+                        err
                     )
                 })?;
         }
@@ -375,9 +378,11 @@ async fn bless(
     test_helpers::deploy_and_wait(ampctl, &dataset, Some(end), Duration::from_secs(30))
         .await
         .map_err(|err| {
-            format!(
+            anyhow!(
                 "Failed to dump dataset '{}' to block {}: {}",
-                dataset, end, err
+                dataset,
+                end,
+                err
             )
         })?;
 
@@ -389,9 +394,10 @@ async fn bless(
         consistency_check(&physical_table, &data_store)
             .await
             .map_err(|err| {
-                format!(
+                anyhow!(
                     "Consistency check failed for dataset '{}': {}",
-                    dataset, err
+                    dataset,
+                    err
                 )
             })?;
     }
@@ -431,19 +437,18 @@ async fn bless(
 /// executed from:
 /// - The workspace root: `cargo run -p tests`
 /// - The tests crate directory: `cargo run`
-fn resolve_test_data_dir() -> Result<PathBuf, BoxError> {
+fn resolve_test_data_dir() -> Result<PathBuf> {
     const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
     TEST_DATA_BASE_DIRS
         .iter()
         .filter_map(|dir| std::path::Path::new(dir).canonicalize().ok())
         .find(|path| path.exists() && path.is_dir())
-        .ok_or_else(|| -> BoxError {
-            format!(
+        .ok_or_else(|| {
+            anyhow!(
                 "Couldn't find test data directory in locations: {:?}. \
                 The `cargo run -p tests` command must be run from the workspace root or the tests crate root",
                 TEST_DATA_BASE_DIRS
             )
-            .into()
         })
 }
 

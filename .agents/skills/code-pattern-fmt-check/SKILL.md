@@ -5,7 +5,7 @@ description: Validate pattern doc format against the specification. Use when rev
 
 # Code Pattern Format Check Skill
 
-This skill validates that code pattern documentation **format** follows the established patterns in `docs/code/code-pattern-docs.md`.
+This skill validates that code pattern documentation **format** follows the established patterns in `docs/__meta__/code-pattern-docs.md`.
 
 ## When to Use This Skill
 
@@ -43,16 +43,16 @@ For each changed pattern doc, verify:
 
 ## Format Reference
 
-All format requirements are defined in [docs/code/code-pattern-docs.md](../../docs/code/code-pattern-docs.md). Read that file for:
+All format requirements are defined in [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md). Read that file for:
 - Frontmatter field requirements (`name`, `description`, `type`, `scope`)
 - Description guidelines ("Load when" triggers, discovery optimization)
 - Pattern type definitions (`core`, `arch`, `crate`, `meta`)
 - Scope format rules (`global`, `crate:<name>`)
 - Naming conventions (kebab-case, flattened crate-specific patterns)
-- Required and optional sections (Purpose, main content, Checklist, Rationale)
+- Required and optional sections (main content, Checklist)
 - No subdirectories rule (all files at `docs/code/` root)
 
-Use the **Validation Checklist** section in `docs/code/code-pattern-docs.md` to validate pattern docs.
+Use the **Checklist** section in `docs/__meta__/code-pattern-docs.md` to validate pattern docs.
 
 ### Discovery Validation
 
@@ -77,13 +77,13 @@ awk '/^---$/{p=!p; print; next} p' docs/code/<pattern-name>.md
 ## Validation Process
 
 1. **Identify changed files**: `git diff --name-only HEAD~1 | grep 'docs/code/.*\.md$'`
-2. **Read the pattern doc** and **Read** [docs/code/code-pattern-docs.md](../../docs/code/code-pattern-docs.md)
+2. **Read the pattern doc** and **Read** [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md)
 3. **Validate** using the checklist in the format specification
 4. **Report** findings using format below
 
 ## Review Report Format
 
-After validation, provide a structured report listing issues found. Use the checklist from [docs/code/code-pattern-docs.md](../../docs/code/code-pattern-docs.md) as the validation criteria.
+After validation, provide a structured report listing issues found. Use the checklist from [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md) as the validation criteria.
 
 ```markdown
 ## Pattern Doc Format Review: <filename>
@@ -94,12 +94,12 @@ After validation, provide a structured report listing issues found. Use the chec
 
 ### Verdict: PASS/FAIL
 
-<If FAIL, provide specific fixes needed referencing docs/code/code-pattern-docs.md>
+<If FAIL, provide specific fixes needed referencing docs/__meta__/code-pattern-docs.md>
 ```
 
 ## Common Issues
 
-When validation fails, refer to [docs/code/code-pattern-docs.md](../../docs/code/code-pattern-docs.md) for detailed requirements. Common issues include:
+When validation fails, refer to [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md) for detailed requirements. Common issues include:
 
 - Invalid frontmatter YAML syntax
 - `name` not in kebab-case or doesn't match filename (minus `.md`)
@@ -108,7 +108,7 @@ When validation fails, refer to [docs/code/code-pattern-docs.md](../../docs/code
 - `scope` invalid format (not `global` or `crate:<name>`)
 - Crate-specific patterns not following `<crate>-<type>.md` naming
 - Pattern files in subdirectories (should be flat at `docs/code/` root)
-- Missing required sections (Purpose, Checklist, Rationale)
+- Missing required sections (main content, Checklist)
 - Empty optional sections
 
 ## Frontmatter Validation Checklist
@@ -142,10 +142,9 @@ When validation fails, refer to [docs/code/code-pattern-docs.md](../../docs/code
 
 ### Required Sections
 - [ ] Title with pattern name
-- [ ] **PURPOSE** section explaining pattern goals
+- [ ] Applicability statement (bold mandatory line)
 - [ ] Main content sections with pattern details
-- [ ] **CHECKLIST** section for verification
-- [ ] **RATIONALE** section explaining principles
+- [ ] **Checklist** section for verification
 
 ### Naming and Organization
 - [ ] File located at `docs/code/` root (no subdirectories)

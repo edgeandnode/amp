@@ -1,5 +1,5 @@
 ---
-name: "documentation"
+name: "rust-documentation"
 description: "Rustdoc patterns, safety documentation, function docs. Load when documenting code or writing docs"
 type: core
 scope: "global"
@@ -266,7 +266,7 @@ pub fn max_block_number(ranges: &[BlockRange]) -> u64 {
 
 ### 1. Error Enum Documentation Template
 
-**MANDATORY**: All error enums MUST follow the documentation template from [error-reporting.md](./error-reporting.md).
+**MANDATORY**: All error enums MUST follow the documentation template from [errors-reporting.md](./errors-reporting.md).
 
 ```rust
 // ✅ CORRECT - Comprehensive error enum documentation
@@ -310,7 +310,7 @@ pub enum RegisterManifestError {
 3. **Common causes** (optional) - Bullet list of typical causes
 4. **Additional context** (optional) - Recovery strategies, transaction guarantees, etc.
 
-**See [error-reporting.md](./error-reporting.md#11-error-documentation-template) for complete requirements.**
+**See [errors-reporting.md](./errors-reporting.md#11-error-documentation-template) for complete requirements.**
 
 ## ⚙️ CARGO.TOML FEATURE DOCUMENTATION
 
@@ -337,7 +337,7 @@ admin-api = ["dep:axum", "dep:tower-http"]
 postgres-support = ["dep:sqlx/postgres"]
 ```
 
-**See [cargo-workspace-patterns.md](./cargo-workspace-patterns.md#-crate-features-section) for complete requirements.**
+**See [rust-crate.md](./rust-crate.md#2-features-section-rules) for complete requirements.**
 
 ## 📚 COMPLETE EXAMPLES
 
@@ -453,7 +453,7 @@ Before committing code, verify:
 
 ### Error Documentation
 
-- [ ] Error enums follow template from error-reporting.md
+- [ ] Error enums follow template from errors-reporting.md
 - [ ] Each error variant has comprehensive documentation
 - [ ] Common causes listed for each variant (when applicable)
 

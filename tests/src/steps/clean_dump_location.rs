@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use common::BoxError;
+use anyhow::Result;
 use fs_err as fs;
 
 use crate::testlib::ctx::TestCtx;
@@ -23,7 +23,7 @@ impl Step {
     /// The method constructs the full path by combining the data store URL path
     /// with the specified clean_dump_location. If the directory exists, it removes
     /// it recursively. If it doesn't exist, the operation is silently skipped.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!("Cleaning dump location '{}'", self.clean_dump_location);
 
         let mut path = PathBuf::from(ctx.daemon_worker().data_store().url().path());

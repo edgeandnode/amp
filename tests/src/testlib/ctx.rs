@@ -32,9 +32,9 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
-use common::BoxError;
+use anyhow::{Result, anyhow};
 use datasets_common::reference::Reference;
-use worker::node_id::NodeId;
+use worker::{events::EventEmitter, node_id::NodeId};
 
 use super::fixtures::{
     AmpCli, Ampctl, Anvil, DaemonAmpDir, DaemonConfig, DaemonConfigBuilder, DaemonController,
@@ -60,6 +60,7 @@ pub struct TestCtxBuilder {
     providers_to_register: Vec<ProviderRegistration>,
     dataset_snapshots_to_preload: BTreeSet<String>,
     meter: Option<monitoring::telemetry::metrics::Meter>,
+    event_emitter: Option<Arc<dyn EventEmitter>>,
 }
 
 impl TestCtxBuilder {
@@ -73,6 +74,7 @@ impl TestCtxBuilder {
             providers_to_register: Default::default(),
             dataset_snapshots_to_preload: Default::default(),
             meter: None,
+            event_emitter: None,
         }
     }
 
@@ -91,6 +93,32 @@ impl TestCtxBuilder {
     /// Use with `monitoring::test_utils::TestMetricsContext` to collect and validate metrics.
     pub fn with_meter(mut self, meter: monitoring::telemetry::metrics::Meter) -> Self {
         self.meter = Some(meter);
+        self
+    }
+
+    /// Inject an event emitter for the worker.
+    ///
+    /// This is useful for integration tests that want to capture worker events
+    /// by injecting a [`MockEventEmitter`](super::fixtures::MockEventEmitter).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mock_emitter = Arc::new(MockEventEmitter::new());
+    /// let ctx = TestCtxBuilder::new("my_test")
+    ///     .with_anvil_http()
+    ///     .with_event_emitter(mock_emitter.clone())
+    ///     .build()
+    ///     .await?;
+    ///
+    /// // Deploy dataset and run sync...
+    ///
+    /// // Check captured events
+    /// let progress_events = mock_emitter.progress_events();
+    /// assert!(progress_events.len() >= 95);
+    /// ```
+    pub fn with_event_emitter(mut self, emitter: Arc<dyn EventEmitter>) -> Self {
+        self.event_emitter = Some(emitter);
         self
     }
 
@@ -292,7 +320,7 @@ impl TestCtxBuilder {
     ///
     /// Creates a temporary directory structure, generates the configuration file,
     /// copies requested datasets and providers, and returns a ready-to-use test environment.
-    pub async fn build(self) -> Result<TestCtx, BoxError> {
+    pub async fn build(self) -> Result<TestCtx> {
         // Load environment variables from .env file (if present)
         let _ = dotenvy::dotenv_override();
 
@@ -464,9 +492,11 @@ impl TestCtxBuilder {
                     .register_manifest(&registration.dataset_ref, &manifest_content)
                     .await
                     .map_err(|err| {
-                        format!(
+                        anyhow!(
                             "Failed to register manifest '{}' as '{}': {}",
-                            registration.manifest_file, registration.dataset_ref, err
+                            registration.manifest_file,
+                            registration.dataset_ref,
+                            err
                         )
                     })?;
 
@@ -504,9 +534,11 @@ impl TestCtxBuilder {
                         .register_provider(&registration.provider_name, &provider_toml)
                         .await
                         .map_err(|err| {
-                            format!(
+                            anyhow!(
                                 "Failed to register provider '{}' as '{}': {}",
-                                registration.provider_file, registration.provider_name, err
+                                registration.provider_file,
+                                registration.provider_name,
+                                err
                             )
                         })?;
 
@@ -525,7 +557,7 @@ impl TestCtxBuilder {
                 ampctl
                     .register_provider("anvil_rpc", &anvil_config)
                     .await
-                    .map_err(|err| format!("Failed to register dynamic Anvil provider: {}", err))?;
+                    .map_err(|err| anyhow!("Failed to register dynamic Anvil provider: {}", err))?;
 
                 tracing::info!("Successfully registered dynamic Anvil provider");
             }
@@ -536,7 +568,7 @@ impl TestCtxBuilder {
             .test_name
             .parse()
             .expect("test name should be a valid WorkerNodeId");
-        let worker = DaemonWorker::new(
+        let worker = DaemonWorker::with_event_emitter(
             build_info,
             config,
             metadata_db.conn_pool().clone(),
@@ -544,6 +576,7 @@ impl TestCtxBuilder {
             dataset_store,
             worker_meter,
             node_id,
+            self.event_emitter.clone(),
         )
         .await?;
 
@@ -557,6 +590,7 @@ impl TestCtxBuilder {
             daemon_controller_fixture: controller,
             daemon_worker_fixture: worker,
             anvil_fixture: anvil,
+            event_emitter: self.event_emitter,
         })
     }
 }
@@ -577,6 +611,7 @@ pub struct TestCtx {
     daemon_controller_fixture: DaemonController,
     daemon_worker_fixture: DaemonWorker,
     anvil_fixture: Option<Anvil>,
+    event_emitter: Option<Arc<dyn EventEmitter>>,
 }
 
 impl TestCtx {
@@ -626,13 +661,22 @@ impl TestCtx {
         })
     }
 
+    /// Get a reference to the event emitter if one was injected.
+    ///
+    /// Returns `None` if no event emitter was provided via `with_event_emitter()`.
+    /// Use this to access a [`MockEventEmitter`](super::fixtures::MockEventEmitter)
+    /// for asserting on captured events after a sync completes.
+    pub fn event_emitter(&self) -> Option<&Arc<dyn EventEmitter>> {
+        self.event_emitter.as_ref()
+    }
+
     /// Create a new Flight client connected to this test environment's server.
     ///
     /// This convenience method creates a new FlightClient instance connected to the
     /// daemon server's Flight endpoint.
     ///
     /// Returns a new FlightClient instance ready to execute SQL queries.
-    pub async fn new_flight_client(&self) -> Result<FlightClient, BoxError> {
+    pub async fn new_flight_client(&self) -> Result<FlightClient> {
         FlightClient::new(self.daemon_server_fixture.flight_server_url()).await
     }
 

@@ -1,5 +1,5 @@
 ---
-name: "error-reporting"
+name: "errors-reporting"
 description: "Error handling patterns, thiserror usage, error context. Load when defining errors or handling error types"
 type: core
 scope: "global"
@@ -649,3 +649,6 @@ These patterns prioritize:
 4. **Error chain integrity** - `#[source]` attribute preserves full error causality
 5. **Maintainability** - Clear naming and documentation make errors easy to understand and evolve
 6. **Production quality** - Avoiding type erasure and enforcing comprehensive documentation ensures robust error handling
+
+## References
+- [errors-handling](errors-handling.md) - Related: Error handling rules

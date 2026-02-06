@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, hash::Hash, name::Name, namespace::Namespace,
+    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash, name::Name,
+    namespace::Namespace,
 };
 pub use dump::Ctx;
-use dump::EndBlock;
 use serde_json::Value as JsonValue;
 
 use crate::node_id::NodeId;

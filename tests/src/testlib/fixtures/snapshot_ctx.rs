@@ -12,15 +12,15 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
+use anyhow::Result;
 use common::{
-    BoxError, LogicalCatalog, QueryContext,
+    LogicalCatalog, QueryContext,
     catalog::{
         logical::LogicalTable,
         physical::{Catalog, PhysicalTable},
     },
 };
 use server::config::Config;
-
 /// Snapshot context fixture for comparing dataset snapshots in tests.
 ///
 /// This fixture wraps a QueryContext to provide snapshot comparison capabilities
@@ -39,7 +39,7 @@ impl SnapshotContext {
         config: &Config,
         store: DataStore,
         tables: Vec<Arc<PhysicalTable>>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self> {
         let resolved_tables: Vec<_> = tables
             .iter()
             .map(|t| {

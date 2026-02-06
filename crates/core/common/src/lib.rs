@@ -18,7 +18,7 @@ use std::{
 pub use ::datasets_derived::sql_str;
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use datafusion::{arrow, parquet};
-pub use datasets_common::{BlockNum, SPECIAL_BLOCK_NUM, block_range::BlockRange};
+pub use datasets_common::{block_num::BlockNum, block_range::BlockRange, end_block::EndBlock};
 use serde::{Deserialize, Serialize};
 
 pub use self::{
@@ -27,8 +27,6 @@ pub use self::{
     planning_context::{DetachedLogicalPlan, PlanningContext},
     query_context::{Error as QueryError, QueryContext},
 };
-
-pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;

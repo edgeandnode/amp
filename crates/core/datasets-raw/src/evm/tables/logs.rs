@@ -5,8 +5,7 @@ use arrow::{
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
 use datasets_common::{
-    block_range::BlockRange,
-    dataset::{SPECIAL_BLOCK_NUM, Table},
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, dataset::Table,
     network_id::NetworkId,
 };
 
@@ -37,7 +36,7 @@ pub const TABLE_NAME: &str = "logs";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
-    let special_block_num = Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false);
+    let special_block_num = Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false);
     let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
     let block_num = Field::new("block_num", DataType::UInt64, false);
     let timestamp = Field::new("timestamp", timestamp_type(), false);

@@ -8,7 +8,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
-use common::BoxError;
+use anyhow::Result;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{
@@ -47,8 +47,8 @@ impl DaemonServer {
         meter: Option<Meter>,
         enable_flight: bool,
         enable_jsonl: bool,
-    ) -> Result<Self, BoxError> {
-        let flight_at = if enable_flight {
+    ) -> Result<Self> {
+        let flight_at: Option<SocketAddr> = if enable_flight {
             Some(config.server_addrs.flight_addr)
         } else {
             None

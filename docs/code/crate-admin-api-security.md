@@ -1,5 +1,5 @@
 ---
-name: "admin-api-security"
+name: "crate-admin-api-security"
 description: "Security checklist for HTTP APIs, input validation, injection prevention. Load when modifying admin-api crate code"
 type: crate
 scope: "crate:admin-api"

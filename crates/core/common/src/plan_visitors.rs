@@ -15,15 +15,13 @@ use datafusion::{
     prelude::{Expr, col, lit},
     sql::{TableReference, utils::UNNEST_PLACEHOLDER},
 };
+use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 
-use crate::{
-    SPECIAL_BLOCK_NUM,
-    incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
-};
+use crate::incrementalizer::{NonIncrementalQueryError, incremental_op_kind};
 
 /// Helper function to create a column reference to `_block_num`
 fn block_num_col() -> Expr {
-    col(SPECIAL_BLOCK_NUM)
+    col(RESERVED_BLOCK_NUM_COLUMN_NAME)
 }
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
@@ -95,20 +93,38 @@ fn block_num_for_join(join: &JoinStruct) -> Result<Expr, DataFusionError> {
     // Find the qualified _block_num columns from each side
     let left_block_num = left_schema
         .iter()
-        .find(|(_, field)| field.name() == SPECIAL_BLOCK_NUM)
-        .map(|(qualifier, _)| col(Column::new(qualifier.cloned(), SPECIAL_BLOCK_NUM)))
-        .ok_or_else(|| df_err(format!("Left side of join missing {SPECIAL_BLOCK_NUM}")))?;
+        .find(|(_, field)| field.name() == RESERVED_BLOCK_NUM_COLUMN_NAME)
+        .map(|(qualifier, _)| {
+            col(Column::new(
+                qualifier.cloned(),
+                RESERVED_BLOCK_NUM_COLUMN_NAME,
+            ))
+        })
+        .ok_or_else(|| {
+            df_err(format!(
+                "Left side of join missing {RESERVED_BLOCK_NUM_COLUMN_NAME}"
+            ))
+        })?;
 
     let right_block_num = right_schema
         .iter()
-        .find(|(_, field)| field.name() == SPECIAL_BLOCK_NUM)
-        .map(|(qualifier, _)| col(Column::new(qualifier.cloned(), SPECIAL_BLOCK_NUM)))
-        .ok_or_else(|| df_err(format!("Right side of join missing {SPECIAL_BLOCK_NUM}")))?;
+        .find(|(_, field)| field.name() == RESERVED_BLOCK_NUM_COLUMN_NAME)
+        .map(|(qualifier, _)| {
+            col(Column::new(
+                qualifier.cloned(),
+                RESERVED_BLOCK_NUM_COLUMN_NAME,
+            ))
+        })
+        .ok_or_else(|| {
+            df_err(format!(
+                "Right side of join missing {RESERVED_BLOCK_NUM_COLUMN_NAME}"
+            ))
+        })?;
 
     Ok(greatest(vec![left_block_num, right_block_num]))
 }
 
-/// Rewriter that propagates the `SPECIAL_BLOCK_NUM` column through the logical plan.
+/// Rewriter that propagates the `RESERVED_BLOCK_NUM_COLUMN_NAME` column through the logical plan.
 struct BlockNumPropagator {
     // State variable of the transformation.
     // This is the block num value being bubbled up to be applied in the next projection as:
@@ -145,7 +161,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
 
                     // Use an alias if it would not be redundant
                     if expr != block_num_col() {
-                        expr = expr.alias(SPECIAL_BLOCK_NUM)
+                        expr = expr.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
                     }
                     expr
                 };
@@ -153,11 +169,11 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 // Deal with any existing projection that resolves to `_block_num`
                 for existing_expr in projection.expr.iter() {
                     // Unwrap: `physical_name` never errors
-                    if physical_name(existing_expr).unwrap() != SPECIAL_BLOCK_NUM {
+                    if physical_name(existing_expr).unwrap() != RESERVED_BLOCK_NUM_COLUMN_NAME {
                         continue;
                     }
 
-                    // If the user already correctly selected `SPECIAL_BLOCK_NUM`, we don't need to modify the projection.
+                    // If the user already correctly selected `RESERVED_BLOCK_NUM_COLUMN_NAME`, we don't need to modify the projection.
                     // We do a best effort to detect correct selections:
                     // - If the expression is identical to the generated one, it is trivially correct.
                     // - If the input is a single table and the expression is simply `_block_num`, qualified or not, it is also correct.
@@ -253,26 +269,29 @@ impl TreeNodeRewriter for BlockNumPropagator {
     }
 }
 
-/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
+/// Propagate the `RESERVED_BLOCK_NUM_COLUMN_NAME` column through the logical plan.
 pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
     let mut propagator = BlockNumPropagator::new();
     plan.rewrite(&mut propagator).map(|t| t.data)
 }
 
-/// This will project the `SPECIAL_BLOCK_NUM` out of the plan by adding a projection on top of the
-/// query which selects all columns except `SPECIAL_BLOCK_NUM`.
+/// This will project the `RESERVED_BLOCK_NUM_COLUMN_NAME` out of the plan by adding a projection on top of the
+/// query which selects all columns except `RESERVED_BLOCK_NUM_COLUMN_NAME`.
 pub fn unproject_special_block_num_column(
     plan: LogicalPlan,
 ) -> Result<LogicalPlan, DataFusionError> {
     let fields = plan.schema().fields();
-    if !fields.iter().any(|f| f.name() == SPECIAL_BLOCK_NUM) {
+    if !fields
+        .iter()
+        .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME)
+    {
         // Nothing to do.
         return Ok(plan);
     }
     let expr = plan
         .schema()
         .iter()
-        .filter(|(_, field)| field.name() != SPECIAL_BLOCK_NUM)
+        .filter(|(_, field)| field.name() != RESERVED_BLOCK_NUM_COLUMN_NAME)
         .map(Expr::from)
         .collect::<Vec<_>>();
 
@@ -372,13 +391,17 @@ pub fn prepend_special_block_num_field(
     if schema
         .fields()
         .iter()
-        .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+        .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME)
     {
         return Arc::new(schema.clone());
     }
 
     let mut new_schema = datafusion::common::DFSchema::from_unqualified_fields(
-        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+        Fields::from(vec![Field::new(
+            RESERVED_BLOCK_NUM_COLUMN_NAME,
+            DataType::UInt64,
+            false,
+        )]),
         Default::default(),
     )
     .unwrap();
@@ -407,16 +430,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_propagate_block_num_with_qualified_wildcard() {
-        // Create two tables that both contain SPECIAL_BLOCK_NUM columns
+        // Create two tables that both contain RESERVED_BLOCK_NUM_COLUMN_NAME columns
         let foo_schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int32, false),
-            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
             Field::new("foo_value", DataType::Utf8, false),
         ]));
 
         let bar_schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int32, false),
-            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
             Field::new("bar_value", DataType::Utf8, false),
         ]));
 
@@ -475,7 +498,7 @@ mod tests {
         let invalid_projection_plan = LogicalPlanBuilder::from(join_plan.clone())
             .project(vec![
                 col("foo.id"),
-                col(format!("foo.{}", SPECIAL_BLOCK_NUM)),
+                col(format!("foo.{}", RESERVED_BLOCK_NUM_COLUMN_NAME)),
                 col("foo.foo_value"),
             ])
             .unwrap()
@@ -490,7 +513,7 @@ mod tests {
         let projection_plan = LogicalPlanBuilder::from(join_plan)
             .project(vec![
                 col("foo.id"),
-                col(format!("foo.{}", SPECIAL_BLOCK_NUM)).alias("block_num"),
+                col(format!("foo.{}", RESERVED_BLOCK_NUM_COLUMN_NAME)).alias("block_num"),
                 col("foo.foo_value"),
             ])
             .unwrap()
@@ -502,7 +525,7 @@ mod tests {
         // Check that the plan was transformed (should be a Projection)
         match &transformed_plan {
             LogicalPlan::Projection(projection) => {
-                // The first expression should be the SPECIAL_BLOCK_NUM
+                // The first expression should be the RESERVED_BLOCK_NUM_COLUMN_NAME
                 assert_eq!(projection.expr.len(), 4);
 
                 // Check if the qualified column was properly aliased
@@ -510,8 +533,8 @@ mod tests {
                     assert_eq!(alias.name, "block_num", "Should alias to block_num");
                     if let Expr::Column(c) = alias.expr.as_ref() {
                         assert_eq!(
-                            c.name, SPECIAL_BLOCK_NUM,
-                            "Should reference SPECIAL_BLOCK_NUM (_block_num) column"
+                            c.name, RESERVED_BLOCK_NUM_COLUMN_NAME,
+                            "Should reference RESERVED_BLOCK_NUM_COLUMN_NAME (_block_num) column"
                         );
                         assert_eq!(
                             c.relation.as_ref().unwrap().table(),
@@ -526,14 +549,14 @@ mod tests {
             _ => panic!("Expected a Projection plan after propagate_block_num"),
         }
 
-        // Check the schema to ensure SPECIAL_BLOCK_NUM is present and correctly aliased
+        // Check the schema to ensure RESERVED_BLOCK_NUM_COLUMN_NAME is present and correctly aliased
         let schema = transformed_plan.schema();
         assert!(
             schema
                 .fields()
                 .iter()
-                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
-            "Schema should contain the SPECIAL_BLOCK_NUM field"
+                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
+            "Schema should contain the RESERVED_BLOCK_NUM_COLUMN_NAME field"
         );
     }
 
@@ -560,7 +583,7 @@ mod tests {
         assert_eq!(result.fields().len(), 3, "Should add _block_num field");
         assert_eq!(
             result.fields()[0].name(),
-            SPECIAL_BLOCK_NUM,
+            RESERVED_BLOCK_NUM_COLUMN_NAME,
             "First field should be _block_num"
         );
         assert_eq!(result.fields()[1].name(), "id");
@@ -576,7 +599,7 @@ mod tests {
         );
         assert_eq!(
             result2.fields()[0].name(),
-            SPECIAL_BLOCK_NUM,
+            RESERVED_BLOCK_NUM_COLUMN_NAME,
             "First field should still be _block_num"
         );
 
@@ -584,7 +607,7 @@ mod tests {
         let schema_with_block_num = DFSchema::from_unqualified_fields(
             vec![
                 Field::new("id", DataType::Int32, false),
-                Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+                Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
                 Field::new("value", DataType::Utf8, false),
             ]
             .into(),
@@ -603,7 +626,7 @@ mod tests {
             result3
                 .fields()
                 .iter()
-                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
             "Should still contain _block_num field"
         );
 
@@ -612,7 +635,7 @@ mod tests {
         // considered as the same field for the purposes of this function.
         let arrow_schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int32, false),
-            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
             Field::new("value", DataType::Utf8, false),
         ]));
         let qualified_schema = DFSchema::try_from_qualified_schema("foo", &arrow_schema).unwrap();
@@ -628,13 +651,13 @@ mod tests {
             result4
                 .fields()
                 .iter()
-                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
             "Should still contain _block_num field"
         );
         // Verify the qualified field is preserved
         let (qualifier, _field) = result4
             .iter()
-            .find(|(_, f)| f.name() == SPECIAL_BLOCK_NUM)
+            .find(|(_, f)| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME)
             .unwrap();
         assert_eq!(
             qualifier.map(|q| q.to_string()),
@@ -714,7 +737,7 @@ mod tests {
         // Create a table with _block_num
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int32, false),
-            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
             Field::new("value", DataType::Utf8, false),
         ]));
         let batch = array::RecordBatch::new_empty(schema.clone());
@@ -769,7 +792,7 @@ mod tests {
             plan.schema()
                 .fields()
                 .iter()
-                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
             "Resulting plan should have _block_num in schema"
         );
     }

@@ -6,16 +6,14 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use anyhow::{Result, anyhow};
 use arrow_flight::{
     FlightData, decode::FlightRecordBatchStream, flight_service_client::FlightServiceClient,
     sql::client::FlightSqlServiceClient,
 };
-use common::{
-    BoxError,
-    arrow::{
-        array::RecordBatch, compute::concat_batches, datatypes::SchemaRef, ipc as arrow_ipc,
-        json::writer::ArrayWriter,
-    },
+use common::arrow::{
+    array::RecordBatch, compute::concat_batches, datatypes::SchemaRef, ipc as arrow_ipc,
+    json::writer::ArrayWriter,
 };
 use futures::stream::StreamExt;
 use tokio::sync::mpsc;
@@ -33,7 +31,7 @@ pub struct FlightClient {
 
 impl FlightClient {
     /// Create a new Flight client connected to the provided Flight server URL.
-    pub async fn new(url: impl Into<String>) -> Result<Self, BoxError> {
+    pub async fn new(url: impl Into<String>) -> Result<Self> {
         let conn = tonic::transport::Endpoint::from_shared(url.into())?
             .connect()
             .await?;
@@ -51,7 +49,7 @@ impl FlightClient {
         &mut self,
         query: &str,
         take: impl Into<Option<usize>>,
-    ) -> Result<(serde_json::Value, usize), BoxError> {
+    ) -> Result<(serde_json::Value, usize)> {
         let take = take.into();
 
         tracing::debug!("Running query: {query}, take: {take:?}");
@@ -97,7 +95,7 @@ impl FlightClient {
     }
 
     /// Register a streaming query with the given name.
-    pub async fn register_stream(&mut self, name: &str, query: &str) -> Result<(), BoxError> {
+    pub async fn register_stream(&mut self, name: &str, query: &str) -> Result<()> {
         let mut info = self.client.execute(query.to_string(), None).await?;
         let schema = arrow_ipc::convert::try_schema_from_ipc_buffer(&info.schema)
             .expect("Flight query should return valid schema");
@@ -123,9 +121,9 @@ impl FlightClient {
         &mut self,
         name: &str,
         n: usize,
-    ) -> Result<(serde_json::Value, usize), BoxError> {
+    ) -> Result<(serde_json::Value, usize)> {
         let Some(stream) = self.streams.get_mut(name) else {
-            return Err(Box::from(format!("Stream \"{name}\" not found")));
+            return Err(anyhow!("Stream \"{name}\" not found"));
         };
 
         let mut buf = Vec::new();
@@ -144,7 +142,7 @@ impl FlightClient {
     pub async fn execute_with_metadata_stream(
         &mut self,
         query: &str,
-    ) -> Result<mpsc::UnboundedReceiver<FlightData>, BoxError> {
+    ) -> Result<mpsc::UnboundedReceiver<FlightData>> {
         tracing::debug!("Starting metadata stream for query: {query}");
 
         let info = self.client.execute(query.to_string(), None).await?;
@@ -201,7 +199,7 @@ impl ResponseStream {
 
     /// Take the first `n` rows from the stream, advancing the cursor.
     /// Returns the concatenated batch and the number of batches consumed.
-    pub async fn take(&mut self, mut n: usize) -> Result<(RecordBatch, usize), BoxError> {
+    pub async fn take(&mut self, mut n: usize) -> Result<(RecordBatch, usize)> {
         let schema = self.current_batch.schema();
         let mut out_batches = Vec::new();
         let mut batch_count = 0;
@@ -235,7 +233,7 @@ impl ResponseStream {
                     n -= batch.num_rows();
                     out_batches.push(batch);
                 }
-                Some(Err(err)) => return Err(err.into()),
+                Some(Err(err)) => return Err(anyhow!(err)),
                 None => break, // stream ended early
             }
         }

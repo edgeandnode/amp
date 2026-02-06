@@ -1,6 +1,6 @@
 //! Test step for registering streams with the Flight client.
 
-use common::BoxError;
+use anyhow::Result;
 
 use crate::testlib::fixtures::FlightClient;
 
@@ -22,7 +22,7 @@ impl Step {
     ///
     /// Uses the Flight client to register a named stream that can be
     /// referenced in subsequent streaming operations.
-    pub async fn run(&self, client: &mut FlightClient) -> Result<(), BoxError> {
+    pub async fn run(&self, client: &mut FlightClient) -> Result<()> {
         tracing::debug!("Registering stream '{}'", self.stream);
 
         client.register_stream(&self.name, &self.stream).await

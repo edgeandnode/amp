@@ -3,10 +3,9 @@
 //! Provides methods for interacting with the `/datasets` endpoints of the admin API.
 
 use datasets_common::{
-    fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace, reference::Reference,
-    revision::Revision, version::Version,
+    end_block::EndBlock, fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace,
+    reference::Reference, revision::Revision, version::Version,
 };
-use dump::EndBlock;
 use monitoring::logging;
 use serde_json::value::RawValue;
 use worker::job::JobId;

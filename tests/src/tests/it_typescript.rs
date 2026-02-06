@@ -9,7 +9,7 @@
 
 use std::process::Stdio;
 
-use common::BoxError;
+use anyhow::{Result, anyhow};
 use monitoring::logging;
 
 use crate::testlib;
@@ -22,7 +22,7 @@ use crate::testlib;
 /// 3. Passes connection information via environment variables
 /// 4. Streams vitest output to stdout/stderr
 /// 5. Returns an error if the test fails
-async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
+async fn run_vitest_file(file: &str) -> Result<()> {
     // Extract test name for directory naming
     let name = file
         .trim_end_matches(".test.ts")
@@ -53,7 +53,7 @@ async fn run_vitest_file(file: &str) -> Result<(), BoxError> {
         .await?;
 
     if !status.success() {
-        return Err(format!("Test file {} failed with status: {}", file, status).into());
+        return Err(anyhow!("Test file {} failed with status: {}", file, status));
     }
 
     tracing::info!("Test file {} completed successfully", file);

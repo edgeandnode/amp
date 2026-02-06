@@ -27,3 +27,6 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 url.workspace = true
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

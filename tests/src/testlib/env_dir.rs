@@ -19,7 +19,7 @@
 
 use std::path::PathBuf;
 
-use common::BoxError;
+use anyhow::Result;
 use tempfile::TempDir;
 
 use super::debug;
@@ -41,7 +41,7 @@ impl TestEnvDir {
     /// making it easier to identify which test created which temporary directory.
     /// If the `TESTS_KEEP_TEMP_DIRS` environment variable is set, the directory
     /// will not be automatically cleaned up on drop, which is useful for debugging.
-    pub fn new(test_name: &str) -> Result<Self, BoxError> {
+    pub fn new(test_name: &str) -> Result<Self> {
         let prefix = format!("tests__{}__", test_name);
 
         let mut builder = tempfile::Builder::new();

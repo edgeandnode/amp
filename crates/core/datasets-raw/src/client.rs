@@ -2,7 +2,7 @@
 
 use std::{future::Future, time::Duration};
 
-use datasets_common::BlockNum;
+use datasets_common::block_num::BlockNum;
 use futures::{Stream, StreamExt as _};
 
 use crate::rows::Rows;

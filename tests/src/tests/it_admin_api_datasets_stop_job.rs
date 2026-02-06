@@ -11,11 +11,10 @@ use ampctl::client::{
     jobs::{JobInfo, StopError},
 };
 use datasets_common::{
-    fqn::FullyQualifiedName, name::Name, namespace::Namespace, reference::Reference,
-    revision::Revision, version::Version,
+    end_block::EndBlock, fqn::FullyQualifiedName, name::Name, namespace::Namespace,
+    reference::Reference, revision::Revision, version::Version,
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
-use dump::EndBlock;
 use serde_json::value::RawValue;
 use worker::job::JobId;
 

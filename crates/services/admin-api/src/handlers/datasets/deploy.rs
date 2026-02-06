@@ -170,9 +170,9 @@ pub async fn handler(
 #[serde(transparent)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-pub struct EndBlock(dump::EndBlock);
+pub struct EndBlock(datasets_common::end_block::EndBlock);
 
-impl From<EndBlock> for dump::EndBlock {
+impl From<EndBlock> for datasets_common::end_block::EndBlock {
     fn from(value: EndBlock) -> Self {
         value.0
     }

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use common::BoxError;
+use anyhow::{Result, anyhow};
 use datasets_common::reference::Reference;
 
 use crate::testlib::{ctx::TestCtx, helpers as test_helpers};
@@ -30,7 +30,7 @@ impl Step {
     /// Performs the dump operation using test helpers, validates table consistency,
     /// and handles expected failure scenarios. If failure is specified, the step
     /// succeeds only if the dump operation fails with the expected error.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!(
             "Dumping dataset '{}' up to block {}, failure={:?}",
             self.dataset,
@@ -38,7 +38,7 @@ impl Step {
             self.failure
         );
 
-        let result: Result<(), BoxError> = async {
+        let result: Result<()> = async {
             let ampctl = ctx.new_ampctl();
 
             test_helpers::deploy_and_wait(
@@ -91,16 +91,15 @@ impl Step {
 
                     if !found {
                         let full_error_chain = error_chain.join("\n  caused by: ");
-                        return Err(format!(
+                        return Err(anyhow!(
                             "Expected error to contain: \"{}\"\nActual error chain:\n  {}",
                             expected_substring.trim(),
                             full_error_chain
-                        )
-                        .into());
+                        ));
                     }
                     Ok(())
                 }
-                Ok(_) => Err("Expected dump to fail, but it succeeded".into()),
+                Ok(_) => Err(anyhow!("Expected dump to fail, but it succeeded")),
             }
         } else {
             result

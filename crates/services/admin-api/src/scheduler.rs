@@ -25,10 +25,9 @@
 
 use async_trait::async_trait;
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference, name::Name,
-    namespace::Namespace,
+    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
+    hash_reference::HashReference, name::Name, namespace::Namespace,
 };
-use dump::EndBlock;
 use metadata_db::Worker;
 use worker::{
     job::{Job, JobId, JobStatus},

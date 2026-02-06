@@ -22,7 +22,7 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 use async_stream::stream;
-use datasets_common::{block_range::BlockRange, dataset::BlockNum, network_id::NetworkId};
+use datasets_common::{block_num::BlockNum, block_range::BlockRange, network_id::NetworkId};
 use datasets_raw::{
     Timestamp,
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},

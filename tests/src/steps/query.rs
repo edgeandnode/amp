@@ -1,6 +1,6 @@
 //! Test step for executing SQL queries.
 
-use common::BoxError;
+use anyhow::Result;
 
 // Re-export SqlTestResult from stream_take for compatibility
 pub use super::stream_take::SqlTestResult;
@@ -29,7 +29,7 @@ impl Step {
     ///
     /// Runs the specified SQL query using the Flight client with optional
     /// streaming settings, then validates the actual results against expected results.
-    pub async fn run(&self, client: &mut FlightClient) -> Result<(), BoxError> {
+    pub async fn run(&self, client: &mut FlightClient) -> Result<()> {
         tracing::debug!(
             "Executing query: {} (streaming_options: {:?})",
             self.query,
@@ -45,7 +45,9 @@ impl Step {
             )
             .await;
 
-        self.result.assert_eq(actual_result)
+        self.result.assert_eq(actual_result)?;
+
+        Ok(())
     }
 }
 

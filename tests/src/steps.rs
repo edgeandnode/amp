@@ -134,7 +134,7 @@ pub struct TestStepError {
     /// Name of the test step that failed.
     pub name: String,
     /// Source error that caused the step to fail.
-    pub source: Box<dyn std::error::Error + Send + Sync>,
+    pub source: anyhow::Error,
 }
 
 /// Error types for test specification loading.

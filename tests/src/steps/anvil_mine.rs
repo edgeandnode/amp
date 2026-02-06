@@ -1,6 +1,5 @@
 //! Test step for mining blocks on Anvil.
-
-use common::BoxError;
+use anyhow::Result;
 
 use crate::testlib::ctx::TestCtx;
 
@@ -23,7 +22,7 @@ impl Step {
     ///
     /// Uses the Anvil fixture from the test context to mine blocks.
     /// Requires that the test context was configured with Anvil support.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!("Mining {} blocks", self.anvil_mine);
 
         ctx.anvil().mine(self.anvil_mine).await?;

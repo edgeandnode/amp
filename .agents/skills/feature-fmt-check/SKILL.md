@@ -5,7 +5,7 @@ description: Validate feature doc format against the specification. Use when rev
 
 # Feature Format Check Skill
 
-This skill validates that feature documentation **format** follows the established patterns in `docs/code/feature-docs.md`.
+This skill validates that feature documentation **format** follows the established patterns in `docs/__meta__/feature-docs.md`.
 
 ## When to Use This Skill
 
@@ -43,7 +43,7 @@ For each changed feature doc, verify:
 
 ## Format Reference
 
-All format requirements are defined in [docs/code/feature-docs.md](../../docs/code/feature-docs.md). Read that file for:
+All format requirements are defined in [docs/__meta__/feature-docs.md](../../docs/__meta__/feature-docs.md). Read that file for:
 - Frontmatter field requirements (`name`, `description`, `components`)
 - Description guidelines (third person, "Load when" triggers, no ending period)
 - Component prefix rules (`crate:`, `service:`, `app:`)
@@ -51,7 +51,7 @@ All format requirements are defined in [docs/code/feature-docs.md](../../docs/co
 - Reference direction rules (references flow UP the hierarchy)
 - No empty sections rule
 
-Use the **Checklist** section in `docs/code/feature-docs.md` to validate feature docs.
+Use the **Checklist** section in `docs/__meta__/feature-docs.md` to validate feature docs.
 
 ### Discovery Validation
 
@@ -76,13 +76,13 @@ awk '/^---$/{p=!p; print; next} p' docs/features/<feature-name>.md
 ## Validation Process
 
 1. **Identify changed files**: `git diff --name-only HEAD~1 | grep 'docs/features/.*\.md$'`
-2. **Read the feature doc** and **Read** [docs/code/feature-docs.md](../../docs/code/feature-docs.md)
+2. **Read the feature doc** and **Read** [docs/__meta__/feature-docs.md](../../docs/__meta__/feature-docs.md)
 3. **Validate** using the checklist in the patterns file
 4. **Report** findings using format below
 
 ## Review Report Format
 
-After validation, provide a structured report listing issues found. Use the checklist from [docs/code/feature-docs.md](../../docs/code/feature-docs.md) as the validation criteria.
+After validation, provide a structured report listing issues found. Use the checklist from [docs/__meta__/feature-docs.md](../../docs/__meta__/feature-docs.md) as the validation criteria.
 
 ```markdown
 ## Feature Doc Format Review: <filename>
@@ -93,12 +93,12 @@ After validation, provide a structured report listing issues found. Use the chec
 
 ### Verdict: PASS/FAIL
 
-<If FAIL, provide specific fixes needed referencing docs/code/feature-docs.md>
+<If FAIL, provide specific fixes needed referencing docs/__meta__/feature-docs.md>
 ```
 
 ## Common Issues
 
-When validation fails, refer to [docs/code/feature-docs.md](../../docs/code/feature-docs.md) for detailed requirements. Common issues include:
+When validation fails, refer to [docs/__meta__/feature-docs.md](../../docs/__meta__/feature-docs.md) for detailed requirements. Common issues include:
 
 - Invalid frontmatter YAML syntax
 - `name` not in kebab-case or doesn't match filename

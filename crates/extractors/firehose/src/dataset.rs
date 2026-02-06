@@ -3,10 +3,8 @@ use std::collections::BTreeMap;
 // Reuse types from datasets-common for consistency
 pub use datasets_common::manifest::TableSchema;
 use datasets_common::{
-    dataset::{BlockNum, Table as DatasetTable},
-    dataset_kind_str::DatasetKindStr,
-    hash_reference::HashReference,
-    network_id::NetworkId,
+    block_num::BlockNum, dataset::Table as DatasetTable, dataset_kind_str::DatasetKindStr,
+    hash_reference::HashReference, network_id::NetworkId,
 };
 
 use crate::dataset_kind::FirehoseDatasetKind;
