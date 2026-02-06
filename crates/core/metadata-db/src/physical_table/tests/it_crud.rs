@@ -31,13 +31,15 @@ async fn insert_creates_location_and_returns_id() {
     let path = TablePath::from_ref_unchecked(
         "test-dataset/test_table/01234567-89ab-cdef-0123-456789abcdef",
     );
-    let active = true;
 
     //* When
     let location_id =
-        physical_table::register(&mut conn, namespace, name, hash, table_name, path, active)
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
+    physical_table::mark_active_by_id(&mut conn, namespace, name, hash, table_name, location_id)
+        .await
+        .expect("Failed to mark location active");
 
     //* Then
     assert!(
@@ -90,23 +92,15 @@ async fn insert_on_conflict_returns_existing_id() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/unique-revision-id");
 
     // Insert first location
-    let first_id = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        &path,
-        true,
-    )
-    .await
-    .expect("Failed to insert first location");
+    let first_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            .await
+            .expect("Failed to insert first location");
 
     //* When - Try to insert with same path but different data
-    let second_id =
-        physical_table::register(&mut conn, namespace, name, hash, table_name, path, false)
-            .await
-            .expect("Failed to insert second location");
+    let second_id = physical_table::register(&mut conn, namespace, name, hash, table_name, path)
+        .await
+        .expect("Failed to insert second location");
 
     //* Then - Should return the same ID due to conflict resolution
     assert_eq!(
@@ -135,10 +129,9 @@ async fn path_to_location_id_finds_existing_location() {
     let table_name = TableName::from_ref_unchecked("test_table");
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/find-me-revision");
 
-    let expected_id =
-        physical_table::register(&mut conn, namespace, name, hash, table_name, &path, false)
-            .await
-            .expect("Failed to insert location");
+    let expected_id = physical_table::register(&mut conn, namespace, name, hash, table_name, &path)
+        .await
+        .expect("Failed to insert location");
 
     //* When
     let found_id = physical_table::path_to_id(&mut conn, path)
@@ -201,59 +194,61 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 
     // Create active location for target table
     let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/active1-revision");
-    let active_id1 = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        &path1,
-        true,
-    )
-    .await
-    .expect("Failed to insert active location 1");
+    let active_id1 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path1)
+            .await
+            .expect("Failed to insert active location 1");
+
+    physical_table::mark_active_by_id(&mut conn, &namespace, &name, &hash, &table_name, active_id1)
+        .await
+        .expect("Failed to mark location active");
 
     // Create another active location for different table (still should be returned)
     let path2 = TablePath::from_ref_unchecked("test-dataset/test_table2/active2-revision");
-    let active_id2 = physical_table::register(
+    let active_id2 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table2_name, &path2)
+            .await
+            .expect("Failed to insert active location 2");
+
+    physical_table::mark_active_by_id(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table2_name,
-        &path2,
-        true,
+        active_id2,
     )
     .await
-    .expect("Failed to insert active location 2");
+    .expect("Failed to mark location active");
 
     // Create inactive location for target table (should be filtered out)
     let path3 = TablePath::from_ref_unchecked("test-dataset/test_table/inactive-revision");
-    physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path3,
-        false,
-    )
-    .await
-    .expect("Failed to insert inactive location");
+    physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path3)
+        .await
+        .expect("Failed to insert inactive location");
 
     // Create active location for different table (should be filtered out)
     let path4 = TablePath::from_ref_unchecked("test-dataset/other_table/other-revision");
-    physical_table::register(
+    let active_id3 = physical_table::register(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &other_table_name,
         path4,
-        true,
     )
     .await
     .expect("Failed to insert location for other table");
+    physical_table::mark_active_by_id(
+        &mut conn,
+        &namespace,
+        &name,
+        &hash,
+        &other_table_name,
+        active_id3,
+    )
+    .await
+    .expect("Failed to mark location active");
 
     //* When - Get locations for first table
     let active_location1 = physical_table::get_active(&mut conn, &hash, &table_name)
@@ -320,45 +315,37 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
 
     // Create active location for first target table
     let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/target1-revision");
-    let target_id1 = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path1,
-        true,
-    )
-    .await
-    .expect("Failed to insert target location 1");
+    let target_id1 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path1)
+            .await
+            .expect("Failed to insert target location 1");
+    physical_table::mark_active_by_id(&mut conn, &namespace, &name, &hash, &table_name, target_id1)
+        .await
+        .expect("Failed to mark location active");
 
     // Create active location for second target table
     let path2 = TablePath::from_ref_unchecked("test-dataset/test_table2/target2-revision");
-    let target_id2 = physical_table::register(
+    let target_id2 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table2_name, path2)
+            .await
+            .expect("Failed to insert target location 2");
+    physical_table::mark_active_by_id(
         &mut conn,
         &namespace,
         &name,
         &hash,
         &table2_name,
-        path2,
-        true,
+        target_id2,
     )
     .await
-    .expect("Failed to insert target location 2");
+    .expect("Failed to mark location active");
 
     // Create already inactive location for target table (should remain unchanged)
     let path3 = TablePath::from_ref_unchecked("test-dataset/test_table/already-inactive-revision");
-    let inactive_id = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path3,
-        false,
-    )
-    .await
-    .expect("Failed to insert inactive location");
+    let inactive_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path3)
+            .await
+            .expect("Failed to insert inactive location");
 
     // Create active location for different table (should remain unchanged)
     let path4 = TablePath::from_ref_unchecked("test-dataset/other_table/other-revision");
@@ -369,13 +356,22 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
         &hash,
         &other_table_name,
         path4,
-        true,
     )
     .await
     .expect("Failed to insert other table location");
+    physical_table::mark_active_by_id(
+        &mut conn,
+        &namespace,
+        &name,
+        &hash,
+        &other_table_name,
+        other_id,
+    )
+    .await
+    .expect("Failed to mark other location active");
 
     //* When - Mark only the first table inactive
-    physical_table::mark_inactive_by_table_id(&mut conn, &hash, &table_name)
+    physical_table::mark_inactive_by_table_id(&mut conn, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark locations inactive");
 
@@ -419,6 +415,7 @@ async fn mark_active_by_id_activates_specific_location() {
     let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
+
     conn.run_migrations()
         .await
         .expect("Failed to run migrations");
@@ -432,33 +429,19 @@ async fn mark_active_by_id_activates_specific_location() {
     let table_name = TableName::from_ref_unchecked("test_table");
 
     let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/to-activate-revision");
-    let target_id = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path1,
-        false,
-    )
-    .await
-    .expect("Failed to insert location to activate");
+    let target_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path1)
+            .await
+            .expect("Failed to insert location to activate");
 
     let path2 = TablePath::from_ref_unchecked("test-dataset/test_table/stay-inactive-revision");
-    let other_id = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path2,
-        false,
-    )
-    .await
-    .expect("Failed to insert other location");
+    let other_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path2)
+            .await
+            .expect("Failed to insert other location");
 
     //* When
-    physical_table::mark_active_by_id(&mut conn, target_id, &hash, &table_name)
+    physical_table::mark_active_by_id(&mut conn, &namespace, &name, &hash, &table_name, target_id)
         .await
         .expect("Failed to mark location active");
 
@@ -466,6 +449,7 @@ async fn mark_active_by_id_activates_specific_location() {
     let target_active = is_location_active(&mut conn, target_id)
         .await
         .expect("Failed to check target location active status");
+
     let other_still_inactive = is_location_active(&mut conn, other_id)
         .await
         .expect("Failed to check other location active status");
@@ -515,48 +499,27 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     // Create locations to assign
     let path1 = TablePath::from_ref_unchecked("test-dataset/output_table/assign1-revision");
-    let location_id1 = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path1,
-        false,
-    )
-    .await
-    .expect("Failed to insert location 1");
+    let location_id1 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path1)
+            .await
+            .expect("Failed to insert location 1");
 
     let path2 = TablePath::from_ref_unchecked("test-dataset/output_table/assign2-revision");
-    let location_id2 = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path2,
-        false,
-    )
-    .await
-    .expect("Failed to insert location 2");
+    let location_id2 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path2)
+            .await
+            .expect("Failed to insert location 2");
 
     let path3 = TablePath::from_ref_unchecked("test-dataset/output_table/assign3-revision");
-    let location_id3 = physical_table::register(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-        path3,
-        false,
-    )
-    .await
-    .expect("Failed to insert location 3");
+    let location_id3 =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path3)
+            .await
+            .expect("Failed to insert location 3");
 
     // Create a location that should not be assigned
     let path4 = TablePath::from_ref_unchecked("test-dataset/output_table/not-assigned-revision");
     let unassigned_id =
-        physical_table::register(&mut conn, namespace, name, hash, &table_name, path4, false)
+        physical_table::register(&mut conn, namespace, name, hash, &table_name, path4)
             .await
             .expect("Failed to insert unassigned location");
 
@@ -625,9 +588,19 @@ async fn get_by_id_returns_existing_location() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/get-by-id-revision");
 
     let inserted_id =
-        physical_table::register(&mut conn, namespace, name, hash, &table_name, &path, true)
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
+    physical_table::mark_active_by_id(
+        &mut conn,
+        &namespace,
+        &name,
+        &hash,
+        &table_name,
+        inserted_id,
+    )
+    .await
+    .expect("Failed to mark location active");
 
     //* When
     let location = physical_table::get_by_id_with_details(&mut conn, inserted_id)
@@ -691,7 +664,7 @@ async fn get_by_id_returns_none_for_nonexistent_location() {
 
 // Helper functions for tests
 
-/// Helper function to fetch location details by ID
+/// Helper function to fetch location details by ID (Only checks active revision)
 async fn get_location_by_id<'c, E>(
     exe: E,
     location_id: LocationId,
@@ -699,8 +672,13 @@ async fn get_location_by_id<'c, E>(
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
-    let query =
-        "SELECT id, manifest_hash, table_name, path, active FROM physical_tables WHERE id = $1";
+    let query = indoc::indoc! {"
+        SELECT ptr.id, pt.manifest_hash, pt.table_name, ptr.path,
+               (pt.active_revision_id = ptr.id) AS active
+        FROM physical_table_revisions ptr
+        JOIN physical_tables pt ON pt.active_revision_id = ptr.id
+        WHERE ptr.id = $1
+    "};
     sqlx::query_as(query).bind(location_id).fetch_one(exe).await
 }
 
@@ -709,7 +687,12 @@ async fn is_location_active<'c, E>(exe: E, location_id: LocationId) -> Result<bo
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
-    let query = "SELECT active FROM physical_tables WHERE id = $1";
+    let query = indoc::indoc! {"
+        SELECT COALESCE(pt.active_revision_id = ptr.id, false) AS activ
+        FROM physical_table_revisions ptr
+        LEFT JOIN physical_tables pt ON pt.active_revision_id = ptr.id
+        WHERE ptr.id = $1
+    "};
     sqlx::query_scalar(query)
         .bind(location_id)
         .fetch_one(exe)
@@ -724,7 +707,7 @@ async fn get_writer_by_location_id<'c, E>(
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
-    let query = "SELECT writer FROM physical_tables WHERE id = $1";
+    let query = "SELECT writer FROM physical_table_revisions WHERE id = $1";
     sqlx::query_scalar(query)
         .bind(location_id)
         .fetch_one(exe)

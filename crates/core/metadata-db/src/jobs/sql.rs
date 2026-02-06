@@ -191,8 +191,9 @@ where
             j.created_at,
             j.updated_at
         FROM jobs j
-        INNER JOIN physical_tables l ON j.id = l.writer
-        WHERE l.manifest_hash = $1
+        INNER JOIN physical_table_revisions ptr ON j.id = ptr.writer
+        INNER JOIN physical_tables pt ON pt.active_revision_id = ptr.id
+        WHERE pt.manifest_hash = $1
         ORDER BY j.id ASC
     "#};
     let res = sqlx::query_as(query)
