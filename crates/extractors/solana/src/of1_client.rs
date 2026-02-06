@@ -77,11 +77,20 @@ pub async fn car_file_manager(
     let pending_msgs = Arc::new(Mutex::new(PendingMessageMap::new()));
     let file_interests = Arc::new(Mutex::new(FileInterestMap::new()));
 
+    if let Err(e) = fs_err::create_dir_all(&car_directory) {
+        tracing::error!(
+            path = %car_directory.display(),
+            error = %e,
+            "failed to create CAR file directory, shutting down CAR file manager"
+        );
+        return;
+    }
+
     loop {
         tokio::select! {
             msg = car_manager_rx.recv() => {
                 let Some(msg) = msg else {
-                    tracing::debug!("CAR file manager channel closed, shutting down");
+                    tracing::error!("CAR file manager channel closed, shutting down");
                     return;
                 };
                 match msg {
