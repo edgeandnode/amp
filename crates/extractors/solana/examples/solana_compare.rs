@@ -206,8 +206,8 @@ async fn get_block_with_retry(
 /// focused error logging.
 fn slots_match(
     slot_num: Slot,
-    of1_slot: solana_datasets::tables::NonEmptySlot,
-    rpc_slot: solana_datasets::tables::NonEmptySlot,
+    mut of1_slot: solana_datasets::tables::NonEmptySlot,
+    mut rpc_slot: solana_datasets::tables::NonEmptySlot,
 ) -> bool {
     if of1_slot.slot != rpc_slot.slot {
         tracing::warn!(
@@ -360,35 +360,35 @@ fn slots_match(
         }
     }
 
-    if of1_slot.block_rewards.rewards.len() != rpc_slot.block_rewards.rewards.len() {
+    let mut of1_rewards = std::mem::take(&mut of1_slot.block_rewards.rewards);
+    let mut rpc_rewards = std::mem::take(&mut rpc_slot.block_rewards.rewards);
+
+    if of1_rewards.len() != rpc_rewards.len() {
         // TODO(known-mismatch): some RPC providers could have pruned block rewards
         // for older slots while OF1 has the rewards for the same slots,
         // resulting in a mismatch in block reward count.
-        let known_mismatch = rpc_slot.block_rewards.rewards.is_empty();
+        let known_mismatch = rpc_rewards.is_empty();
 
         if !known_mismatch {
             tracing::warn!(
                 %slot_num,
-                of1_rewards_count = %of1_slot.block_rewards.rewards.len(),
-                rpc_rewards_count = %rpc_slot.block_rewards.rewards.len(),
+                of1_rewards_count = %of1_rewards.len(),
+                rpc_rewards_count = %rpc_rewards.len(),
                 "block reward count mismatch"
             );
             return false;
         }
     }
 
-    for (reward_index, (of1_reward, rpc_reward)) in of1_slot
-        .block_rewards
-        .rewards
-        .iter()
-        .zip(rpc_slot.block_rewards.rewards.iter())
-        .enumerate()
-    {
+    // Rewards are not sorted by default, which could lead to false positives.
+    of1_rewards.sort();
+    rpc_rewards.sort();
+
+    for (of1_reward, rpc_reward) in of1_rewards.iter().zip(rpc_rewards.iter()) {
         if of1_reward != rpc_reward {
-            let cmp = pretty_assertions::Comparison::new(&of1_reward, &rpc_reward);
+            let cmp = pretty_assertions::Comparison::new(of1_reward, rpc_reward);
             tracing::warn!(
                 %slot_num,
-                %reward_index,
                 %cmp,
                 "block reward mismatch"
             );
