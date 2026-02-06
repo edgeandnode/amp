@@ -311,12 +311,15 @@ fn slots_match(
 
         if of1_tx != rpc_tx {
             // TODO(known-mismatch)
-            let is_known_mismatch = known_ui_amount_mismatch(
+            let known_mismatch = known_tx_ui_amount_mismatch(
+                of1_tx.transaction_status_meta.as_ref(),
+                rpc_tx.transaction_status_meta.as_ref(),
+            ) || known_tx_reward_mismatch(
                 of1_tx.transaction_status_meta.as_ref(),
                 rpc_tx.transaction_status_meta.as_ref(),
             );
 
-            if !is_known_mismatch {
+            if !known_mismatch {
                 let cmp = pretty_assertions::Comparison::new(&of1_tx, &rpc_tx);
                 tracing::warn!(
                     %slot_num,
@@ -358,9 +361,10 @@ fn slots_match(
     }
 
     if of1_slot.block_rewards.rewards.len() != rpc_slot.block_rewards.rewards.len() {
-        // TODO(known-mismatch)
-        let known_mismatch =
-            known_block_reward_count_mismatch(&rpc_slot, of1_slot.block_rewards.rewards.len());
+        // TODO(known-mismatch): some RPC providers could have pruned block rewards
+        // for older slots while OF1 has the rewards for the same slots,
+        // resulting in a mismatch in block reward count.
+        let known_mismatch = rpc_slot.block_rewards.rewards.is_empty();
 
         if !known_mismatch {
             tracing::warn!(
@@ -398,7 +402,7 @@ fn slots_match(
 /// Checks for a known mismatch (in value, by a small delta) in the `ui_amount`
 /// field of token balances in transaction status metadata and returns `true` if
 /// found. For any other kind of mismatch (or no mismatch), returns `false`.
-fn known_ui_amount_mismatch(
+fn known_tx_ui_amount_mismatch(
     of1_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
     rpc_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
 ) -> bool {
@@ -454,31 +458,21 @@ fn known_ui_amount_mismatch(
     false
 }
 
-/// Checks for a known mismatch in the block reward count where the OF1 slot
-/// has its block rewards in the top level `block_rewards` field of the slot
-/// and the RPC slot has its block rewards distributed across the transactions'
-/// metadata `rewards` fields. Returns `true` if this is the case.
-///
-/// TODO: This can probably be resolved through JSON-RPC call configuration or similar.
-fn known_block_reward_count_mismatch(
-    rpc_slot: &solana_datasets::tables::NonEmptySlot,
-    of1_block_reward_count: usize,
+/// Checks for a known mismatch where OF1 has block rewards for a transaction but
+/// RPC shows no rewards for the same transaction (because some RPC providers
+/// prune rewards for older transactions).
+fn known_tx_reward_mismatch(
+    of1_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
+    rpc_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
 ) -> bool {
-    let actual_rpc_block_rewards_count: usize = rpc_slot
-        .transactions
-        .iter()
-        .map(|tx| {
-            tx.transaction_status_meta
-                .as_ref()
-                .map(|meta| {
-                    meta.rewards
-                        .as_ref()
-                        .map(|rewards| rewards.len())
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default()
-        })
-        .sum();
+    let (Some(of1_tx_meta), Some(rpc_tx_meta)) = (of1_tx_meta, rpc_tx_meta) else {
+        return false;
+    };
 
-    of1_block_reward_count != actual_rpc_block_rewards_count
+    let (Some(of1_rewards), Some(rpc_rewards)) =
+        (of1_tx_meta.rewards.as_ref(), rpc_tx_meta.rewards.as_ref())
+    else {
+        return false;
+    };
+    rpc_rewards.is_empty() && !of1_rewards.is_empty()
 }
