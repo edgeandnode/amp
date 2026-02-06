@@ -30,6 +30,11 @@ pub struct Config {
 
     /// Parquet file configuration
     pub parquet: ParquetConfig,
+
+    /// Progress event emission interval.
+    /// Progress events are emitted at most once per this interval when there is new progress.
+    /// Default: 10 seconds.
+    pub progress_interval: Duration,
 }
 
 impl Config {

@@ -16,6 +16,7 @@ pub mod config;
 mod derived_dataset;
 pub mod metrics;
 mod parquet_writer;
+pub mod progress;
 mod raw_dataset;
 mod raw_dataset_writer;
 pub mod streaming_query;
@@ -29,6 +30,10 @@ pub use self::{
         SizeLimitConfig,
     },
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+    progress::{
+        NoOpProgressReporter, ProgressReporter, ProgressReporterExt, ProgressUpdate,
+        SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
 };
 use crate::{
     compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit},
@@ -37,6 +42,7 @@ use crate::{
 };
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
+#[expect(clippy::too_many_arguments)]
 pub async fn dump_tables(
     ctx: Ctx,
     dataset: &HashReference,
@@ -45,15 +51,23 @@ pub async fn dump_tables(
     microbatch_max_interval: u64,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     if kind == DerivedDatasetKind {
         // Derived datasets
-        derived_dataset::dump(ctx, dataset, microbatch_max_interval, end, writer)
-            .await
-            .map_err(Error::DerivedDatasetDump)?;
+        derived_dataset::dump(
+            ctx,
+            dataset,
+            microbatch_max_interval,
+            end,
+            writer,
+            progress_reporter,
+        )
+        .await
+        .map_err(Error::DerivedDatasetDump)?;
     } else {
         // Raw datasets (EvmRpc, Firehose, Solana, etc.)
-        raw_dataset::dump(ctx, dataset, max_writers, end, writer)
+        raw_dataset::dump(ctx, dataset, max_writers, end, writer, progress_reporter)
             .await
             .map_err(Error::RawDatasetDump)?;
     }

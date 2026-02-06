@@ -100,3 +100,19 @@ url = "postgres://<pg_url>"
 # active = false                   # Enable or disable the collector (default: false)
 # min_interval = 30.0              # Interval in seconds to run the garbage collector (default: 30.0)
 # deletion_lock_duration = 1800.0  # Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)
+
+# Worker configuration
+[worker_events]
+# enabled = false                  # Enable event streaming to Kafka (default: false)
+# progress_interval = 10          # Interval in seconds for emitting progress events (default: 10)
+
+[worker_events.kafka]
+# brokers = ["localhost:9092"]    # Kafka broker addresses (required if events enabled)
+# topic = "amp.worker.events"     # Kafka topic for worker events (default: "amp.worker.events")
+# partitions = 16                 # Number of partitions for consistent hashing (default: 16)
+
+# SASL authentication (optional - for managed Kafka like AWS MSK, Confluent, Redpanda Cloud)
+# sasl_mechanism = "SCRAM-SHA-256"  # Supported: "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"
+# sasl_username = "your-username"
+# sasl_password = "your-password"
+# tls_enabled = true              # Enable TLS encryption (default: false)

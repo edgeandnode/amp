@@ -1,5 +1,6 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
+use amp_config::WorkerEventsConfig;
 use amp_data_store::DataStore;
 use amp_dataset_store::DatasetStore;
 use backon::{ExponentialBuilder, Retryable};
@@ -30,6 +31,7 @@ use self::{
 use crate::{
     build_info::BuildInfo,
     config::Config,
+    events::{EventEmitter, KafkaEventEmitter, NoOpEmitter},
     job::{Job, JobAction, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
@@ -46,6 +48,17 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 ///   listener setup, and bootstrap. Errors in this phase are returned as [`InitError`].
 /// - **Phase 2 (Runtime)**: Main event loop handling heartbeats, job notifications,
 ///   job results, and reconciliation. Errors in this phase are returned as [`RuntimeError`].
+///
+/// # Event Emitter Injection
+///
+/// The `event_emitter` parameter allows injecting a custom [`EventEmitter`] implementation.
+/// This is primarily useful for testing, where a mock emitter can be injected to capture
+/// events during integration tests.
+///
+/// - If `Some(emitter)` is provided, it will be used directly.
+/// - If `None` is provided, an emitter will be created based on the configuration
+///   (either [`KafkaEventEmitter`] if events are enabled, or [`NoOpEmitter`] otherwise).
+#[expect(clippy::too_many_arguments)]
 pub async fn new(
     config: Config,
     build_info: impl Into<BuildInfo>,
@@ -54,6 +67,7 @@ pub async fn new(
     dataset_store: DatasetStore,
     meter: Option<Meter>,
     node_id: NodeId,
+    event_emitter: Option<Arc<dyn EventEmitter>>,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
     let build_info = build_info.into();
 
@@ -80,6 +94,15 @@ pub async fn new(
     // Create notification multiplexer
     let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
+    // Use injected event emitter or create one based on configuration
+    let event_emitter: Arc<dyn EventEmitter> = match event_emitter {
+        Some(emitter) => {
+            tracing::info!("Using injected event emitter");
+            emitter
+        }
+        None => create_event_emitter(&config.events_config, &node_id).await,
+    };
+
     // Worker bootstrap: If the worker is restarted, it needs to be able to resume its state
     // from the last known state.
     //
@@ -102,6 +125,7 @@ pub async fn new(
             data_store,
             notification_multiplexer,
             meter,
+            event_emitter,
         },
     );
 
@@ -218,6 +242,7 @@ pub(crate) struct WorkerJobCtx {
     pub data_store: DataStore,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,
+    pub event_emitter: Arc<dyn EventEmitter>,
 }
 
 pub struct Worker {
@@ -286,6 +311,10 @@ impl Worker {
     ///
     /// This method is called when a job in the job set completes, fails, or is aborted.
     /// It updates the job status in the Metadata DB.
+    ///
+    /// Note: Lifecycle events (sync.started, sync.completed, sync.failed) are now emitted
+    /// per-table from the dump layer where table names are known. This ensures partition
+    /// key consistency with sync.progress events.
     async fn handle_job_result(
         &mut self,
         job_id: JobId,
@@ -414,6 +443,10 @@ impl Worker {
         let job_desc: crate::job::JobDescriptor =
             serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
 
+        // Note: sync.started/completed/failed events are now emitted per-table from
+        // the dump layer where table names are known, ensuring partition key consistency
+        // with sync.progress events.
+
         let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc);
 
         self.job_set.spawn(job_id, job_fut);
@@ -437,6 +470,41 @@ impl Worker {
         self.job_set.abort(job_id);
         Ok(())
     }
+}
+
+// --- Private helpers below ---
+
+/// Creates an event emitter based on configuration.
+///
+/// Returns a [`NoOpEmitter`] if events are disabled, Kafka config is missing,
+/// or Kafka producer creation fails.
+async fn create_event_emitter(
+    events_config: &WorkerEventsConfig,
+    node_id: &NodeId,
+) -> Arc<dyn EventEmitter> {
+    if !events_config.enabled {
+        return Arc::new(NoOpEmitter);
+    }
+
+    let Some(kafka_config) = &events_config.kafka else {
+        tracing::warn!("Events enabled but no Kafka config provided, events disabled");
+        return Arc::new(NoOpEmitter);
+    };
+
+    let producer = match crate::kafka::KafkaProducer::new(kafka_config).await {
+        Ok(producer) => producer,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                error_source = logging::error_source(&err),
+                "Failed to create Kafka producer, events disabled"
+            );
+            return Arc::new(NoOpEmitter);
+        }
+    };
+
+    tracing::info!("Kafka event streaming enabled");
+    Arc::new(KafkaEventEmitter::new(Arc::new(producer), node_id.clone()))
 }
 
 /// Registers a worker in the metadata DB.

@@ -12,7 +12,10 @@ use anyhow::Result;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
-use worker::{config::Config, node_id::NodeId, service::RuntimeError as WorkerRuntimeError};
+use worker::{
+    config::Config, events::EventEmitter, node_id::NodeId,
+    service::RuntimeError as WorkerRuntimeError,
+};
 
 use crate::testlib::build_info::BuildInfo;
 
@@ -45,6 +48,39 @@ impl DaemonWorker {
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self> {
+        Self::with_event_emitter(
+            build_info,
+            config,
+            metadata_db,
+            data_store,
+            dataset_store,
+            meter,
+            node_id,
+            None,
+        )
+        .await
+    }
+
+    /// Create and start a new Amp worker with an injected event emitter.
+    ///
+    /// This is useful for integration tests that want to capture worker events
+    /// by injecting a mock event emitter.
+    ///
+    /// # Parameters
+    ///
+    /// - `event_emitter`: If `Some`, uses the provided emitter. If `None`, creates
+    ///   an emitter based on the configuration (same as `new()`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn with_event_emitter(
+        build_info: BuildInfo,
+        config: Arc<amp_config::Config>,
+        metadata_db: MetadataDb,
+        data_store: DataStore,
+        dataset_store: DatasetStore,
+        meter: Option<Meter>,
+        node_id: NodeId,
+        event_emitter: Option<Arc<dyn EventEmitter>>,
+    ) -> Result<Self> {
         let worker_config = worker_config_from_common(&config);
         let worker_fut = worker::service::new(
             worker_config.clone(),
@@ -54,6 +90,7 @@ impl DaemonWorker {
             dataset_store.clone(),
             meter,
             node_id.clone(),
+            event_emitter,
         )
         .await?;
         let worker_task = tokio::spawn(worker_fut);
@@ -114,6 +151,7 @@ fn worker_config_from_common(config: &amp_config::Config) -> Config {
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
+        events_config: config.worker_events.clone(),
     }
 }
 

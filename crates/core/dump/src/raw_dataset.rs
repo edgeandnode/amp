@@ -83,8 +83,8 @@ use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
     sync::{
-        Arc, RwLock,
-        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -112,6 +112,9 @@ use crate::{
     check::consistency_check,
     compaction::AmpCompactor,
     metrics,
+    progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
     raw_dataset_writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError},
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
@@ -124,6 +127,7 @@ pub async fn dump(
     max_writers: u16,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     let writer = writer.into();
 
@@ -247,92 +251,142 @@ pub async fn dump(
     let mut timer = tokio::time::interval(ctx.config.poll_interval);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // Emit sync.started event for each table
+    if let Some(ref reporter) = progress_reporter {
+        for (table, _) in &tables {
+            reporter.report_sync_started(SyncStartedInfo {
+                table_name: table.table_name().clone(),
+                start_block: dataset.start_block(),
+                end_block: end,
+            });
+        }
+    }
+
     // In order to resolve reorgs in the same block as they are detected, we run the
     // `dump_ranges` procedure in a loop.
     //
     // To reduce RPC polling of `latest_block`, we wait on `timer` when we know the
     // next iteration would have no work to do unless there is a new block.
-    loop {
-        let Some(latest_block) = client
-            .latest_block(finalized_blocks_only)
-            .await
-            .map_err(Error::LatestBlock)?
-        else {
-            // No data to dump, wait for more data
-            timer.tick().await;
-            continue;
-        };
-        if latest_block < start {
-            // Start not yet reached, wait for more data
-            timer.tick().await;
-            continue;
-        }
-
-        let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
-            Default::default();
-
-        let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> = Default::default();
-
-        for (table, compactor) in &tables {
-            let end = match end {
-                None => latest_block,
-                Some(end) => BlockNum::min(end, latest_block),
-            };
-            let missing_ranges = table
-                .missing_ranges(start..=end)
+    //
+    // We wrap the loop in a block to handle errors and emit failure events.
+    let dump_result: Result<(), Error> = async {
+        loop {
+            let Some(latest_block) = client
+                .latest_block(finalized_blocks_only)
                 .await
-                .map_err(Error::MissingRanges)?;
-            let table_name = table.table_name();
-            missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
-            compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
-        }
-
-        // Use the union of missing table block ranges.
-        let missing_dataset_ranges = {
-            let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
-                .values()
-                .flatten()
-                .cloned()
-                .collect();
-            merge_ranges(ranges)
-        };
-
-        // If there are no ranges then there is no more work to do, check dump end condition.
-        if missing_dataset_ranges.is_empty() {
-            // If we've reached the configured end block, stop completely and return.
-            if let Some(end) = end
-                && end <= latest_block
-            {
-                break;
-            } else {
-                // Otherwise, wait for more data.
+                .map_err(Error::LatestBlock)?
+            else {
+                // No data to dump, wait for more data
+                timer.tick().await;
+                continue;
+            };
+            if latest_block < start {
+                // Start not yet reached, wait for more data
                 timer.tick().await;
                 continue;
             }
-        }
 
-        dump_ranges(
-            missing_dataset_ranges,
-            max_writers,
-            &client,
-            &ctx,
-            &catalog,
-            parquet_opts.clone(),
-            missing_ranges_by_table,
-            compactors_by_table,
-            metrics.as_ref(),
-            &tables,
-        )
-        .await?;
+            let mut missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>> =
+                Default::default();
+
+            let mut compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>> =
+                Default::default();
+
+            for (table, compactor) in &tables {
+                let end = match end {
+                    None => latest_block,
+                    Some(end) => BlockNum::min(end, latest_block),
+                };
+                let missing_ranges = table
+                    .missing_ranges(start..=end)
+                    .await
+                    .map_err(Error::MissingRanges)?;
+                let table_name = table.table_name();
+                missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
+                compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
+            }
+
+            // Use the union of missing table block ranges.
+            let missing_dataset_ranges = {
+                let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
+                    .values()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                merge_ranges(ranges)
+            };
+
+            // If there are no ranges then there is no more work to do, check dump end condition.
+            if missing_dataset_ranges.is_empty() {
+                // If we've reached the configured end block, stop completely and return.
+                if let Some(end) = end
+                    && end <= latest_block
+                {
+                    break;
+                } else {
+                    // Otherwise, wait for more data.
+                    timer.tick().await;
+                    continue;
+                }
+            }
+
+            dump_ranges(
+                missing_dataset_ranges,
+                max_writers,
+                &client,
+                &ctx,
+                &catalog,
+                parquet_opts.clone(),
+                missing_ranges_by_table,
+                compactors_by_table,
+                metrics.as_ref(),
+                &tables,
+                start,
+                end,
+                latest_block,
+                progress_reporter.clone(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    .await;
+
+    // Handle dump errors by emitting failure events for each table
+    if let Err(ref err) = dump_result {
+        if let Some(ref reporter) = progress_reporter {
+            let error_message = err.to_string();
+            for (table, _) in &tables {
+                reporter.report_sync_failed(SyncFailedInfo {
+                    table_name: table.table_name().clone(),
+                    error_message: error_message.clone(),
+                    error_type: Some("DumpError".to_string()),
+                });
+            }
+        }
+        return dump_result;
     }
 
     // Record dump duration on successful completion
+    let duration_millis = dump_start_time.elapsed().as_millis() as u64;
     if let Some(ref metrics) = metrics {
-        let duration_millis = dump_start_time.elapsed().as_millis() as f64;
         for (table, _compactor) in &tables {
             let table_name = table.table_name().to_string();
             let job_id = table_name.clone();
-            metrics.record_dump_duration(duration_millis, table_name, job_id);
+            metrics.record_dump_duration(duration_millis as f64, table_name, job_id);
+        }
+    }
+
+    // Emit sync.completed event for each table
+    if let Some(ref reporter) = progress_reporter {
+        // The final block is the configured end block (we only exit the loop when we reach it)
+        let final_block = end.expect("dump loop only exits when end block is reached");
+        for (table, _) in &tables {
+            reporter.report_sync_completed(SyncCompletedInfo {
+                table_name: table.table_name().clone(),
+                final_block,
+                duration_millis,
+            });
         }
     }
 
@@ -487,6 +541,14 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
     metrics: Option<&Arc<metrics::MetricsRegistry>>,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
+    // The job's actual start block (from dataset definition), used for progress events
+    job_start_block: BlockNum,
+    // The job's actual end block (resolved), used for progress events. None for continuous mode.
+    job_end_block: Option<BlockNum>,
+    // Current chain head block, used for percentage calculation in continuous mode
+    chain_head: BlockNum,
+    // Optional progress reporter for external event streaming
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     tracing::info!(
         "dumping ranges {}",
@@ -501,16 +563,23 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     let missing_dataset_ranges =
         split_and_partition(missing_dataset_ranges, max_writers as u64, 2000);
 
-    let total_blocks_to_cover = missing_dataset_ranges
-        .iter()
-        .flatten()
-        .map(|r| r.clone().count())
-        .sum::<usize>();
+    // Extract table names for progress reporting
+    let table_names: Vec<TableName> = tables.iter().map(|(t, _)| t.table_name().clone()).collect();
 
-    let progress_reporter = Arc::new(ProgressReporter {
-        overall_blocks_covered: AtomicUsize::new(0),
-        total_blocks_to_cover,
-        last_log_time: RwLock::new(Instant::now()),
+    // Use the job's actual start/end blocks for progress events (not the missing ranges).
+    // This ensures consumers see the overall job progress, not just progress through remaining work.
+    // For continuous mode, chain_head is used instead of job_end_block for percentage calculation.
+    let progress_tracker = Arc::new(ProgressTracker {
+        last_logged_percent: AtomicUsize::new(0),
+        last_emission_time: Mutex::new(Instant::now() - ctx.config.progress_interval),
+        last_emitted_block: AtomicU64::new(0),
+        has_emitted: AtomicBool::new(false),
+        interval: ctx.config.progress_interval,
+        progress_reporter: progress_reporter.clone(),
+        table_names,
+        job_start_block,
+        job_end_block,
+        chain_head,
     });
 
     let writers = missing_dataset_ranges
@@ -527,7 +596,7 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
             compactors_by_table: compactors_by_table.clone(),
             id: i as u32,
             metrics: metrics.cloned(),
-            progress_reporter: progress_reporter.clone(),
+            progress_tracker: progress_tracker.clone(),
         });
 
     // Spawn the writers, starting them with a 1-second delay between each.
@@ -568,26 +637,94 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     Ok(())
 }
 
-struct ProgressReporter {
-    overall_blocks_covered: AtomicUsize,
-    total_blocks_to_cover: usize,
-    last_log_time: RwLock<Instant>,
+/// Internal progress tracker that handles throttling and forwards to the external reporter.
+struct ProgressTracker {
+    /// Last percentage that was logged (for throttling log output)
+    last_logged_percent: AtomicUsize,
+    /// Time of last progress event emission (for time-based throttling)
+    last_emission_time: Mutex<Instant>,
+    /// Last block that triggered a progress event
+    last_emitted_block: AtomicU64,
+    /// Whether we've emitted at least one progress event
+    has_emitted: AtomicBool,
+    /// Minimum interval between progress events
+    interval: Duration,
+    /// Optional progress reporter for external event streaming
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
+    /// Table names for progress reporting
+    table_names: Vec<TableName>,
+    /// The job's actual start block (from dataset definition)
+    job_start_block: BlockNum,
+    /// The job's actual end block (resolved). None for continuous mode.
+    job_end_block: Option<BlockNum>,
+    /// Current chain head block, used for percentage calculation in continuous mode
+    chain_head: BlockNum,
 }
 
-impl ProgressReporter {
-    /// Signal to the progress reporter that another block has been covered.
-    fn block_covered(&self) {
-        let overall_blocks_covered = self.overall_blocks_covered.fetch_add(1, Ordering::SeqCst) + 1;
-        let now = Instant::now();
-        let last_log_time = *self.last_log_time.read().unwrap();
-        if now.duration_since(last_log_time) >= Duration::from_secs(15) {
-            let percent_covered =
-                (overall_blocks_covered as f64 / self.total_blocks_to_cover as f64) * 100.0;
-            tracing::info!(
-                "overall progress: {overall_blocks_covered}/{} blocks ({percent_covered:.2}%)",
-                self.total_blocks_to_cover
-            );
-            *self.last_log_time.write().unwrap() = now;
+impl ProgressTracker {
+    /// Signal to the progress tracker that another block has been covered.
+    fn block_covered(&self, current_block: BlockNum) {
+        // Calculate current percentage based on chain head position (for logging).
+        // For bounded jobs: percentage = (current - start) / (end - start) * 100
+        // For continuous jobs: percentage = (current - start) / (chain_head - start) * 100
+        let effective_end = self.job_end_block.unwrap_or(self.chain_head);
+        let total_range = effective_end.saturating_sub(self.job_start_block) + 1;
+        let blocks_done = current_block.saturating_sub(self.job_start_block) + 1;
+        let current_percent = if total_range > 0 {
+            ((blocks_done as f64 / total_range as f64) * 100.0).min(100.0) as usize
+        } else {
+            0
+        };
+
+        // Log progress when percentage increases (throttled to avoid spam)
+        let last_logged = self.last_logged_percent.load(Ordering::SeqCst);
+        if current_percent > last_logged {
+            // Only log every 5% to avoid excessive logging
+            if current_percent / 5 > last_logged / 5 {
+                tracing::info!(
+                    "overall progress: {blocks_done}/{total_range} blocks ({current_percent}%)",
+                );
+            }
+            self.last_logged_percent
+                .store(current_percent, Ordering::SeqCst);
+        }
+
+        // Time-based progress event emission
+        // Only emit if: interval has elapsed AND we have new progress
+        if let Some(ref reporter) = self.progress_reporter {
+            let last_block = self.last_emitted_block.load(Ordering::SeqCst);
+            let has_emitted = self.has_emitted.load(Ordering::SeqCst);
+
+            // Check if we have new progress: either first emission or current > last
+            let progress_made = !has_emitted || current_block > last_block;
+
+            if progress_made {
+                let mut last_time = self.last_emission_time.lock().unwrap();
+                let now = Instant::now();
+
+                if now.duration_since(*last_time) >= self.interval {
+                    // Update state before emitting
+                    *last_time = now;
+                    drop(last_time); // Release lock before emitting
+                    self.last_emitted_block
+                        .store(current_block, Ordering::SeqCst);
+                    self.has_emitted.store(true, Ordering::SeqCst);
+
+                    // Report for each table
+                    for table_name in &self.table_names {
+                        reporter.report_progress(ProgressUpdate {
+                            table_name: table_name.clone(),
+                            start_block: self.job_start_block,
+                            current_block,
+                            end_block: self.job_end_block,
+                            // File and byte counts are tracked at the writer level and
+                            // reported via metrics. Progress reports focus on block progress.
+                            files_count: 0,
+                            total_size_bytes: 0,
+                        });
+                    }
+                }
+            }
         }
     }
 }
@@ -674,8 +811,8 @@ struct DumpPartition<S: BlockStreamer> {
     id: u32,
     /// Metrics registry
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    /// A progress reporter which logs the overall progress of all partitions.
-    progress_reporter: Arc<ProgressReporter>,
+    /// A progress tracker which logs the overall progress of all partitions.
+    progress_tracker: Arc<ProgressTracker>,
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -744,12 +881,15 @@ impl<S: BlockStreamer> DumpPartition<S> {
         .map_err(RunRangeError::CreateWriter)?;
 
         let mut stream = std::pin::pin!(stream);
+        let mut last_block_num: BlockNum = *range.start();
         while let Some(dataset_rows) = stream.try_next().await.map_err(RunRangeError::ReadStream)? {
             for table_rows in dataset_rows {
+                let block_num = table_rows.block_num();
+                last_block_num = block_num;
+
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
                     let table_name = table_rows.table.name();
-                    let block_num = table_rows.block_num();
                     let physical_table = self
                         .catalog
                         .tables()
@@ -769,7 +909,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
                     .map_err(RunRangeError::Write)?;
             }
 
-            self.progress_reporter.block_covered();
+            self.progress_tracker.block_covered(last_block_num);
         }
 
         // Close the last part file for each table, checking for any errors.
@@ -833,6 +973,261 @@ pub enum RunRangeError {
 
 #[cfg(test)]
 mod test {
+    use std::{
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, AtomicU64, AtomicUsize},
+        },
+        time::{Duration, Instant},
+    };
+
+    use datasets_common::table_name::TableName;
+
+    use super::ProgressTracker;
+    use crate::progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    };
+
+    /// A mock progress reporter that records all progress updates.
+    struct MockProgressReporter {
+        updates: Mutex<Vec<ProgressUpdate>>,
+    }
+
+    impl MockProgressReporter {
+        fn new() -> Self {
+            Self {
+                updates: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn get_updates(&self) -> Vec<ProgressUpdate> {
+            self.updates.lock().unwrap().clone()
+        }
+    }
+
+    impl ProgressReporter for MockProgressReporter {
+        fn report_progress(&self, update: ProgressUpdate) {
+            tracing::info!(
+                table = %update.table_name,
+                start_block = update.start_block,
+                current_block = update.current_block,
+                "[PROGRESS] block_covered"
+            );
+            self.updates.lock().unwrap().push(update);
+        }
+
+        fn report_sync_started(&self, _info: SyncStartedInfo) {}
+        fn report_sync_completed(&self, _info: SyncCompletedInfo) {}
+        fn report_sync_failed(&self, _info: SyncFailedInfo) {}
+    }
+
+    #[test]
+    fn progress_tracker_emits_on_time_interval() {
+        // Initialize logging so we can see the events
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("info")
+            .with_test_writer()
+            .try_init();
+
+        // Given: A ProgressTracker with zero interval (emits on every update)
+        let reporter = Arc::new(MockProgressReporter::new());
+        let table_name: TableName = "blocks".parse().unwrap();
+
+        let tracker = ProgressTracker {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO, // Zero interval for testing
+            progress_reporter: Some(reporter.clone()),
+            table_names: vec![table_name.clone()],
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process all 100 blocks (block numbers 0-99)
+        for block in 0..100u64 {
+            tracker.block_covered(block);
+        }
+
+        // Then: With zero interval, should emit on every unique block
+        let updates = reporter.get_updates();
+
+        // We expect 100 updates (one per block with new progress)
+        assert_eq!(
+            updates.len(),
+            100,
+            "Expected 100 progress updates, got {}",
+            updates.len()
+        );
+
+        // Verify updates have correct metadata
+        for update in &updates {
+            assert_eq!(update.table_name, table_name);
+            assert_eq!(update.start_block, 0);
+            assert_eq!(update.end_block, Some(99));
+        }
+
+        // Verify first and last blocks
+        let first_block = updates.first().unwrap().current_block;
+        let last_block = updates.last().unwrap().current_block;
+        assert_eq!(first_block, 0, "First update should be at block 0");
+        assert_eq!(last_block, 99, "Last update should be at block 99");
+    }
+
+    #[test]
+    fn progress_tracker_emits_for_multiple_tables() {
+        // Given: A ProgressTracker with multiple tables
+        let reporter = Arc::new(MockProgressReporter::new());
+        let tables: Vec<TableName> = vec![
+            "blocks".parse().unwrap(),
+            "transactions".parse().unwrap(),
+            "logs".parse().unwrap(),
+        ];
+
+        let tracker = ProgressTracker {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO, // Zero interval for testing
+            progress_reporter: Some(reporter.clone()),
+            table_names: tables.clone(),
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process 10 blocks
+        for block in 0..10 {
+            tracker.block_covered(block);
+        }
+
+        // Then: Should have 10 updates per table * 3 tables = 30 updates
+        let updates = reporter.get_updates();
+        assert_eq!(
+            updates.len(),
+            30, // 10 blocks * 3 tables
+            "Expected 30 progress updates (10 blocks * 3 tables), got {}",
+            updates.len()
+        );
+
+        // Verify each block has updates for all 3 tables
+        for block in 0..10u64 {
+            let block_updates: Vec<_> = updates
+                .iter()
+                .filter(|u| u.current_block == block)
+                .collect();
+            assert_eq!(
+                block_updates.len(),
+                3,
+                "Expected 3 table updates at block {}, got {}",
+                block,
+                block_updates.len()
+            );
+        }
+    }
+
+    #[test]
+    fn progress_tracker_no_reporter_no_updates() {
+        // Given: A ProgressTracker with no reporter
+        let tracker = ProgressTracker {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO,
+            progress_reporter: None,
+            table_names: vec!["blocks".parse().unwrap()],
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process all 100 blocks
+        for block in 0..100 {
+            tracker.block_covered(block);
+        }
+
+        // Then: No crash, no updates (reporter is None)
+        // This just verifies the code handles None gracefully
+    }
+
+    #[test]
+    fn progress_tracker_large_block_range() {
+        // Given: A ProgressTracker with 10,000 blocks and zero interval
+        let reporter = Arc::new(MockProgressReporter::new());
+        let table_name: TableName = "blocks".parse().unwrap();
+
+        let tracker = ProgressTracker {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now() - Duration::from_secs(10)),
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::ZERO, // Zero interval for testing
+            progress_reporter: Some(reporter.clone()),
+            table_names: vec![table_name],
+            job_start_block: 1000, // Non-zero start block
+            job_end_block: Some(10999),
+            chain_head: 10999,
+        };
+
+        // When: Process all 10,000 blocks
+        for block in 1000..11000 {
+            tracker.block_covered(block);
+        }
+
+        // Then: Should have 10,000 progress updates (one per block with zero interval)
+        let updates = reporter.get_updates();
+        assert_eq!(
+            updates.len(),
+            10000,
+            "Expected 10000 progress updates (one per block), got {}",
+            updates.len()
+        );
+
+        // Verify job_start_block and job_end_block are preserved in updates
+        for update in &updates {
+            assert_eq!(update.start_block, 1000);
+            assert_eq!(update.end_block, Some(10999));
+        }
+    }
+
+    #[test]
+    fn progress_tracker_throttles_with_non_zero_interval() {
+        // Given: A ProgressTracker with a 1 hour interval (won't elapse during test)
+        let reporter = Arc::new(MockProgressReporter::new());
+        let table_name: TableName = "blocks".parse().unwrap();
+
+        let tracker = ProgressTracker {
+            last_logged_percent: AtomicUsize::new(0),
+            last_emission_time: Mutex::new(Instant::now()), // Just now
+            last_emitted_block: AtomicU64::new(0),
+            has_emitted: AtomicBool::new(false),
+            interval: Duration::from_secs(3600), // 1 hour - won't elapse
+            progress_reporter: Some(reporter.clone()),
+            table_names: vec![table_name],
+            job_start_block: 0,
+            job_end_block: Some(99),
+            chain_head: 99,
+        };
+
+        // When: Process all 100 blocks
+        for block in 0..100 {
+            tracker.block_covered(block);
+        }
+
+        // Then: Should have NO progress updates because interval hasn't elapsed
+        let updates = reporter.get_updates();
+        assert_eq!(
+            updates.len(),
+            0,
+            "Expected 0 progress updates (interval not elapsed), got {}",
+            updates.len()
+        );
+    }
+
     #[test]
     fn split_and_partition() {
         assert_eq!(

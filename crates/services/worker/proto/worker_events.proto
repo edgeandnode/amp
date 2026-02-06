@@ -1,0 +1,216 @@
+// Worker Events Protocol Buffer Schema
+//
+// This schema defines the event types emitted by Amp workers during sync jobs.
+// Events are published to Kafka for real-time monitoring and observability.
+//
+// Event Flow:
+//   1. sync.started  - Emitted when a sync job begins processing a table
+//   2. sync.progress - Emitted periodically (configurable time interval)
+//   3. sync.completed OR sync.failed - Emitted when the job finishes
+//
+// Partition Key Format: {namespace}/{name}/{manifest_hash}/{table_name}
+//   This ensures all events for a given table are ordered within a partition.
+
+syntax = "proto3";
+
+package amp.worker.events.v1;
+
+// WorkerEvent is the envelope that wraps all event types.
+//
+// Every event published to Kafka uses this wrapper, which provides:
+// - Unique identification (event_id)
+// - Type discrimination (event_type)
+// - Versioning for schema evolution (event_version)
+// - Timestamp for ordering and debugging (timestamp)
+// - Source attribution (source)
+// - The actual event payload (payload oneof)
+message WorkerEvent {
+  // Unique event identifier.
+  // Format: UUID v7 (time-ordered) for natural chronological sorting.
+  // Example: "01912345-6789-7abc-def0-123456789abc"
+  string event_id = 1;
+
+  // Event type discriminator for routing and filtering.
+  // Values: "sync.started", "sync.progress", "sync.completed", "sync.failed"
+  string event_type = 2;
+
+  // Schema version for forward compatibility.
+  // Consumers should handle unknown fields gracefully.
+  // Current version: "1.0"
+  string event_version = 3;
+
+  // Event timestamp in RFC 3339 format.
+  // Example: "2024-01-15T10:30:00.123Z"
+  string timestamp = 4;
+
+  // Source metadata identifying the worker that emitted this event.
+  EventSource source = 5;
+
+  // Event payload - exactly one of the specific event types.
+  // Use event_type field to determine which payload is present.
+  oneof payload {
+    SyncStarted sync_started = 10;
+    SyncProgress sync_progress = 11;
+    SyncCompleted sync_completed = 12;
+    SyncFailed sync_failed = 13;
+  }
+}
+
+// EventSource identifies the origin of an event.
+//
+// Used for debugging, tracing, and correlating events across
+// a distributed worker fleet.
+message EventSource {
+  // Unique identifier of the worker instance.
+  // Format: Typically a UUID or hostname-based identifier.
+  // Example: "worker-abc123" or "01912345-6789-7abc-def0-123456789abc"
+  string worker_id = 1;
+}
+
+// DatasetInfo uniquely identifies a dataset being synced.
+//
+// The combination of (namespace, name, manifest_hash) forms a unique
+// reference to a specific version of a dataset definition.
+message DatasetInfo {
+  // Dataset namespace (organization or project scope).
+  // Example: "ethereum", "polygon", "my-org"
+  string namespace = 1;
+
+  // Dataset name within the namespace.
+  // Example: "mainnet", "transactions", "blocks"
+  string name = 2;
+
+  // Hash of the dataset manifest for version identification.
+  // Format: 64-character hex string (SHA-256).
+  // Example: "a1b2c3d4e5f6..."
+  string manifest_hash = 3;
+}
+
+// ProgressInfo contains detailed progress metrics for a sync job.
+//
+// Used within SyncProgress events to report incremental progress.
+// Some fields are optional for continuous (unbounded) sync jobs.
+message ProgressInfo {
+  // Starting block number of the sync job.
+  // This is the first block the job will process.
+  uint64 start_block = 1;
+
+  // Current block number being processed.
+  // Increases as the job progresses through the block range.
+  uint64 current_block = 2;
+
+  // Target end block number (bounded jobs only).
+  // Not set for continuous/live sync jobs that follow chain head.
+  // Consumers can calculate percentage as: (current_block - start_block) / (end_block - start_block) * 100
+  optional uint64 end_block = 3;
+
+  // Reserved: Previously used for percentage field.
+  // Percentage is now calculated by consumers from start_block, current_block, and end_block.
+  reserved 4;
+
+  // Number of parquet files written so far.
+  // Useful for monitoring output volume.
+  uint64 files_count = 5;
+
+  // Total bytes written across all files.
+  // Useful for monitoring storage consumption.
+  uint64 total_size_bytes = 6;
+}
+
+// SyncStarted is emitted when a sync job begins processing a table.
+//
+// Event type: "sync.started"
+//
+// This event is emitted once per table when the job starts.
+// For multi-table datasets, multiple SyncStarted events are emitted.
+message SyncStarted {
+  // Database ID of the job.
+  // Can be used to correlate with job records in the metadata database.
+  int64 job_id = 1;
+
+  // Dataset being synced.
+  DatasetInfo dataset = 2;
+
+  // Name of the table being synced.
+  // Example: "blocks", "transactions", "logs"
+  string table_name = 3;
+
+  // Starting block number (if known at job start).
+  // May not be set if the job determines this dynamically.
+  optional uint64 start_block = 4;
+
+  // Target end block number (if this is a bounded job).
+  // Not set for continuous/live sync jobs.
+  optional uint64 end_block = 5;
+}
+
+// SyncProgress is emitted periodically during sync job execution.
+//
+// Event type: "sync.progress"
+//
+// Emission frequency is time-based (configurable interval, default 10s).
+// Events are only emitted when there is new progress to report.
+message SyncProgress {
+  // Database ID of the job.
+  int64 job_id = 1;
+
+  // Dataset being synced.
+  DatasetInfo dataset = 2;
+
+  // Name of the table being synced.
+  string table_name = 3;
+
+  // Detailed progress metrics.
+  ProgressInfo progress = 4;
+}
+
+// SyncCompleted is emitted when a bounded sync job finishes successfully.
+//
+// Event type: "sync.completed"
+//
+// This event indicates the job processed all blocks in its configured range
+// without errors. Only emitted for bounded jobs (jobs with a configured end block).
+// Continuous jobs (no end block) never emit this event since they sync indefinitely.
+message SyncCompleted {
+  // Database ID of the job.
+  int64 job_id = 1;
+
+  // Dataset that was synced.
+  DatasetInfo dataset = 2;
+
+  // Name of the table that was synced.
+  string table_name = 3;
+
+  // Last block number that was successfully processed.
+  uint64 final_block = 4;
+
+  // Total job duration in milliseconds.
+  // Measured from job start to completion.
+  uint64 duration_millis = 5;
+}
+
+// SyncFailed is emitted when a sync job fails.
+//
+// Event type: "sync.failed"
+//
+// This event indicates the job encountered an unrecoverable error.
+// The job may be retried depending on the error type and retry policy.
+message SyncFailed {
+  // Database ID of the job.
+  int64 job_id = 1;
+
+  // Dataset that failed to sync.
+  DatasetInfo dataset = 2;
+
+  // Name of the table that failed.
+  string table_name = 3;
+
+  // Human-readable error message.
+  // Example: "Failed to connect to RPC endpoint"
+  string error_message = 4;
+
+  // Error type classification (optional).
+  // Used for error categorization and retry decisions.
+  // Examples: "NetworkError", "RateLimitError", "SchemaError"
+  optional string error_type = 5;
+}

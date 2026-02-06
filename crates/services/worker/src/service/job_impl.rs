@@ -3,11 +3,13 @@
 use std::{future::Future, sync::Arc};
 
 use datasets_common::hash_reference::HashReference;
-use dump::{Ctx, Error as DumpError, metrics::MetricsRegistry};
+use dump::{Ctx, Error as DumpError, ProgressReporter, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
 use crate::{
+    events::WorkerProgressReporter,
     job::{JobDescriptor, JobId},
+    kafka::proto,
     service::WorkerJobCtx,
 };
 
@@ -19,24 +21,40 @@ pub(super) fn new(
     job_id: JobId,
     job_desc: JobDescriptor,
 ) -> impl Future<Output = Result<(), DumpError>> {
-    let (end_block, max_writers, reference, dataset_kind) = match job_desc {
-        JobDescriptor::Dump {
-            end_block,
-            max_writers,
-            dataset_namespace,
-            dataset_name,
-            manifest_hash,
-            dataset_kind,
-        } => {
-            let hash_reference = HashReference::new(dataset_namespace, dataset_name, manifest_hash);
-            (end_block, max_writers, hash_reference, dataset_kind)
-        }
-    };
+    let JobDescriptor::Dump {
+        end_block,
+        max_writers,
+        dataset_namespace,
+        dataset_name,
+        manifest_hash,
+        dataset_kind,
+    } = job_desc;
+
+    let reference = HashReference::new(
+        dataset_namespace.clone(),
+        dataset_name.clone(),
+        manifest_hash.clone(),
+    );
 
     let metrics = job_ctx
         .meter
         .as_ref()
         .map(|m| Arc::new(MetricsRegistry::new(m, reference.clone())));
+
+    // Create progress reporter for event streaming
+    // Always create the reporter - NoOpEmitter will discard events if not needed
+    let progress_reporter: Option<Arc<dyn ProgressReporter>> = {
+        let dataset_info = proto::DatasetInfo {
+            namespace: dataset_namespace.to_string(),
+            name: dataset_name.to_string(),
+            manifest_hash: manifest_hash.to_string(),
+        };
+        Some(Arc::new(WorkerProgressReporter::new(
+            job_id,
+            dataset_info,
+            job_ctx.event_emitter.clone(),
+        )))
+    };
 
     // Create Ctx instance for job execution
     let ctx = Ctx {
@@ -59,6 +77,7 @@ pub(super) fn new(
             microbatch_max_interval,
             end_block,
             writer,
+            progress_reporter,
         )
         .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
         .await

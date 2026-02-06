@@ -21,3 +21,4 @@ mod it_streaming;
 mod it_streaming_join;
 mod it_typescript;
 mod it_verification;
+mod it_worker_events;

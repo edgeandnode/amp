@@ -135,6 +135,9 @@ use crate::{
         CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
         ParquetFileWriterOutput, commit_metadata,
     },
+    progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
     streaming_query::{
         QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
@@ -148,6 +151,7 @@ pub async fn dump(
     microbatch_max_interval: u64,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     let writer = writer.into();
 
@@ -247,6 +251,7 @@ pub async fn dump(
         let metrics = ctx.metrics.clone();
         let manifest = manifest.clone();
 
+        let progress_reporter = progress_reporter.clone();
         join_set.spawn(
             async move {
                 let table_name = table.table_name().to_string();
@@ -261,6 +266,7 @@ pub async fn dump(
                     microbatch_max_interval,
                     end,
                     metrics,
+                    progress_reporter,
                 )
                 .await?;
 
@@ -416,6 +422,7 @@ async fn dump_table(
     microbatch_max_interval: u64,
     end: EndBlock,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), DumpTableError> {
     let dump_start_time = Instant::now();
 
@@ -546,13 +553,27 @@ async fn dump_table(
                 ResolvedEndBlock::Block(block) => Some(block),
             };
 
+            // Emit sync.started event now that we have resolved start/end blocks
+            if let Some(ref reporter) = progress_reporter {
+                reporter.report_sync_started(SyncStartedInfo {
+                    table_name: table.table_name().clone(),
+                    start_block: Some(start),
+                    end_block: end,
+                });
+            }
+
+            // Track start time for duration calculation
+            let table_dump_start = Instant::now();
+
             let latest_range = table
                 .canonical_chain()
                 .await
                 .map_err(DumpTableSpawnError::CanonicalChain)?
                 .map(|c| c.last().clone());
             let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(&[r]));
-            dump_sql_query(
+
+            // Execute the dump, capturing any errors for sync.failed event
+            let dump_result = dump_sql_query(
                 &ctx,
                 &env,
                 &catalog,
@@ -563,12 +584,36 @@ async fn dump_table(
                 table.clone(),
                 compactor,
                 &opts,
+                progress_reporter.clone(),
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
                 metrics.clone(),
             )
-            .await
-            .map_err(DumpTableSpawnError::DumpSqlQuery)?;
+            .await;
+
+            // Handle dump result and emit appropriate lifecycle event
+            if let Err(ref err) = dump_result {
+                if let Some(ref reporter) = progress_reporter {
+                    reporter.report_sync_failed(SyncFailedInfo {
+                        table_name: table.table_name().clone(),
+                        error_message: err.to_string(),
+                        error_type: Some("DerivedDumpError".to_string()),
+                    });
+                }
+                return dump_result.map_err(DumpTableSpawnError::DumpSqlQuery);
+            }
+
+            // Emit sync.completed event for bounded jobs only
+            // (continuous jobs never complete, they just keep syncing)
+            if let Some(final_block) = end
+                && let Some(ref reporter) = progress_reporter
+            {
+                reporter.report_sync_completed(SyncCompletedInfo {
+                    table_name: table.table_name().clone(),
+                    final_block,
+                    duration_millis: table_dump_start.elapsed().as_millis() as u64,
+                });
+            }
 
             Ok(())
         }
@@ -743,6 +788,7 @@ async fn dump_sql_query(
     physical_table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
     opts: &Arc<WriterProperties>,
+    progress_reporter: Option<Arc<dyn ProgressReporter>>,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -792,6 +838,13 @@ async fn dump_sql_query(
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
 
+    // Track progress for event emission
+    let mut files_count: u64 = 0;
+    let mut total_size_bytes: u64 = 0;
+    let mut last_emission_time = Instant::now() - ctx.config.progress_interval;
+    let mut last_emitted_block: BlockNum = 0;
+    let mut has_emitted = false;
+
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
@@ -831,6 +884,10 @@ async fn dump_sql_query(
                     .await
                     .map_err(DumpSqlQueryError::CloseFile)?;
 
+                // Track progress stats
+                files_count += 1;
+                total_size_bytes += object_meta.size;
+
                 commit_metadata(
                     &ctx.metadata_db,
                     parquet_meta,
@@ -843,6 +900,30 @@ async fn dump_sql_query(
                 .map_err(DumpSqlQueryError::CommitMetadata)?;
 
                 compactor.try_run().map_err(DumpSqlQueryError::Compactor)?;
+
+                // Time-based progress event emission
+                // Emit when interval has elapsed AND we have new progress
+                if let Some(ref reporter) = progress_reporter {
+                    let now = Instant::now();
+                    let interval_elapsed =
+                        now.duration_since(last_emission_time) >= ctx.config.progress_interval;
+                    let progress_made = !has_emitted || microbatch_end > last_emitted_block;
+
+                    if interval_elapsed && progress_made {
+                        last_emission_time = now;
+                        last_emitted_block = microbatch_end;
+                        has_emitted = true;
+
+                        reporter.report_progress(ProgressUpdate {
+                            table_name: table_name.clone(),
+                            start_block: start,
+                            current_block: microbatch_end,
+                            end_block: end, // None in continuous mode
+                            files_count,
+                            total_size_bytes,
+                        });
+                    }
+                }
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;

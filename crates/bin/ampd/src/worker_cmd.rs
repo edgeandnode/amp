@@ -66,6 +66,7 @@ pub async fn run(
         dataset_store,
         meter,
         node_id,
+        None, // Use config-based event emitter
     )
     .await
     .map_err(Error::Init)?;
@@ -126,5 +127,6 @@ pub(crate) fn config_from_common(config: &Config) -> worker::config::Config {
         query_max_mem_mb: config.query_max_mem_mb,
         spill_location: config.spill_location.clone(),
         parquet: config.parquet.clone(),
+        events_config: config.worker_events.clone(),
     }
 }

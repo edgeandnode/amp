@@ -186,6 +186,7 @@ pub async fn run(
         dataset_store,
         meter,
         worker_id,
+        None, // Use config-based event emitter
     )
     .await
     .map_err(Error::WorkerInit)?;
