@@ -1,9 +1,10 @@
 //! The program streams blocks from OF1 for a given epoch, fetches the same blocks via JSON-RPC,
 //! and compares the results at the [solana_datasets::tables::NonEmptySlot] level.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
+use backon::{ExponentialBuilder, Retryable};
 use clap::Parser;
 use futures::StreamExt;
 use solana_clock::Slot;
@@ -96,9 +97,11 @@ async fn main() -> anyhow::Result<()> {
 
             let slots_match = 'slots_match: {
                 if slot_num != expected_slot_num {
-                    // If OF1 stream skipped slots, make sure those slots are also missing via RPC.
+                    // OF1 stream skipped slots, make sure those slots are also missing via RPC.
                     for skipped_slot in expected_slot_num..slot_num {
-                        match rpc_client.get_block(slot_num, get_block_config, None).await {
+                        match get_block_with_retry(&rpc_client, skipped_slot, get_block_config)
+                            .await
+                        {
                             Ok(_) => {
                                 tracing::warn!(
                                     slot = skipped_slot,
@@ -116,7 +119,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
 
-                let rpc_block = match rpc_client.get_block(slot_num, get_block_config, None).await {
+                let rpc_block = match get_block_with_retry(&rpc_client, slot_num, get_block_config)
+                    .await
+                {
                     Ok(block) => block,
                     Err(e) => {
                         if rpc_client::is_block_missing_err(&e) {
@@ -161,6 +166,9 @@ async fn main() -> anyhow::Result<()> {
             }
 
             expected_slot_num = slot_num + 1;
+            if slot_num.is_multiple_of(1000) {
+                tracing::info!(slot = slot_num, "progress");
+            }
         }
     }
 
@@ -172,6 +180,26 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("comparison complete");
 
     Ok(())
+}
+
+async fn get_block_with_retry(
+    rpc_client: &rpc_client::SolanaRpcClient,
+    slot: Slot,
+    config: rpc_client::rpc_config::RpcBlockConfig,
+) -> rpc_client::client_error::Result<rpc_client::UiConfirmedBlock> {
+    (|| async { rpc_client.get_block(slot, config, None).await })
+        .retry(ExponentialBuilder::default())
+        .sleep(tokio::time::sleep)
+        .when(|e| !rpc_client::is_block_missing_err(e))
+        .notify(|error: &rpc_client::client_error::Error, delay: Duration| {
+            tracing::warn!(
+                wait_ms = delay.as_millis(),
+                %slot,
+                %error,
+                "retrying RPC get_block"
+            );
+        })
+        .await
 }
 
 /// Compare two `NonEmptySlot`s and log any differences. The comparison is done piecewise for more
