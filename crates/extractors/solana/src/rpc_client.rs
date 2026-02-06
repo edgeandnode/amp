@@ -3,6 +3,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Instant};
 use datasets_common::network_id::NetworkId;
 pub use solana_client::{rpc_config, rpc_response::UiReturnDataEncoding};
 use solana_clock::Slot;
+pub use solana_rpc_client_api::client_error;
 pub use solana_transaction_status_client_types::{
     EncodedTransaction, EncodedTransactionWithStatusMeta, Reward, TransactionStatusMeta,
     TransactionTokenBalance, UiConfirmedBlock, UiInstruction, UiMessage, UiRawMessage,
@@ -51,7 +52,7 @@ impl SolanaRpcClient {
     pub async fn get_slot(
         &self,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
-    ) -> solana_rpc_client_api::client_error::Result<Slot> {
+    ) -> client_error::Result<Slot> {
         let slot = self
             .rpc_call("getSlot", metrics, self.inner.get_slot())
             .await?;
@@ -69,7 +70,7 @@ impl SolanaRpcClient {
         slot: Slot,
         config: rpc_config::RpcBlockConfig,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
-    ) -> solana_rpc_client_api::client_error::Result<UiConfirmedBlock> {
+    ) -> client_error::Result<UiConfirmedBlock> {
         let block = self
             .rpc_call(
                 "getBlock",
@@ -123,10 +124,10 @@ impl SolanaRpcClient {
 /// ### Reference
 ///
 /// <https://www.quicknode.com/docs/solana/error-references>
-pub fn is_block_missing_err(err: &solana_rpc_client_api::client_error::Error) -> bool {
+pub fn is_block_missing_err(err: &client_error::Error) -> bool {
     matches!(
         err.kind(),
-        solana_rpc_client_api::client_error::ErrorKind::RpcError(
+        client_error::ErrorKind::RpcError(
             solana_rpc_client_api::request::RpcError::RpcResponseError {
                 code: -32007 | -32009,
                 ..
