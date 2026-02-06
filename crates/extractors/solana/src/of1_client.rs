@@ -90,7 +90,7 @@ pub async fn car_file_manager(
         tokio::select! {
             msg = car_manager_rx.recv() => {
                 let Some(msg) = msg else {
-                    tracing::error!("CAR file manager channel closed, shutting down");
+                    tracing::debug!("CAR file manager channel closed, shutting down");
                     return;
                 };
                 match msg {
