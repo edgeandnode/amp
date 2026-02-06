@@ -211,7 +211,7 @@ impl BlockStreamer for SolanaExtractor {
             encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
             transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
             max_supported_transaction_version: Some(0),
-            rewards: Some(false),
+            rewards: Some(true),
             // TODO: Make this configurable.
             commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
         };
@@ -294,10 +294,10 @@ impl BlockStreamer for SolanaExtractor {
         &mut self,
         _finalized: bool,
     ) -> Result<Option<BlockNum>, LatestBlockError> {
-        let get_block_height_resp = self.rpc_client.get_block_height(self.metrics.clone()).await;
+        let get_slot_resp = self.rpc_client.get_slot(self.metrics.clone()).await;
 
-        match get_block_height_resp {
-            Ok(block_height) => Ok(Some(block_height)),
+        match get_slot_resp {
+            Ok(slot) => Ok(Some(slot)),
             Err(e) if rpc_client::is_block_missing_err(&e) => Ok(None),
             Err(e) => Err(e.into()),
         }
