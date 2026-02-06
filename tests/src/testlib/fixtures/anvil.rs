@@ -16,12 +16,12 @@ use alloy::{
     rpc::types::{TransactionRequest, anvil::ReorgOptions},
     signers::local::PrivateKeySigner,
 };
+use anyhow::{Result, anyhow};
 use backon::{ConstantBuilder, Retryable as _};
 use common::BlockNum;
 use tempfile::NamedTempFile;
 
 use super::contract_artifact::ContractArtifact;
-use crate::BoxError;
 
 /// Default retry interval for Anvil readiness checks.
 const ANVIL_RETRY_INTERVAL: Duration = Duration::from_millis(200);
@@ -62,11 +62,11 @@ impl Anvil {
     ///
     /// This creates a temporary IPC socket file and spawns Anvil configured to use it.
     /// The socket file is automatically cleaned up when the fixture is dropped.
-    pub async fn new_ipc() -> Result<Self, BoxError> {
+    pub async fn new_ipc() -> Result<Self> {
         let temp_file = tempfile::Builder::new()
             .prefix("anvil")
             .tempfile()
-            .map_err(|err| format!("Failed to create temp file for Anvil IPC: {}", err))?;
+            .map_err(|err| anyhow!("Failed to create temp file for Anvil IPC: {}", err))?;
 
         let ipc_path = temp_file.path().to_string_lossy().to_string();
 
@@ -75,7 +75,7 @@ impl Anvil {
         let provider = alloy::providers::ProviderBuilder::new()
             .connect_ipc(ipc_path.clone().into())
             .await
-            .map_err(|err| format!("Failed to connect to Anvil via IPC: {}", err))?
+            .map_err(|err| anyhow!("Failed to connect to Anvil via IPC: {}", err))?
             .erased();
 
         Ok(Self {
@@ -92,7 +92,7 @@ impl Anvil {
     ///
     /// This spawns Anvil configured to listen on the given HTTP port.
     /// If port is 0, Anvil will automatically allocate an available port.
-    pub async fn new_http(port: u16) -> Result<Self, BoxError> {
+    pub async fn new_http(port: u16) -> Result<Self> {
         let instance = AlloyAnvil::new().port(port).spawn();
         let assigned_port = instance.port();
 
@@ -174,17 +174,17 @@ impl Anvil {
     ///
     /// Returns a PrivateKeySigner that can be used to sign transactions
     /// with the default pre-funded account.
-    pub fn default_signer(&self) -> Result<PrivateKeySigner, BoxError> {
+    pub fn default_signer(&self) -> Result<PrivateKeySigner> {
         DEFAULT_PRIVATE_KEY
             .parse()
-            .map_err(|err| format!("Failed to parse default private key: {}", err).into())
+            .map_err(|err| anyhow!("Failed to parse default private key: {}", err))
     }
 
     /// Create a wallet containing the default signer.
     ///
     /// Returns an EthereumWallet that can be used with ProviderBuilder
     /// to create a signing provider.
-    pub fn default_wallet(&self) -> Result<EthereumWallet, BoxError> {
+    pub fn default_wallet(&self) -> Result<EthereumWallet> {
         let signer = self.default_signer()?;
         Ok(EthereumWallet::from(signer))
     }
@@ -193,12 +193,12 @@ impl Anvil {
     ///
     /// This instructs Anvil to mine new blocks, which is useful for advancing
     /// the blockchain state in tests.
-    pub async fn mine(&self, blocks: u64) -> Result<(), BoxError> {
+    pub async fn mine(&self, blocks: u64) -> Result<()> {
         tracing::info!(blocks, "Mining blocks");
         self.provider
             .anvil_mine(Some(blocks), None)
             .await
-            .map_err(|err| format!("Failed to mine blocks: {}", err))?;
+            .map_err(|err| anyhow!("Failed to mine blocks: {}", err))?;
         Ok(())
     }
 
@@ -206,9 +206,9 @@ impl Anvil {
     ///
     /// This causes Anvil to reorganize the blockchain by replacing the last
     /// `depth` blocks with alternative blocks, simulating a chain reorg.
-    pub async fn reorg(&self, depth: u64) -> Result<(), BoxError> {
+    pub async fn reorg(&self, depth: u64) -> Result<()> {
         if depth == 0 {
-            return Err("Reorg depth must be greater than 0".into());
+            return Err(anyhow!("Reorg depth must be greater than 0"));
         }
 
         tracing::info!(depth, "Triggering blockchain reorg");
@@ -221,21 +221,21 @@ impl Anvil {
                 tx_block_pairs: vec![],
             })
             .await
-            .map_err(|err| format!("Failed to trigger reorg: {}", err))?;
+            .map_err(|err| anyhow!("Failed to trigger reorg: {}", err))?;
 
         let new_head = self.latest_block().await?;
 
         // Verify the reorg happened as expected
         if original_head.block_num != new_head.block_num {
-            return Err(format!(
+            return Err(anyhow!(
                 "Reorg failed: block number changed from {} to {}",
-                original_head.block_num, new_head.block_num
-            )
-            .into());
+                original_head.block_num,
+                new_head.block_num
+            ));
         }
 
         if original_head.hash == new_head.hash {
-            return Err("Reorg failed: block hash did not change".into());
+            return Err(anyhow!("Reorg failed: block hash did not change"));
         }
 
         tracing::info!(
@@ -251,13 +251,13 @@ impl Anvil {
     /// Get information about the latest block.
     ///
     /// Returns block number, hash, and parent hash for the current chain head.
-    pub async fn latest_block(&self) -> Result<BlockInfo, BoxError> {
+    pub async fn latest_block(&self) -> Result<BlockInfo> {
         let block = self
             .provider
             .get_block(BlockId::latest())
             .await
-            .map_err(|err| format!("Failed to get latest block: {}", err))?
-            .ok_or("Latest block not found")?;
+            .map_err(|err| anyhow!("Failed to get latest block: {}", err))?
+            .ok_or(anyhow!("Latest block not found"))?;
 
         Ok(BlockInfo {
             block_num: block.header.number,
@@ -272,7 +272,7 @@ impl Anvil {
     /// It performs a lightweight query (getting the current block number) with retries and
     /// fixed interval backoff to handle the startup delay that may occur when Anvil is first
     /// launched.
-    pub async fn wait_for_ready(&self, timeout: Duration) -> Result<(), BoxError> {
+    pub async fn wait_for_ready(&self, timeout: Duration) -> Result<()> {
         tracing::debug!("Waiting for Anvil service to be ready");
 
         (|| async {
@@ -297,12 +297,12 @@ impl Anvil {
             );
         })
         .await
-        .map_err(|err| -> BoxError {
-            format!(
+        .map_err(|err| {
+            anyhow!(
                 "Anvil service did not become ready within {:?}. Last error: {}",
-                timeout, err
+                timeout,
+                err
             )
-            .into()
         })?;
 
         tracing::info!("Anvil service is ready");
@@ -313,10 +313,7 @@ impl Anvil {
     ///
     /// Uses the default Anvil account for deployment. Waits for the transaction
     /// to be mined and returns the deployed contract address and transaction hash.
-    pub async fn deploy_contract(
-        &self,
-        artifact: &ContractArtifact,
-    ) -> Result<DeploymentResult, BoxError> {
+    pub async fn deploy_contract(&self, artifact: &ContractArtifact) -> Result<DeploymentResult> {
         self.deploy_contract_with_args(artifact, Bytes::new()).await
     }
 
@@ -328,7 +325,7 @@ impl Anvil {
         &self,
         artifact: &ContractArtifact,
         ctor_args: Bytes,
-    ) -> Result<DeploymentResult, BoxError> {
+    ) -> Result<DeploymentResult> {
         tracing::debug!("Deploying contract");
 
         // Create a signing provider with the default wallet, using the same connection type
@@ -339,7 +336,7 @@ impl Anvil {
                 .connect_ipc(path.clone().into())
                 .await
                 .map_err(|err| {
-                    format!("Failed to connect to Anvil via IPC for deployment: {}", err)
+                    anyhow!("Failed to connect to Anvil via IPC for deployment: {}", err)
                 })?
                 .erased(),
             AnvilConnection::Http { port } => {
@@ -367,18 +364,18 @@ impl Anvil {
         let pending_tx = provider
             .send_transaction(tx)
             .await
-            .map_err(|err| format!("Failed to send deployment transaction: {}", err))?;
+            .map_err(|err| anyhow!("Failed to send deployment transaction: {}", err))?;
 
         let tx_hash = *pending_tx.tx_hash();
 
         let receipt = pending_tx
             .get_receipt()
             .await
-            .map_err(|err| format!("Failed to get deployment receipt: {}", err))?;
+            .map_err(|err| anyhow!("Failed to get deployment receipt: {}", err))?;
 
-        let address = receipt
-            .contract_address
-            .ok_or("Deployment receipt did not contain contract address")?;
+        let address = receipt.contract_address.ok_or(anyhow!(
+            "Deployment receipt did not contain contract address"
+        ))?;
 
         tracing::info!(
             address = %address,
@@ -394,7 +391,7 @@ impl Anvil {
     /// Performs an `eth_call` to read data from a contract without
     /// sending a transaction or spending gas. The `data` parameter should
     /// be ABI-encoded function call data.
-    pub async fn call(&self, to: Address, data: Bytes) -> Result<Bytes, BoxError> {
+    pub async fn call(&self, to: Address, data: Bytes) -> Result<Bytes> {
         tracing::debug!(to = %to, "Calling contract");
 
         let tx = TransactionRequest::default().with_to(to).with_input(data);
@@ -403,7 +400,7 @@ impl Anvil {
             .provider
             .call(tx)
             .await
-            .map_err(|err| format!("Failed to call contract: {}", err))?;
+            .map_err(|err| anyhow!("Failed to call contract: {}", err))?;
 
         Ok(result)
     }
@@ -412,7 +409,7 @@ impl Anvil {
     ///
     /// Uses the default Anvil account to sign and send the transaction.
     /// Waits for the transaction to be mined and returns the transaction hash.
-    pub async fn send_transaction(&self, to: Address, data: Bytes) -> Result<TxHash, BoxError> {
+    pub async fn send_transaction(&self, to: Address, data: Bytes) -> Result<TxHash> {
         self.send_transaction_with_value(to, data, U256::ZERO).await
     }
 
@@ -425,7 +422,7 @@ impl Anvil {
         to: Address,
         data: Bytes,
         value: U256,
-    ) -> Result<TxHash, BoxError> {
+    ) -> Result<TxHash> {
         tracing::debug!(to = %to, value = %value, "Sending transaction");
 
         // Create a signing provider with the default wallet
@@ -435,7 +432,7 @@ impl Anvil {
                 .wallet(wallet)
                 .connect_ipc(path.clone().into())
                 .await
-                .map_err(|err| format!("Failed to connect to Anvil via IPC: {}", err))?
+                .map_err(|err| anyhow!("Failed to connect to Anvil via IPC: {}", err))?
                 .erased(),
             AnvilConnection::Http { port } => {
                 let url = format!("http://localhost:{}", port);
@@ -456,14 +453,14 @@ impl Anvil {
         let pending_tx = provider
             .send_transaction(tx)
             .await
-            .map_err(|err| format!("Failed to send transaction: {}", err))?;
+            .map_err(|err| anyhow!("Failed to send transaction: {}", err))?;
 
         let tx_hash = *pending_tx.tx_hash();
 
         pending_tx
             .get_receipt()
             .await
-            .map_err(|err| format!("Failed to get transaction receipt: {}", err))?;
+            .map_err(|err| anyhow!("Failed to get transaction receipt: {}", err))?;
 
         tracing::info!(tx_hash = %tx_hash, "Transaction mined successfully");
 

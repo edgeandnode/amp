@@ -1,9 +1,8 @@
 //! Test step for deploying dataset packages.
 
-use crate::{
-    BoxError,
-    testlib::{ctx::TestCtx, fixtures::DatasetPackage},
-};
+use anyhow::{Result, anyhow};
+
+use crate::testlib::{ctx::TestCtx, fixtures::DatasetPackage};
 
 /// Test step that deploys and registers dataset packages.
 ///
@@ -31,7 +30,7 @@ impl Step {
     /// configuration, then uses the amp CLI to install and register it.
     /// If failure is specified, the step succeeds only if the registration
     /// fails with the expected error.
-    pub async fn run(&self, ctx: &TestCtx) -> Result<(), BoxError> {
+    pub async fn run(&self, ctx: &TestCtx) -> Result<()> {
         tracing::debug!(
             "Registering dataset '{}' (tag: {:?}, failure={:?})",
             self.dataset,
@@ -71,16 +70,15 @@ impl Step {
 
                     if !found {
                         let full_error_chain = error_chain.join("\n  caused by: ");
-                        return Err(format!(
+                        return Err(anyhow!(
                             "Expected error to contain: \"{}\"\nActual error chain:\n  {}",
                             expected_substring.trim(),
                             full_error_chain
-                        )
-                        .into());
+                        ));
                     }
                     Ok(())
                 }
-                Ok(_) => Err("Expected registration to fail, but it succeeded".into()),
+                Ok(_) => Err(anyhow!("Expected registration to fail, but it succeeded")),
             }
         } else {
             result

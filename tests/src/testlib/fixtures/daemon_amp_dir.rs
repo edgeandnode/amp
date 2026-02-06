@@ -22,9 +22,10 @@ use amp_config::{
     DEFAULT_AMP_DIR_NAME, DEFAULT_CONFIG_FILENAME, DEFAULT_DATA_DIRNAME, DEFAULT_MANIFESTS_DIRNAME,
     DEFAULT_METADB_DIRNAME, DEFAULT_PROVIDERS_DIRNAME,
 };
+use anyhow::{Result, anyhow};
 use fs_err as fs;
 
-use crate::{BoxError, testlib::config};
+use crate::testlib::config;
 
 /// Create a builder for configuring [`DaemonAmpDir`] with custom paths.
 ///
@@ -130,7 +131,7 @@ impl DaemonAmpDir {
     /// Writes the given content to the config file in the amp dir.
     /// This method automatically creates the root directory if it doesn't exist.
     /// This method is type agnostic - it accepts any string content without handling serialization.
-    pub fn write_config_file(&self, content: &str) -> Result<(), BoxError> {
+    pub fn write_config_file(&self, content: &str) -> Result<()> {
         let config_file_path = &self.config_file_path;
 
         // Ensure the root directory exists
@@ -148,7 +149,7 @@ impl DaemonAmpDir {
     ///
     /// Creates the directory for storing dataset manifest files (.json) within the amp dir.
     /// Returns the path to the created directory.
-    pub fn create_manifests_dir(&self) -> Result<(), BoxError> {
+    pub fn create_manifests_dir(&self) -> Result<()> {
         let dir_path = &self.manifests_dir_path;
 
         fs::create_dir_all(dir_path)?;
@@ -164,7 +165,7 @@ impl DaemonAmpDir {
     ///
     /// Creates the directory for storing provider configuration files (.toml) within the amp dir.
     /// Returns the path to the created directory.
-    pub fn create_providers_dir(&self) -> Result<(), BoxError> {
+    pub fn create_providers_dir(&self) -> Result<()> {
         let dir_path = &self.providers_dir_path;
 
         fs::create_dir_all(dir_path)?;
@@ -177,7 +178,7 @@ impl DaemonAmpDir {
     ///
     /// Creates the directory for storing dataset data and dataset snapshot reference data within the amp dir.
     /// Returns the path to the created directory.
-    pub fn create_data_dir(&self) -> Result<(), BoxError> {
+    pub fn create_data_dir(&self) -> Result<()> {
         let dir_path = &self.data_dir_path;
 
         fs::create_dir_all(dir_path)?;
@@ -196,7 +197,7 @@ impl DaemonAmpDir {
     pub async fn preload_dataset_snapshots(
         &self,
         datasets_data: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<()> {
         let target_dir = &self.data_dir_path;
 
         // Create directory lazily if it doesn't exist
@@ -211,7 +212,7 @@ impl DaemonAmpDir {
 
             // Resolve source directory by searching known fixture locations
             let source_dir_path = config::resolve_snapshot_source_dir(&path).ok_or_else(|| {
-                format!("Could not find dataset snapshot '{name}' source directory",)
+                anyhow!("Could not find dataset snapshot '{name}' source directory")
             })?;
             let target_dir_path = target_dir.join(&path);
 
@@ -322,7 +323,7 @@ impl DaemonAmpDirBuilder {
 }
 
 /// Recursively copy a directory and all its contents.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), BoxError> {
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
 
     let entries = fs::read_dir(src)?;

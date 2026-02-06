@@ -5,13 +5,13 @@
 
 use std::{path::Path, process::Stdio};
 
-use crate::BoxError;
+use anyhow::{Result, anyhow};
 
 /// Initialize git submodules in the specified directory.
 ///
 /// Runs `git submodule update --init --recursive` to initialize submodules
 /// such as forge-std for Foundry contracts.
-pub async fn submodules_init(dir: &Path) -> Result<(), BoxError> {
+pub async fn submodules_init(dir: &Path) -> Result<()> {
     tracing::debug!(
         dir = %dir.display(),
         "Initializing git submodules"
@@ -27,12 +27,11 @@ pub async fn submodules_init(dir: &Path) -> Result<(), BoxError> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
+        return Err(anyhow!(
             "Failed to initialize git submodules in '{}': {}",
             dir.display(),
             stderr.trim()
-        )
-        .into());
+        ));
     }
 
     tracing::debug!(

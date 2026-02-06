@@ -4,9 +4,8 @@
 //! JSON Lines server and parsing the responses. It handles the HTTP communication and
 //! JSON deserialization, making it easy to write tests that verify query results.
 
+use anyhow::{Result, anyhow};
 use serde::de::DeserializeOwned;
-
-use crate::BoxError;
 
 /// JSONL client fixture for querying the Amp JSON Lines server.
 ///
@@ -41,7 +40,7 @@ impl JsonlClient {
     /// The query is sent as a POST request to the JSON Lines server, and the response
     /// is parsed as newline-delimited JSON. Each line in the response is deserialized
     /// into the specified type T.
-    pub async fn query<T>(&self, sql: &str) -> Result<Vec<T>, BoxError>
+    pub async fn query<T>(&self, sql: &str) -> Result<Vec<T>>
     where
         T: DeserializeOwned + std::fmt::Debug,
     {
@@ -53,22 +52,21 @@ impl JsonlClient {
             .body(sql.to_string())
             .send()
             .await
-            .map_err(|err| format!("Failed to send HTTP request: {}", err))?;
+            .map_err(|err| anyhow!("Failed to send HTTP request: {}", err))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(format!(
+            return Err(anyhow!(
                 "HTTP request failed with status {}: {}",
                 status,
                 response.text().await.unwrap_or_default()
-            )
-            .into());
+            ));
         }
 
         let buffer = response
             .text()
             .await
-            .map_err(|err| format!("Failed to read response body: {}", err))?;
+            .map_err(|err| anyhow!("Failed to read response body: {}", err))?;
 
         let mut rows = Vec::new();
         for (line_num, line) in buffer.lines().enumerate() {
@@ -77,7 +75,7 @@ impl JsonlClient {
             }
 
             let row: T = serde_json::from_str(line).map_err(|err| {
-                format!(
+                anyhow!(
                     "Failed to parse JSON on line {}: {} (line content: '{}')",
                     line_num + 1,
                     err,

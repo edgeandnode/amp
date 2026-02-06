@@ -12263,6 +12263,7 @@ dependencies = [
  "amp-object-store",
  "amp-providers-registry",
  "ampctl",
+ "anyhow",
  "arrow-flight",
  "backon",
  "clap",

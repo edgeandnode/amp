@@ -5,12 +5,11 @@
 //! the ampctl admin API client for direct programmatic access.
 
 use ampctl::client::datasets::NodeSelector;
+use anyhow::{Result, anyhow};
 use datasets_common::{hash::Hash, reference::Reference};
 use dump::EndBlock;
 use serde_json::value::RawValue;
 use url::Url;
-
-use crate::BoxError;
 
 /// ampctl fixture for registering dataset manifests and provider configurations.
 ///
@@ -62,12 +61,12 @@ impl Ampctl {
         &self,
         dataset_ref: &Reference,
         manifest_content: &str,
-    ) -> Result<(), BoxError> {
+    ) -> Result<()> {
         let fqn = dataset_ref.as_fqn();
         let revision = dataset_ref.revision().as_version();
 
         let manifest_json: Box<RawValue> = serde_json::from_str(manifest_content)
-            .map_err(|err| format!("Failed to parse manifest JSON: {}", err))?;
+            .map_err(|err| anyhow!("Failed to parse manifest JSON: {}", err))?;
 
         self.client
             .datasets()
@@ -90,23 +89,19 @@ impl Ampctl {
     /// - The network request fails
     /// - The API returns an error response (400/409/500)
     /// - The API returns an unexpected status code
-    pub async fn register_provider(
-        &self,
-        provider_name: &str,
-        provider_toml: &str,
-    ) -> Result<(), BoxError> {
+    pub async fn register_provider(&self, provider_name: &str, provider_toml: &str) -> Result<()> {
         // Parse TOML content
         let toml_value: toml::Value = toml::from_str(provider_toml)
-            .map_err(|err| format!("Failed to parse provider TOML: {}", err))?;
+            .map_err(|err| anyhow!("Failed to parse provider TOML: {}", err))?;
 
         // Validate that the provider is a TOML table
         if !toml_value.is_table() {
-            return Err("Provider TOML must be a table at the root level".into());
+            return Err(anyhow!("Provider TOML must be a table at the root level"));
         }
 
         // Convert TOML to JSON for API request
         let json_value: serde_json::Value = serde_json::to_value(&toml_value)
-            .map_err(|err| format!("Failed to convert TOML to JSON: {}", err))?;
+            .map_err(|err| anyhow!("Failed to convert TOML to JSON: {}", err))?;
 
         // Register with the client
         self.client
@@ -128,10 +123,7 @@ impl Ampctl {
     /// - The API returns an error response
     /// - No versions are found for the dataset
     /// - The manifest hash cannot be parsed
-    pub async fn get_latest_manifest_hash(
-        &self,
-        dataset_ref: &Reference,
-    ) -> Result<Hash, BoxError> {
+    pub async fn get_latest_manifest_hash(&self, dataset_ref: &Reference) -> Result<Hash> {
         let fqn = dataset_ref.as_fqn();
 
         let versions_response = self
@@ -139,13 +131,13 @@ impl Ampctl {
             .datasets()
             .list_versions(fqn)
             .await
-            .map_err(|err| format!("Failed to list dataset versions: {}", err))?;
+            .map_err(|err| anyhow!("Failed to list dataset versions: {}", err))?;
 
         versions_response
             .versions
             .first()
             .map(|v| v.manifest_hash.clone())
-            .ok_or("No versions found for dataset".into())
+            .ok_or(anyhow!("No versions found for dataset"))
     }
 
     /// Restore a dataset's physical tables from object storage.
@@ -167,7 +159,7 @@ impl Ampctl {
     pub async fn restore_dataset(
         &self,
         dataset_ref: &Reference,
-    ) -> Result<Vec<ampctl::client::datasets::RestoredTableInfo>, BoxError> {
+    ) -> Result<Vec<ampctl::client::datasets::RestoredTableInfo>> {
         self.client
             .datasets()
             .restore(dataset_ref)
@@ -194,11 +186,12 @@ impl Ampctl {
         end_block: Option<u64>,
         parallelism: Option<u16>,
         worker_id: Option<NodeSelector>,
-    ) -> Result<worker::job::JobId, BoxError> {
+    ) -> Result<worker::job::JobId> {
         let reference: Reference = dataset_ref.parse().map_err(|err| {
-            format!(
+            anyhow!(
                 "Failed to parse dataset reference '{}': {}",
-                dataset_ref, err
+                dataset_ref,
+                err
             )
         })?;
 
