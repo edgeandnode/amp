@@ -1109,8 +1109,12 @@ dependencies = [
  "alloy",
  "amp-object-store",
  "anyhow",
+ "async-trait",
  "clap",
+ "common",
  "console",
+ "datafusion",
+ "dataset-authoring",
  "datasets-common",
  "datasets-derived",
  "dump",
@@ -4069,6 +4073,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataset-authoring"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "common",
+ "datafusion",
+ "datasets-common",
+ "datasets-derived",
+ "dirs",
+ "flate2",
+ "minijinja",
+ "regex",
+ "semver 1.0.27",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer 0.2.0",
+ "serde_yaml",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "walkdir",
+]
+
+[[package]]
 name = "datasets-common"
 version = "0.1.0"
 dependencies = [
@@ -4896,6 +4925,17 @@ dependencies = [
  "libc",
  "thiserror 1.0.69",
  "winapi",
+]
+
+[[package]]
+name = "filetime"
+version = "0.2.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f98844151eee8917efc50bd9e8318cb963ae8b297431495d3f758616ea5c57db"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "libredox",
 ]
 
 [[package]]
@@ -6765,6 +6805,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "minijinja"
+version = "2.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b479616bb6f0779fb0f3964246beda02d4b01144e1b0d5519616e012ccc2a245"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8033,7 +8082,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "serde_json_canonicalizer",
+ "serde_json_canonicalizer 0.3.1",
  "serde_yaml",
  "sha2",
  "spki",
@@ -9083,6 +9132,12 @@ checksum = "a50f4cf475b65d88e057964e0e9bb1f0aa9bbb2036dc65c64596b42932536984"
 
 [[package]]
 name = "ryu-js"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6518fc26bced4d53678a22d6e423e9d8716377def84545fe328236e3af070e7f"
+
+[[package]]
+name = "ryu-js"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd29631678d6fb0903b69223673e122c32e9ae559d0960a38d574695ebc0ea15"
@@ -9371,11 +9426,22 @@ dependencies = [
 
 [[package]]
 name = "serde_json_canonicalizer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8a4c2ea923e1d3d2c03bd1299b7061e015f3bd9dab5a47b34283df9d8ab36a1"
+dependencies = [
+ "ryu-js 0.2.2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "serde_json_canonicalizer"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f777f77aeef456e47e75c2a4b16804b15395be5b344e2094a54965143ef1c31"
 dependencies = [
- "ryu-js",
+ "ryu-js 1.0.2",
  "serde",
  "serde_json",
 ]
@@ -12166,6 +12232,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12264,12 +12341,15 @@ dependencies = [
  "amp-providers-registry",
  "ampctl",
  "arrow-flight",
+ "async-trait",
  "backon",
  "clap",
  "color-backtrace",
  "common",
  "controller",
  "ctor",
+ "datafusion",
+ "dataset-authoring",
  "datasets-common",
  "datasets-derived",
  "dotenvy",
@@ -14136,6 +14216,16 @@ dependencies = [
  "rusticata-macros",
  "thiserror 1.0.69",
  "time",
+]
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.3",
 ]
 
 [[package]]

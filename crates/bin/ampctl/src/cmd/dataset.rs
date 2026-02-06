@@ -1,9 +1,13 @@
 //! Dataset management commands
 
+mod authoring;
+pub mod build;
+pub mod check;
 pub mod deploy;
 pub mod inspect;
 pub mod list;
 pub mod manifest;
+pub mod package;
 pub mod register;
 pub mod restore;
 pub mod versions;
@@ -11,6 +15,28 @@ pub mod versions;
 /// Dataset management subcommands.
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    /// Build a dataset from amp.yaml configuration
+    ///
+    /// Parses the amp.yaml configuration, resolves dependencies, renders
+    /// Jinja SQL templates, validates CTAS statements, infers schemas,
+    /// and writes output files to the target directory.
+    Build(build::Args),
+
+    /// Validate dataset authoring inputs without building artifacts
+    ///
+    /// Parses the amp.yaml/amp.yml configuration, resolves dependencies,
+    /// renders Jinja SQL templates, validates SELECT statements, and
+    /// infers schemas without writing output files.
+    #[command(after_help = include_str!("dataset/check__after_help.md"))]
+    Check(check::Args),
+
+    /// Package built dataset artifacts into a .tgz archive
+    ///
+    /// Creates a deterministic archive containing manifest.json, SQL files,
+    /// schemas, and function sources for distribution or deployment.
+    #[command(alias = "pkg")]
+    Package(package::Args),
+
     /// Deploy a dataset to start syncing blockchain data
     ///
     /// Deploys a dataset version by scheduling a data extraction job via the
@@ -59,6 +85,9 @@ pub enum Commands {
 /// Execute the dataset command with the given subcommand.
 pub async fn run(command: Commands) -> anyhow::Result<()> {
     match command {
+        Commands::Build(args) => build::run(args).await?,
+        Commands::Check(args) => check::run(args).await?,
+        Commands::Package(args) => package::run(args).await?,
         Commands::Deploy(args) => deploy::run(args).await?,
         Commands::Register(args) => register::run(args).await?,
         Commands::List(args) => list::run(args).await?,

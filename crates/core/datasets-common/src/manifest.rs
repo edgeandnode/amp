@@ -159,6 +159,23 @@ impl From<ArrowSchema> for SchemaRef {
     }
 }
 
+/// Convert Arrow `SchemaRef` to serializable `ArrowSchema`.
+impl From<&SchemaRef> for ArrowSchema {
+    fn from(schema: &SchemaRef) -> Self {
+        Self {
+            fields: schema
+                .fields()
+                .iter()
+                .map(|f| Field {
+                    name: f.name().clone(),
+                    type_: DataType(f.data_type().clone()),
+                    nullable: f.is_nullable(),
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Arrow field definition with name, type, and nullability.
 ///
 /// Represents a single column in a table schema.

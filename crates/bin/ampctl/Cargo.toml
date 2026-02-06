@@ -18,8 +18,12 @@ admin-client = { path = "../../clients/admin" }
 alloy.workspace = true
 amp-object-store = { path = "../../core/object-store" }
 anyhow.workspace = true
+async-trait.workspace = true
 clap.workspace = true
+common = { path = "../../core/common" }
 console = "0.16.1"
+datafusion.workspace = true
+dataset-authoring = { path = "../../core/dataset-authoring" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }

@@ -6,6 +6,7 @@ mod it_admin_api_jobs_progress;
 mod it_admin_api_schema;
 mod it_ampctl_gen_manifest;
 mod it_client;
+mod it_dataset_authoring;
 mod it_dependencies;
 mod it_dump;
 mod it_functions;
