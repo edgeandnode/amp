@@ -582,12 +582,14 @@ mod tests {
             }
         };
 
-        let block_stream = extractor.block_stream_impl(
-            start,
-            end,
-            historical,
-            rpc_client::rpc_config::RpcBlockConfig::default(),
-        );
+        let get_block_config = rpc_client::rpc_config::RpcBlockConfig {
+            encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
+            transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
+            max_supported_transaction_version: Some(0),
+            rewards: Some(true),
+            commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
+        };
+        let block_stream = extractor.block_stream_impl(start, end, historical, get_block_config);
 
         futures::pin_mut!(block_stream);
 
