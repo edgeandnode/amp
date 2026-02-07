@@ -11,8 +11,8 @@ use datasets_common::{
 };
 use datasets_raw::{
     arrow::{
-        ArrayRef, DataType, Field, Fields, Float64Builder, Int64Builder, ListBuilder, Schema,
-        SchemaRef, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder, UInt64Builder,
+        ArrayRef, DataType, Field, Fields, Int64Builder, ListBuilder, Schema, SchemaRef,
+        StringBuilder, StructBuilder, UInt8Builder, UInt32Builder, UInt64Builder,
     },
     rows::{TableRowError, TableRows},
 };
@@ -638,13 +638,11 @@ impl TransactionRowsBuilder {
         fn ui_token_amount_builder() -> StructBuilder {
             StructBuilder::new(
                 Fields::from(vec![
-                    Field::new("ui_amount", DataType::Float64, true),
                     Field::new("decimals", DataType::UInt8, false),
                     Field::new("amount", DataType::Utf8, false),
                     Field::new("ui_amount_string", DataType::Utf8, false),
                 ]),
                 vec![
-                    Box::new(Float64Builder::new()),
                     Box::new(UInt8Builder::new()),
                     Box::new(StringBuilder::new()),
                     Box::new(StringBuilder::new()),
