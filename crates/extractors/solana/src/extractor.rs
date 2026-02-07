@@ -351,14 +351,23 @@ pub fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<table
     let mut msgs = Vec::with_capacity(transactions.len());
 
     for (index, (tx, tx_meta)) in transactions.into_iter().zip(transaction_metas).enumerate() {
+        let tx_index = index.try_into().expect("conversion error");
         let solana_sdk::transaction::VersionedTransaction {
             signatures,
             message,
         } = tx;
-        let tx_index = index.try_into().expect("conversion error");
+
+        let tx_version = match message {
+            solana_sdk::message::VersionedMessage::Legacy(_) => {
+                tables::transactions::TransactionVersion::Legacy
+            }
+            solana_sdk::message::VersionedMessage::V0(_) => {
+                tables::transactions::TransactionVersion::V0
+            }
+        };
 
         let tx = tables::transactions::Transaction::from_of1_transaction(
-            slot, tx_index, signatures, tx_meta,
+            slot, tx_index, tx_version, signatures, tx_meta,
         )
         .context("converting of1 transaction")?;
         let message = tables::messages::Message::from_of1_message(slot, tx_index, message);
@@ -404,7 +413,9 @@ pub fn non_empty_rpc_slot(
         let tx_index = index.try_into().expect("conversion error");
 
         let rpc_client::EncodedTransactionWithStatusMeta {
-            transaction, meta, ..
+            transaction,
+            meta,
+            version,
         } = tx_with_meta;
 
         // These should follow the encoding we requested when fetching the block.
@@ -419,8 +430,27 @@ pub fn non_empty_rpc_slot(
             anyhow::bail!("expected raw message for slot {slot}, tx index {tx_index}");
         };
 
+        // Version should be present since we requested it when fetching the block.
+        let Some(version) = version else {
+            anyhow::bail!("missing transaction version for slot {slot}, tx index {tx_index}");
+        };
+
+        let tx_version = match version {
+            solana_transaction::versioned::TransactionVersion::Legacy(_) => {
+                tables::transactions::TransactionVersion::Legacy
+            }
+            solana_transaction::versioned::TransactionVersion::Number(0) => {
+                tables::transactions::TransactionVersion::V0
+            }
+            solana_transaction::versioned::TransactionVersion::Number(n) => {
+                anyhow::bail!(
+                    "unsupported transaction version number {n} at slot {slot}, transaction index {tx_index}"
+                )
+            }
+        };
+
         let tx = tables::transactions::Transaction::from_rpc_transaction(
-            slot, tx_index, signatures, meta,
+            slot, tx_index, tx_version, signatures, meta,
         )?;
         let msg = tables::messages::Message::from_rpc_message(slot, tx_index, msg);
 

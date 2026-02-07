@@ -1,4 +1,7 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    fmt,
+    sync::{Arc, LazyLock},
+};
 
 use anyhow::Context;
 use base64::Engine;
@@ -32,6 +35,7 @@ fn schema() -> Schema {
         Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
         Field::new("slot", DataType::UInt64, false),
         Field::new("tx_index", DataType::UInt32, false),
+        Field::new("tx_version", DataType::Utf8, false),
         Field::new(
             "signatures",
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
@@ -123,6 +127,7 @@ pub struct Transaction {
     pub slot: Slot,
     pub index: u32,
 
+    pub version: TransactionVersion,
     pub signatures: Vec<String>,
     pub transaction_status_meta: Option<TransactionStatusMeta>,
 }
@@ -131,6 +136,7 @@ impl Transaction {
     pub(crate) fn from_of1_transaction(
         slot: Slot,
         tx_index: u32,
+        tx_version: TransactionVersion,
         of1_tx_signatures: Vec<solana_sdk::signature::Signature>,
         of1_tx_meta: Option<of1_client::DecodedTransactionStatusMeta>,
     ) -> anyhow::Result<Self> {
@@ -149,6 +155,7 @@ impl Transaction {
 
         Ok(Self {
             slot,
+            version: tx_version,
             index: tx_index,
             signatures,
             transaction_status_meta,
@@ -158,6 +165,7 @@ impl Transaction {
     pub(crate) fn from_rpc_transaction(
         slot: Slot,
         tx_index: u32,
+        tx_version: TransactionVersion,
         rpc_tx_signatures: Vec<String>,
         rpc_tx_meta: Option<rpc_client::UiTransactionStatusMeta>,
     ) -> anyhow::Result<Self> {
@@ -167,10 +175,27 @@ impl Transaction {
 
         Ok(Self {
             slot,
+            version: tx_version,
             index: tx_index,
             signatures: rpc_tx_signatures,
             transaction_status_meta,
         })
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub enum TransactionVersion {
+    #[default]
+    Legacy,
+    V0,
+}
+
+impl fmt::Display for TransactionVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TransactionVersion::Legacy => write!(f, "legacy"),
+            TransactionVersion::V0 => write!(f, "v0"),
+        }
     }
 }
 
@@ -596,6 +621,7 @@ pub(crate) struct TransactionRowsBuilder {
     special_block_num: UInt64Builder,
     slot: UInt64Builder,
     tx_index: UInt32Builder,
+    tx_version: StringBuilder,
 
     tx_signatures: ListBuilder<StringBuilder>,
     err: StringBuilder,
@@ -676,6 +702,7 @@ impl TransactionRowsBuilder {
             special_block_num: UInt64Builder::with_capacity(count),
             slot: UInt64Builder::with_capacity(count),
             tx_index: UInt32Builder::with_capacity(count),
+            tx_version: StringBuilder::with_capacity(count, 0),
             tx_signatures: ListBuilder::with_capacity(StringBuilder::new(), count),
             err: StringBuilder::with_capacity(count, 0),
             fee: UInt64Builder::with_capacity(count),
@@ -698,6 +725,7 @@ impl TransactionRowsBuilder {
         self.special_block_num.append_value(tx.slot);
         self.slot.append_value(tx.slot);
         self.tx_index.append_value(tx.index);
+        self.tx_version.append_value(tx.version.to_string());
 
         for sig in &tx.signatures {
             self.tx_signatures.values().append_value(sig);
@@ -917,6 +945,7 @@ impl TransactionRowsBuilder {
             mut special_block_num,
             mut slot,
             mut tx_index,
+            mut tx_version,
             mut tx_signatures,
             mut err,
             mut fee,
@@ -938,6 +967,7 @@ impl TransactionRowsBuilder {
             Arc::new(special_block_num.finish()) as ArrayRef,
             Arc::new(slot.finish()),
             Arc::new(tx_index.finish()),
+            Arc::new(tx_version.finish()),
             Arc::new(tx_signatures.finish()),
             Arc::new(err.finish()),
             Arc::new(fee.finish()),
