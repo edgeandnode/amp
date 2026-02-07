@@ -201,7 +201,7 @@ impl fmt::Display for TransactionVersion {
 #[derive(Debug, Default, PartialEq)]
 pub struct TransactionStatusMeta {
     // Instead of trying to represent the entire transaction error enumeration as a union, we
-    // serialize it into a string. This keeps the schema simpler and more stable, at the cost
+    // serialize it into a JSON string. This keeps the schema simpler and more stable, at the cost
     // of type safety, query expressiveness and some performance.
     pub err: Option<String>,
     pub fee: u64,
