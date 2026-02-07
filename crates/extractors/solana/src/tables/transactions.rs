@@ -8,9 +8,8 @@ use datasets_common::{
 };
 use datasets_raw::{
     arrow::{
-        ArrayRef, BooleanBuilder, DataType, Field, Fields, Float64Builder, Int64Builder,
-        ListBuilder, Schema, SchemaRef, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
-        UInt64Builder,
+        ArrayRef, DataType, Field, Fields, Float64Builder, Int64Builder, ListBuilder, Schema,
+        SchemaRef, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder, UInt64Builder,
     },
     rows::{TableRowError, TableRows},
 };
@@ -39,7 +38,7 @@ fn schema() -> Schema {
             false,
         ),
         // Transaction status meta fields.
-        Field::new("status", DataType::Boolean, true),
+        Field::new("err", DataType::Utf8, true),
         Field::new("fee", DataType::UInt64, true),
         Field::new(
             "pre_balances",
@@ -142,9 +141,9 @@ impl Transaction {
                     TransactionStatusMeta::from_proto_meta(slot, tx_index, proto_meta)
                 }
 
-                of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => Ok(
-                    TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta),
-                ),
+                of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => {
+                    TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta)
+                }
             })
             .transpose()?;
 
@@ -177,8 +176,10 @@ impl Transaction {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TransactionStatusMeta {
-    // `true` if the transaction succeeded, `false` otherwise.
-    pub status: bool,
+    // Instead of trying to represent the entire transaction error enumeration as a union, we
+    // serialize it into a string. This keeps the schema simpler and more stable, at the cost
+    // of type safety, query expressiveness and some performance.
+    pub err: Option<String>,
     pub fee: u64,
     pub pre_balances: Vec<u64>,
     pub post_balances: Vec<u64>,
@@ -198,8 +199,17 @@ impl TransactionStatusMeta {
         slot: u64,
         tx_index: u32,
         stored_tx_meta: solana_storage_proto::StoredTransactionStatusMeta,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let rpc_tx_meta = crate::rpc_client::TransactionStatusMeta::from(stored_tx_meta);
+
+        let err = rpc_tx_meta
+            .status
+            .err()
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .context("serializing stored transaction error")?;
+
         let inner_instructions = rpc_tx_meta
             .inner_instructions
             .map(|inner_instructions_vec| {
@@ -256,8 +266,8 @@ impl TransactionStatusMeta {
                 data: return_data.data,
             });
 
-        Self {
-            status: rpc_tx_meta.status.is_ok(),
+        Ok(Self {
+            err,
             fee: rpc_tx_meta.fee,
             pre_balances: rpc_tx_meta.pre_balances,
             post_balances: rpc_tx_meta.post_balances,
@@ -271,7 +281,7 @@ impl TransactionStatusMeta {
             pre_token_balances: Some(pre_token_balances.unwrap_or_default()),
             post_token_balances: Some(post_token_balances.unwrap_or_default()),
             rewards: Some(rewards.unwrap_or_default()),
-        }
+        })
     }
 
     pub(crate) fn from_proto_meta(
@@ -279,6 +289,17 @@ impl TransactionStatusMeta {
         tx_index: u32,
         proto_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> anyhow::Result<Self> {
+        let err = proto_tx_meta
+            .err
+            .map(|proto_err| {
+                let err: solana_transaction_error::TransactionError =
+                    bincode::deserialize(&proto_err.err)
+                        .context("bincode deserializing proto transaction error")?;
+                serde_json::to_string(&err).context("json serializing proto transaction error")
+            })
+            .transpose()
+            .context("converting proto tx error")?;
+
         let inner_instructions: Vec<Vec<tables::instructions::Instruction>> = proto_tx_meta
             .inner_instructions
             .into_iter()
@@ -339,7 +360,7 @@ impl TransactionStatusMeta {
         });
 
         Ok(TransactionStatusMeta {
-            status: proto_tx_meta.err.is_none(),
+            err,
             fee: proto_tx_meta.fee,
             pre_balances: proto_tx_meta.pre_balances,
             post_balances: proto_tx_meta.post_balances,
@@ -360,6 +381,13 @@ impl TransactionStatusMeta {
         tx_index: u32,
         rpc_meta: rpc_client::UiTransactionStatusMeta,
     ) -> anyhow::Result<Self> {
+        let err = rpc_meta
+            .err
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .context("serializing RPC transaction error")?;
+
         let inner_instructions = rpc_meta
             .inner_instructions
             .map(|rpc_inner_instructions| {
@@ -438,7 +466,7 @@ impl TransactionStatusMeta {
             .transpose()?;
 
         Ok(Self {
-            status: rpc_meta.err.is_none(),
+            err,
             fee: rpc_meta.fee,
             pre_balances: rpc_meta.pre_balances,
             post_balances: rpc_meta.post_balances,
@@ -570,7 +598,7 @@ pub(crate) struct TransactionRowsBuilder {
     tx_index: UInt32Builder,
 
     tx_signatures: ListBuilder<StringBuilder>,
-    status: BooleanBuilder,
+    err: StringBuilder,
     fee: UInt64Builder,
     pre_balances: ListBuilder<UInt64Builder>,
     post_balances: ListBuilder<UInt64Builder>,
@@ -649,7 +677,7 @@ impl TransactionRowsBuilder {
             slot: UInt64Builder::with_capacity(count),
             tx_index: UInt32Builder::with_capacity(count),
             tx_signatures: ListBuilder::with_capacity(StringBuilder::new(), count),
-            status: BooleanBuilder::with_capacity(count),
+            err: StringBuilder::with_capacity(count, 0),
             fee: UInt64Builder::with_capacity(count),
             pre_balances: ListBuilder::with_capacity(UInt64Builder::new(), count),
             post_balances: ListBuilder::with_capacity(UInt64Builder::new(), count),
@@ -677,7 +705,7 @@ impl TransactionRowsBuilder {
         self.tx_signatures.append(true);
 
         if let Some(meta) = tx.transaction_status_meta.as_ref() {
-            self.status.append_value(meta.status);
+            self.err.append_option(meta.err.as_ref());
             self.fee.append_value(meta.fee);
 
             for pre_balance in &meta.pre_balances {
@@ -867,7 +895,7 @@ impl TransactionRowsBuilder {
                 .append_option(meta.compute_units_consumed);
             self.cost_units.append_option(meta.cost_units);
         } else {
-            self.status.append_null();
+            self.err.append_null();
             self.fee.append_null();
             self.pre_balances.append(false);
             self.post_balances.append(false);
@@ -890,7 +918,7 @@ impl TransactionRowsBuilder {
             mut slot,
             mut tx_index,
             mut tx_signatures,
-            mut status,
+            mut err,
             mut fee,
             mut pre_balances,
             mut post_balances,
@@ -911,7 +939,7 @@ impl TransactionRowsBuilder {
             Arc::new(slot.finish()),
             Arc::new(tx_index.finish()),
             Arc::new(tx_signatures.finish()),
-            Arc::new(status.finish()),
+            Arc::new(err.finish()),
             Arc::new(fee.finish()),
             Arc::new(pre_balances.finish()),
             Arc::new(post_balances.finish()),

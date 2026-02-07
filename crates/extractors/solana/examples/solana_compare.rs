@@ -303,7 +303,7 @@ fn slots_match(
             // `TransactionError::Instruction(_, InstructionError::Custom(0))`
             //
             // while the same JSON-RPC transactions show no error.
-            (Some(of1_tx_meta), Some(rpc_tx_meta)) if of1_tx_meta.status != rpc_tx_meta.status => {
+            (Some(of1_tx_meta), Some(rpc_tx_meta)) if of1_tx_meta.err != rpc_tx_meta.err => {
                 continue;
             }
             _ => {}
