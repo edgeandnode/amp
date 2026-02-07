@@ -1,4 +1,7 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    fmt,
+    sync::{Arc, LazyLock},
+};
 
 use anyhow::Context;
 use base64::Engine;
@@ -8,9 +11,8 @@ use datasets_common::{
 };
 use datasets_raw::{
     arrow::{
-        ArrayRef, BooleanBuilder, DataType, Field, Fields, Float64Builder, Int64Builder,
-        ListBuilder, Schema, SchemaRef, StringBuilder, StructBuilder, UInt8Builder, UInt32Builder,
-        UInt64Builder,
+        ArrayRef, DataType, Field, Fields, Int64Builder, ListBuilder, Schema, SchemaRef,
+        StringBuilder, StructBuilder, UInt8Builder, UInt32Builder, UInt64Builder,
     },
     rows::{TableRowError, TableRows},
 };
@@ -33,13 +35,14 @@ fn schema() -> Schema {
         Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
         Field::new("slot", DataType::UInt64, false),
         Field::new("tx_index", DataType::UInt32, false),
+        Field::new("tx_version", DataType::Utf8, false),
         Field::new(
             "signatures",
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
             false,
         ),
         // Transaction status meta fields.
-        Field::new("status", DataType::Boolean, true),
+        Field::new("err", DataType::Utf8, true),
         Field::new("fee", DataType::UInt64, true),
         Field::new(
             "pre_balances",
@@ -102,7 +105,6 @@ fn token_balances_dtype() -> DataType {
 
 fn ui_token_amount_dtype() -> DataType {
     DataType::Struct(Fields::from(vec![
-        Field::new("ui_amount", DataType::Float64, true),
         Field::new("decimals", DataType::UInt8, false),
         Field::new("amount", DataType::Utf8, false),
         Field::new("ui_amount_string", DataType::Utf8, false),
@@ -124,6 +126,7 @@ pub struct Transaction {
     pub slot: Slot,
     pub index: u32,
 
+    pub version: TransactionVersion,
     pub signatures: Vec<String>,
     pub transaction_status_meta: Option<TransactionStatusMeta>,
 }
@@ -132,6 +135,7 @@ impl Transaction {
     pub(crate) fn from_of1_transaction(
         slot: Slot,
         tx_index: u32,
+        tx_version: TransactionVersion,
         of1_tx_signatures: Vec<solana_sdk::signature::Signature>,
         of1_tx_meta: Option<of1_client::DecodedTransactionStatusMeta>,
     ) -> anyhow::Result<Self> {
@@ -142,14 +146,15 @@ impl Transaction {
                     TransactionStatusMeta::from_proto_meta(slot, tx_index, proto_meta)
                 }
 
-                of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => Ok(
-                    TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta),
-                ),
+                of1_client::DecodedTransactionStatusMeta::Bincode(stored_meta) => {
+                    TransactionStatusMeta::from_stored_meta(slot, tx_index, stored_meta)
+                }
             })
             .transpose()?;
 
         Ok(Self {
             slot,
+            version: tx_version,
             index: tx_index,
             signatures,
             transaction_status_meta,
@@ -159,6 +164,7 @@ impl Transaction {
     pub(crate) fn from_rpc_transaction(
         slot: Slot,
         tx_index: u32,
+        tx_version: TransactionVersion,
         rpc_tx_signatures: Vec<String>,
         rpc_tx_meta: Option<rpc_client::UiTransactionStatusMeta>,
     ) -> anyhow::Result<Self> {
@@ -168,6 +174,7 @@ impl Transaction {
 
         Ok(Self {
             slot,
+            version: tx_version,
             index: tx_index,
             signatures: rpc_tx_signatures,
             transaction_status_meta,
@@ -176,9 +183,27 @@ impl Transaction {
 }
 
 #[derive(Debug, Default, PartialEq)]
+pub enum TransactionVersion {
+    #[default]
+    Legacy,
+    V0,
+}
+
+impl fmt::Display for TransactionVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TransactionVersion::Legacy => write!(f, "legacy"),
+            TransactionVersion::V0 => write!(f, "v0"),
+        }
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
 pub struct TransactionStatusMeta {
-    // `true` if the transaction succeeded, `false` otherwise.
-    pub status: bool,
+    // Instead of trying to represent the entire transaction error enumeration as a union, we
+    // serialize it into a JSON string. This keeps the schema simpler and more stable, at the cost
+    // of type safety, query expressiveness and some performance.
+    pub err: Option<String>,
     pub fee: u64,
     pub pre_balances: Vec<u64>,
     pub post_balances: Vec<u64>,
@@ -198,8 +223,17 @@ impl TransactionStatusMeta {
         slot: u64,
         tx_index: u32,
         stored_tx_meta: solana_storage_proto::StoredTransactionStatusMeta,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let rpc_tx_meta = crate::rpc_client::TransactionStatusMeta::from(stored_tx_meta);
+
+        let err = rpc_tx_meta
+            .status
+            .err()
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .context("serializing stored transaction error")?;
+
         let inner_instructions = rpc_tx_meta
             .inner_instructions
             .map(|inner_instructions_vec| {
@@ -256,8 +290,8 @@ impl TransactionStatusMeta {
                 data: return_data.data,
             });
 
-        Self {
-            status: rpc_tx_meta.status.is_ok(),
+        Ok(Self {
+            err,
             fee: rpc_tx_meta.fee,
             pre_balances: rpc_tx_meta.pre_balances,
             post_balances: rpc_tx_meta.post_balances,
@@ -271,7 +305,7 @@ impl TransactionStatusMeta {
             pre_token_balances: Some(pre_token_balances.unwrap_or_default()),
             post_token_balances: Some(post_token_balances.unwrap_or_default()),
             rewards: Some(rewards.unwrap_or_default()),
-        }
+        })
     }
 
     pub(crate) fn from_proto_meta(
@@ -279,6 +313,17 @@ impl TransactionStatusMeta {
         tx_index: u32,
         proto_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
     ) -> anyhow::Result<Self> {
+        let err = proto_tx_meta
+            .err
+            .map(|proto_err| {
+                let err: solana_transaction_error::TransactionError =
+                    bincode::deserialize(&proto_err.err)
+                        .context("bincode deserializing proto transaction error")?;
+                serde_json::to_string(&err).context("json serializing proto transaction error")
+            })
+            .transpose()
+            .context("converting proto tx error")?;
+
         let inner_instructions: Vec<Vec<tables::instructions::Instruction>> = proto_tx_meta
             .inner_instructions
             .into_iter()
@@ -339,7 +384,7 @@ impl TransactionStatusMeta {
         });
 
         Ok(TransactionStatusMeta {
-            status: proto_tx_meta.err.is_none(),
+            err,
             fee: proto_tx_meta.fee,
             pre_balances: proto_tx_meta.pre_balances,
             post_balances: proto_tx_meta.post_balances,
@@ -360,6 +405,13 @@ impl TransactionStatusMeta {
         tx_index: u32,
         rpc_meta: rpc_client::UiTransactionStatusMeta,
     ) -> anyhow::Result<Self> {
+        let err = rpc_meta
+            .err
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .context("serializing RPC transaction error")?;
+
         let inner_instructions = rpc_meta
             .inner_instructions
             .map(|rpc_inner_instructions| {
@@ -438,7 +490,7 @@ impl TransactionStatusMeta {
             .transpose()?;
 
         Ok(Self {
-            status: rpc_meta.err.is_none(),
+            err,
             fee: rpc_meta.fee,
             pre_balances: rpc_meta.pre_balances,
             post_balances: rpc_meta.post_balances,
@@ -470,7 +522,6 @@ impl From<rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
             account_index: value.account_index,
             mint: value.mint,
             ui_token_amount: TokenAmount {
-                ui_amount: value.ui_token_amount.ui_amount,
                 decimals: value.ui_token_amount.decimals,
                 amount: value.ui_token_amount.amount,
                 ui_amount_string: value.ui_token_amount.ui_amount_string,
@@ -484,7 +535,6 @@ impl From<rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
 impl From<rpc_client::TransactionTokenBalance> for TransactionTokenBalance {
     fn from(value: rpc_client::TransactionTokenBalance) -> Self {
         let ui_token_amount = TokenAmount {
-            ui_amount: value.ui_token_amount.ui_amount,
             decimals: value.ui_token_amount.decimals,
             amount: value.ui_token_amount.amount,
             ui_amount_string: value.ui_token_amount.ui_amount_string,
@@ -513,12 +563,6 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
         let ui_token_amount = value
             .ui_token_amount
             .map(|token_amount| TokenAmount {
-                // Convert 0.0 ui_amount to `None` to match JSON-RPC behavior.
-                ui_amount: if token_amount.ui_amount == 0.0 {
-                    None
-                } else {
-                    Some(token_amount.ui_amount)
-                },
                 decimals: token_amount.decimals as u8,
                 amount: token_amount.amount,
                 ui_amount_string: token_amount.ui_amount_string,
@@ -546,7 +590,8 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TokenAmount {
-    pub ui_amount: Option<f64>,
+    /// Deprecated: https://solana.com/docs/rpc/json-structures#token-balances
+    /// pub ui_amount: Option<f64>,
     pub decimals: u8,
     pub amount: String,
     pub ui_amount_string: String,
@@ -568,9 +613,10 @@ pub(crate) struct TransactionRowsBuilder {
     special_block_num: UInt64Builder,
     slot: UInt64Builder,
     tx_index: UInt32Builder,
+    tx_version: StringBuilder,
 
     tx_signatures: ListBuilder<StringBuilder>,
-    status: BooleanBuilder,
+    err: StringBuilder,
     fee: UInt64Builder,
     pre_balances: ListBuilder<UInt64Builder>,
     post_balances: ListBuilder<UInt64Builder>,
@@ -592,13 +638,11 @@ impl TransactionRowsBuilder {
         fn ui_token_amount_builder() -> StructBuilder {
             StructBuilder::new(
                 Fields::from(vec![
-                    Field::new("ui_amount", DataType::Float64, true),
                     Field::new("decimals", DataType::UInt8, false),
                     Field::new("amount", DataType::Utf8, false),
                     Field::new("ui_amount_string", DataType::Utf8, false),
                 ]),
                 vec![
-                    Box::new(Float64Builder::new()),
                     Box::new(UInt8Builder::new()),
                     Box::new(StringBuilder::new()),
                     Box::new(StringBuilder::new()),
@@ -648,8 +692,9 @@ impl TransactionRowsBuilder {
             special_block_num: UInt64Builder::with_capacity(count),
             slot: UInt64Builder::with_capacity(count),
             tx_index: UInt32Builder::with_capacity(count),
+            tx_version: StringBuilder::with_capacity(count, 0),
             tx_signatures: ListBuilder::with_capacity(StringBuilder::new(), count),
-            status: BooleanBuilder::with_capacity(count),
+            err: StringBuilder::with_capacity(count, 0),
             fee: UInt64Builder::with_capacity(count),
             pre_balances: ListBuilder::with_capacity(UInt64Builder::new(), count),
             post_balances: ListBuilder::with_capacity(UInt64Builder::new(), count),
@@ -670,6 +715,7 @@ impl TransactionRowsBuilder {
         self.special_block_num.append_value(tx.slot);
         self.slot.append_value(tx.slot);
         self.tx_index.append_value(tx.index);
+        self.tx_version.append_value(tx.version.to_string());
 
         for sig in &tx.signatures {
             self.tx_signatures.values().append_value(sig);
@@ -677,7 +723,7 @@ impl TransactionRowsBuilder {
         self.tx_signatures.append(true);
 
         if let Some(meta) = tx.transaction_status_meta.as_ref() {
-            self.status.append_value(meta.status);
+            self.err.append_option(meta.err.as_ref());
             self.fee.append_value(meta.fee);
 
             for pre_balance in &meta.pre_balances {
@@ -716,19 +762,15 @@ impl TransactionRowsBuilder {
                         let struct_builder =
                             struct_builder.field_builder::<StructBuilder>(2).unwrap();
                         struct_builder
-                            .field_builder::<Float64Builder>(0)
-                            .unwrap()
-                            .append_option(balance.ui_token_amount.ui_amount);
-                        struct_builder
-                            .field_builder::<UInt8Builder>(1)
+                            .field_builder::<UInt8Builder>(0)
                             .unwrap()
                             .append_value(balance.ui_token_amount.decimals);
                         struct_builder
-                            .field_builder::<StringBuilder>(2)
+                            .field_builder::<StringBuilder>(1)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.amount);
                         struct_builder
-                            .field_builder::<StringBuilder>(3)
+                            .field_builder::<StringBuilder>(2)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.ui_amount_string);
 
@@ -768,19 +810,15 @@ impl TransactionRowsBuilder {
                         let struct_builder =
                             struct_builder.field_builder::<StructBuilder>(2).unwrap();
                         struct_builder
-                            .field_builder::<Float64Builder>(0)
-                            .unwrap()
-                            .append_option(balance.ui_token_amount.ui_amount);
-                        struct_builder
-                            .field_builder::<UInt8Builder>(1)
+                            .field_builder::<UInt8Builder>(0)
                             .unwrap()
                             .append_value(balance.ui_token_amount.decimals);
                         struct_builder
-                            .field_builder::<StringBuilder>(2)
+                            .field_builder::<StringBuilder>(1)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.amount);
                         struct_builder
-                            .field_builder::<StringBuilder>(3)
+                            .field_builder::<StringBuilder>(2)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.ui_amount_string);
 
@@ -867,7 +905,7 @@ impl TransactionRowsBuilder {
                 .append_option(meta.compute_units_consumed);
             self.cost_units.append_option(meta.cost_units);
         } else {
-            self.status.append_null();
+            self.err.append_null();
             self.fee.append_null();
             self.pre_balances.append(false);
             self.post_balances.append(false);
@@ -889,8 +927,9 @@ impl TransactionRowsBuilder {
             mut special_block_num,
             mut slot,
             mut tx_index,
+            mut tx_version,
             mut tx_signatures,
-            mut status,
+            mut err,
             mut fee,
             mut pre_balances,
             mut post_balances,
@@ -910,8 +949,9 @@ impl TransactionRowsBuilder {
             Arc::new(special_block_num.finish()) as ArrayRef,
             Arc::new(slot.finish()),
             Arc::new(tx_index.finish()),
+            Arc::new(tx_version.finish()),
             Arc::new(tx_signatures.finish()),
-            Arc::new(status.finish()),
+            Arc::new(err.finish()),
             Arc::new(fee.finish()),
             Arc::new(pre_balances.finish()),
             Arc::new(post_balances.finish()),
