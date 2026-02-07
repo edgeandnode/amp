@@ -105,7 +105,6 @@ fn token_balances_dtype() -> DataType {
 
 fn ui_token_amount_dtype() -> DataType {
     DataType::Struct(Fields::from(vec![
-        Field::new("ui_amount", DataType::Float64, true),
         Field::new("decimals", DataType::UInt8, false),
         Field::new("amount", DataType::Utf8, false),
         Field::new("ui_amount_string", DataType::Utf8, false),
@@ -523,7 +522,6 @@ impl From<rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
             account_index: value.account_index,
             mint: value.mint,
             ui_token_amount: TokenAmount {
-                ui_amount: value.ui_token_amount.ui_amount,
                 decimals: value.ui_token_amount.decimals,
                 amount: value.ui_token_amount.amount,
                 ui_amount_string: value.ui_token_amount.ui_amount_string,
@@ -537,7 +535,6 @@ impl From<rpc_client::UiTransactionTokenBalance> for TransactionTokenBalance {
 impl From<rpc_client::TransactionTokenBalance> for TransactionTokenBalance {
     fn from(value: rpc_client::TransactionTokenBalance) -> Self {
         let ui_token_amount = TokenAmount {
-            ui_amount: value.ui_token_amount.ui_amount,
             decimals: value.ui_token_amount.decimals,
             amount: value.ui_token_amount.amount,
             ui_amount_string: value.ui_token_amount.ui_amount_string,
@@ -566,12 +563,6 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
         let ui_token_amount = value
             .ui_token_amount
             .map(|token_amount| TokenAmount {
-                // Convert 0.0 ui_amount to `None` to match JSON-RPC behavior.
-                ui_amount: if token_amount.ui_amount == 0.0 {
-                    None
-                } else {
-                    Some(token_amount.ui_amount)
-                },
                 decimals: token_amount.decimals as u8,
                 amount: token_amount.amount,
                 ui_amount_string: token_amount.ui_amount_string,
@@ -599,7 +590,8 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TokenAmount {
-    pub ui_amount: Option<f64>,
+    /// Deprecated: https://solana.com/docs/rpc/json-structures#token-balances
+    /// pub ui_amount: Option<f64>,
     pub decimals: u8,
     pub amount: String,
     pub ui_amount_string: String,
@@ -772,19 +764,15 @@ impl TransactionRowsBuilder {
                         let struct_builder =
                             struct_builder.field_builder::<StructBuilder>(2).unwrap();
                         struct_builder
-                            .field_builder::<Float64Builder>(0)
-                            .unwrap()
-                            .append_option(balance.ui_token_amount.ui_amount);
-                        struct_builder
-                            .field_builder::<UInt8Builder>(1)
+                            .field_builder::<UInt8Builder>(0)
                             .unwrap()
                             .append_value(balance.ui_token_amount.decimals);
                         struct_builder
-                            .field_builder::<StringBuilder>(2)
+                            .field_builder::<StringBuilder>(1)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.amount);
                         struct_builder
-                            .field_builder::<StringBuilder>(3)
+                            .field_builder::<StringBuilder>(2)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.ui_amount_string);
 
@@ -824,19 +812,15 @@ impl TransactionRowsBuilder {
                         let struct_builder =
                             struct_builder.field_builder::<StructBuilder>(2).unwrap();
                         struct_builder
-                            .field_builder::<Float64Builder>(0)
-                            .unwrap()
-                            .append_option(balance.ui_token_amount.ui_amount);
-                        struct_builder
-                            .field_builder::<UInt8Builder>(1)
+                            .field_builder::<UInt8Builder>(0)
                             .unwrap()
                             .append_value(balance.ui_token_amount.decimals);
                         struct_builder
-                            .field_builder::<StringBuilder>(2)
+                            .field_builder::<StringBuilder>(1)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.amount);
                         struct_builder
-                            .field_builder::<StringBuilder>(3)
+                            .field_builder::<StringBuilder>(2)
                             .unwrap()
                             .append_value(&balance.ui_token_amount.ui_amount_string);
 

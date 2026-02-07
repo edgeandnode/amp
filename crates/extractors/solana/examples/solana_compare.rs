@@ -311,10 +311,7 @@ fn slots_match(
 
         if of1_tx != rpc_tx {
             // TODO(known-mismatch)
-            let known_mismatch = known_tx_ui_amount_mismatch(
-                of1_tx.transaction_status_meta.as_ref(),
-                rpc_tx.transaction_status_meta.as_ref(),
-            ) || known_tx_reward_mismatch(
+            let known_mismatch = known_tx_reward_mismatch(
                 of1_tx.transaction_status_meta.as_ref(),
                 rpc_tx.transaction_status_meta.as_ref(),
             );
@@ -397,65 +394,6 @@ fn slots_match(
     }
 
     true
-}
-
-/// Checks for a known mismatch (in value, by a small delta) in the `ui_amount`
-/// field of token balances in transaction status metadata and returns `true` if
-/// found. For any other kind of mismatch (or no mismatch), returns `false`.
-fn known_tx_ui_amount_mismatch(
-    of1_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
-    rpc_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
-) -> bool {
-    fn known_ui_amount_mismatch_in(
-        of1_tok_balances: &[tables::transactions::TransactionTokenBalance],
-        rpc_tok_balances: &[tables::transactions::TransactionTokenBalance],
-    ) -> bool {
-        for (of1_balance, rpc_balance) in of1_tok_balances.iter().zip(rpc_tok_balances.iter()) {
-            let (Some(of1_amount), Some(rpc_amount)) = (
-                of1_balance.ui_token_amount.ui_amount,
-                rpc_balance.ui_token_amount.ui_amount,
-            ) else {
-                continue;
-            };
-
-            let delta = (of1_amount - rpc_amount).abs();
-            if delta > 0.0 && delta < 0.0001 {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    let (Some(of1_tx_meta), Some(rpc_tx_meta)) = (of1_tx_meta, rpc_tx_meta) else {
-        return false;
-    };
-
-    match (
-        of1_tx_meta.pre_token_balances.as_ref(),
-        rpc_tx_meta.pre_token_balances.as_ref(),
-    ) {
-        (Some(of1_balances), Some(rpc_balances))
-            if known_ui_amount_mismatch_in(of1_balances, rpc_balances) =>
-        {
-            return true;
-        }
-        _ => {}
-    }
-
-    match (
-        of1_tx_meta.post_token_balances.as_ref(),
-        rpc_tx_meta.post_token_balances.as_ref(),
-    ) {
-        (Some(of1_balances), Some(rpc_balances))
-            if known_ui_amount_mismatch_in(of1_balances, rpc_balances) =>
-        {
-            return true;
-        }
-        _ => {}
-    }
-
-    false
 }
 
 /// Checks for a known mismatch where OF1 has block rewards for a transaction but
