@@ -431,7 +431,7 @@ pub fn non_empty_rpc_slot(
         };
 
         // Version should be present since we requested it when fetching the block.
-        let Some(version) = version else {
+        let Some(version) = version.as_ref() else {
             anyhow::bail!("missing transaction version for slot {slot}, tx index {tx_index}");
         };
 
