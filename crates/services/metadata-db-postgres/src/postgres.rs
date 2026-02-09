@@ -233,10 +233,11 @@ impl PostgresBuilder {
 
         let url = process.connection_url().to_string();
         let data_dir = process.data_dir.clone();
+        let pid = process.child.id().expect("postgres child must have a PID");
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
-        let handle = super::service::Handle::new(url, data_dir, shutdown_tx);
+        let handle = super::service::Handle::new(url, data_dir, pid, shutdown_tx);
 
         let fut = async move {
             let mut process = process;
