@@ -513,11 +513,8 @@ pub enum Error {
     /// - Object store connectivity issues
     /// - RawDatasetWriter initialization failures
     /// - Partition task panics (assertion failures, unwrap on None/Err, stack overflow)
-    ///
-    /// Note: The `TryWaitAllError` type cannot use `#[source]` due to Rust trait system
-    /// limitations with `BoxError`, but the error is displayed via `Display` implementation.
-    #[error("Partition task failed: {0}")]
-    PartitionTask(TryWaitAllError<RunRangeError>),
+    #[error("Partition task failed")]
+    PartitionTask(#[source] TryWaitAllError<RunRangeError>),
 
     /// Failure during blockchain client cleanup
     ///
