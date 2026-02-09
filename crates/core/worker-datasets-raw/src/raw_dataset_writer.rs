@@ -10,9 +10,7 @@ use common::{
 };
 use datasets_common::table_name::TableName;
 use datasets_raw::rows::TableRows;
-use metadata_db::MetadataDb;
-
-use crate::{
+use dump::{
     WriterProperties,
     compaction::{AmpCompactor, AmpCompactorTaskError},
     metrics,
@@ -21,6 +19,7 @@ use crate::{
         ParquetFileWriterOutput, commit_metadata,
     },
 };
+use metadata_db::MetadataDb;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 

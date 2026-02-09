@@ -1046,6 +1046,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-worker-datasets-raw"
+version = "0.1.0"
+dependencies = [
+ "amp-data-store",
+ "common",
+ "datasets-common",
+ "datasets-raw",
+ "dump",
+ "futures",
+ "metadata-db",
+ "monitoring",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ampcc"
 version = "0.1.0"
 dependencies = [
@@ -14114,11 +14132,13 @@ version = "0.1.0"
 dependencies = [
  "amp-config",
  "amp-data-store",
+ "amp-worker-datasets-raw",
  "async-trait",
  "backon",
  "chrono",
  "common",
  "datasets-common",
+ "datasets-derived",
  "dump",
  "futures",
  "metadata-db",

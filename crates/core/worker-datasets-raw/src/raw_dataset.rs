@@ -101,12 +101,7 @@ use common::{
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
-use futures::TryStreamExt as _;
-use metadata_db::MetadataDb;
-use monitoring::logging;
-use tracing::{Instrument, instrument};
-
-use crate::{
+use dump::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
     block_ranges::resolve_end_block,
     check::consistency_check,
@@ -115,8 +110,15 @@ use crate::{
     progress::{
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     },
-    raw_dataset_writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError},
     tasks::{FailFastJoinSet, TryWaitAllError},
+};
+use futures::TryStreamExt as _;
+use metadata_db::MetadataDb;
+use monitoring::logging;
+use tracing::{Instrument, instrument};
+
+use crate::raw_dataset_writer::{
+    RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError,
 };
 
 /// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
@@ -132,7 +134,7 @@ pub async fn dump(
     let writer = writer.into();
 
     let dump_start_time = Instant::now();
-    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = dump::parquet_opts(&ctx.config.parquet);
 
     let dataset = ctx
         .dataset_store
@@ -451,7 +453,7 @@ pub enum Error {
     ConsistencyCheck {
         table_name: String,
         #[source]
-        source: crate::check::ConsistencyError,
+        source: dump::check::ConsistencyError,
     },
 
     /// Failed to get blockchain client for dataset
@@ -474,7 +476,7 @@ pub enum Error {
     /// - RPC provider returning invalid block numbers
     /// - Provider temporarily unavailable
     #[error("Failed to resolve end block")]
-    ResolveEndBlock(#[source] crate::block_ranges::ResolutionError),
+    ResolveEndBlock(#[source] dump::block_ranges::ResolutionError),
 
     /// Failed to get latest block number from blockchain client
     ///
@@ -979,11 +981,11 @@ mod test {
     };
 
     use datasets_common::table_name::TableName;
-
-    use super::ProgressTracker;
-    use crate::progress::{
+    use dump::progress::{
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     };
+
+    use super::ProgressTracker;
 
     /// A mock progress reporter that records all progress updates.
     struct MockProgressReporter {

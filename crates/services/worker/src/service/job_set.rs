@@ -3,9 +3,9 @@ use std::{
     future::Future,
 };
 
-use dump::Error as DumpError;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet};
 
+use super::job_impl::DumpError;
 use crate::job::JobId;
 
 /// A collection of jobs that are spawned and managed by a [`Worker`].

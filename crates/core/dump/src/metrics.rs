@@ -189,7 +189,7 @@ impl MetricsRegistry {
         ]
     }
     /// Record rows ingested
-    pub(crate) fn record_ingestion_rows(&self, rows: u64, table: String, location_id: i64) {
+    pub fn record_ingestion_rows(&self, rows: u64, table: String, location_id: i64) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[
             telemetry::metrics::KeyValue::new("table", table),
@@ -199,7 +199,7 @@ impl MetricsRegistry {
     }
 
     /// Record bytes written
-    pub(crate) fn record_write_call(&self, bytes: u64, table: String, location_id: i64) {
+    pub fn record_write_call(&self, bytes: u64, table: String, location_id: i64) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[
             telemetry::metrics::KeyValue::new("table", table),
@@ -210,7 +210,7 @@ impl MetricsRegistry {
     }
 
     /// Record a file being written
-    pub(crate) fn record_file_written(&self, table: String, location_id: i64) {
+    pub fn record_file_written(&self, table: String, location_id: i64) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[
             telemetry::metrics::KeyValue::new("table", table),
@@ -220,7 +220,7 @@ impl MetricsRegistry {
     }
 
     /// Update the latest block number for a dataset/table
-    pub(crate) fn set_latest_block(&self, block_number: u64, table: String, location_id: i64) {
+    pub fn set_latest_block(&self, block_number: u64, table: String, location_id: i64) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[
             telemetry::metrics::KeyValue::new("table", table),
@@ -230,7 +230,7 @@ impl MetricsRegistry {
     }
 
     /// Record duration of a dump operation
-    pub(crate) fn record_dump_duration(&self, duration_millis: f64, table: String, job_id: String) {
+    pub fn record_dump_duration(&self, duration_millis: f64, table: String, job_id: String) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[
             telemetry::metrics::KeyValue::new("table", table),
@@ -241,7 +241,7 @@ impl MetricsRegistry {
     }
 
     /// Record a dump error
-    pub(crate) fn record_dump_error(&self, table: String) {
+    pub fn record_dump_error(&self, table: String) {
         let mut kv_pairs = self.base_kvs();
         kv_pairs.extend_from_slice(&[telemetry::metrics::KeyValue::new("table", table)]);
         self.dump_errors.inc_with_kvs(&kv_pairs);

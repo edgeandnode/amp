@@ -3,7 +3,8 @@
 use std::{future::Future, sync::Arc};
 
 use datasets_common::hash_reference::HashReference;
-use dump::{Ctx, Error as DumpError, ProgressReporter, metrics::MetricsRegistry};
+use datasets_derived::DerivedDatasetKind;
+use dump::{Ctx, ProgressReporter, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
 use crate::{
@@ -13,9 +14,35 @@ use crate::{
     service::WorkerJobCtx,
 };
 
+/// Errors from dataset dump job execution.
+///
+/// Wraps the specific error types from raw and derived dataset dump operations
+/// to provide a unified error type for the worker job system.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DumpError {
+    /// Raw dataset dump operation failed
+    ///
+    /// This occurs when the raw dataset extraction and Parquet file writing
+    /// process encounters an error. Common causes include blockchain client
+    /// connectivity issues, consistency check failures, and partition task errors.
+    #[error("Failed to dump raw dataset")]
+    Raw(#[source] amp_worker_datasets_raw::Error),
+
+    /// Derived dataset dump operation failed
+    ///
+    /// This occurs when the derived dataset SQL query execution and Parquet
+    /// file writing process encounters an error. Common causes include query
+    /// environment creation failures, manifest retrieval errors, and table
+    /// dump failures.
+    #[error("Failed to dump derived dataset")]
+    Derived(#[source] dump::Error),
+}
+
 /// Create and run a worker job that dumps tables from a dataset.
 ///
 /// This function returns a future that executes the dump operation.
+/// Raw datasets are handled by `amp_worker_datasets_raw` and derived
+/// datasets are handled by `dump::dump_tables`.
 pub(super) fn new(
     job_ctx: WorkerJobCtx,
     job_id: JobId,
@@ -69,17 +96,32 @@ pub(super) fn new(
     let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
     let writer: metadata_db::JobId = job_id.into();
     async move {
-        dump::dump_tables(
-            ctx,
-            &reference,
-            dataset_kind,
-            max_writers,
-            microbatch_max_interval,
-            end_block,
-            writer,
-            progress_reporter,
-        )
-        .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
-        .await
+        if dataset_kind == DerivedDatasetKind {
+            dump::dump_tables(
+                ctx,
+                &reference,
+                microbatch_max_interval,
+                end_block,
+                writer,
+                progress_reporter,
+            )
+            .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
+            .await
+            .map_err(DumpError::Derived)?;
+        } else {
+            amp_worker_datasets_raw::dump(
+                ctx,
+                &reference,
+                max_writers,
+                end_block,
+                writer,
+                progress_reporter,
+            )
+            .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
+            .await
+            .map_err(DumpError::Raw)?;
+        }
+
+        Ok(())
     }
 }
