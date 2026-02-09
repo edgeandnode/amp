@@ -1550,6 +1550,109 @@
         }
       }
     },
+    "/revisions/deactivate": {
+      "post": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `POST /revisions/deactivate` endpoint",
+        "description": "Deactivates all revisions for a specific table.\n\n## Request Body\n- `dataset`: Dataset reference (namespace/name or with revision)\n- `table_name`: Name of the table whose revisions to deactivate\n\n## Response\n- **200 OK**: Successfully deactivated all table revisions\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database error during deactivation\n\n## Error Codes\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `TABLE_NOT_FOUND`: No physical table exists for the dataset and table name\n- `DEACTIVATE_TABLE_REVISION_ERROR`: Failed to deactivate the table revisions\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n\n## Behavior\nThis endpoint resolves the dataset reference to a manifest hash, then marks all\nrevisions for the specified table as inactive.",
+        "operationId": "deactivate_table_revision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeactivationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully deactivated the table revisions"
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revisions/{id}/activate": {
+      "post": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `POST /revisions/activate` endpoint",
+        "description": "Activates a specific table revision by location ID.\n\n## Request Body\n- `dataset`: Dataset reference (namespace/name or with revision)\n- `table_name`: Name of the table whose revision to activate\n- `location_id`: Location ID of the revision to activate\n\n## Response\n- **200 OK**: Successfully activated the table revision\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database error during activation\n\n## Error Codes\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `TABLE_NOT_FOUND`: No physical table exists for the dataset and table name\n- `ACTIVATE_TABLE_REVISION_ERROR`: Failed to activate the table revision\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n\n## Behavior\nThis endpoint resolves the dataset reference to a manifest hash, then atomically\ndeactivates all existing revisions for the table and marks the specified revision\nas active.",
+        "operationId": "activate_table_revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Location ID of the revision to activate",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully activated the table revision"
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/schema": {
       "post": {
         "tags": [
@@ -1710,6 +1813,24 @@
   },
   "components": {
     "schemas": {
+      "ActivationPayload": {
+        "type": "object",
+        "description": "Payload for activating a table revision",
+        "required": [
+          "table_name",
+          "dataset"
+        ],
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "description": "Dataset reference"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "Table name"
+          }
+        }
+      },
       "Dataset": {
         "type": "object",
         "description": "Dataset information\n\nRepresents a dataset tag with its namespace, name, and version.",
@@ -1812,6 +1933,24 @@
               "$ref": "#/components/schemas/DatasetSummary"
             },
             "description": "List of all datasets across all namespaces"
+          }
+        }
+      },
+      "DeactivationPayload": {
+        "type": "object",
+        "description": "Payload for deactivating a table revision",
+        "required": [
+          "table_name",
+          "dataset"
+        ],
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "description": "Dataset reference"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "Table name"
           }
         }
       },
@@ -2605,6 +2744,10 @@
     {
       "name": "schema",
       "description": "Schema generation endpoints"
+    },
+    {
+      "name": "revisions",
+      "description": "Revision management endpoints"
     },
     {
       "name": "workers",

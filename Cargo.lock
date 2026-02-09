@@ -1082,7 +1082,6 @@ name = "ampctl"
 version = "0.1.0"
 dependencies = [
  "admin-client",
- "alloy",
  "amp-object-store",
  "anyhow",
  "clap",

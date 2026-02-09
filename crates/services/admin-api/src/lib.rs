@@ -11,7 +11,7 @@ pub mod handlers;
 pub mod scheduler;
 
 use ctx::Ctx;
-use handlers::{datasets, files, jobs, manifests, providers, schema, workers};
+use handlers::{datasets, files, jobs, manifests, providers, revisions, schema, workers};
 
 /// Create the admin API router with all routes registered
 ///
@@ -49,6 +49,14 @@ pub fn router(ctx: Ctx) -> Router<()> {
         .route(
             "/datasets/{namespace}/{name}/versions/{revision}/jobs",
             get(datasets::list_jobs::handler),
+        )
+        .route(
+            "/revisions/{id}/activate",
+            post(revisions::activate::handler),
+        )
+        .route(
+            "/revisions/deactivate",
+            post(revisions::deactivate::handler),
         )
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
@@ -132,6 +140,9 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::files::get_by_id::handler,
         // Schema endpoints
         handlers::schema::handler,
+        // Revision endpoints
+        handlers::revisions::activate::handler,
+        handlers::revisions::deactivate::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
         handlers::workers::get_by_id::handler,
@@ -171,6 +182,9 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // Schema schemas
         handlers::schema::SchemaRequest,
         handlers::schema::SchemaResponse,
+        // Revision schemas
+        handlers::revisions::activate::ActivationPayload,
+        handlers::revisions::deactivate::DeactivationPayload,
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,
@@ -184,6 +198,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         (name = "providers", description = "Provider management endpoints"),
         (name = "files", description = "File access endpoints"),
         (name = "schema", description = "Schema generation endpoints"),
+        (name = "revisions", description = "Revision management endpoints"),
         (name = "workers", description = "Worker management endpoints"),
     )
 )]

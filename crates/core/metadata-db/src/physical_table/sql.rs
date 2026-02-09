@@ -233,7 +233,7 @@ pub async fn mark_inactive_by_table_name<'c, E>(
     dataset_name: DatasetName<'_>,
     manifest_hash: ManifestHash<'_>,
     table_name: Name<'_>,
-) -> Result<(), sqlx::Error>
+) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -243,14 +243,14 @@ where
         WHERE dataset_namespace = $1 AND dataset_name = $2 AND manifest_hash = $3 AND table_name = $4
     "};
 
-    sqlx::query(query)
+    let result = sqlx::query(query)
         .bind(dataset_namespace)
         .bind(dataset_name)
         .bind(manifest_hash)
         .bind(table_name)
         .execute(exe)
         .await?;
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 /// Activate a specific location by ID (does not deactivate others)
@@ -261,7 +261,7 @@ pub async fn mark_active_by_id<'c, E>(
     manifest_hash: ManifestHash<'_>,
     table_name: Name<'_>,
     location_id: LocationId,
-) -> Result<(), sqlx::Error>
+) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -271,7 +271,7 @@ where
         WHERE dataset_namespace = $2 AND dataset_name = $3 AND manifest_hash = $4 AND table_name = $5
     "};
 
-    sqlx::query(query)
+    let result = sqlx::query(query)
         .bind(location_id)
         .bind(dataset_namespace)
         .bind(dataset_name)
@@ -279,7 +279,7 @@ where
         .bind(table_name)
         .execute(exe)
         .await?;
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 /// Assign a job as the writer for multiple revisions

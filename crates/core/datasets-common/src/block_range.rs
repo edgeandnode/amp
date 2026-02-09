@@ -41,7 +41,7 @@ impl BlockRange {
         *self.numbers.end()
     }
 
-    /// Return true iff `self` is sequenced immediately before `other`.
+    /// Return true if `self` is sequenced immediately before `other`.
     /// We allow gaps between numbers, but the hashes must line up.
     #[inline]
     pub fn adjacent(&self, other: &Self) -> bool {
