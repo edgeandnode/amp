@@ -193,7 +193,7 @@ async fn get_block_with_retry(
     config: rpc_client::rpc_config::RpcBlockConfig,
 ) -> rpc_client::client_error::Result<rpc_client::UiConfirmedBlock> {
     (|| async { rpc_client.get_block(slot, config, None).await })
-        .retry(ExponentialBuilder::default())
+        .retry(ExponentialBuilder::default().without_max_times())
         .sleep(tokio::time::sleep)
         .when(|e| !rpc_client::is_block_missing_err(e))
         .notify(|error: &rpc_client::client_error::Error, delay: Duration| {
