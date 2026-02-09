@@ -76,12 +76,12 @@ where
             'retry: loop {
                 let inner_stream = self.0.clone().block_stream(current_block, end).await;
                 futures::pin_mut!(inner_stream);
-                while let Some(block) = inner_stream.next().await {
-                    match &block {
-                        Ok(_) => {
+                while let Some(rows) = inner_stream.next().await {
+                    match &rows {
+                        Ok(r) => {
                             num_retries = 0;
-                            current_block += 1;
-                            yield block;
+                            current_block = r.block_num();
+                            yield rows;
                         }
                         Err(e) => {
                             let error_source = monitoring::logging::error_source(e.as_ref());
