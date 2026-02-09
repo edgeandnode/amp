@@ -9,11 +9,12 @@ use solana_account_decoder::{
     parse_token::{UiTokenAmount, real_number_string_trimmed},
 };
 use solana_message::v0::LoadedAddresses;
+use solana_reward_info::RewardType;
 use solana_serde::default_on_eof;
 use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::{TransactionError, TransactionResult as Result};
-use solana_transaction_status::{
-    InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
+use solana_transaction_status_client_types::{
+    InnerInstruction, InnerInstructions, Reward, TransactionStatusMeta, TransactionTokenBalance,
 };
 
 pub type StoredExtendedRewards = Vec<StoredExtendedReward>;
@@ -174,6 +175,74 @@ impl From<TransactionTokenBalance> for StoredTransactionTokenBalance {
     }
 }
 
+/// Copied from `solana_transaction_status_client_types::InnerInstruction` but without the
+/// `stack_height` field, which was added in a later version and is not present in bincode
+/// serialized metadata.
+#[derive(Serialize, Deserialize)]
+pub struct StoredInnerInstruction {
+    pub instruction: solana_message::compiled_instruction::CompiledInstruction,
+    // This was added in a later version and is not present in bincode serialized metadata.
+    // pub stack_height: Option<u32>,
+}
+
+impl From<StoredInnerInstruction> for InnerInstruction {
+    fn from(value: StoredInnerInstruction) -> Self {
+        let StoredInnerInstruction { instruction } = value;
+        Self {
+            instruction,
+            stack_height: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StoredInnerInstructions {
+    pub index: u8,
+    pub instructions: Vec<StoredInnerInstruction>,
+}
+
+impl From<StoredInnerInstructions> for InnerInstructions {
+    fn from(value: StoredInnerInstructions) -> Self {
+        let StoredInnerInstructions {
+            index,
+            instructions,
+        } = value;
+        Self {
+            index,
+            instructions: instructions
+                .into_iter()
+                .map(|instruction| instruction.into())
+                .collect(),
+        }
+    }
+}
+
+impl From<InnerInstructions> for StoredInnerInstructions {
+    fn from(value: InnerInstructions) -> Self {
+        let InnerInstructions {
+            index,
+            instructions,
+        } = value;
+        Self {
+            index,
+            instructions: instructions
+                .into_iter()
+                .map(|instruction| instruction.into())
+                .collect(),
+        }
+    }
+}
+
+impl From<InnerInstruction> for StoredInnerInstruction {
+    fn from(value: InnerInstruction) -> Self {
+        let InnerInstruction {
+            instruction,
+            stack_height: _,
+        } = value;
+        Self { instruction }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct StoredTransactionStatusMeta {
     pub status: Result<()>,
@@ -181,7 +250,7 @@ pub struct StoredTransactionStatusMeta {
     pub pre_balances: Vec<u64>,
     pub post_balances: Vec<u64>,
     #[serde(deserialize_with = "default_on_eof")]
-    pub inner_instructions: Option<Vec<InnerInstructions>>,
+    pub inner_instructions: Option<Vec<StoredInnerInstructions>>,
     #[serde(deserialize_with = "default_on_eof")]
     pub log_messages: Option<Vec<String>>,
     #[serde(deserialize_with = "default_on_eof")]
@@ -219,7 +288,8 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
             fee,
             pre_balances,
             post_balances,
-            inner_instructions,
+            inner_instructions: inner_instructions
+                .map(|instructions| instructions.into_iter().map(Into::into).collect()),
             log_messages,
             pre_token_balances: pre_token_balances
                 .map(|balances| balances.into_iter().map(|balance| balance.into()).collect()),
@@ -267,7 +337,8 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
             fee,
             pre_balances,
             post_balances,
-            inner_instructions,
+            inner_instructions: inner_instructions
+                .map(|instructions| instructions.into_iter().map(Into::into).collect()),
             log_messages,
             pre_token_balances: pre_token_balances
                 .map(|balances| balances.into_iter().map(|balance| balance.into()).collect()),
