@@ -63,11 +63,11 @@ async fn list_locations_first_page_respects_limit() {
                 .expect("Failed to insert location");
         physical_table::mark_active_by_id(
             &mut conn,
+            location_id,
             &namespace,
             &name,
             &hash,
             &table_name,
-            location_id,
         )
         .await
         .expect("Failed to mark location active");
@@ -139,11 +139,11 @@ async fn list_locations_next_page_uses_cursor() {
         all_location_ids.push(location_id);
         physical_table::mark_active_by_id(
             &mut conn,
+            location_id,
             &namespace,
             &name,
             &hash,
             &table_name,
-            location_id,
         )
         .await
         .expect("Failed to mark location active");

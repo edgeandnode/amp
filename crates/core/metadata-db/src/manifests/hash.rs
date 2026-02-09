@@ -34,7 +34,7 @@ pub type HashOwned = Hash<'static>;
 ///
 /// The type trusts that values are already validated. Validation must occur at system
 /// boundaries before conversion into this type.
-#[derive(Clone, serde::Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 pub struct Hash<'a>(Cow<'a, str>);
 
 impl<'a> Hash<'a> {

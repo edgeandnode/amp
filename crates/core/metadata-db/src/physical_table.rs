@@ -130,7 +130,7 @@ where
 /// This operation should typically be performed within a transaction along with
 /// `mark_active_by_id()` to ensure atomicity when switching active locations.
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_inactive_by_table_id<'c, E>(
+pub async fn mark_inactive_by_table_name<'c, E>(
     exe: E,
     dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
@@ -140,7 +140,7 @@ pub async fn mark_inactive_by_table_id<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::mark_inactive_by_table_id(
+    sql::mark_inactive_by_table_name(
         exe,
         dataset_namespace.into(),
         dataset_name.into(),
@@ -163,11 +163,11 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_active_by_id<'c, E>(
     exe: E,
+    location_id: impl Into<LocationId> + std::fmt::Debug,
     dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
-    location_id: impl Into<LocationId> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,

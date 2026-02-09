@@ -37,7 +37,7 @@ async fn insert_creates_location_and_returns_id() {
         physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
-    physical_table::mark_active_by_id(&mut conn, namespace, name, hash, table_name, location_id)
+    physical_table::mark_active_by_id(&mut conn, location_id, namespace, name, hash, table_name)
         .await
         .expect("Failed to mark location active");
 
@@ -199,7 +199,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
             .await
             .expect("Failed to insert active location 1");
 
-    physical_table::mark_active_by_id(&mut conn, &namespace, &name, &hash, &table_name, active_id1)
+    physical_table::mark_active_by_id(&mut conn, active_id1, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
@@ -212,11 +212,11 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 
     physical_table::mark_active_by_id(
         &mut conn,
+        active_id2,
         &namespace,
         &name,
         &hash,
         &table2_name,
-        active_id2,
     )
     .await
     .expect("Failed to mark location active");
@@ -241,11 +241,11 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     .expect("Failed to insert location for other table");
     physical_table::mark_active_by_id(
         &mut conn,
+        active_id3,
         &namespace,
         &name,
         &hash,
         &other_table_name,
-        active_id3,
     )
     .await
     .expect("Failed to mark location active");
@@ -319,7 +319,7 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
         physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path1)
             .await
             .expect("Failed to insert target location 1");
-    physical_table::mark_active_by_id(&mut conn, &namespace, &name, &hash, &table_name, target_id1)
+    physical_table::mark_active_by_id(&mut conn, target_id1, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
@@ -331,11 +331,11 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
             .expect("Failed to insert target location 2");
     physical_table::mark_active_by_id(
         &mut conn,
+        target_id2,
         &namespace,
         &name,
         &hash,
         &table2_name,
-        target_id2,
     )
     .await
     .expect("Failed to mark location active");
@@ -361,17 +361,17 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     .expect("Failed to insert other table location");
     physical_table::mark_active_by_id(
         &mut conn,
+        other_id,
         &namespace,
         &name,
         &hash,
         &other_table_name,
-        other_id,
     )
     .await
     .expect("Failed to mark other location active");
 
     //* When - Mark only the first table inactive
-    physical_table::mark_inactive_by_table_id(&mut conn, &namespace, &name, &hash, &table_name)
+    physical_table::mark_inactive_by_table_name(&mut conn, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark locations inactive");
 
@@ -441,7 +441,7 @@ async fn mark_active_by_id_activates_specific_location() {
             .expect("Failed to insert other location");
 
     //* When
-    physical_table::mark_active_by_id(&mut conn, &namespace, &name, &hash, &table_name, target_id)
+    physical_table::mark_active_by_id(&mut conn, target_id, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
@@ -593,11 +593,11 @@ async fn get_by_id_returns_existing_location() {
             .expect("Failed to insert location");
     physical_table::mark_active_by_id(
         &mut conn,
+        inserted_id,
         &namespace,
         &name,
         &hash,
         &table_name,
-        inserted_id,
     )
     .await
     .expect("Failed to mark location active");

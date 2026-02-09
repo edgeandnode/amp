@@ -138,7 +138,7 @@ impl DataStore {
         .await
         .map_err(RegisterTableRevisionError::RegisterPhysicalTable)?;
 
-        metadata_db::physical_table::mark_inactive_by_table_id(
+        metadata_db::physical_table::mark_inactive_by_table_name(
             &mut tx,
             dataset.namespace(),
             dataset.name(),
@@ -150,11 +150,11 @@ impl DataStore {
 
         metadata_db::physical_table::mark_active_by_id(
             &mut tx,
+            location_id,
             dataset.namespace(),
             dataset.name(),
             dataset.hash(),
             table_name,
-            location_id,
         )
         .await
         .map_err(RegisterTableRevisionError::MarkActive)?;

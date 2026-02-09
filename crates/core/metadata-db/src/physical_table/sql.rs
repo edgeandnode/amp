@@ -227,7 +227,7 @@ where
 }
 
 /// Deactivate all revisions for a specific table (set active_revision_id to NULL)
-pub async fn mark_inactive_by_table_id<'c, E>(
+pub async fn mark_inactive_by_table_name<'c, E>(
     exe: E,
     dataset_namespace: DatasetNamespace<'_>,
     dataset_name: DatasetName<'_>,
