@@ -57,9 +57,20 @@ async fn list_locations_first_page_respects_limit() {
             "test-dataset/test_table_{}/revision-{}",
             i, i
         ));
-        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path, true)
-            .await
-            .expect("Failed to insert location");
+        let location_id =
+            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path)
+                .await
+                .expect("Failed to insert location");
+        physical_table::mark_active_by_id(
+            &mut conn,
+            location_id,
+            &namespace,
+            &name,
+            &hash,
+            &table_name,
+        )
+        .await
+        .expect("Failed to mark location active");
 
         // Small delay to ensure different timestamps
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -122,10 +133,20 @@ async fn list_locations_next_page_uses_cursor() {
             i, i
         ));
         let location_id =
-            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path, true)
+            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path)
                 .await
                 .expect("Failed to insert location");
         all_location_ids.push(location_id);
+        physical_table::mark_active_by_id(
+            &mut conn,
+            location_id,
+            &namespace,
+            &name,
+            &hash,
+            &table_name,
+        )
+        .await
+        .expect("Failed to mark location active");
 
         // Small delay to ensure different timestamps
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

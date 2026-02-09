@@ -11,7 +11,7 @@ amp-datasets-registry = { version = "0.1.0", path = "../../core/datasets-registr
 amp-providers-registry = { version = "0.1.0", path = "../../core/providers-registry" }
 async-trait.workspace = true
 axum.workspace = true
-amp-dataset-store = { version = "0.1.0", path = "../../core/dataset-store" }
+common = { path = "../../core/common" }
 datasets-common = { version = "0.1.0", path = "../../core/datasets-common" }
 metadata-db = { version = "0.1.0", path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }

@@ -95,7 +95,7 @@ impl JobSet {
             // The job completed successfully
             Ok(Ok(())) => (job_id, Ok(())),
             // The job returned an error
-            Ok(Err(err)) => (job_id, Err(JoinError::Failed(err))),
+            Ok(Err(err)) => (job_id, Err(JoinError::Failed(Box::new(err)))),
             // The job was aborted
             Err(err) if err.is_cancelled() => (job_id, Err(JoinError::Aborted)),
             // The job panicked
@@ -111,7 +111,7 @@ impl JobSet {
 pub enum JoinError {
     /// The job failed
     #[error("Job failed: {0}")]
-    Failed(DumpError),
+    Failed(Box<DumpError>),
     /// The job was aborted
     #[error("Job was aborted")]
     Aborted,

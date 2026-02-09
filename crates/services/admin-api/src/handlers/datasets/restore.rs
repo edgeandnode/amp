@@ -285,7 +285,7 @@ pub enum Error {
     /// - Manifest parsing errors
     /// - Invalid dataset structure
     #[error("Failed to load dataset: {0}")]
-    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+    GetDataset(#[source] common::dataset_store::GetDatasetError),
 
     /// Failed to restore table revision from storage
     ///

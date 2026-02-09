@@ -2,7 +2,6 @@ use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use admin_api::ctx::Ctx;
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
 use axum::{
@@ -11,6 +10,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
+use common::dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;

@@ -7,7 +7,6 @@
 use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, GetDatasetError};
 use arrow_flight::{
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
     HandshakeResponse, PutResult, SchemaAsIpc, Ticket,
@@ -42,6 +41,7 @@ use common::{
             },
         },
     },
+    dataset_store::{DatasetStore, GetDatasetError},
     query_context::{Error as CoreError, QueryEnv},
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,

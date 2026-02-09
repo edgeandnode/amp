@@ -252,7 +252,7 @@ impl From<ParseDerivedManifestError> for Error {
     fn from(err: ParseDerivedManifestError) -> Self {
         match err {
             ParseDerivedManifestError::Deserialization(e) => Error::InvalidManifest(e),
-            ParseDerivedManifestError::ManifestValidation(e) => Error::ManifestValidationError(e),
+            ParseDerivedManifestError::ManifestValidation(e) => Error::ManifestValidationError(*e),
             ParseDerivedManifestError::Serialization(e) => Error::InvalidManifest(e),
         }
     }

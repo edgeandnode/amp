@@ -10,7 +10,6 @@ pub mod git;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use anyhow::{Result, anyhow};
 use common::{
     BlockRange, LogicalCatalog,
@@ -19,6 +18,7 @@ use common::{
         logical::LogicalTable,
         physical::{Catalog, PhysicalTable},
     },
+    dataset_store::DatasetStore,
     sql,
     sql_str::SqlStr,
 };

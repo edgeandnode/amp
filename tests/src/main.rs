@@ -53,13 +53,13 @@ use std::{
 };
 
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, GetDatasetError};
 use amp_datasets_registry::{
     DatasetsRegistry, error::ResolveRevisionError, manifests::DatasetManifestsStore,
 };
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use anyhow::{Result, anyhow};
 use clap::Parser;
+use common::dataset_store::{DatasetStore, GetDatasetError};
 use datasets_common::reference::Reference;
 use datasets_derived::{
     Dataset as DerivedDataset,
