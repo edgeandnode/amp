@@ -38,10 +38,7 @@ pub struct NonEmptySlot {
 }
 
 impl NonEmptySlot {
-    pub fn into_db_rows(
-        self: NonEmptySlot,
-        network: &NetworkId,
-    ) -> Result<Rows, RowConversionError> {
+    pub fn into_db_rows(self, network: &NetworkId) -> Result<Rows, RowConversionError> {
         let NonEmptySlot {
             slot,
             parent_slot,
