@@ -8,8 +8,6 @@ use tracing::instrument;
 
 use crate::{LocationId, LocationNotification, MetadataDb};
 
-type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
-
 struct NotificationMultiplexer {
     metadata_db: MetadataDb,
     watchers: Arc<Mutex<HashMap<LocationId, watch::Sender<()>>>>,
@@ -84,10 +82,11 @@ impl NotificationMultiplexer {
     }
 
     #[instrument(skip(self))]
-    async fn execute(self) -> Result<(), BoxError> {
+    async fn execute(self) -> Result<(), NotificationMultiplexerExecuteError> {
         // Establish connection
-        let listener =
-            crate::physical_table::listen_for_location_change_notif(&self.metadata_db).await?;
+        let listener = crate::physical_table::listen_for_location_change_notif(&self.metadata_db)
+            .await
+            .map_err(NotificationMultiplexerExecuteError::ListenForLocationChangeNotif)?;
         let mut stream = std::pin::pin!(listener.into_stream());
 
         tracing::debug!("Connected to notification channel: change-tracking");
@@ -114,8 +113,38 @@ impl NotificationMultiplexer {
         }
 
         // Stream ended, which typically means connection was closed
-        Err("Listen connection closed for channel: change-tracking".into())
+        Err(NotificationMultiplexerExecuteError::ListenConnectionClosed)
     }
+}
+
+/// Errors from running the notification multiplexer's listen loop.
+///
+/// This error type is used by `NotificationMultiplexer::execute()`.
+#[derive(Debug, thiserror::Error)]
+pub enum NotificationMultiplexerExecuteError {
+    /// Failed to start listening for location change notifications
+    ///
+    /// This error occurs when the multiplexer cannot set up a LISTEN connection
+    /// on the `change-tracking` notification channel.
+    ///
+    /// Common causes:
+    /// - Database server unreachable
+    /// - Database connection pool exhausted
+    /// - Insufficient permissions for LISTEN
+    #[error("Failed to listen for location change notifications")]
+    ListenForLocationChangeNotif(#[source] crate::Error),
+
+    /// The listen connection was closed unexpectedly
+    ///
+    /// This error occurs when the notification stream ends, which typically
+    /// means the PostgreSQL connection was dropped or the server shut down.
+    ///
+    /// Common causes:
+    /// - Database server restart or shutdown
+    /// - Network connectivity loss
+    /// - Idle connection timeout
+    #[error("Listen connection closed for channel: change-tracking")]
+    ListenConnectionClosed,
 }
 
 /// A retry policy for notification multiplexer operations.
