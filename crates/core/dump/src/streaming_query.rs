@@ -651,7 +651,7 @@ impl StreamingQuery {
         let mut latest_src_watermarks: Vec<Watermark> = Default::default();
         'chain_loop: for chain in chains {
             for segment in chain.iter().rev() {
-                let watermark = (&segment.range).into();
+                let watermark = segment.single_range().into();
                 if self
                     .blocks_table_contains(ctx, &watermark)
                     .await
@@ -728,7 +728,7 @@ impl StreamingQuery {
                 .0
                 .iter()
                 .rev()
-                .map(|s| &s.range.numbers)
+                .map(|s| &s.single_range().numbers)
                 .find(|r| r.contains(&min_fork_block_num))
                 .unwrap_or(&(0..=0))
                 .start();
@@ -751,11 +751,11 @@ impl StreamingQuery {
         // Optimization: Check segment metadata first to avoid expensive query,
         // Walk segments in reverse to find one that covers this block number.
         for segment in blocks_segments.canonical_segments().iter().rev() {
-            if *segment.range.numbers.start() <= watermark.number {
+            if *segment.single_range().numbers.start() <= watermark.number {
                 // Found segment that could contain this block
-                if *segment.range.numbers.end() == watermark.number {
+                if *segment.single_range().numbers.end() == watermark.number {
                     // Exact match on segment end - use segment hash directly
-                    return Ok(segment.range.hash == watermark.hash);
+                    return Ok(segment.single_range().hash == watermark.hash);
                 }
                 // Block is inside segment but not at end.
                 // So we will need to query the data file to find the hash.
