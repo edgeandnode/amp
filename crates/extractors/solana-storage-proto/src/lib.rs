@@ -181,7 +181,6 @@ impl From<TransactionTokenBalance> for StoredTransactionTokenBalance {
 #[derive(Serialize, Deserialize)]
 pub struct StoredInnerInstruction {
     pub instruction: solana_message::compiled_instruction::CompiledInstruction,
-    // This was added in a later version and is not present in bincode serialized metadata.
     // pub stack_height: Option<u32>,
 }
 
@@ -195,6 +194,9 @@ impl From<StoredInnerInstruction> for InnerInstruction {
     }
 }
 
+/// Same as [solana_transaction_status_client_types::InnerInstructions] but with [StoredInnerInstruction]
+/// instead of [solana_transaction_status_client_types::InnerInstruction], which has the `stack_height`
+/// field that is not present in bincode serialized metadata.
 #[derive(Serialize, Deserialize)]
 pub struct StoredInnerInstructions {
     pub index: u8,
