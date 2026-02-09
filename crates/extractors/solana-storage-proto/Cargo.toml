@@ -16,12 +16,12 @@ prost.workspace = true
 serde.workspace = true
 
 # Solana dependencies, version should be compatible with solana-datasets
-solana-account-decoder = "3.0.10"
+solana-account-decoder = "3.0.0"
 solana-message = "3.0.0"
 solana-reward-info = "3.0.0"
-solana-transaction-context = { version = "3.1.8", features = ["serde"] }
+solana-transaction-context = { version = "3.0.0", features = ["serde"] }
 solana-transaction-error = "3.0.0"
-solana-transaction-status-client-types = "3.0.10"
+solana-transaction-status-client-types = "3.0.0"
 solana-serde = "3.0.0"
 
 [dev-dependencies]
