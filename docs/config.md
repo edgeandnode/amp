@@ -40,13 +40,15 @@ These boolean flags control which services are started. They can be set via conf
 
 | Config Key | Environment Variable | CLI Flag | Description |
 |------------|---------------------|----------|-------------|
-| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server` | Enable Arrow Flight RPC server |
-| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server` | Enable JSON Lines server |
-| `admin_server` | `AMP_ADMIN_SERVER` | `--admin-server` | Enable Admin API server (solo mode only) |
+| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server [bool]` | Enable Arrow Flight RPC server |
+| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server [bool]` | Enable JSON Lines server |
+| `admin_server` | `AMP_ADMIN_SERVER` | `--admin-server [bool]` | Enable Admin API server (solo mode only) |
 
 **Default behavior:** If none of these flags are explicitly set (via any method), all applicable services are enabled by default. Setting any flag explicitly means only the flagged services will start.
 
 **Precedence:** CLI flag > Config file / Environment variable
+
+**CLI flag values:** `--flight-server` alone enables the server. Use `--flight-server false` to explicitly disable a server that is enabled in the config file.
 
 **Environment variable values:** Accepts `1`, `true`, `yes`, `on` (case-insensitive) as truthy values.
 

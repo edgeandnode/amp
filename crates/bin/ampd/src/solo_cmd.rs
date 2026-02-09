@@ -23,9 +23,9 @@ type ServerFuture = Pin<Box<dyn Future<Output = Result<(), server::service::Serv
 pub async fn run(
     amp_dir: PathBuf,
     config_path: Option<PathBuf>,
-    flight_server: bool,
-    jsonl_server: bool,
-    admin_server: bool,
+    flight_server: Option<bool>,
+    jsonl_server: Option<bool>,
+    admin_server: Option<bool>,
 ) -> Result<(), Error> {
     // 1. Check if user provided metadata_db.url before starting managed PostgreSQL
     let effective_config_path = config_path
@@ -81,10 +81,10 @@ pub async fn run(
     )
     .map_err(Error::ConfigLoad)?;
 
-    // Merge CLI flags with config values (CLI takes precedence)
-    let mut flight_server = flight_server || config.flight_server;
-    let mut jsonl_server = jsonl_server || config.jsonl_server;
-    let mut admin_server = admin_server || config.admin_server;
+    // Merge CLI flags with config values (CLI takes precedence when provided)
+    let mut flight_server = flight_server.unwrap_or(config.flight_server);
+    let mut jsonl_server = jsonl_server.unwrap_or(config.jsonl_server);
+    let mut admin_server = admin_server.unwrap_or(config.admin_server);
 
     // If no servers are explicitly enabled (CLI or config), enable all
     if !flight_server && !jsonl_server && !admin_server {

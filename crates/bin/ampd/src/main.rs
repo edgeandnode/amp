@@ -36,23 +36,23 @@ enum Command {
         #[arg(long, env = "AMP_DIR")]
         amp_dir: Option<PathBuf>,
         /// Enable Arrow Flight RPC Server (env: AMP_FLIGHT_SERVER).
-        #[arg(long)]
-        flight_server: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        flight_server: Option<bool>,
         /// Enable JSON Lines Server (env: AMP_JSONL_SERVER).
-        #[arg(long)]
-        jsonl_server: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        jsonl_server: Option<bool>,
         /// Enable Admin API Server (env: AMP_ADMIN_SERVER).
-        #[arg(long)]
-        admin_server: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        admin_server: Option<bool>,
     },
     /// Run query server (Arrow Flight, JSON Lines)
     Server {
         /// Enable Arrow Flight RPC Server (env: AMP_FLIGHT_SERVER).
-        #[arg(long)]
-        flight_server: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        flight_server: Option<bool>,
         /// Enable JSON Lines Server (env: AMP_JSONL_SERVER).
-        #[arg(long)]
-        jsonl_server: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        jsonl_server: Option<bool>,
     },
     /// Run a distributed worker node
     Worker {
@@ -150,9 +150,9 @@ async fn main_inner() -> Result<(), Error> {
             let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
             let config = config::load(config_path).map_err(Error::LoadConfig)?;
 
-            // Merge CLI flags with config values (CLI takes precedence)
-            let mut flight_server = cli_flight_server || config.flight_server;
-            let mut jsonl_server = cli_jsonl_server || config.jsonl_server;
+            // Merge CLI flags with config values (CLI takes precedence when provided)
+            let mut flight_server = cli_flight_server.unwrap_or(config.flight_server);
+            let mut jsonl_server = cli_jsonl_server.unwrap_or(config.jsonl_server);
 
             // If neither flag is set (CLI or config), enable both servers
             if !flight_server && !jsonl_server {

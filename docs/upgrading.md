@@ -132,6 +132,12 @@ The following environment variables have been renamed to use the `AMP_` prefix f
 
 **Action required**: Update your environment variables, deployment scripts, and container definitions to use the new `AMP_*` names.
 
+#### Service Enable Flags Now Configurable in TOML
+
+The server enable flags (`flight_server`, `jsonl_server`, `admin_server`) can now be set in the TOML config file in addition to environment variables and CLI flags. This allows persistent configuration without relying on environment variables or CLI flags.
+
+CLI flags accept an optional value (`--flight-server` to enable, `--flight-server false` to disable). When omitted, the config file value is used. See [config.md](config.md#service-enable-flags) for details.
+
 ### Future Releases
 
 Check the release notes for each version for specific upgrade instructions and breaking changes.

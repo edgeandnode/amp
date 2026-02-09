@@ -61,10 +61,12 @@ Control which servers are started via CLI flags, config file, or environment var
 
 | Config Key | Environment Variable | CLI Flag | Description |
 |------------|---------------------|----------|-------------|
-| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server` | Enable Arrow Flight server |
-| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server` | Enable JSON Lines server |
+| `flight_server` | `AMP_FLIGHT_SERVER` | `--flight-server [bool]` | Enable Arrow Flight server |
+| `jsonl_server` | `AMP_JSONL_SERVER` | `--jsonl-server [bool]` | Enable JSON Lines server |
 
 **Default behavior:** If no flags are explicitly set, both servers are enabled.
+
+**CLI flag values:** `--flight-server` alone enables the server. Use `--flight-server false` to explicitly disable.
 
 **Environment variable values:** Accepts `1`, `true`, `yes`, `on` (case-insensitive).
 
