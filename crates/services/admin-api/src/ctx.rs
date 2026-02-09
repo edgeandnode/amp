@@ -2,9 +2,9 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
+use common::dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 
 use crate::{build_info::BuildInfo, scheduler::Scheduler};
@@ -17,7 +17,7 @@ pub struct Ctx {
     pub datasets_registry: DatasetsRegistry,
     /// Providers registry for provider configuration operations.
     pub providers_registry: ProvidersRegistry,
-    /// Dataset store for loading datasets (implements DatasetAccess trait).
+    /// Dataset store for loading datasets.
     pub dataset_store: DatasetStore,
     pub scheduler: Arc<dyn Scheduler>,
     /// Object store for output data (used by dataset restore handler)

@@ -4,9 +4,8 @@ use std::{
     time::Duration,
 };
 
-use amp_dataset_store::DatasetStore;
 use anyhow::Result;
-use common::metadata::Generation;
+use common::{dataset_store::DatasetStore, metadata::Generation};
 use datasets_common::reference::Reference;
 use dump::{
     compaction::{AmpCompactor, SegmentSizeLimit},

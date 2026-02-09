@@ -31,8 +31,8 @@
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use anyhow::{Result, anyhow};
+use common::dataset_store::DatasetStore;
 use datasets_common::reference::Reference;
 use worker::{events::EventEmitter, node_id::NodeId};
 

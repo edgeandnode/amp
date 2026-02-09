@@ -14,12 +14,8 @@ use datasets_derived::{dataset::Dataset as DerivedDataset, func_name::ETH_CALL_F
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
-    catalog::{
-        dataset_access::{
-            DatasetAccess, EthCallForDatasetError, GetDatasetError, ResolveRevisionError,
-        },
-        logical::{LogicalCatalog, LogicalTable},
-    },
+    catalog::logical::{LogicalCatalog, LogicalTable},
+    dataset_store::{DatasetStore, EthCallForDatasetError, GetDatasetError, ResolveRevisionError},
     sql::{FunctionReference, TableReference},
 };
 
@@ -54,7 +50,7 @@ pub type ResolvedReferences = (
 /// Unlike `catalog_for_sql`, this does not query the metadata database for physical
 /// parquet locations, making it faster for planning-only operations.
 pub async fn create(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     isolate_pool: &IsolatePool,
     refs: ResolvedReferences,
 ) -> Result<LogicalCatalog, CreateCatalogError> {
@@ -76,7 +72,7 @@ pub async fn create(
 /// Processes each table reference, resolves the dataset reference to a hash,
 /// loads the dataset, finds the table, and creates a LogicalTable for catalog construction.
 async fn resolve_tables(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     refs: impl IntoIterator<Item = TableReference<PartialReference>>,
 ) -> Result<Vec<LogicalTable>, ResolveTablesError> {
     // Use hash-based map to deduplicate datasets and collect resolved tables
@@ -103,9 +99,8 @@ async fn resolve_tables(
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| ResolveTablesError::ResolveDatasetReference {
+                    .ok_or_else(|| ResolveTablesError::DatasetNotFound {
                         reference: reference.clone(),
-                        source: format!("Dataset '{}' not found", reference).into(),
                     })?;
 
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
@@ -160,7 +155,7 @@ async fn resolve_tables(
 /// Processes each function reference, resolves the dataset reference,
 /// loads the dataset, and retrieves or creates the UDF.
 async fn resolve_udfs(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     isolate_pool: &IsolatePool,
     refs: impl IntoIterator<Item = FunctionReference<PartialReference>>,
 ) -> Result<Vec<ScalarUDF>, ResolveUdfsError> {
@@ -185,9 +180,8 @@ async fn resolve_udfs(
                         reference: reference.clone(),
                         source: err,
                     })?
-                    .ok_or_else(|| ResolveUdfsError::ResolveDatasetReference {
+                    .ok_or_else(|| ResolveUdfsError::DatasetNotFound {
                         reference: reference.clone(),
-                        source: format!("Dataset '{}' not found", reference).into(),
                     })?;
 
                 // Check vacancy BEFORE loading dataset
@@ -272,6 +266,16 @@ pub enum ResolveTablesError {
         table_ref: String,
     },
 
+    /// Dataset not found.
+    ///
+    /// This occurs when a dataset reference resolves to None, meaning the dataset
+    /// does not exist in the metadata store.
+    #[error("Dataset '{reference}' not found")]
+    DatasetNotFound {
+        /// The dataset reference that was not found
+        reference: Reference,
+    },
+
     /// Failed to resolve dataset reference to a hash reference.
     ///
     /// This occurs when the dataset store cannot resolve a reference to its
@@ -321,6 +325,16 @@ pub enum ResolveTablesError {
 /// Errors that can occur when resolving UDF references.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveUdfsError {
+    /// Dataset not found.
+    ///
+    /// This occurs when a dataset reference resolves to None, meaning the dataset
+    /// does not exist in the metadata store.
+    #[error("Dataset '{reference}' not found")]
+    DatasetNotFound {
+        /// The dataset reference that was not found
+        reference: Reference,
+    },
+
     /// Failed to resolve dataset reference to a hash reference.
     ///
     /// This occurs when the dataset store cannot resolve a reference to its

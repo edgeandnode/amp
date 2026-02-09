@@ -1,9 +1,9 @@
 use amp_config::{Config, MetadataDbConfig};
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
+use common::dataset_store::DatasetStore;
 use monitoring::telemetry::metrics::Meter;
 use worker::node_id::NodeId;
 

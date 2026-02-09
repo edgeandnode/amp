@@ -2,8 +2,8 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use amp_config::WorkerEventsConfig;
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use backon::{ExponentialBuilder, Retryable};
+use common::dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle,

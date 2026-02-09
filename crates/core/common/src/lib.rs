@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod dataset_store;
 pub mod datasets_derived;
 pub mod evm;
 pub mod incrementalizer;

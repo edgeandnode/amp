@@ -6,13 +6,13 @@
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use axum::{
     Router,
     http::StatusCode,
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
+use common::dataset_store::DatasetStore;
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use metadata_db::MetadataDb;

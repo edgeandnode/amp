@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use amp_dataset_store::GetDatasetError;
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -11,6 +10,7 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
+    dataset_store::GetDatasetError,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
     planning_context::PlanningContext,
@@ -274,38 +274,20 @@ pub async fn handler(
             ResolveTablesError::DependencyAliasNotFound { .. } => {
                 Error::DependencyAliasNotFound(err)
             }
-            ResolveTablesError::GetDataset { source, .. } => {
-                // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
-                // When the underlying error is GetDatasetError::DatasetNotFound, we map to
-                // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
-                // (and other error types) map to Error::GetDataset for HTTP 500.
-                if source
-                    .downcast_ref::<GetDatasetError>()
-                    .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
-                {
-                    Error::DatasetNotFound(err)
-                } else {
-                    Error::GetDataset(err)
-                }
-            }
+            ResolveTablesError::GetDataset {
+                source: GetDatasetError::DatasetNotFound(_),
+                ..
+            } => Error::DatasetNotFound(err),
+            ResolveTablesError::GetDataset { .. } => Error::GetDataset(err),
             ResolveTablesError::TableNotFoundInDataset { .. } => Error::TableNotFoundInDataset(err),
         },
         CreateLogicalCatalogError::ResolveUdfs(inner) => match inner {
             ResolveUdfsError::DependencyAliasNotFound { .. } => Error::DependencyAliasNotFound(err),
-            ResolveUdfsError::GetDataset { source, .. } => {
-                // NOTE: The source error is a BoxError from DatasetAccess::get_dataset().
-                // When the underlying error is GetDatasetError::DatasetNotFound, we map to
-                // Error::DatasetNotFound to return HTTP 404. All other GetDatasetError variants
-                // (and other error types) map to Error::GetDataset for HTTP 500.
-                if source
-                    .downcast_ref::<GetDatasetError>()
-                    .is_some_and(|e| matches!(e, GetDatasetError::DatasetNotFound(_)))
-                {
-                    Error::DatasetNotFound(err)
-                } else {
-                    Error::GetDataset(err)
-                }
-            }
+            ResolveUdfsError::GetDataset {
+                source: GetDatasetError::DatasetNotFound(_),
+                ..
+            } => Error::DatasetNotFound(err),
+            ResolveUdfsError::GetDataset { .. } => Error::GetDataset(err),
             ResolveUdfsError::EthCallUdfCreation { .. } => Error::EthCallUdfCreation(err),
             ResolveUdfsError::EthCallNotAvailable { .. } => Error::EthCallNotAvailable(err),
             ResolveUdfsError::FunctionNotFoundInDataset { .. } => {

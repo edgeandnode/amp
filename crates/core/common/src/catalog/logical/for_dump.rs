@@ -19,10 +19,8 @@ use datasets_derived::{
 use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 
 use crate::{
-    catalog::{
-        dataset_access::{DatasetAccess, EthCallForDatasetError, GetDatasetError},
-        logical::{LogicalCatalog, LogicalTable},
-    },
+    catalog::logical::{LogicalCatalog, LogicalTable},
+    dataset_store::{DatasetStore, EthCallForDatasetError, GetDatasetError},
     sql::{FunctionReference, TableReference},
 };
 
@@ -50,7 +48,7 @@ pub type ResolvedReferences = (
 /// 3. Resolves function references to ScalarUDF instances
 /// 4. Returns a LogicalCatalog containing tables and UDFs
 pub async fn create(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     isolate_pool: &IsolatePool,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     manifest_udfs: &BTreeMap<FuncName, Function>,
@@ -79,7 +77,7 @@ pub async fn create(
 /// Processes each table reference, looks up the dataset by hash, finds the table
 /// within the dataset, and creates a LogicalTable for catalog construction.
 async fn resolve_tables(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     refs: impl IntoIterator<Item = TableReference<DepAlias>>,
 ) -> Result<Vec<LogicalTable>, ResolveTablesError> {
@@ -158,7 +156,7 @@ async fn resolve_tables(
 /// - For self-references (self.function): creates JsUdf from the manifest's function definition
 /// - Skips bare functions (built-in DataFusion/Amp functions)
 async fn resolve_udfs(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     isolate_pool: &IsolatePool,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     manifest_udfs: &BTreeMap<FuncName, Function>,

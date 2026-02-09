@@ -3,8 +3,10 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
-use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use common::{
+    dataset_store::DatasetStore,
+    parquet::file::properties::WriterProperties as ParquetWriterProperties,
+};
 use datasets_common::{dataset_kind_str::DatasetKindStr, hash_reference::HashReference};
 use datasets_derived::DerivedDatasetKind;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};

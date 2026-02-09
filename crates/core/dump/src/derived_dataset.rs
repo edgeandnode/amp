@@ -97,7 +97,6 @@
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use amp_data_store::file_name::FileName;
-use amp_dataset_store::ResolveRevisionError;
 use common::{
     BlockNum, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
     catalog::{
@@ -107,6 +106,7 @@ use common::{
             for_dump as physical_catalog,
         },
     },
+    dataset_store::ResolveRevisionError,
     metadata::Generation,
     parquet::errors::ParquetError,
     query_context::QueryEnv,
@@ -304,7 +304,7 @@ pub enum Error {
     /// - Manifest parsing errors
     /// - Missing required manifest fields
     #[error("Failed to get dataset")]
-    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+    GetDataset(#[source] common::dataset_store::GetDatasetError),
 
     /// Failed to get active physical table
     ///
@@ -365,7 +365,7 @@ pub enum Error {
     ///
     /// The manifest is required to determine table definitions and SQL queries.
     #[error("Failed to get derived manifest")]
-    GetDerivedManifest(#[source] amp_dataset_store::GetDerivedManifestError),
+    GetDerivedManifest(#[source] common::dataset_store::GetDerivedManifestError),
 
     /// Failed to dump individual table
     ///
