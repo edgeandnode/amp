@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 
-use amp_dataset_store::GetDatasetError;
 use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
 use axum::{
     Json,
@@ -10,6 +9,7 @@ use axum::{
     },
     http::StatusCode,
 };
+use common::dataset_store::GetDatasetError;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use monitoring::logging;
 use worker::job::JobId;

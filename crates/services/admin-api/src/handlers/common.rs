@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use amp_dataset_store::{DatasetStore, GetDatasetError};
 use amp_datasets_registry::error::ResolveRevisionError;
 use common::{
     BlockNum,
@@ -10,6 +9,7 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
+    dataset_store::{DatasetStore, GetDatasetError},
     planning_context::PlanningContext,
     query_context::Error as QueryContextErr,
     sql::{
@@ -141,7 +141,7 @@ pub async fn parse_and_canonicalize_derived_dataset_manifest(
 
     validate_derived_manifest(&manifest, store)
         .await
-        .map_err(ParseDerivedManifestError::ManifestValidation)?;
+        .map_err(|err| ParseDerivedManifestError::ManifestValidation(Box::new(err)))?;
 
     serde_json::to_string(&manifest).map_err(ParseDerivedManifestError::Serialization)
 }
@@ -155,7 +155,7 @@ pub enum ParseDerivedManifestError {
 
     /// Failed manifest validation after successful deserialization
     #[error("manifest validation failed: {0}")]
-    ManifestValidation(#[source] ManifestValidationError),
+    ManifestValidation(#[source] Box<ManifestValidationError>),
 
     /// Failed to serialize the validated manifest back to canonical JSON
     #[error("failed to serialize manifest: {0}")]

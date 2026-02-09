@@ -8,7 +8,6 @@ use std::{
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
-use amp_dataset_store::{DatasetStore, ResolveRevisionError};
 use common::{
     BlockNum, BlockRange, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
     ResumeWatermark, Watermark,
@@ -17,6 +16,7 @@ use common::{
         logical::LogicalTable,
         physical::{CanonicalChainError, Catalog, PhysicalTable},
     },
+    dataset_store::{DatasetStore, ResolveRevisionError},
     incrementalizer::incrementalize_plan,
     metadata::segments::{Segment, WatermarkNotFoundError},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
@@ -1250,7 +1250,7 @@ pub enum SearchDependenciesForRawDatasetError {
     /// This occurs when retrieving the dataset instance from the dataset store fails.
     /// The dataset store loads dataset manifests and parses them into Dataset instances.
     #[error("Failed to get dataset")]
-    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+    GetDataset(#[source] common::dataset_store::GetDatasetError),
 
     /// Failed to resolve revision
     ///

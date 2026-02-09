@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use amp_config::{Config as CommonConfig, MetadataDbConfig, server::ServerAddrs};
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
+use common::dataset_store::DatasetStore;
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 

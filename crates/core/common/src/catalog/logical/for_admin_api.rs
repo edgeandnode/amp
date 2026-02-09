@@ -25,10 +25,8 @@ use datasets_derived::{
 use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 
 use crate::{
-    catalog::{
-        dataset_access::{DatasetAccess, EthCallForDatasetError, GetDatasetError},
-        logical::{LogicalCatalog, LogicalTable},
-    },
+    catalog::logical::{LogicalCatalog, LogicalTable},
+    dataset_store::{DatasetStore, EthCallForDatasetError, GetDatasetError},
     sql::{FunctionReference, TableReference},
 };
 
@@ -59,7 +57,7 @@ pub type TableReferencesMap = BTreeMap<
 /// - [`resolve_tables`] - Resolves table references to LogicalTable instances
 /// - [`resolve_udfs`] - Resolves function references to UDFs
 pub async fn create(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     isolate_pool: IsolatePool,
     manifest_deps: BTreeMap<DepAlias, HashReference>,
     manifest_udfs: BTreeMap<FuncName, Function>,
@@ -110,7 +108,7 @@ pub enum CreateLogicalCatalogError {
 /// Processes each table reference across all tables, looks up datasets by hash, finds tables
 /// within datasets, and creates LogicalTable instances for catalog construction.
 async fn resolve_tables<'a>(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     refs: impl IntoIterator<Item = (&'a TableName, &'a TableReference<DepAlias>)> + 'a,
 ) -> Result<Vec<LogicalTable>, ResolveTablesError> {
@@ -193,7 +191,7 @@ async fn resolve_tables<'a>(
 /// - For self-references (self.function): creates JsUdf from the manifest's function definition
 /// - Skips bare functions (built-in DataFusion/Amp functions)
 async fn resolve_udfs<'a>(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     isolate_pool: IsolatePool,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     manifest_udfs: &BTreeMap<FuncName, Function>,

@@ -8,10 +8,12 @@ use std::sync::Arc;
 use amp_data_store::DataStore;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 
-use crate::catalog::{
-    dataset_access::{DatasetAccess, GetDatasetError},
-    logical::LogicalCatalog,
-    physical::{Catalog, PhysicalTable},
+use crate::{
+    catalog::{
+        logical::LogicalCatalog,
+        physical::{Catalog, PhysicalTable},
+    },
+    dataset_store::{DatasetStore, GetDatasetError},
 };
 
 /// Creates a full catalog with physical data access for SQL query execution.
@@ -41,7 +43,7 @@ use crate::catalog::{
 /// 3. Retrieves dataset metadata to get start_block
 /// 4. Constructs physical catalog for query execution
 pub async fn create(
-    dataset_store: &impl DatasetAccess,
+    dataset_store: &DatasetStore,
     data_store: &DataStore,
     logical: LogicalCatalog,
 ) -> Result<Catalog, CreateCatalogError> {

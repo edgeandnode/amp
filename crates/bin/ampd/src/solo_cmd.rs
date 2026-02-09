@@ -2,10 +2,10 @@ use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
 use amp_config::{ConfigDefaultsOverride, DEFAULT_CONFIG_FILENAME, DEFAULT_METADB_DIRNAME};
 use amp_data_store::DataStore;
-use amp_dataset_store::DatasetStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
+use common::dataset_store::DatasetStore;
 
 use crate::{build_info, server_cmd, worker_cmd};
 

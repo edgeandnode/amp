@@ -295,7 +295,7 @@ pub enum Error {
 
     /// Failed to get dataset definition
     #[error("failed to get dataset definition")]
-    GetDataset(#[source] amp_dataset_store::GetDatasetError),
+    GetDataset(#[source] common::dataset_store::GetDatasetError),
 
     /// Failed to get active table revision
     #[error("failed to get active table revision")]
