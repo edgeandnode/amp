@@ -300,7 +300,7 @@ fn chains(mut segments: Vec<Segment>) -> Option<Chains> {
         // Build a candidate fork chain backwards from fork_end.
         let mut fork_segments = vec![fork_end];
         for segment in non_canonical.iter().rev() {
-            if BlockRange::adjacent(&segment.range, &fork_segments.last().unwrap().range) {
+            if BlockRange::adjacent(&segment.range, &fork_segments.first().unwrap().range) {
                 fork_segments.insert(0, segment.clone());
             }
         }
@@ -587,6 +587,24 @@ mod test {
                     test_segment(4..=8, (0, 0), 2),
                 ]),
                 fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 4)])),
+            })
+        );
+
+        // multi-segment fork extending past canonical
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=3, (0, 0), 0),
+                test_segment(4..=5, (1, 1), 1),
+                test_segment(6..=7, (1, 1), 2),
+                test_segment(8..=9, (1, 1), 3),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![test_segment(0..=3, (0, 0), 0)]),
+                fork: Some(Chain(vec![
+                    test_segment(4..=5, (1, 1), 1),
+                    test_segment(6..=7, (1, 1), 2),
+                    test_segment(8..=9, (1, 1), 3),
+                ])),
             })
         );
     }
