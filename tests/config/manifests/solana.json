@@ -313,6 +313,11 @@
               "nullable": false
             },
             {
+              "name": "tx_version",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
               "name": "signatures",
               "type": {
                 "List": {
@@ -327,8 +332,8 @@
               "nullable": false
             },
             {
-              "name": "status",
-              "type": "Boolean",
+              "name": "err",
+              "type": "Utf8",
               "nullable": true
             },
             {
@@ -405,14 +410,6 @@
                         "name": "ui_token_amount",
                         "data_type": {
                           "Struct": [
-                            {
-                              "name": "ui_amount",
-                              "data_type": "Float64",
-                              "nullable": true,
-                              "dict_id": 0,
-                              "dict_is_ordered": false,
-                              "metadata": {}
-                            },
                             {
                               "name": "decimals",
                               "data_type": "UInt8",
@@ -497,14 +494,6 @@
                         "name": "ui_token_amount",
                         "data_type": {
                           "Struct": [
-                            {
-                              "name": "ui_amount",
-                              "data_type": "Float64",
-                              "nullable": true,
-                              "dict_id": 0,
-                              "dict_is_ordered": false,
-                              "metadata": {}
-                            },
                             {
                               "name": "decimals",
                               "data_type": "UInt8",
