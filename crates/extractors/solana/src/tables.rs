@@ -24,7 +24,7 @@ pub fn all(network: &NetworkId) -> Vec<datasets_common::dataset::Table> {
 }
 
 /// A Solana slot that contains a confirmed block.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NonEmptySlot {
     pub slot: Slot,
     pub parent_slot: Slot,
@@ -37,109 +37,112 @@ pub struct NonEmptySlot {
     pub block_rewards: block_rewards::BlockRewards,
 }
 
-pub(crate) fn convert_slot_to_db_rows(
-    non_empty_slot: NonEmptySlot,
-    network: &NetworkId,
-) -> Result<Rows, RowConversionError> {
-    let NonEmptySlot {
-        slot,
-        parent_slot,
-        blockhash,
-        prev_blockhash,
-        block_height,
-        blocktime,
-        transactions,
-        messages,
-        block_rewards,
-    } = non_empty_slot;
-
-    let range = BlockRange {
-        // Using the slot as a block number since some blocks do not have a block_height.
-        numbers: slot..=slot,
-        network: network.clone(),
-        hash: blockhash.into(),
-        prev_hash: prev_blockhash.into(),
-    };
-
-    let block_headers_row = {
-        let mut builder = block_headers::BlockHeaderRowsBuilder::new();
-
-        let header = block_headers::BlockHeader {
-            block_height,
+impl NonEmptySlot {
+    pub fn into_db_rows(
+        self: NonEmptySlot,
+        network: &NetworkId,
+    ) -> Result<Rows, RowConversionError> {
+        let NonEmptySlot {
             slot,
             parent_slot,
-            block_hash: bs58::encode(blockhash).into_string(),
-            previous_block_hash: bs58::encode(prev_blockhash).into_string(),
-            block_time: blocktime,
+            blockhash,
+            prev_blockhash,
+            block_height,
+            blocktime,
+            transactions,
+            messages,
+            block_rewards,
+        } = self;
+
+        let range = BlockRange {
+            // Using the slot as a block number since some blocks do not have a block_height.
+            numbers: slot..=slot,
+            network: network.clone(),
+            hash: blockhash.into(),
+            prev_hash: prev_blockhash.into(),
         };
 
-        builder.append(&header);
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
+        let block_headers_row = {
+            let mut builder = block_headers::BlockHeaderRowsBuilder::new();
 
-    let block_rewards_row = {
-        let mut builder =
-            block_rewards::BlockRewardsRowsBuilder::with_capacity(block_rewards.rewards.len());
-        builder.append(&block_rewards);
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
+            let header = block_headers::BlockHeader {
+                block_height,
+                slot,
+                parent_slot,
+                block_hash: bs58::encode(blockhash).into_string(),
+                previous_block_hash: bs58::encode(prev_blockhash).into_string(),
+                block_time: blocktime,
+            };
 
-    let transactions_row = {
-        let mut builder = transactions::TransactionRowsBuilder::with_capacity(transactions.len());
-        for tx in &transactions {
-            builder.append(tx);
-        }
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
+            builder.append(&header);
+            builder
+                .build(range.clone())
+                .map_err(RowConversionError::TableBuild)?
+        };
 
-    let messages_row = {
-        let mut builder = messages::MessageRowsBuilder::with_capacity(messages.len());
-        for message in &messages {
-            builder.append(message);
-        }
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
+        let block_rewards_row = {
+            let mut builder =
+                block_rewards::BlockRewardsRowsBuilder::with_capacity(block_rewards.rewards.len());
+            builder.append(&block_rewards);
+            builder
+                .build(range.clone())
+                .map_err(RowConversionError::TableBuild)?
+        };
 
-    let instructions_row = {
-        let all_instructions: Vec<_> = transactions
-            .iter()
-            .filter_map(|tx| {
-                tx.transaction_status_meta
-                    .as_ref()
-                    .and_then(|meta| meta.inner_instructions.as_ref())
-                    .map(|inner_instructions| {
-                        inner_instructions
-                            .iter()
-                            .flat_map(|instructions| instructions.iter())
-                    })
-            })
-            .flatten()
-            .chain(messages.iter().flat_map(|msg| msg.instructions.iter()))
-            .collect();
+        let transactions_row = {
+            let mut builder =
+                transactions::TransactionRowsBuilder::with_capacity(transactions.len());
+            for tx in &transactions {
+                builder.append(tx);
+            }
+            builder
+                .build(range.clone())
+                .map_err(RowConversionError::TableBuild)?
+        };
 
-        let mut builder =
-            instructions::InstructionRowsBuilder::with_capacity(all_instructions.len());
-        for instruction in all_instructions {
-            builder.append(instruction);
-        }
-        builder
-            .build(range.clone())
-            .map_err(RowConversionError::TableBuild)?
-    };
+        let messages_row = {
+            let mut builder = messages::MessageRowsBuilder::with_capacity(messages.len());
+            for message in &messages {
+                builder.append(message);
+            }
+            builder
+                .build(range.clone())
+                .map_err(RowConversionError::TableBuild)?
+        };
 
-    Ok(Rows::new(vec![
-        block_headers_row,
-        block_rewards_row,
-        transactions_row,
-        messages_row,
-        instructions_row,
-    ]))
+        let instructions_row = {
+            let all_instructions: Vec<_> = transactions
+                .iter()
+                .filter_map(|tx| {
+                    tx.transaction_status_meta
+                        .as_ref()
+                        .and_then(|meta| meta.inner_instructions.as_ref())
+                        .map(|inner_instructions| {
+                            inner_instructions
+                                .iter()
+                                .flat_map(|instructions| instructions.iter())
+                        })
+                })
+                .flatten()
+                .chain(messages.iter().flat_map(|msg| msg.instructions.iter()))
+                .collect();
+
+            let mut builder =
+                instructions::InstructionRowsBuilder::with_capacity(all_instructions.len());
+            for instruction in all_instructions {
+                builder.append(instruction);
+            }
+            builder
+                .build(range.clone())
+                .map_err(RowConversionError::TableBuild)?
+        };
+
+        Ok(Rows::new(vec![
+            block_headers_row,
+            block_rewards_row,
+            transactions_row,
+            messages_row,
+            instructions_row,
+        ]))
+    }
 }

@@ -153,6 +153,11 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
 
+                // Make sure the conversion to DB rows works too.
+                if let Err(e) = rpc_slot.clone().into_db_rows(&provider_cfg.network) {
+                    tracing::error!(slot = slot_num, error = %e, "slot to row conversion error");
+                }
+
                 slots_match(slot_num, of1_slot, rpc_slot)
             };
 
