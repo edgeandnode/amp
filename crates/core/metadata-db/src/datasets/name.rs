@@ -35,7 +35,7 @@ pub type NameOwned = Name<'static>;
 ///
 /// The type trusts that values are already validated. Validation must occur at system
 /// boundaries before conversion into this type.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 pub struct Name<'a>(Cow<'a, str>);
 
 impl<'a> Name<'a> {
