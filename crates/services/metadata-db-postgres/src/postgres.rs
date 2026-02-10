@@ -44,6 +44,118 @@ const DEFAULT_READINESS_TIMEOUT_SECS: u64 = 30;
 /// Postmaster PID file name
 const POSTMASTER_PID_FILE: &str = "postmaster.pid";
 
+/// PostgreSQL shared memory implementation.
+///
+/// Controls how PostgreSQL allocates its main shared memory area.
+/// Using `Mmap` avoids System V shared memory, which has low default
+/// limits on macOS and can leak if the process is killed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedMemoryType {
+    /// Memory-mapped files (anonymous mmap). Default since PostgreSQL 12.
+    Mmap,
+    /// System V shared memory (legacy).
+    SysV,
+}
+
+impl std::fmt::Display for SharedMemoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mmap => f.write_str("mmap"),
+            Self::SysV => f.write_str("sysvipc"),
+        }
+    }
+}
+
+/// PostgreSQL dynamic shared memory implementation.
+///
+/// Controls how PostgreSQL allocates dynamic shared memory segments
+/// used for parallel queries and other operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicSharedMemoryType {
+    /// POSIX shared memory (`shm_open`).
+    Posix,
+    /// System V shared memory.
+    SysV,
+    /// Memory-mapped files.
+    Mmap,
+}
+
+impl std::fmt::Display for DynamicSharedMemoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Posix => f.write_str("posix"),
+            Self::SysV => f.write_str("sysv"),
+            Self::Mmap => f.write_str("mmap"),
+        }
+    }
+}
+
+/// PostgreSQL `shared_buffers` memory size.
+///
+/// Wraps [`byte_unit::Byte`] internally, formats to PostgreSQL memory syntax on output.
+/// Constructors mirror [`std::time::Duration`] — e.g., `SharedBuffers::from_mb(128)`.
+///
+/// PostgreSQL accepts the units `kB` (1024), `MB` (1024^2), `GB` (1024^3).
+/// [`Display`](std::fmt::Display) picks the largest unit that divides evenly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedBuffers(byte_unit::Byte);
+
+impl SharedBuffers {
+    /// Creates a `SharedBuffers` value from kilobytes (1 kB = 1024 bytes).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `kb * 1024` overflows `u64`.
+    pub fn from_kb(kb: u64) -> Self {
+        Self(
+            byte_unit::Byte::from_u64_with_unit(kb, byte_unit::Unit::KiB)
+                .expect("kilobytes overflow"),
+        )
+    }
+
+    /// Creates a `SharedBuffers` value from megabytes (1 MB = 1024² bytes).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mb * 1024 * 1024` overflows `u64`.
+    pub fn from_mb(mb: u64) -> Self {
+        Self(
+            byte_unit::Byte::from_u64_with_unit(mb, byte_unit::Unit::MiB)
+                .expect("megabytes overflow"),
+        )
+    }
+
+    /// Creates a `SharedBuffers` value from gigabytes (1 GB = 1024³ bytes).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `gb * 1024 * 1024 * 1024` overflows `u64`.
+    pub fn from_gb(gb: u64) -> Self {
+        Self(
+            byte_unit::Byte::from_u64_with_unit(gb, byte_unit::Unit::GiB)
+                .expect("gigabytes overflow"),
+        )
+    }
+}
+
+impl std::fmt::Display for SharedBuffers {
+    /// Formats to PostgreSQL memory syntax, picking the largest exact binary unit.
+    ///
+    /// Delegates unit selection to [`byte_unit::Byte::get_exact_unit`], then maps
+    /// the binary unit variant to PostgreSQL notation (`GiB` -> `GB`, `MiB` -> `MB`,
+    /// `KiB` -> `kB`).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (value, unit) = self.0.get_exact_unit(false);
+        let pg_unit = match unit {
+            byte_unit::Unit::GiB => "GB",
+            byte_unit::Unit::MiB => "MB",
+            byte_unit::Unit::KiB => "kB",
+            _ => "kB",
+        };
+        write!(f, "{value}{pg_unit}")
+    }
+}
+
 /// Builder for configuring and starting a managed PostgreSQL instance.
 ///
 /// Provides a builder-based async API for starting a PostgreSQL server with
@@ -65,8 +177,10 @@ const POSTMASTER_PID_FILE: &str = "postmaster.pid";
 /// let (handle, bg_task) = PostgresBuilder::new(".amp/metadb")
 ///     .locale("C")
 ///     .encoding("UTF8")
+///     .shared_memory_type(SharedMemoryType::Mmap)
+///     .dynamic_shared_memory_type(DynamicSharedMemoryType::Posix)
+///     .shared_buffers(SharedBuffers::from_mb(128))
 ///     .config_param("max_connections", "50")
-///     .config_param("shared_buffers", "128MB")
 ///     .initdb_arg("--data-checksums", "")
 ///     .bin_path("/usr/lib/postgresql/18/bin")
 ///     .start()
@@ -80,6 +194,7 @@ pub struct PostgresBuilder {
     server_configs: BTreeMap<String, String>,
     initdb_args: BTreeMap<String, String>,
     bin_path: Option<PathBuf>,
+    wait_for_exit: bool,
 }
 
 impl PostgresBuilder {
@@ -96,6 +211,7 @@ impl PostgresBuilder {
             server_configs: BTreeMap::new(),
             initdb_args: BTreeMap::new(),
             bin_path: None,
+            wait_for_exit: true,
         }
     }
 
@@ -166,6 +282,62 @@ impl PostgresBuilder {
         self
     }
 
+    /// Controls whether [`Drop`] performs a blocking waitpid loop to let
+    /// PostgreSQL clean up before the process is reaped.
+    ///
+    /// | `wait_for_exit` | `kill_on_drop` | Drop behavior |
+    /// |---|---|---|
+    /// | `true` **(default)** | `false` | SIGINT → waitpid polling → SIGKILL escalation |
+    /// | `false` | `true` | No blocking wait; tokio sends SIGKILL when `Child` drops |
+    ///
+    /// # When to disable
+    ///
+    /// The blocking wait exists so PostgreSQL can release SysV shared memory
+    /// segments during shutdown. If you configure
+    /// `shared_memory_type=mmap` (which does not allocate SysV segments),
+    /// you can safely set this to `false` to avoid the up-to-10-second
+    /// blocking poll in the [`Drop`] implementation.
+    ///
+    /// # Interaction with async shutdown
+    ///
+    /// This setting only affects the **synchronous [`Drop`] safety net**.
+    /// The async shutdown path ([`PostgresProcess::shutdown_with_signal`])
+    /// always sends the requested signal and waits via tokio's async
+    /// `child.wait()`, regardless of this setting.
+    #[must_use]
+    pub fn wait_for_exit(mut self, wait: bool) -> Self {
+        self.wait_for_exit = wait;
+        self
+    }
+
+    /// Sets the PostgreSQL shared memory implementation.
+    ///
+    /// Delegates to [`config_param("shared_memory_type", ...)`](Self::config_param).
+    /// See [`SharedMemoryType`] for available options.
+    #[must_use]
+    pub fn shared_memory_type(self, ty: SharedMemoryType) -> Self {
+        self.config_param("shared_memory_type", &ty.to_string())
+    }
+
+    /// Sets the PostgreSQL dynamic shared memory implementation.
+    ///
+    /// Delegates to [`config_param("dynamic_shared_memory_type", ...)`](Self::config_param).
+    /// See [`DynamicSharedMemoryType`] for available options.
+    #[must_use]
+    pub fn dynamic_shared_memory_type(self, ty: DynamicSharedMemoryType) -> Self {
+        self.config_param("dynamic_shared_memory_type", &ty.to_string())
+    }
+
+    /// Sets the `shared_buffers` PostgreSQL parameter.
+    ///
+    /// Delegates to [`config_param("shared_buffers", ...)`](Self::config_param).
+    /// Accepts a [`SharedBuffers`] value constructed via typed constructors
+    /// (e.g., `SharedBuffers::from_mb(128)`).
+    #[must_use]
+    pub fn shared_buffers(self, value: SharedBuffers) -> Self {
+        self.config_param("shared_buffers", &value.to_string())
+    }
+
     /// Builds the effective server configuration by merging dev-mode defaults with
     /// caller overrides. Caller values take precedence.
     fn effective_server_configs(&self) -> BTreeMap<String, String> {
@@ -210,9 +382,9 @@ impl PostgresBuilder {
     /// 6. Returns `(Handle, impl Future)` for service composition
     ///
     /// The returned future uses `tokio::select!` to monitor two events:
-    /// - **Shutdown notification**: the [`Handle`](super::service::Handle) calls
-    ///   [`graceful_shutdown()`](super::service::Handle::graceful_shutdown) or
-    ///   [`force_shutdown()`](super::service::Handle::force_shutdown)
+    /// - **Shutdown notification**: the [`Handle`] calls
+    ///   [`graceful_shutdown()`](Handle::graceful_shutdown) or
+    ///   [`force_shutdown()`](Handle::force_shutdown)
     /// - **Unexpected child exit**: the postgres process crashes or exits on its own
     ///
     /// Signal handling (SIGINT/SIGTERM) is NOT done here — the caller (e.g.
@@ -222,22 +394,15 @@ impl PostgresBuilder {
     /// escalates to SIGKILL. On unexpected exit, it returns an error.
     pub async fn start(
         self,
-    ) -> Result<
-        (
-            super::service::Handle,
-            impl std::future::Future<Output = Result<(), PostgresError>>,
-        ),
-        PostgresError,
-    > {
+    ) -> Result<(Handle, impl Future<Output = Result<(), PostgresError>>), PostgresError> {
         let process = self.start_process().await?;
 
         let url = process.connection_url().to_string();
         let data_dir = process.data_dir.clone();
-        let pid = process.child.id().expect("postgres child must have a PID");
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
-        let handle = super::service::Handle::new(url, data_dir, pid, shutdown_tx);
+        let handle = Handle::new(url, data_dir, shutdown_tx);
 
         let fut = async move {
             let mut process = process;
@@ -248,11 +413,11 @@ impl PostgresBuilder {
             // the Handle, which sends a ShutdownSignal through the channel.
             let signal = tokio::select! {
                 result = shutdown_rx => match result {
-                    Ok(super::service::ShutdownSignal::Hard) => {
+                    Ok(ShutdownSignal::Hard) => {
                         tracing::info!("Hard shutdown requested, sending SIGINT to PostgreSQL");
                         nix::sys::signal::Signal::SIGINT
                     }
-                    Ok(super::service::ShutdownSignal::Graceful) => {
+                    Ok(ShutdownSignal::Graceful) => {
                         tracing::info!("Graceful shutdown requested, sending SIGTERM to PostgreSQL");
                         nix::sys::signal::Signal::SIGTERM
                     }
@@ -346,6 +511,7 @@ impl PostgresBuilder {
             connection_url,
             stdout_log_task,
             stderr_log_task,
+            wait_for_exit: self.wait_for_exit,
         };
 
         process.wait_for_ready().await?;
@@ -474,8 +640,9 @@ impl PostgresBuilder {
     /// [`effective_server_configs`](Self::effective_server_configs).
     ///
     /// Both stdout and stderr are piped for log forwarding via tracing.
-    /// The `PostgresProcess::Drop` impl sends a best-effort SIGTERM via nix as
-    /// the safety net for future cancellation.
+    /// The `PostgresProcess::Drop` impl performs a full blocking shutdown
+    /// sequence (SIGINT → waitpid polling → SIGKILL escalation) as the
+    /// safety net for future cancellation.
     ///
     /// ## PostgreSQL Reference
     ///
@@ -515,7 +682,7 @@ impl PostgresBuilder {
         let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(!self.wait_for_exit)
             .spawn()
             .map_err(|err| PostgresError::StartFailed { source: err })?;
 
@@ -571,6 +738,9 @@ pub(crate) struct PostgresProcess {
     stdout_log_task: Option<JoinHandle<()>>,
     /// Handle for the stderr log forwarding task
     stderr_log_task: Option<JoinHandle<()>>,
+    /// Whether [`Drop`] should perform a blocking waitpid loop.
+    /// See [`PostgresBuilder::wait_for_exit`].
+    wait_for_exit: bool,
 }
 
 impl PostgresProcess {
@@ -717,12 +887,11 @@ impl PostgresProcess {
         // Send the requested signal via nix crate (safe Rust, no shell)
         #[cfg(unix)]
         if let Some(pid) = self.child.id() {
-            // Convert u32 PID to i32 safely (PIDs should never exceed i32::MAX)
-            let Ok(pid_i32) = i32::try_from(pid) else {
-                tracing::error!(pid = pid, "PID exceeds i32::MAX, cannot signal process");
-                return Err(PostgresError::InvalidPid { pid });
-            };
-            let nix_pid = nix::unistd::Pid::from_raw(pid_i32);
+            // SAFETY: PID limits are well under `i32::MAX` (~2.1 billion) on all
+            // supported platforms — Linux caps at 4_194_304, macOS at 99_999.
+            let nix_pid = i32::try_from(pid)
+                .map(nix::unistd::Pid::from_raw)
+                .expect("PID exceeds i32::MAX");
             if let Err(err) = nix::sys::signal::kill(nix_pid, signal) {
                 tracing::warn!(pid = pid, signal = %signal, error = %err, "Failed to send signal to PostgreSQL");
             }
@@ -771,32 +940,170 @@ impl PostgresProcess {
             handle.abort();
         }
     }
+
+    /// Blocking shutdown for the Drop safety net.
+    ///
+    /// Sends SIGINT (fast shutdown: aborts transactions, doesn't wait for
+    /// sessions) then polls waitpid with WNOHANG to let PostgreSQL complete
+    /// its SysV shared memory cleanup. On timeout, escalates to SIGKILL.
+    ///
+    /// Happy path: when the async shutdown already completed, child.id()
+    /// returns None (tokio already reaped) and we return immediately.
+    #[cfg(unix)]
+    fn shutdown_blocking(&mut self) {
+        use nix::sys::wait::WaitPidFlag;
+
+        let Some(pid) = self.child.id() else {
+            // Already reaped by the async shutdown path — nothing to do.
+            return;
+        };
+
+        // SAFETY: PID limits are well under `i32::MAX` (~2.1 billion) on all
+        // supported platforms — Linux caps at 4_194_304, macOS at 99_999.
+        let nix_pid = i32::try_from(pid)
+            .map(nix::unistd::Pid::from_raw)
+            .expect("PID exceeds i32::MAX");
+
+        // Fast shutdown — SIGINT aborts transactions and exits promptly,
+        // unlike SIGTERM (smart shutdown) which waits for sessions to
+        // disconnect voluntarily.
+        if nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGINT).is_err() {
+            return; // process already gone
+        }
+
+        // Poll waitpid(WNOHANG): 100 iterations × 100 ms = 10 s timeout.
+        for _ in 0..100 {
+            match nix::sys::wait::waitpid(nix_pid, Some(WaitPidFlag::WNOHANG)) {
+                Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                // Process exited, signaled, or any other terminal state.
+                Ok(_) => return,
+                // ECHILD: not our child or already reaped — either way, done.
+                Err(_) => return,
+            }
+        }
+
+        // Timeout — escalate to SIGKILL.
+        tracing::warn!(
+            pid = pid,
+            "PostgreSQL did not exit within 10 s after SIGINT in Drop, sending SIGKILL"
+        );
+        let _ = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGKILL);
+
+        // Brief reap attempt: 5 iterations × 100 ms = 500 ms.
+        for _ in 0..5 {
+            match nix::sys::wait::waitpid(nix_pid, Some(WaitPidFlag::WNOHANG)) {
+                Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                _ => return,
+            }
+        }
+        // Give up — tokio's orphan queue handles the rest.
+    }
 }
 
 impl Drop for PostgresProcess {
     fn drop(&mut self) {
-        // Abort log forwarding tasks to prevent them from outliving the process
         self.abort_log_tasks();
-
-        // Best-effort graceful shutdown: send SIGTERM synchronously via nix crate.
-        // This is the safety net for future cancellation — when the background
-        // future is dropped without completing the shutdown sequence, this gives
-        // postgres a chance to flush WAL before the OS reaps the child.
-        #[cfg(unix)]
-        if let Some(pid) = self.child.id() {
-            // Convert u32 PID to i32 safely (best-effort, log error but don't panic)
-            if let Ok(pid_i32) = i32::try_from(pid) {
-                let _ = nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(pid_i32),
-                    nix::sys::signal::Signal::SIGTERM,
-                );
-            } else {
-                tracing::error!(
-                    pid = pid,
-                    "PID exceeds i32::MAX in Drop, cannot send SIGTERM"
-                );
-            }
+        if self.wait_for_exit {
+            self.shutdown_blocking();
         }
+    }
+}
+
+/// Signal sent from [`Handle`] to the background future to initiate shutdown.
+///
+/// Decoupled from `nix::sys::signal::Signal` so the public API does not
+/// depend on the `nix` crate.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ShutdownSignal {
+    /// Graceful (smart) shutdown — postgres waits for sessions to disconnect.
+    Graceful,
+    /// Hard (fast) shutdown — postgres aborts transactions and disconnects clients.
+    Hard,
+}
+
+/// Handle to interact with the PostgreSQL database service.
+///
+/// The caller **must** consume this handle by calling either
+/// [`graceful_shutdown()`](Handle::graceful_shutdown) or
+/// [`force_shutdown()`](Handle::force_shutdown). Both methods consume `self` by
+/// value, returning an inert [`ShuttingDown`] token. The background future
+/// then performs the actual shutdown sequence (signal → timeout → SIGKILL).
+///
+/// Dropping the handle without calling a shutdown method is a programming
+/// error — the background future will hang on the oneshot receiver until it is
+/// cancelled (e.g., by aborting its `JoinHandle`). When the future is
+/// cancelled, `PostgresProcess::Drop` performs a full blocking shutdown
+/// sequence (SIGINT → waitpid polling → SIGKILL escalation) to ensure
+/// PostgreSQL completes SysV shared memory cleanup.
+#[derive(Debug)]
+pub struct Handle {
+    url: String,
+    data_dir: PathBuf,
+    shutdown_tx: tokio::sync::oneshot::Sender<ShutdownSignal>,
+}
+
+/// Inert token proving that shutdown was initiated.
+///
+/// Returned by [`Handle::graceful_shutdown`] and [`Handle::force_shutdown`].
+/// Has no methods and no `Drop` side-effects — the background future handles
+/// the actual shutdown sequence.
+pub struct ShuttingDown(());
+
+impl Handle {
+    /// Creates a new handle (crate-internal).
+    pub(crate) fn new(
+        url: String,
+        data_dir: PathBuf,
+        shutdown_tx: tokio::sync::oneshot::Sender<ShutdownSignal>,
+    ) -> Self {
+        Self {
+            url,
+            data_dir,
+            shutdown_tx,
+        }
+    }
+
+    /// Gets the connection URL for connecting to this database.
+    ///
+    /// The URL uses Unix socket connections in the format:
+    /// `postgresql:///postgres?host=/path/to/data_dir`
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Gets the data directory where PostgreSQL stores its files.
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    /// Initiates a graceful (smart) shutdown by sending SIGTERM to postgres.
+    ///
+    /// Postgres waits for all sessions to disconnect voluntarily, then exits.
+    /// If the process does not exit within the timeout, the background future
+    /// escalates to SIGKILL.
+    ///
+    /// Consumes the handle — the caller cannot interact with the service after
+    /// initiating shutdown.
+    pub fn graceful_shutdown(self) -> ShuttingDown {
+        let _ignore_send_error = self.shutdown_tx.send(ShutdownSignal::Graceful);
+        ShuttingDown(())
+    }
+
+    /// Initiates a hard (fast) shutdown by sending SIGINT to postgres.
+    ///
+    /// Postgres aborts active transactions, disconnects clients, then exits.
+    /// If the process does not exit within the timeout, the background future
+    /// escalates to SIGKILL.
+    ///
+    /// Consumes the handle — the caller cannot interact with the service after
+    /// initiating shutdown.
+    pub fn force_shutdown(self) -> ShuttingDown {
+        let _ignore_send_error = self.shutdown_tx.send(ShutdownSignal::Hard);
+        ShuttingDown(())
     }
 }
 
@@ -920,14 +1227,11 @@ async fn cleanup_orphan_process(data_dir: &Path) -> Result<(), PostgresError> {
     // terminate an unrelated process. This is the same inherent limitation
     // as `pg_ctl` and other PID-file-based approaches; the race window is
     // small in practice.
-    let Ok(pid_i32) = i32::try_from(pid) else {
-        tracing::error!(
-            pid = pid,
-            "PID exceeds i32::MAX in orphan cleanup, skipping"
-        );
-        return Ok(());
-    };
-    let nix_pid = nix::unistd::Pid::from_raw(pid_i32);
+    // SAFETY: PID limits are well under `i32::MAX` (~2.1 billion) on all
+    // supported platforms — Linux caps at 4_194_304, macOS at 99_999.
+    let nix_pid = i32::try_from(pid)
+        .map(nix::unistd::Pid::from_raw)
+        .expect("PID exceeds i32::MAX");
     let process_exists = nix::sys::signal::kill(nix_pid, None).is_ok();
 
     if process_exists {
@@ -1145,16 +1449,6 @@ pub enum PostgresError {
         /// Exit status code, if available
         status: Option<i32>,
     },
-
-    /// Process ID exceeds i32::MAX
-    ///
-    /// This error occurs when a PID cannot be safely converted to i32 for use
-    /// with nix signal APIs. This should never happen in practice on modern systems.
-    #[error("Process ID {pid} exceeds i32::MAX, cannot send signal")]
-    InvalidPid {
-        /// The PID that exceeds i32::MAX
-        pid: u32,
-    },
 }
 
 #[cfg(test)]
@@ -1228,6 +1522,9 @@ mod tests {
             .locale("C")
             .encoding("UTF8")
             .config_param("fsync", "on")
+            .shared_memory_type(SharedMemoryType::SysV)
+            .dynamic_shared_memory_type(DynamicSharedMemoryType::Mmap)
+            .shared_buffers(SharedBuffers::from_mb(256))
             .initdb_arg("--data-checksums", "")
             .bin_path("/usr/lib/postgresql/18/bin");
 
@@ -1236,6 +1533,27 @@ mod tests {
         assert_eq!(
             builder.server_configs.get("fsync").map(String::as_str),
             Some("on")
+        );
+        assert_eq!(
+            builder
+                .server_configs
+                .get("shared_memory_type")
+                .map(String::as_str),
+            Some("sysvipc")
+        );
+        assert_eq!(
+            builder
+                .server_configs
+                .get("dynamic_shared_memory_type")
+                .map(String::as_str),
+            Some("mmap")
+        );
+        assert_eq!(
+            builder
+                .server_configs
+                .get("shared_buffers")
+                .map(String::as_str),
+            Some("256MB")
         );
         assert_eq!(
             builder
@@ -1248,5 +1566,36 @@ mod tests {
             builder.bin_path,
             Some(PathBuf::from("/usr/lib/postgresql/18/bin"))
         );
+    }
+
+    #[test]
+    fn shared_memory_type_display() {
+        assert_eq!(SharedMemoryType::Mmap.to_string(), "mmap");
+        assert_eq!(SharedMemoryType::SysV.to_string(), "sysvipc");
+    }
+
+    #[test]
+    fn dynamic_shared_memory_type_display() {
+        assert_eq!(DynamicSharedMemoryType::Posix.to_string(), "posix");
+        assert_eq!(DynamicSharedMemoryType::SysV.to_string(), "sysv");
+        assert_eq!(DynamicSharedMemoryType::Mmap.to_string(), "mmap");
+    }
+
+    #[test]
+    fn shared_buffers_from_constructors() {
+        assert_eq!(SharedBuffers::from_kb(1).0.as_u64(), 1024);
+        assert_eq!(SharedBuffers::from_mb(1).0.as_u64(), 1024 * 1024);
+        assert_eq!(SharedBuffers::from_gb(1).0.as_u64(), 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn shared_buffers_display() {
+        assert_eq!(SharedBuffers::from_gb(1).to_string(), "1GB");
+        assert_eq!(SharedBuffers::from_gb(4).to_string(), "4GB");
+        assert_eq!(SharedBuffers::from_mb(128).to_string(), "128MB");
+        assert_eq!(SharedBuffers::from_mb(256).to_string(), "256MB");
+        assert_eq!(SharedBuffers::from_kb(256).to_string(), "256kB");
+        assert_eq!(SharedBuffers::from_kb(1024).to_string(), "1MB");
+        assert_eq!(SharedBuffers::from_mb(1024).to_string(), "1GB");
     }
 }
