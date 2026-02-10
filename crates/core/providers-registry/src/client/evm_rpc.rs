@@ -1,6 +1,7 @@
 //! EVM RPC provider creation.
 
 use amp_providers_common::config::TryIntoConfig as _;
+use url::Url;
 
 use crate::config::{EvmRpcProviderConfig, ParseConfigError, ProviderConfig};
 
@@ -33,7 +34,10 @@ pub async fn create(config: ProviderConfig) -> Result<EvmRpcProvider, CreateEvmR
             .await
             .map_err(CreateEvmRpcClientError::IpcConnection)?
     } else {
-        evm_provider::new(typed_config.url, typed_config.rate_limit_per_minute)
+        evm_provider::new(
+            Url::clone(&typed_config.url),
+            typed_config.rate_limit_per_minute,
+        )
     };
 
     Ok(provider)

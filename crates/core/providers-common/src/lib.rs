@@ -8,10 +8,12 @@
 //! - `kind::ProviderKindStr`: Type-erased provider kind identifier
 //! - `sql_name::sanitize_sql_name()`: SQL-safe identifier normalization for schema/catalog names
 //! - `envsub`: Environment variable substitution for TOML values
+//! - `redacted::Redacted`: A wrapper type that redacts sensitive data in Debug output
 
 pub mod config;
 pub mod envsub;
 pub mod kind;
 pub mod network_id;
 pub mod provider_name;
+pub mod redacted;
 pub mod sql_name;
