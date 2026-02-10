@@ -14,30 +14,6 @@ use crate::{
     service::WorkerJobCtx,
 };
 
-/// Errors from dataset dump job execution.
-///
-/// Wraps the specific error types from raw and derived dataset dump operations
-/// to provide a unified error type for the worker job system.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DumpError {
-    /// Raw dataset dump operation failed
-    ///
-    /// This occurs when the raw dataset extraction and Parquet file writing
-    /// process encounters an error. Common causes include blockchain client
-    /// connectivity issues, consistency check failures, and partition task errors.
-    #[error("Failed to dump raw dataset")]
-    Raw(#[source] amp_worker_datasets_raw::Error),
-
-    /// Derived dataset dump operation failed
-    ///
-    /// This occurs when the derived dataset SQL query execution and Parquet
-    /// file writing process encounters an error. Common causes include query
-    /// environment creation failures, manifest retrieval errors, and table
-    /// dump failures.
-    #[error("Failed to dump derived dataset")]
-    Derived(#[source] dump::Error),
-}
-
 /// Create and run a worker job that dumps tables from a dataset.
 ///
 /// This function returns a future that executes the dump operation.
@@ -124,4 +100,28 @@ pub(super) fn new(
 
         Ok(())
     }
+}
+
+/// Errors from dataset dump job execution.
+///
+/// Wraps the specific error types from raw and derived dataset dump operations
+/// to provide a unified error type for the worker job system.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DumpError {
+    /// Raw dataset dump operation failed
+    ///
+    /// This occurs when the raw dataset extraction and Parquet file writing
+    /// process encounters an error. Common causes include blockchain client
+    /// connectivity issues, consistency check failures, and partition task errors.
+    #[error("Failed to dump raw dataset")]
+    Raw(#[source] amp_worker_datasets_raw::Error),
+
+    /// Derived dataset dump operation failed
+    ///
+    /// This occurs when the derived dataset SQL query execution and Parquet
+    /// file writing process encounters an error. Common causes include query
+    /// environment creation failures, manifest retrieval errors, and table
+    /// dump failures.
+    #[error("Failed to dump derived dataset")]
+    Derived(#[source] dump::Error),
 }

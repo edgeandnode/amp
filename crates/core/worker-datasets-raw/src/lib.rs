@@ -1,4 +1,4 @@
-mod raw_dataset;
-mod raw_dataset_writer;
+mod dataset;
+mod writer;
 
-pub use raw_dataset::{Error, dump};
+pub use self::dataset::{Error, dump};
