@@ -232,12 +232,12 @@ impl ParquetFileWriter {
 }
 
 pub struct ParquetFileWriterOutput {
-    pub(crate) parquet_meta: ParquetMeta,
-    pub(crate) object_meta: ObjectMeta,
-    pub(crate) location_id: LocationId,
-    pub(crate) url: Url,
-    pub(crate) parent_ids: Vec<FileId>,
-    pub(crate) footer: FooterBytes,
+    pub parquet_meta: ParquetMeta,
+    pub object_meta: ObjectMeta,
+    pub location_id: LocationId,
+    pub url: Url,
+    pub parent_ids: Vec<FileId>,
+    pub footer: FooterBytes,
 }
 
 /// Errors that occur when closing a parquet file writer

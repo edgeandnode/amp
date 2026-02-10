@@ -7,22 +7,19 @@ use common::{
     dataset_store::DatasetStore,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
 };
-use datasets_common::{dataset_kind_str::DatasetKindStr, hash_reference::HashReference};
-use datasets_derived::DerivedDatasetKind;
+use datasets_common::hash_reference::HashReference;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
-mod block_ranges;
-mod check;
+pub mod block_ranges;
+pub mod check;
 pub mod compaction;
 pub mod config;
 mod derived_dataset;
 pub mod metrics;
-mod parquet_writer;
+pub mod parquet_writer;
 pub mod progress;
-mod raw_dataset;
-mod raw_dataset_writer;
 pub mod streaming_query;
-mod tasks;
+pub mod tasks;
 
 pub use self::{
     block_ranges::{EndBlock, ResolvedEndBlock},
@@ -43,36 +40,25 @@ use crate::{
     metrics::MetricsRegistry,
 };
 
-/// Dumps a set of tables. All tables must belong to the same dataset.
-#[expect(clippy::too_many_arguments)]
+/// Dumps derived dataset tables. All tables must belong to the same dataset.
 pub async fn dump_tables(
     ctx: Ctx,
     dataset: &HashReference,
-    kind: DatasetKindStr,
-    max_writers: u16,
     microbatch_max_interval: u64,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::JobId>>,
     progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
-    if kind == DerivedDatasetKind {
-        // Derived datasets
-        derived_dataset::dump(
-            ctx,
-            dataset,
-            microbatch_max_interval,
-            end,
-            writer,
-            progress_reporter,
-        )
-        .await
-        .map_err(Error::DerivedDatasetDump)?;
-    } else {
-        // Raw datasets (EvmRpc, Firehose, Solana, etc.)
-        raw_dataset::dump(ctx, dataset, max_writers, end, writer, progress_reporter)
-            .await
-            .map_err(Error::RawDatasetDump)?;
-    }
+    derived_dataset::dump(
+        ctx,
+        dataset,
+        microbatch_max_interval,
+        end,
+        writer,
+        progress_reporter,
+    )
+    .await
+    .map_err(Error::DerivedDatasetDump)?;
 
     Ok(())
 }
@@ -80,24 +66,9 @@ pub async fn dump_tables(
 /// Errors that occur during dump_tables operations
 ///
 /// This error type is used by the `dump_tables()` function to report issues encountered
-/// when dumping tables to Parquet files.
+/// when dumping derived dataset tables to Parquet files.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Failed to dump raw dataset
-    ///
-    /// This occurs when the raw dataset dump operation fails. This wraps errors
-    /// from the `raw_dataset::dump()` function which handles blockchain data
-    /// extraction and Parquet file writing for raw datasets.
-    ///
-    /// Common causes:
-    /// - Blockchain client connectivity issues
-    /// - Consistency check failures
-    /// - Invalid dataset kind
-    /// - Partition task failures
-    /// - Parquet file writing errors
-    #[error("Failed to dump raw dataset")]
-    RawDatasetDump(#[source] raw_dataset::Error),
-
     /// Failed to dump derived dataset
     ///
     /// This occurs when the derived dataset dump operation fails. This wraps errors
