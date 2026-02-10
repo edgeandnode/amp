@@ -117,9 +117,7 @@ use metadata_db::MetadataDb;
 use monitoring::logging;
 use tracing::{Instrument, instrument};
 
-use crate::writer::{
-    RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError,
-};
+use crate::writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError};
 
 /// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
 #[instrument(skip_all, err)]
