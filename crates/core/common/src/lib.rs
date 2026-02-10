@@ -10,6 +10,7 @@ pub mod planning_context;
 pub mod query_context;
 pub mod sql;
 pub mod stream_helpers;
+pub mod streaming_query;
 
 use std::{
     ops::RangeInclusive,

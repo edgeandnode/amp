@@ -90,6 +90,17 @@ use std::{
 };
 
 use amp_data_store::DataStore;
+use amp_worker_core::{
+    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    block_ranges::resolve_end_block,
+    check::consistency_check,
+    compaction::AmpCompactor,
+    metrics,
+    progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
+    tasks::{FailFastJoinSet, TryWaitAllError},
+};
 use common::{
     BlockNum, LogicalCatalog,
     catalog::{
@@ -101,17 +112,6 @@ use common::{
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
-use dump::{
-    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
-    block_ranges::resolve_end_block,
-    check::consistency_check,
-    compaction::AmpCompactor,
-    metrics,
-    progress::{
-        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
-    },
-    tasks::{FailFastJoinSet, TryWaitAllError},
-};
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use monitoring::logging;
@@ -132,7 +132,7 @@ pub async fn dump(
     let writer = writer.into();
 
     let dump_start_time = Instant::now();
-    let parquet_opts = dump::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = amp_worker_core::parquet_opts(&ctx.config.parquet);
 
     let dataset = ctx
         .dataset_store
@@ -451,7 +451,7 @@ pub enum Error {
     ConsistencyCheck {
         table_name: String,
         #[source]
-        source: dump::check::ConsistencyError,
+        source: amp_worker_core::check::ConsistencyError,
     },
 
     /// Failed to get blockchain client for dataset
@@ -474,7 +474,7 @@ pub enum Error {
     /// - RPC provider returning invalid block numbers
     /// - Provider temporarily unavailable
     #[error("Failed to resolve end block")]
-    ResolveEndBlock(#[source] dump::block_ranges::ResolutionError),
+    ResolveEndBlock(#[source] amp_worker_core::block_ranges::ResolutionError),
 
     /// Failed to get latest block number from blockchain client
     ///
@@ -978,10 +978,10 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use datasets_common::table_name::TableName;
-    use dump::progress::{
+    use amp_worker_core::progress::{
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     };
+    use datasets_common::table_name::TableName;
 
     use super::*;
 

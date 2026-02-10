@@ -27,7 +27,7 @@
 
 use std::path::{Path, PathBuf};
 
-use dump::{ConfigDuration, ParquetConfig};
+use amp_worker_core::{ConfigDuration, ParquetConfig};
 use figment::{
     Figment,
     providers::{Env, Format as _, Serialized, Toml},

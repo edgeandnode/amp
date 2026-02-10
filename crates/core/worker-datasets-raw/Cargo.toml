@@ -6,10 +6,10 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
+amp-worker-core = { path = "../worker-core" }
 common = { path = "../common" }
 datasets-common = { path = "../datasets-common" }
 datasets-raw = { path = "../datasets-raw" }
-dump = { path = "../dump" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }

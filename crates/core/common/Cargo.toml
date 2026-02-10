@@ -8,6 +8,7 @@ license-file.workspace = true
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
 amp-datasets-registry = { path = "../datasets-registry" }
+async-stream.workspace = true
 amp-providers-registry = { path = "../providers-registry" }
 async-trait.workspace = true
 bigdecimal = "0.4"
@@ -35,6 +36,8 @@ serde_json.workspace = true
 solana-datasets = { path = "../../extractors/solana" }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 url.workspace = true
 

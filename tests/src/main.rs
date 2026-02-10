@@ -57,6 +57,7 @@ use amp_datasets_registry::{
     DatasetsRegistry, error::ResolveRevisionError, manifests::DatasetManifestsStore,
 };
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
+use amp_worker_core::consistency_check;
 use anyhow::{Result, anyhow};
 use clap::Parser;
 use common::dataset_store::{DatasetStore, GetDatasetError};
@@ -65,7 +66,6 @@ use datasets_derived::{
     Dataset as DerivedDataset,
     deps::{DfsError, dfs},
 };
-use dump::consistency_check;
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use monitoring::logging;

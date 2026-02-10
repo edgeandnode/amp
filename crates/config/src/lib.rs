@@ -4,9 +4,9 @@ use std::{
 };
 
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
+use amp_worker_core::{ConfigDuration, ParquetConfig};
 use common::query_context::QueryEnv;
 use datafusion::error::DataFusionError;
-use dump::{ConfigDuration, ParquetConfig};
 use fs_err as fs;
 use monitoring::config::OpenTelemetryConfig;
 

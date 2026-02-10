@@ -6,11 +6,11 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
+amp-worker-core = { path = "../worker-core" }
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 datasets-derived = { path = "../datasets-derived" }
-dump = { path = "../dump" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 thiserror.workspace = true

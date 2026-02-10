@@ -97,6 +97,21 @@
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use amp_data_store::file_name::FileName;
+use amp_worker_core::{
+    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
+    check::consistency_check,
+    compaction::{AmpCompactor, AmpCompactorTaskError},
+    metrics,
+    parquet_writer::{
+        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
+        ParquetFileWriterOutput, commit_metadata,
+    },
+    progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
+    tasks::{self, TryWaitAllError},
+};
 use common::{
     BlockNum, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
     catalog::{
@@ -114,30 +129,15 @@ use common::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
     },
+    streaming_query::{
+        QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
+    },
 };
 use datasets_common::hash_reference::HashReference;
 use datasets_derived::{
     Manifest as DerivedManifest,
     deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::TableInput,
-};
-use dump::{
-    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
-    block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
-    check::consistency_check,
-    compaction::{AmpCompactor, AmpCompactorTaskError},
-    metrics,
-    parquet_writer::{
-        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
-        ParquetFileWriterOutput, commit_metadata,
-    },
-    progress::{
-        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
-    },
-    streaming_query::{
-        QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
-    },
-    tasks::{self, TryWaitAllError},
 };
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
@@ -162,7 +162,7 @@ pub async fn dump(
         .map(Arc::new)
         .map_err(Error::GetDerivedManifest)?;
 
-    let parquet_opts = dump::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = amp_worker_core::parquet_opts(&ctx.config.parquet);
 
     // Get dataset for table resolution
     let dataset = ctx
@@ -351,7 +351,7 @@ pub enum Error {
     ConsistencyCheck {
         table_name: String,
         #[source]
-        source: dump::check::ConsistencyError,
+        source: amp_worker_core::check::ConsistencyError,
     },
 
     /// Failed to retrieve derived dataset manifest
@@ -959,7 +959,7 @@ pub enum DumpSqlQueryError {
     ///
     /// This occurs when initializing the streaming query executor fails.
     #[error("failed to spawn streaming query: {0}")]
-    StreamingQuerySpawn(#[source] dump::streaming_query::SpawnError),
+    StreamingQuerySpawn(#[source] common::streaming_query::SpawnError),
 
     /// Failed to create the parquet file writer
     ///
