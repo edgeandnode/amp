@@ -27,13 +27,18 @@ where
     }
 }
 
+/// A captured JavaScript exception with its message, stack trace, and source position
+///
+/// Produced by [`catch`] when a V8 `TryCatch` scope has caught an exception.
+/// Contains the stringified exception, optional stack trace, and optional
+/// source code position for diagnostic display.
 #[derive(Debug, Error)]
 pub struct ExceptionMessage {
-    // Stringified exception object
+    /// Stringified exception object (e.g. `"TypeError: x is not a function"`)
     pub exception: String,
-    // Stringified stack trace
+    /// Stringified stack trace, if available
     pub stack: Option<String>,
-    // Position of the exception in the source code
+    /// Position of the exception in the source code, if available
     pub position: Option<ExceptionPosition>,
 }
 

@@ -9,8 +9,6 @@ pub mod js_udf;
 #[cfg(test)]
 mod tests;
 
-pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
-
 /// Initialize the per-process V8 platform.
 pub(crate) fn init_platform() {
     static V8_INIT: Once = Once::new();
