@@ -40,3 +40,8 @@ url.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
+criterion = "0.5"
+
+[[bench]]
+name = "segments"
+harness = false
