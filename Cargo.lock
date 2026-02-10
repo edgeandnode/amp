@@ -1032,10 +1032,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-providers-common"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "datasets-common",
+ "schemars 1.2.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "amp-providers-evm-rpc"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "amp-providers-common",
+ "governor 0.10.4",
+ "schemars 1.2.0",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+ "tower",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "amp-providers-evm-rpc-gen"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-evm-rpc",
+ "schemars 1.2.0",
+ "serde_json",
+]
+
+[[package]]
+name = "amp-providers-firehose"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-common",
+ "schemars 1.2.0",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+ "url",
+]
+
+[[package]]
+name = "amp-providers-firehose-gen"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-firehose",
+ "schemars 1.2.0",
+ "serde_json",
+]
+
+[[package]]
 name = "amp-providers-registry"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "amp-providers-common",
  "async-stream",
  "datasets-common",
  "datasets-raw",
@@ -1054,6 +1116,28 @@ dependencies = [
  "toml",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "amp-providers-solana"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-common",
+ "schemars 1.2.0",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+ "url",
+]
+
+[[package]]
+name = "amp-providers-solana-gen"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-solana",
+ "schemars 1.2.0",
+ "serde_json",
 ]
 
 [[package]]

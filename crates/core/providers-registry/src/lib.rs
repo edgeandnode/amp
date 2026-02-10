@@ -21,8 +21,9 @@ use rand::seq::SliceRandom as _;
 
 mod client;
 mod config;
-mod env_subs;
 mod store;
+
+use amp_providers_common::envsub;
 
 pub use self::{
     client::{
@@ -159,7 +160,7 @@ where
 
         'try_find_provider: for mut provider in matching_providers {
             for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = env_subs::substitute_env_vars(value) {
+                if let Err(err) = envsub::substitute_env_vars(value) {
                     tracing::warn!(
                         provider_name = %provider.name,
                         provider_kind = %kind,

@@ -1,0 +1,21 @@
+[package]
+name = "amp-providers-evm-rpc-gen"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+publish = false
+
+# The parent crate is always available as a build dependency
+[build-dependencies]
+amp-providers-evm-rpc = { path = ".." }
+
+# Provider config schema generation dependencies
+# These dependencies are only included when the gen_schema_provider cfg flag is enabled
+[target.'cfg(gen_schema_provider)'.build-dependencies]
+amp-providers-evm-rpc = { path = "..", features = ["schemars"] }
+schemars = { workspace = true }
+serde_json = { workspace = true }
+
+[lints.rust]
+# Allow the gen_schema_provider cfg flag used for conditional schema generation
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gen_schema_provider)'] }

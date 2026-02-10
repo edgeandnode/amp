@@ -1,5 +1,7 @@
 //! EVM RPC provider creation.
 
+use amp_providers_common::config::TryIntoConfig as _;
+
 use crate::config::{EvmRpcProviderConfig, ParseConfigError, ProviderConfig};
 
 /// Type alias for an EVM RPC provider that works with any network.

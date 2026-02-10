@@ -1,0 +1,40 @@
+# Sample Solana Provider Configuration
+#
+# Solana providers connect to Solana RPC endpoints for blockchain data extraction.
+# This provider uses Old Faithful ONE CAR files for historical archive data
+# and the Solana RPC endpoint for recent blocks.
+
+# Provider type - must be "solana" for Solana providers
+kind = "solana"
+
+# Blockchain network identifier (e.g., "solana-mainnet")
+network = "solana-mainnet"
+
+# Solana RPC endpoint URL
+rpc_provider_url = "${SOLANA_RPC_URL}"
+
+# Directory for storing Old Faithful ONE CAR files
+# This directory is used to cache downloaded archive data
+of1_car_directory = "/data/solana/car"
+
+# ============================
+# Optional Fields
+# ============================
+
+# Controls when to use the Solana archive for historical data (optional)
+# - "auto": Automatically determine based on block age
+# - "always": Always use the archive, even for recent blocks
+# - "never": Never use the archive, fetch all blocks from the RPC provider
+# Default: "always"
+# use_archive = "always"
+
+# Rate limit for RPC calls per second (optional)
+# When set, limits the number of RPC calls to avoid rate limiting
+# Default: no rate limit
+# max_rpc_calls_per_second = 10
+
+# Whether to keep downloaded CAR files after processing (optional)
+# - true: Retain CAR files on disk after extraction
+# - false: Delete CAR files after processing to save disk space
+# Default: false
+# keep_of1_car_files = false

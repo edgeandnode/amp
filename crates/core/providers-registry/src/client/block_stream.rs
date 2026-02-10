@@ -1,5 +1,6 @@
 //! Client creation for raw dataset providers.
 
+use amp_providers_common::config::TryIntoConfig as _;
 use async_stream::stream;
 use datasets_common::{block_num::BlockNum, network_id::NetworkId};
 use datasets_raw::{

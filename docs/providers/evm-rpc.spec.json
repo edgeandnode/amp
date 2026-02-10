@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvmRpcProviderConfig",
+  "description": "EVM RPC provider configuration for parsing TOML config.\n\nThis struct contains only the fields needed for provider construction.\nThe `kind` field validates that the config belongs to an `evm-rpc` provider\nat deserialization time.",
+  "type": "object",
+  "properties": {
+    "concurrent_request_limit": {
+      "description": "Optional limit on the number of concurrent requests.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0
+    },
+    "fetch_receipts_per_tx": {
+      "description": "Whether to use `eth_getTransactionReceipt` to fetch receipts for each transaction\nor `eth_getBlockReceipts` to fetch all receipts for a block in one call.",
+      "type": "boolean",
+      "default": false
+    },
+    "kind": {
+      "description": "The provider kind, must be `\"evm-rpc\"`.",
+      "const": "evm-rpc"
+    },
+    "network": {
+      "description": "The network this provider serves.",
+      "$ref": "#/$defs/NetworkId"
+    },
+    "rate_limit_per_minute": {
+      "description": "Optional rate limit for requests per minute.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 1
+    },
+    "rpc_batch_size": {
+      "description": "Maximum number of JSON-RPC requests to batch together.",
+      "type": "integer",
+      "format": "uint",
+      "default": 0,
+      "minimum": 0
+    },
+    "url": {
+      "description": "The URL of the EVM RPC endpoint (HTTP, HTTPS, or IPC).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "network",
+    "url"
+  ],
+  "$defs": {
+    "NetworkId": {
+      "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
