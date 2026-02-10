@@ -1,6 +1,7 @@
 use std::{
     future::Future,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crate::postgres::{PostgresBuilder, PostgresError};
@@ -54,6 +55,7 @@ pub(crate) enum ShutdownSignal {
 pub struct Handle {
     url: String,
     data_dir: PathBuf,
+    pid: u32,
     shutdown_tx: tokio::sync::oneshot::Sender<ShutdownSignal>,
 }
 
@@ -69,11 +71,13 @@ impl Handle {
     pub(crate) fn new(
         url: String,
         data_dir: PathBuf,
+        pid: u32,
         shutdown_tx: tokio::sync::oneshot::Sender<ShutdownSignal>,
     ) -> Self {
         Self {
             url,
             data_dir,
+            pid,
             shutdown_tx,
         }
     }
@@ -89,6 +93,47 @@ impl Handle {
     /// Gets the data directory where PostgreSQL stores its files.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    /// Sends SIGINT to the postgres process and blocks until it fully exits.
+    ///
+    /// This replicates the shutdown strategy used by pgtemp: send SIGINT (fast
+    /// shutdown) then `waitpid()` to block until the process is fully dead.
+    /// The blocking wait ensures PostgreSQL completes its System V shared memory
+    /// cleanup before the caller proceeds.
+    ///
+    /// Designed for use in `Drop` impls where async is unavailable.
+    /// Times out after 10 seconds if the process doesn't exit.
+    pub fn shutdown_blocking(&self) {
+        #[cfg(unix)]
+        {
+            use nix::sys::wait::WaitPidFlag;
+
+            let Ok(pid_i32) = i32::try_from(self.pid) else {
+                return;
+            };
+            let nix_pid = nix::unistd::Pid::from_raw(pid_i32);
+
+            // Fast shutdown via SIGINT (same as pgtemp).
+            if nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGINT).is_err() {
+                return; // process already gone
+            }
+
+            // Block until the process fully exits (including SysV cleanup).
+            // Use WNOHANG in a polling loop with a timeout so we don't hang
+            // indefinitely if something goes wrong.
+            for _ in 0..100 {
+                match nix::sys::wait::waitpid(nix_pid, Some(WaitPidFlag::WNOHANG)) {
+                    Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    // Process exited, signaled, or any other terminal state.
+                    Ok(_) => return,
+                    // ECHILD: not our child or already reaped — either way, done.
+                    Err(_) => return,
+                }
+            }
+        }
     }
 
     /// Initiates a graceful (smart) shutdown by sending SIGTERM to postgres.

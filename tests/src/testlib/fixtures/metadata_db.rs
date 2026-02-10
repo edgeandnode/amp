@@ -91,7 +91,9 @@ impl MetadataDb {
 
 impl Drop for MetadataDb {
     fn drop(&mut self) {
-        tracing::debug!("Aborting metadata database service task");
+        // Synchronous shutdown: SIGINT + waitpid to ensure postgres completes
+        // System V shared memory cleanup before kill_on_drop sends SIGKILL.
+        self.service_handle.shutdown_blocking();
         self._task.abort();
     }
 }
