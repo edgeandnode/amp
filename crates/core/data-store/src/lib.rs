@@ -275,6 +275,81 @@ impl DataStore {
         }))
     }
 
+    /// Activates a specific table revision by location ID.
+    ///
+    /// This atomically deactivates all existing revisions for the table and then
+    /// marks the specified revision as active within a single transaction.
+    ///
+    /// Unlike [`register_table_revision`](Self::register_table_revision), this does not
+    /// create a new revision — it activates an already-registered one.
+    pub async fn activate_table_revision(
+        &self,
+        dataset: &HashReference,
+        table_name: &TableName,
+        location_id: LocationId,
+    ) -> Result<(), ActivateTableRevisionError> {
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(ActivateTableRevisionError::TransactionBegin)?;
+
+        metadata_db::physical_table::mark_inactive_by_table_name(
+            &mut tx,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(ActivateTableRevisionError::MarkInactive)?;
+
+        let updated = metadata_db::physical_table::mark_active_by_id(
+            &mut tx,
+            location_id,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(ActivateTableRevisionError::MarkActive)?;
+
+        if !updated {
+            return Err(ActivateTableRevisionError::TableNotFound);
+        }
+
+        tx.commit()
+            .await
+            .map_err(ActivateTableRevisionError::TransactionCommit)?;
+
+        Ok(())
+    }
+
+    /// Deactivates all revisions for a table.
+    ///
+    /// Marks all revisions for the given dataset table as inactive. This is a
+    /// single database operation (not wrapped in a transaction).
+    pub async fn deactivate_table_revision(
+        &self,
+        dataset: &HashReference,
+        table_name: &TableName,
+    ) -> Result<(), DeactivateTableRevisionError> {
+        let updated = metadata_db::physical_table::mark_inactive_by_table_name(
+            &self.metadata_db,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(DeactivateTableRevisionError::MarkInactive)?;
+        if !updated {
+            return Err(DeactivateTableRevisionError::TableNotFound);
+        }
+        Ok(())
+    }
+
     /// Finds the latest table revision by lexicographic comparison of revision IDs.
     ///
     /// This function performs a `list_with_delimiter` query on the provided table path,
@@ -709,6 +784,95 @@ pub enum RegisterTableRevisionError {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to get active revision from metadata database")]
 pub struct GetTableActiveRevisionError(#[source] pub metadata_db::Error);
+
+/// Errors that occur when activating a physical table revision
+///
+/// This error type is used by `DataStore::activate_table_revision()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ActivateTableRevisionError {
+    /// Failed to begin transaction
+    ///
+    /// This error occurs when the database connection fails to start a transaction.
+    ///
+    /// Common causes:
+    /// - Database connection pool exhausted
+    /// - Database server unreachable
+    /// - Network connectivity issues
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to mark existing active revisions as inactive
+    ///
+    /// This error occurs when updating the status of previously active revisions fails.
+    /// The transaction is still open and will be rolled back.
+    ///
+    /// Common causes:
+    /// - Database connection lost during update
+    /// - Lock timeout on physical_tables rows
+    /// - Database constraint violation
+    #[error("Failed to mark table revision as inactive")]
+    MarkInactive(#[source] metadata_db::Error),
+
+    /// Failed to mark the specified revision as active
+    ///
+    /// This error occurs when updating the target revision to active status fails.
+    /// The transaction is still open and will be rolled back, so the inactive
+    /// status updates will not be persisted.
+    ///
+    /// Common causes:
+    /// - Database connection lost during update
+    /// - Lock timeout on physical_tables row
+    /// - Database constraint violation
+    #[error("Failed to mark table revision as active")]
+    MarkActive(#[source] metadata_db::Error),
+
+    /// No physical table row found for the given dataset and table name
+    ///
+    /// This error occurs when the UPDATE matched zero rows, meaning no
+    /// `physical_tables` entry exists for the dataset+table combination.
+    /// The table may not have been registered yet.
+    #[error("No physical table found for dataset and table name")]
+    TableNotFound,
+
+    /// Failed to commit transaction after successful database operations
+    ///
+    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
+    /// Neither the deactivation nor the activation will be persisted.
+    ///
+    /// Common causes:
+    /// - Database connection lost during commit
+    /// - Transaction conflict with concurrent operations
+    /// - Database constraint violation detected at commit time
+    ///
+    /// The operation is safe to retry from the beginning as no partial state was persisted.
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
+}
+
+/// Errors that occur when deactivating a physical table revision
+///
+/// This error type is used by `DataStore::deactivate_table_revision()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to mark table revision as inactive")]
+pub enum DeactivateTableRevisionError {
+    /// Failed to mark existing active revisions as inactive
+    ///
+    /// This error occurs when updating the status of previously active revisions fails.
+    ///
+    /// Common causes:
+    /// - Database connection lost during update
+    /// - Lock timeout on physical_tables rows
+    /// - Database constraint violation
+    #[error("Failed to mark table revision as inactive")]
+    MarkInactive(#[source] metadata_db::Error),
+    /// No physical table row found for the given dataset and table name
+    ///
+    /// This error occurs when the UPDATE matched zero rows, meaning no
+    /// `physical_tables` entry exists for the dataset+table combination.
+    /// The table may not have been registered yet.
+    #[error("No physical table found for dataset and table name")]
+    TableNotFound,
+}
 
 /// Failed to find the latest table revision in object store
 ///
