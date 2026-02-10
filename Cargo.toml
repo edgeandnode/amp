@@ -23,6 +23,7 @@ members = [
     "crates/core/monitoring",
     "crates/core/object-store",
     "crates/core/verification",
+    "crates/core/worker-datasets-derived",
     "crates/core/worker-datasets-raw",
     "crates/extractors/evm-rpc",
     "crates/extractors/evm-rpc/gen",

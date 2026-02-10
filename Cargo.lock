@@ -1046,6 +1046,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-worker-datasets-derived"
+version = "0.1.0"
+dependencies = [
+ "amp-data-store",
+ "common",
+ "datafusion",
+ "datasets-common",
+ "datasets-derived",
+ "dump",
+ "futures",
+ "metadata-db",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "amp-worker-datasets-raw"
 version = "0.1.0"
 dependencies = [
@@ -14132,6 +14148,7 @@ version = "0.1.0"
 dependencies = [
  "amp-config",
  "amp-data-store",
+ "amp-worker-datasets-derived",
  "amp-worker-datasets-raw",
  "async-trait",
  "backon",

@@ -18,7 +18,7 @@ use crate::{
 ///
 /// This function returns a future that executes the dump operation.
 /// Raw datasets are handled by `amp_worker_datasets_raw` and derived
-/// datasets are handled by `dump::dump_tables`.
+/// datasets are handled by `amp_worker_datasets_derived`.
 pub(super) fn new(
     job_ctx: WorkerJobCtx,
     job_id: JobId,
@@ -73,7 +73,7 @@ pub(super) fn new(
     let writer: metadata_db::JobId = job_id.into();
     async move {
         if dataset_kind == DerivedDatasetKind {
-            dump::dump_tables(
+            amp_worker_datasets_derived::dump(
                 ctx,
                 &reference,
                 microbatch_max_interval,
@@ -123,5 +123,5 @@ pub(crate) enum DumpError {
     /// environment creation failures, manifest retrieval errors, and table
     /// dump failures.
     #[error("Failed to dump derived dataset")]
-    Derived(#[source] dump::Error),
+    Derived(#[source] amp_worker_datasets_derived::Error),
 }
