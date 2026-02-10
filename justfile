@@ -200,18 +200,22 @@ test-ampup *EXTRA_FLAGS:
 alias codegen := gen
 
 GEN_MANIFEST_SCHEMAS_OUTDIR := "docs/manifest-schemas"
+GEN_PROVIDER_SCHEMAS_OUTDIR := "docs/providers"
 GEN_OPENAPI_SCHEMAS_OUTDIR := "docs/openapi-specs"
 GEN_TABLE_SCHEMAS_OUTDIR := "docs/schemas"
 
 # Run all codegen tasks
 [group: 'codegen']
 gen:
-    RUSTFLAGS="--cfg gen_schema_manifest --cfg gen_schema_tables --cfg gen_openapi_spec --cfg gen_worker_proto" cargo check --workspace
-    @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}} {{GEN_TABLE_SCHEMAS_OUTDIR}}
+    RUSTFLAGS="--cfg gen_schema_manifest --cfg gen_schema_tables --cfg gen_openapi_spec --cfg gen_worker_proto --cfg gen_schema_provider" cargo check --workspace
+    @mkdir -p {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}} {{GEN_TABLE_SCHEMAS_OUTDIR}} {{GEN_PROVIDER_SCHEMAS_OUTDIR}}
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
     @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/solana.spec.json
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json
+    @cp -f $(ls -t target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
+    @cp -f $(ls -t target/debug/build/amp-providers-firehose-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json
+    @cp -f $(ls -t target/debug/build/amp-providers-solana-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/evm-rpc.md
     @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/solana.md
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/firehose-evm.md
@@ -221,6 +225,9 @@ gen:
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/solana.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json"
+    @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
+    @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json"
+    @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json"
     @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/evm-rpc.md"
     @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/firehose-evm.md"
     @echo "  {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json"
@@ -258,6 +265,32 @@ gen-firehose-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{DEST_DIR}}/firehose.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
+
+### Provider Config Schema generation
+
+# Generate EVM RPC provider config JSON schema
+[group: 'codegen']
+gen-evm-rpc-provider-schema DEST_DIR=GEN_PROVIDER_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-evm-rpc-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json | head -1) {{DEST_DIR}}/evm-rpc.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/evm-rpc.spec.json"
+
+# Generate Firehose provider config JSON schema
+[group: 'codegen']
+gen-firehose-provider-schema DEST_DIR=GEN_PROVIDER_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-firehose-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/amp-providers-firehose-gen-*/out/schema.json | head -1) {{DEST_DIR}}/firehose.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
+
+# Generate Solana provider config JSON schema
+[group: 'codegen']
+gen-solana-provider-schema DEST_DIR=GEN_PROVIDER_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-solana-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/amp-providers-solana-gen-*/out/schema.json | head -1) {{DEST_DIR}}/solana.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/solana.spec.json"
 
 ### Table Schema markdown generation
 

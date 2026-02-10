@@ -13,7 +13,11 @@ network = "mainnet"
 # Firehose gRPC endpoint URL
 url = "${FIREHOSE_ETH_MAINNET_URL}"
 
+# ============================
+# Optional Fields
+# ============================
+
 # Authentication token for the Firehose endpoint (optional)
 # Required if your Firehose endpoint requires authentication
 # Default: no authentication
-token = "${FIREHOSE_ETH_MAINNET_TOKEN}"
+# token = "${FIREHOSE_ETH_MAINNET_TOKEN}"

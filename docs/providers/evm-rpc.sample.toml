@@ -15,6 +15,21 @@ network = "mainnet"
 # - ipc:// for IPC socket connections
 url = "${RPC_ETH_MAINNET_URL}"
 
+# ============================
+# Query Engine Fields
+# ============================
+# These fields are used by the query engine for provider-based UDFs (e.g., eth_call)
+
+# Rate limit in requests per minute (optional)
+# When set, limits the number of requests made to the RPC endpoint to avoid rate limiting
+# Default: no rate limit
+# rate_limit_per_minute = 600
+
+# ============================
+# Extractor-Only Fields
+# ============================
+# These fields are only used by the extractor for blockchain data extraction
+
 # Maximum number of concurrent requests to the RPC endpoint (optional)
 # Default: 1024
 # concurrent_request_limit = 1024
@@ -23,11 +38,6 @@ url = "${RPC_ETH_MAINNET_URL}"
 # Set to 0 to disable batching
 # Default: 0 (no batching)
 # rpc_batch_size = 0
-
-# Rate limit in requests per minute (optional)
-# When set, limits the number of requests made to the RPC endpoint to avoid rate limiting
-# Default: no rate limit
-# rate_limit_per_minute = 600
 
 # Whether to fetch transaction receipts individually or in bulk (optional)
 # - true: Use eth_getTransactionReceipt for each transaction (slower, more compatible)

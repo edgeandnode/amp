@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SolanaProviderConfig",
+  "description": "Solana provider configuration for parsing TOML config.\n\nThis structure defines the parameters required to connect to a Solana\nRPC endpoint for blockchain data extraction. The `kind` field validates\nthat the config belongs to a `solana` provider at deserialization time.",
+  "type": "object",
+  "properties": {
+    "keep_of1_car_files": {
+      "description": "Whether to keep downloaded CAR files after processing.",
+      "type": "boolean",
+      "default": false
+    },
+    "kind": {
+      "description": "The provider kind, must be `\"solana\"`.",
+      "const": "solana"
+    },
+    "max_rpc_calls_per_second": {
+      "description": "Optional rate limit for RPC calls per second.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 1
+    },
+    "network": {
+      "description": "The network this provider serves.",
+      "$ref": "#/$defs/NetworkId"
+    },
+    "of1_car_directory": {
+      "description": "Directory for storing Old Faithful ONE CAR files.",
+      "type": "string"
+    },
+    "rpc_provider_url": {
+      "description": "The URL of the Solana RPC endpoint.",
+      "type": "string"
+    },
+    "use_archive": {
+      "description": "Controls when to use the Solana archive for historical data.",
+      "$ref": "#/$defs/UseArchive",
+      "default": "always"
+    }
+  },
+  "required": [
+    "kind",
+    "network",
+    "rpc_provider_url",
+    "of1_car_directory"
+  ],
+  "$defs": {
+    "NetworkId": {
+      "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
+      "type": "string",
+      "minLength": 1
+    },
+    "UseArchive": {
+      "description": "Configures when to use the Solana archive for fetching historical data.",
+      "oneOf": [
+        {
+          "description": "Automatically determine whether to use the archive based on block age.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Always use the archive, even for recent blocks.",
+          "type": "string",
+          "const": "always"
+        },
+        {
+          "description": "Never use the archive, fetch all blocks from the RPC provider.",
+          "type": "string",
+          "const": "never"
+        }
+      ]
+    }
+  }
+}

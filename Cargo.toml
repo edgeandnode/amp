@@ -22,6 +22,13 @@ members = [
     "crates/core/metadata-db",
     "crates/core/monitoring",
     "crates/core/object-store",
+    "crates/core/providers-common",
+    "crates/core/providers-evm-rpc",
+    "crates/core/providers-evm-rpc/gen",
+    "crates/core/providers-firehose",
+    "crates/core/providers-firehose/gen",
+    "crates/core/providers-solana",
+    "crates/core/providers-solana/gen",
     "crates/core/verification",
     "crates/core/worker-datasets-derived",
     "crates/core/worker-datasets-raw",
@@ -120,6 +127,7 @@ schemars = "1.0.4"
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
+serde_with = "3.9.0"
 serde_yaml = "0.9.34"
 sqlparser = "0.59"
 tempfile = "3.13.0"
