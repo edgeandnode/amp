@@ -7,14 +7,12 @@ use common::{
     dataset_store::DatasetStore,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
 };
-use datasets_common::hash_reference::HashReference;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
 pub mod block_ranges;
 pub mod check;
 pub mod compaction;
 pub mod config;
-mod derived_dataset;
 pub mod metrics;
 pub mod parquet_writer;
 pub mod progress;
@@ -39,51 +37,6 @@ use crate::{
     config::Config,
     metrics::MetricsRegistry,
 };
-
-/// Dumps derived dataset tables. All tables must belong to the same dataset.
-pub async fn dump_tables(
-    ctx: Ctx,
-    dataset: &HashReference,
-    microbatch_max_interval: u64,
-    end: EndBlock,
-    writer: impl Into<Option<metadata_db::JobId>>,
-    progress_reporter: Option<Arc<dyn ProgressReporter>>,
-) -> Result<(), Error> {
-    derived_dataset::dump(
-        ctx,
-        dataset,
-        microbatch_max_interval,
-        end,
-        writer,
-        progress_reporter,
-    )
-    .await
-    .map_err(Error::DerivedDatasetDump)?;
-
-    Ok(())
-}
-
-/// Errors that occur during dump_tables operations
-///
-/// This error type is used by the `dump_tables()` function to report issues encountered
-/// when dumping derived dataset tables to Parquet files.
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Failed to dump derived dataset
-    ///
-    /// This occurs when the derived dataset dump operation fails. This wraps errors
-    /// from the `derived_dataset::dump()` function which handles SQL query execution
-    /// and Parquet file writing for derived datasets.
-    ///
-    /// Common causes:
-    /// - Query environment creation failures
-    /// - Consistency check failures
-    /// - Manifest retrieval errors
-    /// - Table dump failures
-    /// - Parallel task execution failures
-    #[error("Failed to dump derived dataset")]
-    DerivedDatasetDump(#[source] derived_dataset::Error),
-}
 
 /// Dataset dump context
 #[derive(Clone)]

@@ -1,0 +1,17 @@
+[package]
+name = "amp-worker-datasets-derived"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+amp-data-store = { path = "../data-store" }
+common = { path = "../common" }
+datafusion.workspace = true
+datasets-common = { path = "../datasets-common" }
+datasets-derived = { path = "../datasets-derived" }
+dump = { path = "../dump" }
+futures.workspace = true
+metadata-db = { path = "../metadata-db" }
+thiserror.workspace = true
+tracing.workspace = true
