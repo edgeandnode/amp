@@ -136,7 +136,7 @@ pub async fn mark_inactive_by_table_name<'c, E>(
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
-) -> Result<(), Error>
+) -> Result<bool, Error>
 where
     E: Executor<'c>,
 {
@@ -168,7 +168,7 @@ pub async fn mark_active_by_id<'c, E>(
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
-) -> Result<(), Error>
+) -> Result<bool, Error>
 where
     E: Executor<'c>,
 {

@@ -15,7 +15,6 @@ path = "src/main.rs"
 
 [dependencies]
 admin-client = { path = "../../clients/admin" }
-alloy.workspace = true
 amp-object-store = { path = "../../core/object-store" }
 anyhow.workspace = true
 clap.workspace = true

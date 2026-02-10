@@ -81,7 +81,7 @@ impl From<BTreeMap<NetworkId, (BlockNum, [u8; 32])>> for ResumeWatermark {
     }
 }
 
-/// A block range associated with the matadata from a file in object storage.
+/// A block range associated with the metadata from a file in object storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
     pub id: FileId,
