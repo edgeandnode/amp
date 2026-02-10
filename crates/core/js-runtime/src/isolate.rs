@@ -5,37 +5,60 @@ use v8::{
 };
 
 use crate::{
-    BoxError,
-    convert::{FromV8, ToV8},
+    convert::{FromV8, FromV8Error, ToV8, ToV8Error},
     exception::{ExceptionMessage, catch},
     init_platform,
 };
 
+/// Errors that occur during JavaScript isolate operations
+///
+/// This error type is used by [`Isolate::invoke`], [`Isolate::invoke_batch`],
+/// and internal helpers like `call_function` and `compile_script`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An unhandled JavaScript exception was thrown during script compilation or execution
+    ///
+    /// This wraps the full exception details including message, position, and stack trace
+    /// from the V8 engine.
     #[error("exception in script: {0}")]
-    Exception(#[from] Box<ExceptionMessage>),
-
+    Exception(#[source] Box<ExceptionMessage>),
+    /// A string passed to V8 exceeded the maximum supported length
+    ///
+    /// V8 has internal limits on string length. This occurs when a script source
+    /// or filename exceeds that limit.
     #[error("string too long: {0}")]
     StringTooLong(usize),
-
+    /// The requested function was not found in the script's global scope
+    ///
+    /// This occurs when the script does not define a function with the given name,
+    /// or the global property exists but is not a function.
     #[error("function {0} not found")]
     FunctionNotFound(String),
-
+    /// A general runtime error that does not fit other categories
     #[error("runtime error: {0}")]
     Other(String),
-
+    /// Failed to convert the JavaScript return value back to the expected Rust type
+    ///
+    /// This occurs when the JS function returns a value that cannot be represented
+    /// as the requested Rust type `R` in `invoke<R>`.
     #[error("error converting return value: {0}")]
-    ConvertReturnValue(BoxError),
-
-    #[error("error converting param at idx {0}: {1}")]
-    ConvertParam(usize, BoxError),
-
+    ConvertReturnValue(#[source] Box<FromV8Error>),
+    /// Failed to convert a Rust parameter to a V8 value before calling the JS function
+    ///
+    /// The `usize` field indicates the zero-based index of the parameter that failed.
+    #[error("error converting param at index {0}")]
+    ConvertParam(usize, #[source] ToV8Error),
+    /// The JS invocation panicked inside the isolate thread
+    ///
+    /// This should not occur under normal operation. It indicates a bug in the
+    /// V8 bindings or an unrecoverable internal error.
     #[error("JS invocation panicked: {0}")]
     Panic(String),
-
+    /// Failed to acquire an isolate from the pool
+    ///
+    /// This occurs when the isolate pool is exhausted or has been closed.
     #[error("isolate pool error: {0}")]
-    PoolError(#[from] deadpool::unmanaged::PoolError),
+    PoolError(#[source] deadpool::unmanaged::PoolError),
 }
 
 #[derive(Debug)]
@@ -95,7 +118,7 @@ impl Isolate {
                 NoCacheReason::NoReason,
             ) {
                 Some(compiled_script) => v8::Global::new(s, compiled_script),
-                None => return Err(Box::new(catch(s)).into()),
+                None => return Err(Error::Exception(Box::new(catch(s)))),
             }
         };
         self.scripts.insert(key, compiled_script.clone());
@@ -145,7 +168,7 @@ impl Isolate {
         let s = &mut v8::TryCatch::new(s);
         match script.run(s) {
             Some(_) => {} // Ignore script return value
-            None => return Err(Box::new(catch(s)).into()),
+            None => return Err(Error::Exception(Box::new(catch(s)))),
         }
 
         // Call function
@@ -171,10 +194,10 @@ fn call_function<'a, 't, 's, R: FromV8>(
 
     let ret_val = match func.open(s).call(s, receiver.into(), &params) {
         Some(ret_val) => ret_val,
-        None => return Err(Box::new(catch(s)).into()),
+        None => return Err(Error::Exception(Box::new(catch(s)))),
     };
 
-    R::from_v8(s, ret_val).map_err(Error::ConvertReturnValue)
+    R::from_v8(s, ret_val).map_err(|e| Error::ConvertReturnValue(Box::new(e)))
 }
 
 /// Global context must define a `Module` that contains a `run` function

@@ -1,7 +1,5 @@
 use v8::{Array, BigInt, Local, Object, TypedArray};
 
-use crate::BoxError;
-
 #[derive(Debug)]
 pub enum V8Value<'s> {
     Undefined,
@@ -26,7 +24,7 @@ impl<'s> V8Value<'s> {
     pub fn new(
         scope: &mut v8::HandleScope<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, V8ValueError> {
         if value.is_undefined() {
             Ok(V8Value::Undefined)
         } else if value.is_null() {
@@ -54,10 +52,15 @@ impl<'s> V8Value<'s> {
         } else if value.is_object() {
             Ok(V8Value::Object(value.to_object(scope).unwrap()))
         } else {
-            Err(BoxError::from(format!(
-                "Unsupported JS type {}",
-                value.type_repr()
-            )))
+            Err(V8ValueError {
+                js_type: value.type_repr().to_string(),
+            })
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Unsupported JS type {js_type}")]
+pub struct V8ValueError {
+    js_type: String,
 }

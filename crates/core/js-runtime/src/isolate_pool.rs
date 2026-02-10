@@ -128,7 +128,7 @@ impl IsolatePool {
         let (invoke, res_rx) =
             JsInvoke::<R>::new(filename.into(), script.into(), function.into(), params);
 
-        let isolate_thread = self.pool.get().await?;
+        let isolate_thread = self.pool.get().await.map_err(Error::PoolError)?;
 
         // Unwrapping a `try_send` could panic in two cases:
         //
