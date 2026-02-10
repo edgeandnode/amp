@@ -71,6 +71,7 @@ const AMP_CRATES: &[&str] = &[
     "amp_datasets_registry",
     "amp_object_store",
     "amp_providers_registry",
+    "amp_worker_datasets_raw",
     "ampcc",
     "ampctl",
     "ampd",
