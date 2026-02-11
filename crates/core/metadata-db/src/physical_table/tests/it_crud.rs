@@ -5,9 +5,10 @@ use pgtemp::PgTempDB;
 use crate::{
     DatasetName, DatasetNamespace, WorkerInfo, WorkerNodeId,
     db::Connection,
+    error::Error,
     jobs::{self, JobId},
     manifests::ManifestHash,
-    physical_table::{self, LocationId, TableName, TablePath},
+    physical_table::{self, GetActiveByLocationIdError, LocationId, TableName, TablePath},
     workers,
 };
 
@@ -568,7 +569,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 }
 
 #[tokio::test]
-async fn get_by_id_returns_existing_location() {
+async fn get_by_location_id_returns_existing_location() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
@@ -603,42 +604,50 @@ async fn get_by_id_returns_existing_location() {
     .expect("Failed to mark location active");
 
     //* When
-    let location = physical_table::get_by_id_with_details(&mut conn, inserted_id)
+    let location = physical_table::get_by_location_id_with_details(&mut conn, inserted_id)
         .await
         .expect("Failed to get location by id");
 
     //* Then
     assert!(
         location.is_some(),
-        "get_by_id_with_details should return existing location"
+        "get_by_location_id_with_details should return existing location"
     );
-    let location = location.unwrap();
+    let location = location.expect("location should exist for active revision");
     assert_eq!(
         location.id(),
         inserted_id,
-        "get_by_id_with_details should return location matching ID"
+        "get_by_location_id_with_details should return location matching ID"
     );
     assert_eq!(
-        location.table.dataset_name, "test-dataset",
-        "get_by_id_with_details should return location with persisted dataset_name"
+        location.revision.metadata.dataset_name, "test-dataset",
+        "get_by_location_id_with_details should return location with persisted dataset_name"
     );
     assert_eq!(
-        location.table.table_name, "test_table",
-        "get_by_id_with_details should return location with persisted table_name"
+        location.revision.metadata.table_name, "test_table",
+        "get_by_location_id_with_details should return location with persisted table_name"
     );
     assert_eq!(
-        location.path(),
-        &path,
-        "get_by_id_with_details should return location with persisted path"
+        location.revision.metadata.dataset_namespace, "test-namespace",
+        "get_by_location_id_with_details should return location with persisted dataset_namespace"
+    );
+    assert_eq!(
+        location.revision.metadata.manifest_hash,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "get_by_location_id_with_details should return location with persisted manifest_hash"
+    );
+    assert_eq!(
+        &location.revision.path, &path,
+        "get_by_location_id_with_details should return location with persisted path"
     );
     assert!(
         location.active(),
-        "get_by_id_with_details should return location with persisted active status"
+        "get_by_location_id_with_details should return location with persisted active status"
     );
 }
 
 #[tokio::test]
-async fn get_by_id_returns_none_for_nonexistent_location() {
+async fn get_by_location_id_returns_none_for_nonexistent_location() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
@@ -651,14 +660,266 @@ async fn get_by_id_returns_none_for_nonexistent_location() {
     let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
 
     //* When
-    let location = physical_table::get_by_id_with_details(&mut conn, nonexistent_id)
+    let location = physical_table::get_by_location_id_with_details(&mut conn, nonexistent_id)
         .await
         .expect("Failed to get location by id");
 
     //* Then
     assert!(
         location.is_none(),
-        "get_by_id_with_details should return None for nonexistent location_id"
+        "get_by_location_id_with_details should return None for nonexistent location_id"
+    );
+}
+
+#[tokio::test]
+async fn get_by_location_id_with_details_returns_inactive_revision() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
+    let table_name = TableName::from_ref_unchecked("test_table");
+    let path =
+        TablePath::from_ref_unchecked("test-dataset/test_table/inactive-revision-for-get-by-id");
+
+    let inserted_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            .await
+            .expect("Failed to insert location");
+    // Do NOT call mark_active_by_id - revision stays inactive
+
+    //* When
+    let location = physical_table::get_by_location_id_with_details(&mut conn, inserted_id)
+        .await
+        .expect("Failed to get location by id");
+
+    //* Then
+    assert!(
+        location.is_some(),
+        "get_by_location_id_with_details should return inactive revision by ID"
+    );
+    let location = location.expect("location should exist for inactive revision");
+    assert_eq!(
+        location.id(),
+        inserted_id,
+        "get_by_location_id_with_details should return location matching ID"
+    );
+    assert!(
+        !location.active(),
+        "get_by_location_id_with_details should return inactive revision with active=false"
+    );
+    assert_eq!(
+        &location.revision.path, &path,
+        "get_by_location_id_with_details should return location with persisted path"
+    );
+}
+
+#[tokio::test]
+async fn get_active_by_location_id_returns_some_when_active() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
+    let table_name = TableName::from_ref_unchecked("test_table");
+    let path = TablePath::from_ref_unchecked("test-dataset/test_table/active-for-get-active");
+
+    let inserted_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            .await
+            .expect("Failed to insert location");
+    physical_table::mark_active_by_id(
+        &mut conn,
+        inserted_id,
+        &namespace,
+        &name,
+        &hash,
+        &table_name,
+    )
+    .await
+    .expect("Failed to mark location active");
+
+    //* When
+    let table = physical_table::get_active_by_location_id(&mut conn, inserted_id)
+        .await
+        .expect("Failed to get active table by location id");
+
+    //* Then
+    assert_eq!(
+        table.manifest_hash.as_str(),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "get_active_by_location_id should return PhysicalTable with correct manifest_hash"
+    );
+    assert_eq!(
+        table.table_name.as_str(),
+        "test_table",
+        "get_active_by_location_id should return PhysicalTable with correct table_name"
+    );
+    assert_eq!(
+        table.active_revision_id,
+        Some(inserted_id),
+        "get_active_by_location_id should return PhysicalTable with correct active_revision_id"
+    );
+}
+
+#[tokio::test]
+async fn get_active_by_location_id_returns_err_inactive_when_inactive() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
+    let table_name = TableName::from_ref_unchecked("test_table");
+    let path = TablePath::from_ref_unchecked("test-dataset/test_table/inactive-for-get-active");
+
+    let inserted_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            .await
+            .expect("Failed to insert location");
+    // Do NOT call mark_active_by_id - revision stays inactive
+
+    //* When
+    let result = physical_table::get_active_by_location_id(&mut conn, inserted_id).await;
+
+    //* Then
+    assert!(
+        matches!(
+            result,
+            Err(Error::GetActiveByLocationId(
+                GetActiveByLocationIdError::Inactive
+            ))
+        ),
+        "get_active_by_location_id should return Inactive error when revision is not active, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn get_active_by_location_id_returns_err_not_found_for_nonexistent() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
+
+    //* When
+    let result = physical_table::get_active_by_location_id(&mut conn, nonexistent_id).await;
+
+    //* Then
+    assert!(
+        matches!(
+            result,
+            Err(Error::GetActiveByLocationId(
+                GetActiveByLocationIdError::NotFound
+            ))
+        ),
+        "get_active_by_location_id should return NotFound error for nonexistent location_id, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn get_by_location_id_with_details_returns_revision_with_writer_when_assigned() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
+    let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
+    let worker_info = WorkerInfo::default();
+    workers::register(&mut conn, &worker_id, worker_info)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"operation": "write"});
+    let job_desc_str =
+        serde_json::to_string(&job_desc).expect("Failed to serialize job description");
+    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc_str)
+        .await
+        .expect("Failed to register job");
+
+    let table_name = TableName::from_ref_unchecked("writer_table");
+    let path = TablePath::from_ref_unchecked("test-dataset/writer_table/writer-assigned-revision");
+
+    let inserted_id =
+        physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            .await
+            .expect("Failed to insert location");
+    physical_table::mark_active_by_id(
+        &mut conn,
+        inserted_id,
+        &namespace,
+        &name,
+        &hash,
+        &table_name,
+    )
+    .await
+    .expect("Failed to mark location active");
+
+    physical_table::assign_job_writer(&mut conn, &[inserted_id], job_id)
+        .await
+        .expect("Failed to assign job writer");
+
+    //* When
+    let location = physical_table::get_by_location_id_with_details(&mut conn, inserted_id)
+        .await
+        .expect("Failed to get location by id");
+
+    //* Then
+    let location = location.expect("Location should exist");
+    assert!(
+        location.writer.is_some(),
+        "get_by_location_id_with_details should return writer when assigned"
+    );
+    let writer = location
+        .writer
+        .expect("writer should be present after assignment");
+    assert_eq!(
+        writer.id, job_id,
+        "get_by_location_id_with_details should return correct writer job_id"
     );
 }
 
