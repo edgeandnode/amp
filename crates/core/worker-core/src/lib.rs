@@ -1,4 +1,4 @@
-//! # Dump
+//! # Worker Core
 
 use std::sync::Arc;
 

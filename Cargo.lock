@@ -962,7 +962,7 @@ name = "amp-config"
 version = "0.1.0"
 dependencies = [
  "amp-object-store",
- "dump",
+ "amp-worker-core",
  "figment",
  "fs-err",
  "metadata-db",
@@ -1124,15 +1124,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "amp-worker-datasets-derived"
+name = "amp-worker-core"
 version = "0.1.0"
 dependencies = [
  "amp-data-store",
  "common",
  "datafusion",
  "datasets-common",
+ "futures",
+ "metadata-db",
+ "monitoring",
+ "object_store",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "amp-worker-datasets-derived"
+version = "0.1.0"
+dependencies = [
+ "amp-data-store",
+ "amp-worker-core",
+ "common",
+ "datafusion",
+ "datasets-common",
  "datasets-derived",
- "dump",
  "futures",
  "metadata-db",
  "thiserror 2.0.18",
@@ -1144,10 +1166,10 @@ name = "amp-worker-datasets-raw"
 version = "0.1.0"
 dependencies = [
  "amp-data-store",
+ "amp-worker-core",
  "common",
  "datasets-common",
  "datasets-raw",
- "dump",
  "futures",
  "metadata-db",
  "monitoring",
@@ -4606,28 +4628,6 @@ name = "dtor-proc-macro"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5"
-
-[[package]]
-name = "dump"
-version = "0.1.0"
-dependencies = [
- "amp-data-store",
- "common",
- "datafusion",
- "datasets-common",
- "futures",
- "metadata-db",
- "monitoring",
- "object_store",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
-]
 
 [[package]]
 name = "dunce"
@@ -12455,6 +12455,7 @@ dependencies = [
  "amp-datasets-registry",
  "amp-object-store",
  "amp-providers-registry",
+ "amp-worker-core",
  "ampctl",
  "anyhow",
  "arrow-flight",
@@ -12468,7 +12469,6 @@ dependencies = [
  "datasets-common",
  "datasets-derived",
  "dotenvy",
- "dump",
  "evm-rpc-datasets",
  "firehose-datasets",
  "fs-err",
@@ -14269,6 +14269,7 @@ version = "0.1.0"
 dependencies = [
  "amp-config",
  "amp-data-store",
+ "amp-worker-core",
  "amp-worker-datasets-derived",
  "amp-worker-datasets-raw",
  "async-trait",
@@ -14277,7 +14278,6 @@ dependencies = [
  "common",
  "datasets-common",
  "datasets-derived",
- "dump",
  "futures",
  "metadata-db",
  "monitoring",

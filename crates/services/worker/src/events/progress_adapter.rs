@@ -1,19 +1,19 @@
-//! Progress reporter adapter for bridging dump crate progress to event emitter.
+//! Progress reporter adapter for bridging worker core progress to event emitter.
 //!
-//! This module provides a [`WorkerProgressReporter`] that implements the dump crate's
-//! [`dump::ProgressReporter`] trait and forwards progress updates to the worker's
+//! This module provides a [`WorkerProgressReporter`] that implements the worker core crate's
+//! [`amp_worker_core::ProgressReporter`] trait and forwards progress updates to the worker's
 //! [`EventEmitter`] for Kafka streaming.
 
 use std::sync::Arc;
 
-use dump::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo};
+use amp_worker_core::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo};
 
 use super::EventEmitter;
 use crate::{job::JobId, kafka::proto};
 
-/// Adapter that bridges dump crate progress reporting to worker event emission.
+/// Adapter that bridges worker core progress reporting to worker event emission.
 ///
-/// This struct implements [`dump::ProgressReporter`] and translates progress updates
+/// This struct implements [`amp_worker_core::ProgressReporter`] and translates progress updates
 /// into proto events that are sent to the configured [`EventEmitter`].
 pub struct WorkerProgressReporter {
     job_id: JobId,
@@ -36,7 +36,7 @@ impl WorkerProgressReporter {
     }
 }
 
-impl dump::ProgressReporter for WorkerProgressReporter {
+impl amp_worker_core::ProgressReporter for WorkerProgressReporter {
     fn report_progress(&self, update: ProgressUpdate) {
         let event = proto::SyncProgress {
             job_id: *self.job_id,

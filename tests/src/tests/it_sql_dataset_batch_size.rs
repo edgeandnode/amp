@@ -4,13 +4,13 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
-use common::{dataset_store::DatasetStore, metadata::Generation};
-use datasets_common::reference::Reference;
-use dump::{
+use amp_worker_core::{
     compaction::{AmpCompactor, SegmentSizeLimit},
     parquet_opts,
 };
+use anyhow::Result;
+use common::{dataset_store::DatasetStore, metadata::Generation};
+use datasets_common::reference::Reference;
 use monitoring::logging;
 
 use crate::testlib::{

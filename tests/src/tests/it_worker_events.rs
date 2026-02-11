@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use dump::{ProgressReporter, ProgressUpdate};
+use amp_worker_core::{ProgressReporter, ProgressUpdate};
 use monitoring::logging;
 use worker::{
     events::{EventEmitter, WorkerProgressReporter},

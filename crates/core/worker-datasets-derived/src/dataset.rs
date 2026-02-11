@@ -97,6 +97,21 @@
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use amp_data_store::file_name::FileName;
+use amp_worker_core::{
+    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
+    check::consistency_check,
+    compaction::{AmpCompactor, AmpCompactorTaskError},
+    metrics,
+    parquet_writer::{
+        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
+        ParquetFileWriterOutput, commit_metadata,
+    },
+    progress::{
+        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
+    },
+    tasks::{self, TryWaitAllError},
+};
 use common::{
     BlockNum, ResumeWatermark,
     catalog::{
@@ -127,21 +142,6 @@ use datasets_derived::{
     deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::TableInput,
 };
-use dump::{
-    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
-    block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
-    check::consistency_check,
-    compaction::{AmpCompactor, AmpCompactorTaskError},
-    metrics,
-    parquet_writer::{
-        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
-        ParquetFileWriterOutput, commit_metadata,
-    },
-    progress::{
-        ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
-    },
-    tasks::{self, TryWaitAllError},
-};
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::{Instrument, instrument};
@@ -165,7 +165,7 @@ pub async fn dump(
         .map(Arc::new)
         .map_err(Error::GetDerivedManifest)?;
 
-    let parquet_opts = dump::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = amp_worker_core::parquet_opts(&ctx.config.parquet);
 
     // Get dataset for table resolution
     let dataset = ctx
@@ -354,7 +354,7 @@ pub enum Error {
     ConsistencyCheck {
         table_name: String,
         #[source]
-        source: dump::check::ConsistencyError,
+        source: amp_worker_core::check::ConsistencyError,
     },
 
     /// Failed to retrieve derived dataset manifest

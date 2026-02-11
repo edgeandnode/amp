@@ -2,9 +2,9 @@
 
 use std::{future::Future, sync::Arc};
 
+use amp_worker_core::{Ctx, ProgressReporter, metrics::MetricsRegistry};
 use datasets_common::hash_reference::HashReference;
 use datasets_derived::DerivedDatasetKind;
-use dump::{Ctx, ProgressReporter, metrics::MetricsRegistry};
 use tracing::{Instrument, info_span};
 
 use crate::{

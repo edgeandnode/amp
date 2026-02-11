@@ -30,7 +30,9 @@ The Amp workspace follows a hierarchical organization under the `crates/` direct
 - **`metadata-db`**: PostgreSQL database operations and worker coordination
 - **`dataset-store`**: Dataset management, manifest parsing, SQL dataset support
 - **`js-runtime`**: JavaScript UDF execution runtime
-- **`dump`**: Core data extraction logic and parallel processing
+- **`worker-core`**: Core data extraction logic and parallel processing
+- **`worker-datasets-raw`**: Raw dataset extraction into Parquet files
+- **`worker-datasets-derived`**: Derived dataset materialization via SQL queries
 - **`monitoring`**: Observability, metrics, and telemetry
 
 ### `crates/bin/` - Executable Applications
