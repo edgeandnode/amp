@@ -50,6 +50,12 @@ enum Commands {
     #[command(long_about = include_str!("cmd/dataset__long_about.md"))]
     Dataset(cmd::dataset::Commands),
 
+    /// Manage table revisions
+    #[command(subcommand)]
+    #[command(alias = "tables")]
+    #[command(long_about = include_str!("cmd/table__long_about.md"))]
+    Table(cmd::table::Commands),
+
     /// Manage worker nodes
     #[command(subcommand)]
     #[command(alias = "workers")]
@@ -69,6 +75,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Provider(command) => cmd::provider::run(command).await?,
         Commands::Job(command) => cmd::job::run(command).await?,
         Commands::Dataset(command) => cmd::dataset::run(command).await?,
+        Commands::Table(command) => cmd::table::run(command).await?,
         Commands::Worker(command) => cmd::worker::run(command).await?,
         Commands::Verify(args) => verification::run(args).await?,
     }

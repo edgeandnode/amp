@@ -26,6 +26,11 @@ pub struct BlockRange {
     ///
     /// For genesis blocks (block 0), use the zero hash (default).
     pub prev_hash: BlockHash,
+    /// Unix timestamp (seconds) of the end block.
+    ///
+    /// Optional for backwards compatibility with existing segments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<u64>,
 }
 
 impl BlockRange {
@@ -41,7 +46,13 @@ impl BlockRange {
         *self.numbers.end()
     }
 
-    /// Return true if `self` is sequenced immediately before `other`.
+    /// Get the timestamp of the end block, if available.
+    #[inline]
+    pub fn timestamp(&self) -> Option<u64> {
+        self.timestamp
+    }
+
+    /// Return true iff `self` is sequenced immediately before `other`.
     /// We allow gaps between numbers, but the hashes must line up.
     #[inline]
     pub fn adjacent(&self, other: &Self) -> bool {
@@ -63,12 +74,14 @@ mod tests {
             network: "test".parse().expect("valid network id"),
             hash: [1u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         };
         let r2 = BlockRange {
             numbers: 8..=10,
             network: "test".parse().expect("valid network id"),
             hash: [2u8; 32].into(),
             prev_hash: [1u8; 32].into(),
+            timestamp: None,
         };
 
         //* When checking adjacency
@@ -86,12 +99,14 @@ mod tests {
             network: "test".parse().expect("valid network id"),
             hash: [1u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         };
         let r2 = BlockRange {
             numbers: 10..=12,
             network: "test".parse().expect("valid network id"),
             hash: [2u8; 32].into(),
             prev_hash: [1u8; 32].into(),
+            timestamp: None,
         };
 
         //* When checking adjacency
@@ -109,12 +124,14 @@ mod tests {
             network: "test".parse().expect("valid network id"),
             hash: [1u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         };
         let r2 = BlockRange {
             numbers: 8..=10,
             network: "test".parse().expect("valid network id"),
             hash: [2u8; 32].into(),
             prev_hash: [99u8; 32].into(),
+            timestamp: None,
         };
 
         //* When checking adjacency
@@ -132,12 +149,14 @@ mod tests {
             network: "mainnet".parse().expect("valid network id"),
             hash: [1u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         };
         let r2 = BlockRange {
             numbers: 8..=10,
             network: "sepolia".parse().expect("valid network id"),
             hash: [2u8; 32].into(),
             prev_hash: [1u8; 32].into(),
+            timestamp: None,
         };
 
         //* When checking adjacency
@@ -155,12 +174,14 @@ mod tests {
             network: "test".parse().expect("valid network id"),
             hash: [1u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         };
         let r2 = BlockRange {
             numbers: 8..=12,
             network: "test".parse().expect("valid network id"),
             hash: [2u8; 32].into(),
             prev_hash: [1u8; 32].into(),
+            timestamp: None,
         };
 
         //* When checking adjacency
@@ -178,12 +199,14 @@ mod tests {
             network: "test".parse().expect("valid network id"),
             hash: [1u8; 32].into(),
             prev_hash: [0u8; 32].into(),
+            timestamp: None,
         };
         let r2 = BlockRange {
             numbers: 5..=7,
             network: "test".parse().expect("valid network id"),
             hash: [2u8; 32].into(),
             prev_hash: [1u8; 32].into(),
+            timestamp: None,
         };
 
         //* When checking adjacency

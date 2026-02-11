@@ -28,6 +28,12 @@ pub struct MetricsRegistry {
     /// Latest block number successfully dumped for a dataset/table
     pub latest_block: telemetry::metrics::Gauge<u64>,
 
+    /// Unix timestamp (seconds) of the end block in the latest segment written
+    pub latest_segment_timestamp: telemetry::metrics::Gauge<u64>,
+
+    /// Delay in seconds between segment end block timestamp and write time
+    pub latest_segment_delay: telemetry::metrics::Gauge<u64>,
+
     /// Duration of dump operations from start to completion in milliseconds
     pub dump_duration: telemetry::metrics::Histogram<f64>,
 
@@ -92,6 +98,18 @@ impl MetricsRegistry {
                 "latest_block_number",
                 "Latest block number successfully dumped for a dataset/table",
                 "block_number",
+            ),
+            latest_segment_timestamp: telemetry::metrics::Gauge::new_u64(
+                meter,
+                "latest_segment_timestamp",
+                "Unix timestamp (seconds) of the end block in the latest segment written",
+                "seconds",
+            ),
+            latest_segment_delay: telemetry::metrics::Gauge::new_u64(
+                meter,
+                "latest_segment_delay_seconds",
+                "Delay in seconds between segment end block timestamp and write time",
+                "seconds",
             ),
             dump_duration: telemetry::metrics::Histogram::new_f64(
                 meter,
@@ -217,6 +235,28 @@ impl MetricsRegistry {
             telemetry::metrics::KeyValue::new("location_id", location_id),
         ]);
         self.files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    /// Record table freshness metrics (timestamp and delay)
+    pub fn record_table_freshness(
+        &self,
+        table: String,
+        location_id: i64,
+        latest_segment_timestamp: u64,
+    ) {
+        let mut kv_pairs = self.base_kvs();
+        kv_pairs.extend_from_slice(&[
+            telemetry::metrics::KeyValue::new("table", table),
+            telemetry::metrics::KeyValue::new("location_id", location_id),
+        ]);
+        self.latest_segment_timestamp
+            .record_with_kvs(latest_segment_timestamp, &kv_pairs);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before UNIX epoch")
+            .as_secs();
+        let delay = now.saturating_sub(latest_segment_timestamp);
+        self.latest_segment_delay.record_with_kvs(delay, &kv_pairs);
     }
 
     /// Update the latest block number for a dataset/table

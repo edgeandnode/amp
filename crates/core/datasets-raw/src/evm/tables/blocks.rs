@@ -277,6 +277,7 @@ fn default_to_arrow() {
                 network: "test_network".parse().expect("valid network id"),
                 hash: block.hash.into(),
                 prev_hash: block.parent_hash.into(),
+                timestamp: None,
             })
             .unwrap()
     };

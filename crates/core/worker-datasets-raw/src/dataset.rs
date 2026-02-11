@@ -113,8 +113,9 @@ use dump::{
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
 use futures::TryStreamExt as _;
-use metadata_db::MetadataDb;
+use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
 use monitoring::logging;
+use tokio::task::JoinHandle;
 use tracing::{Instrument, instrument};
 
 use crate::writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError};
@@ -218,6 +219,16 @@ pub async fn dump(
                 source: err,
             })?;
     }
+
+    // Spawn freshness tracker if metrics are available
+    ctx.metrics.as_ref().map(|metrics| {
+        spawn_freshness_tracker(
+            catalog.clone(),
+            ctx.data_store.clone(),
+            ctx.notification_multiplexer.clone(),
+            metrics.clone(),
+        )
+    });
 
     let metrics = ctx.metrics.clone();
     let finalized_blocks_only = dataset.finalized_blocks_only();
@@ -980,6 +991,72 @@ pub enum RunRangeError {
     /// - Compaction task failure
     #[error("Failed to close")]
     Close(#[source] RawDatasetWriterCloseError),
+}
+
+/// Spawns a background task that tracks freshness metrics for all tables in the catalog.
+///
+/// The task subscribes to table change notifications and, when a table changes, takes a
+/// snapshot to get the `synced_range` timestamp and reports it as the table freshness metric.
+fn spawn_freshness_tracker(
+    catalog: Catalog,
+    data_store: DataStore,
+    multiplexer: Arc<NotificationMultiplexerHandle>,
+    metrics: Arc<metrics::MetricsRegistry>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        // Subscribe to all table locations
+        let mut subscriptions: BTreeMap<
+            LocationId,
+            (Arc<PhysicalTable>, tokio::sync::watch::Receiver<()>),
+        > = BTreeMap::new();
+        for table in catalog.tables() {
+            let location_id = table.location_id();
+            let receiver = multiplexer.subscribe(location_id).await;
+            subscriptions.insert(location_id, (table.clone(), receiver));
+        }
+
+        loop {
+            // Wait for any table to receive a change notification
+            let futures = subscriptions.iter_mut().map(|(loc, (table, rx))| {
+                let table = table.clone();
+                let loc = *loc;
+                Box::pin(async move {
+                    match rx.changed().await {
+                        Ok(()) => Ok((loc, table)),
+                        Err(_) => Err(loc),
+                    }
+                })
+            });
+
+            let result = futures::future::select_all(futures).await.0;
+
+            match result {
+                Ok((location_id, table)) => {
+                    // Take snapshot and get synced range
+                    match table.snapshot(false, data_store.clone()).await {
+                        Ok(snapshot) => {
+                            if let Some(range) = snapshot.synced_range()
+                                && let Some(ts) = range.timestamp
+                            {
+                                metrics.record_table_freshness(
+                                    table.table_name().to_string(),
+                                    *location_id,
+                                    ts,
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(%location_id, error = %e, "failed to take snapshot for freshness tracking");
+                        }
+                    }
+                }
+                Err(location_id) => {
+                    // Subscription error - should not happen, log and continue
+                    tracing::warn!(%location_id, "freshness subscription unexpectedly ended");
+                }
+            }
+        }
+    })
 }
 
 #[cfg(test)]

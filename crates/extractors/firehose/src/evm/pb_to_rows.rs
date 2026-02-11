@@ -236,6 +236,7 @@ pub fn protobufs_to_rows(
         network: network.clone(),
         hash: header.hash.into(),
         prev_hash: header.parent_hash.into(),
+        timestamp: Some(header.timestamp.0.as_secs()),
     };
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity_for(&header);

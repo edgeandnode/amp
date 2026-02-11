@@ -195,6 +195,19 @@ impl Chain {
     pub fn network_count(&self) -> usize {
         self.first_ranges().len()
     }
+
+    /// Return the overall block range of this chain (single-network only).
+    pub fn range(&self) -> BlockRange {
+        let first = &self.first_ranges()[0];
+        let last = &self.last_ranges()[0];
+        BlockRange {
+            numbers: first.start()..=last.end(),
+            network: first.network.clone(),
+            hash: last.hash,
+            prev_hash: first.prev_hash,
+            timestamp: last.timestamp,
+        }
+    }
 }
 
 impl IntoIterator for Chain {
@@ -483,6 +496,7 @@ mod test {
             } else {
                 test_hash(*numbers.start() as u8 - 1, fork.0)
             },
+            timestamp: None,
         }
     }
 

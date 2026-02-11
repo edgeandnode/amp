@@ -309,20 +309,37 @@ impl PhysicalTable {
             .await
     }
 
+    /// Compute missing block ranges from the canonical chain.
     pub async fn missing_ranges(
         &self,
         desired: RangeInclusive<BlockNum>,
     ) -> Result<Vec<RangeInclusive<BlockNum>>, MissingRangesError> {
         let segments = self.segments().await.map_err(MissingRangesError)?;
-        Ok(missing_ranges(segments, desired))
+
+        // The blocking computation is offloaded to a dedicated thread pool via `spawn_blocking`
+        // to prevent blocking the async runtime. The `missing_ranges` function performs
+        // CPU-intensive operations (sorting, chain building) that can take milliseconds.
+        let ranges = tokio::task::spawn_blocking(move || missing_ranges(segments, desired))
+            .await
+            .expect("missing_ranges task panicked");
+
+        Ok(ranges)
     }
 
+    /// Compute the canonical chain of segments.
     pub async fn canonical_chain(&self) -> Result<Option<Chain>, CanonicalChainError> {
         let segments = self
             .segments()
             .await
             .map_err(CanonicalChainError::GetSegments)?;
-        let canonical = canonical_chain(segments);
+
+        // The blocking computation is offloaded to a dedicated thread pool via `spawn_blocking`
+        // to prevent blocking the async runtime. The `canonical_chain` function performs
+        // CPU-intensive operations (sorting, chain building) that can take milliseconds.
+        let canonical = tokio::task::spawn_blocking(move || canonical_chain(segments))
+            .await
+            .expect("canonical_chain task panicked");
+
         if let Some(start_block) = self.dataset_start_block
             && let Some(canonical) = &canonical
         {
@@ -512,6 +529,7 @@ impl TableSnapshot {
             numbers: start.start()..=end.end(),
             hash: end.hash,
             prev_hash: start.prev_hash,
+            timestamp: end.timestamp,
         })
     }
 

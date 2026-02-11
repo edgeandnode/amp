@@ -10,7 +10,10 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use common::{
     BlockNum, BlockRange, LogicalCatalog, ResumeWatermark, Watermark,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    arrow::{
+        array::{RecordBatch, TimestampNanosecondArray},
+        datatypes::SchemaRef,
+    },
     catalog::{
         logical::LogicalTable,
         physical::{CanonicalChainError, Catalog, PhysicalTable},
@@ -218,6 +221,13 @@ impl From<BlockRow> for SegmentStart {
             prev_hash: row.prev_hash,
         }
     }
+}
+
+/// Watermark with timestamp for the end block of a segment.
+struct BlockWatermark {
+    number: BlockNum,
+    hash: BlockHash,
+    timestamp: Option<u64>,
 }
 
 /// Direction of the stream. Helpful to distinguish reorgs, with the payload being the first block
@@ -564,6 +574,7 @@ impl StreamingQuery {
                 network: self.network.clone(),
                 hash: end.hash,
                 prev_hash: start.prev_hash,
+                timestamp: end.timestamp,
             },
             direction,
         }))
@@ -588,7 +599,8 @@ impl StreamingQuery {
                 if self
                     .blocks_table_contains(ctx, prev)
                     .await
-                    .map_err(NextMicrobatchStartError::BlocksTableContains)? =>
+                    .map_err(NextMicrobatchStartError::BlocksTableContains)?
+                    .is_some() =>
             {
                 let segment_start = SegmentStart {
                     number: prev.number + 1,
@@ -612,8 +624,8 @@ impl StreamingQuery {
         &mut self,
         ctx: &QueryContext,
         start: &SegmentStart,
-        common_watermark: Watermark,
-    ) -> Result<Option<Watermark>, NextMicrobatchEndError> {
+        common_watermark: BlockWatermark,
+    ) -> Result<Option<BlockWatermark>, NextMicrobatchEndError> {
         let number = {
             let end = self
                 .end_block
@@ -638,7 +650,7 @@ impl StreamingQuery {
         } else {
             self.blocks_table_fetch(ctx, number, None)
                 .await
-                .map(|r| r.map(|r| r.watermark()))
+                .map(|r| r.map(|r| r.block_watermark()))
                 .map_err(NextMicrobatchEndError)
         }
     }
@@ -648,28 +660,25 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
         chains: impl Iterator<Item = &[Segment]>,
-    ) -> Result<Option<Watermark>, LatestSrcWatermarkError> {
+    ) -> Result<Option<BlockWatermark>, LatestSrcWatermarkError> {
         // For each chain, collect the latest segment
-        let mut latest_src_watermarks: Vec<Watermark> = Default::default();
+        let mut latest_src_watermarks: Vec<BlockWatermark> = Default::default();
         'chain_loop: for chain in chains {
             for segment in chain.iter().rev() {
                 let watermark = segment.single_range().into();
-                if self
+                if let Some(block_watermark) = self
                     .blocks_table_contains(ctx, &watermark)
                     .await
                     .map_err(LatestSrcWatermarkError)?
                 {
-                    latest_src_watermarks.push(watermark);
+                    latest_src_watermarks.push(block_watermark);
                     continue 'chain_loop;
                 }
             }
             return Ok(None);
         }
         // Select the minimum table watermark as the end.
-        Ok(latest_src_watermarks
-            .iter()
-            .min_by_key(|w| w.number)
-            .cloned())
+        Ok(latest_src_watermarks.into_iter().min_by_key(|w| w.number))
     }
 
     /// Find the block to resume streaming from after detecting a reorg.
@@ -704,6 +713,7 @@ impl StreamingQuery {
                 .blocks_table_contains(ctx, &block.watermark())
                 .await
                 .map_err(ReorgBaseError::BlocksTableContains)?
+                .is_some()
             {
                 break;
             }
@@ -746,7 +756,7 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
         watermark: &Watermark,
-    ) -> Result<bool, BlocksTableContainsError> {
+    ) -> Result<Option<BlockWatermark>, BlocksTableContainsError> {
         // Panic safety: The `blocks_ctx` always has a single table.
         let blocks_segments = &ctx.catalog().table_snapshots()[0];
 
@@ -756,8 +766,17 @@ impl StreamingQuery {
             if *segment.single_range().numbers.start() <= watermark.number {
                 // Found segment that could contain this block
                 if *segment.single_range().numbers.end() == watermark.number {
-                    // Exact match on segment end - use segment hash directly
-                    return Ok(segment.single_range().hash == watermark.hash);
+                    // Exact match on segment end - use segment data directly
+                    let range = segment.single_range();
+                    if range.hash == watermark.hash {
+                        return Ok(Some(BlockWatermark {
+                            number: watermark.number,
+                            hash: range.hash,
+                            timestamp: range.timestamp,
+                        }));
+                    } else {
+                        return Ok(None);
+                    }
                 }
                 // Block is inside segment but not at end.
                 // So we will need to query the data file to find the hash.
@@ -768,7 +787,7 @@ impl StreamingQuery {
         // Fallback to database query
         self.blocks_table_fetch(ctx, watermark.number, Some(&watermark.hash))
             .await
-            .map(|row| row.is_some())
+            .map(|row| row.map(|r| r.block_watermark()))
             .map_err(BlocksTableContainsError)
     }
 
@@ -783,7 +802,7 @@ impl StreamingQuery {
             .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
             .unwrap_or_default();
         let sql = format!(
-            "SELECT hash, parent_hash FROM {} WHERE block_num = {} {} LIMIT 1",
+            "SELECT hash, parent_hash, timestamp FROM {} WHERE block_num = {} {} LIMIT 1",
             self.blocks_table.table_ref().to_quoted_string(),
             number,
             hash_constraint,
@@ -817,11 +836,17 @@ impl StreamingQuery {
                 .and_then(|b| BlockHash::try_from(b).ok())
                 .ok_or_else(|| GetHashValueError::MissingBlockHashValue(column_name.to_string()))
         };
+        let timestamp = results
+            .column_by_name("timestamp")
+            .and_then(|col| col.as_any().downcast_ref::<TimestampNanosecondArray>())
+            .and_then(|arr| arr.value_as_datetime(0))
+            .map(|dt| dt.and_utc().timestamp() as u64);
         Ok(Some(BlockRow {
             number,
             hash: get_hash_value("hash").map_err(BlocksTableFetchError::GetHashValue)?,
             prev_hash: get_hash_value("parent_hash")
                 .map_err(BlocksTableFetchError::GetHashValue)?,
+            timestamp,
         }))
     }
 }
@@ -1056,6 +1081,7 @@ struct BlockRow {
     number: BlockNum,
     hash: BlockHash,
     prev_hash: BlockHash,
+    timestamp: Option<u64>,
 }
 
 impl BlockRow {
@@ -1063,6 +1089,14 @@ impl BlockRow {
         Watermark {
             number: self.number,
             hash: self.hash,
+        }
+    }
+
+    fn block_watermark(&self) -> BlockWatermark {
+        BlockWatermark {
+            number: self.number,
+            hash: self.hash,
+            timestamp: self.timestamp,
         }
     }
 }
