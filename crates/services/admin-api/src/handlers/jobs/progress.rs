@@ -208,7 +208,7 @@ pub async fn handler(
                 let files_count = canonical_segments.len() as i64;
                 let total_size_bytes = canonical_segments
                     .iter()
-                    .map(|s| s.object.size as i64)
+                    .map(|s| s.object().size as i64)
                     .sum();
 
                 let (start, end) = match synced_range {

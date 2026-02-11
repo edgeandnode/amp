@@ -567,12 +567,11 @@ async fn dump_table(
             // Track start time for duration calculation
             let table_dump_start = Instant::now();
 
-            let latest_range = table
+            let resume_watermark = table
                 .canonical_chain()
                 .await
                 .map_err(DumpTableSpawnError::CanonicalChain)?
-                .map(|c| c.last().clone());
-            let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(&[r]));
+                .map(|c| ResumeWatermark::from_ranges(c.last_ranges()));
 
             // Execute the dump, capturing any errors for sync.failed event
             let dump_result = dump_sql_query(
