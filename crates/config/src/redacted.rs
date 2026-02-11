@@ -12,6 +12,13 @@
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Redacted<T>(T);
 
+impl<T> Redacted<T> {
+    /// Consumes the wrapper and returns the inner value.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<T> From<T> for Redacted<T> {
     fn from(value: T) -> Self {
         Self(value)
