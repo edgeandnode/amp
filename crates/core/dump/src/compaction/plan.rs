@@ -50,10 +50,10 @@ impl CompactionFile {
         segment: &Segment,
         is_tail: bool,
     ) -> CompactionResult<Self> {
-        let file_id = segment.id;
-        let range = segment.range.clone();
+        let file_id = segment.id();
+        let range = segment.single_range().clone();
 
-        let mut file_meta = PartitionedFile::from(segment.object.clone());
+        let mut file_meta = PartitionedFile::from(segment.object().clone());
 
         file_meta.extensions = Some(Arc::new(file_id));
 
