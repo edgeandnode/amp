@@ -28,7 +28,6 @@ use solana_clock::Slot;
 use url::Url;
 
 use crate::{
-    error::Of1StreamError,
     metrics, of1_client, rpc_client,
     tables::{self},
 };
@@ -288,10 +287,7 @@ impl BlockStreamer for SolanaExtractor {
                 get_block_config,
                 self.metrics.clone(),
             )
-            .map_err(|err| match err {
-                Of1StreamError::RpcClient(_) => BlockStreamError::Recoverable(err.into()),
-                _ => BlockStreamError::Fatal(err.into()),
-            })
+            .map_err(Into::into)
             .boxed()
         };
 
