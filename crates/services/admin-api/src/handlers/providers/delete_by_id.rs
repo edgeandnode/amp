@@ -1,5 +1,6 @@
 //! Providers delete handler
 
+use amp_providers_common::ProviderName;
 use amp_providers_registry::DeleteError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
@@ -59,7 +60,7 @@ use crate::{
 )]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    path: Result<Path<String>, PathRejection>,
+    path: Result<Path<ProviderName>, PathRejection>,
 ) -> Result<StatusCode, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,

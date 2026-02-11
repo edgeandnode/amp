@@ -89,7 +89,6 @@ pub struct Manifest {
 #[serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub struct ProviderConfig {
-    pub name: String,
     pub kind: SolanaDatasetKind,
     pub network: NetworkId,
     #[serde_as(as = "serde_with::DisplayFromStr")]
@@ -118,6 +117,7 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 
 /// Create a Solana extractor based on the provided configuration.
 pub fn extractor(
+    name: String,
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, ExtractorError> {
@@ -134,7 +134,7 @@ pub fn extractor(
             config.rpc_provider_url,
             config.max_rpc_calls_per_second,
             config.network,
-            config.name,
+            name,
             config.of1_car_directory,
             config.keep_of1_car_files,
             config.use_archive,

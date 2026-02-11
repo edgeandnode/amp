@@ -6,31 +6,34 @@
 //!
 //! ## Provider Configuration Structure
 //!
-//! All provider configurations must define at least:
-//! - `name`: A unique identifier for the provider configuration
+//! Each provider configuration is a TOML file whose filename determines the provider name
+//! (e.g., `my_provider.toml` → provider name `my_provider`). The file must define at least:
 //! - `kind`: The type of provider (e.g., "evm-rpc", "firehose")
 //! - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
 //!
 //! Additional fields depend on the provider type.
 use std::{collections::BTreeMap, ops::Deref};
 
-use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
+use amp_providers_common::{
+    ProviderName,
+    config::{
+        ConfigHeaderWithNetwork, ProviderConfigRaw, ProviderResolvedConfigRaw, TryIntoConfig,
+    },
+};
+use amp_providers_evm_rpc::kind::EvmRpcProviderKind;
+use datasets_common::network_id::NetworkId;
 use monitoring::{logging, telemetry::metrics::Meter};
 use object_store::ObjectStore;
 use rand::seq::SliceRandom as _;
 
 mod client;
-mod config;
 mod store;
-
-use amp_providers_common::envsub;
 
 pub use self::{
     client::{
         block_stream::{BlockStreamClient, CreateClientError},
         evm_rpc::{CreateEvmRpcClientError, EvmRpcProvider},
     },
-    config::{ParseConfigError, ProviderConfig},
     store::{ConfigDeleteError, ConfigStoreError, ProviderConfigsStore},
 };
 
@@ -65,7 +68,7 @@ where
 
     /// Get all provider configurations, using cache if available
     ///
-    /// Returns a read guard that dereferences to the cached `BTreeMap<String, ProviderConfig>`.
+    /// Returns a read guard that dereferences to the cached `BTreeMap<ProviderName, ProviderConfigRaw>`.
     /// This provides efficient access to all provider configurations without cloning.
     ///
     /// # Deadlock Warning
@@ -75,25 +78,26 @@ where
     /// (such as `register` and `delete`). Extract the needed data immediately and drop
     /// the guard as soon as possible.
     #[must_use]
-    pub async fn get_all(&self) -> impl Deref<Target = BTreeMap<String, ProviderConfig>> + '_ {
+    pub async fn get_all(
+        &self,
+    ) -> impl Deref<Target = BTreeMap<ProviderName, ProviderConfigRaw>> + '_ {
         self.store.get_all().await
     }
 
     /// Get a provider configuration by `name`, using cache if available. Returns None if not found.
-    pub async fn get_by_name(&self, name: &str) -> Option<ProviderConfig> {
+    pub async fn get_by_name(&self, name: &str) -> Option<ProviderConfigRaw> {
         self.store.get(name).await
     }
 
     /// Register a provider configuration in both cache and store
     ///
     /// If a provider configuration with the same name already exists, it will be overwritten.
-    pub async fn register(&self, provider: ProviderConfig) -> Result<(), RegisterError> {
-        let name = provider.name.clone();
-
-        self.store
-            .store(&name, provider)
-            .await
-            .map_err(RegisterError)
+    pub async fn register(
+        &self,
+        name: ProviderName,
+        config: ProviderConfigRaw,
+    ) -> Result<(), RegisterError> {
+        self.store.store(name, config).await.map_err(RegisterError)
     }
 
     /// Delete a provider configuration by name from both the store and cache
@@ -119,37 +123,45 @@ where
     /// Providers are tried in random order to distribute load.
     pub async fn create_block_stream_client(
         &self,
-        kind: impl Into<DatasetKindStr>,
+        kind: impl AsRef<str>,
         network: &NetworkId,
         meter: Option<&Meter>,
     ) -> Result<BlockStreamClient, CreateClientError> {
-        let kind = kind.into();
-        let config = self
-            .find_provider(kind.clone(), network)
-            .await
-            .ok_or_else(|| CreateClientError::ProviderNotFound {
-                kind: kind.to_string(),
+        let kind_str = kind.as_ref();
+        let (name, config) = self.find_provider(&kind, network).await.ok_or_else(|| {
+            CreateClientError::ProviderNotFound {
+                kind: kind_str.to_string(),
                 network: network.clone(),
-            })?;
-        client::block_stream::create(config, meter).await
+            }
+        })?;
+        client::block_stream::create(name, config, meter).await
     }
 
     /// Find a provider by kind and network, applying environment variable substitution.
     ///
     /// Providers are tried in random order to distribute load.
+    /// Returns the provider name and resolved configuration.
     pub async fn find_provider(
         &self,
-        kind: impl Into<DatasetKindStr>,
+        kind: impl AsRef<str>,
         network: &NetworkId,
-    ) -> Option<ProviderConfig> {
-        let kind = kind.into();
+    ) -> Option<(ProviderName, ProviderResolvedConfigRaw)> {
+        let kind = kind.as_ref();
 
+        // Collect matching providers with their names
         let mut matching_providers = self
             .get_all()
             .await
-            .values()
-            .filter(|prov| prov.kind == kind && &prov.network == network)
-            .cloned()
+            .iter()
+            .filter_map(|(name, config)| {
+                // Extract kind and network from config
+                let header = config.try_into_config::<ConfigHeaderWithNetwork>().ok()?;
+                if header.kind == kind && &header.network == network {
+                    Some((name.clone(), config.clone()))
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         if matching_providers.is_empty() {
@@ -158,11 +170,20 @@ where
 
         matching_providers.shuffle(&mut rand::rng());
 
-        'try_find_provider: for mut provider in matching_providers {
-            for (_key, value) in provider.rest.iter_mut() {
-                if let Err(err) = envsub::substitute_env_vars(value) {
+        'try_find_provider: for (name, config) in matching_providers {
+            match config.with_env_substitution() {
+                Ok(resolved) => {
+                    tracing::debug!(
+                        provider_name = %name,
+                        provider_kind = %kind,
+                        provider_network = %network,
+                        "successfully selected provider with environment substitution"
+                    );
+                    return Some((name, resolved));
+                }
+                Err(err) => {
                     tracing::warn!(
-                        provider_name = %provider.name,
+                        provider_name = %name,
                         provider_kind = %kind,
                         provider_network = %network,
                         error = %err,
@@ -172,14 +193,6 @@ where
                     continue 'try_find_provider;
                 }
             }
-
-            tracing::debug!(
-                provider_kind = %kind,
-                provider_network = %network,
-                "successfully selected provider with environment substitution"
-            );
-
-            return Some(provider);
         }
 
         None
@@ -197,14 +210,11 @@ where
         &self,
         network: &NetworkId,
     ) -> Result<Option<EvmRpcProvider>, CreateEvmRpcClientError> {
-        let Some(config) = self
-            .find_provider(evm_rpc_datasets::EvmRpcDatasetKind, network)
-            .await
-        else {
+        let Some((name, config)) = self.find_provider(EvmRpcProviderKind, network).await else {
             return Ok(None);
         };
 
-        client::evm_rpc::create(config).await.map(Some)
+        client::evm_rpc::create(name, config).await.map(Some)
     }
 }
 

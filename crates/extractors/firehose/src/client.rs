@@ -41,6 +41,7 @@ pub struct Client {
 impl Client {
     /// Configure the client from a Firehose dataset definition.
     pub async fn new(
+        name: String,
         config: ProviderConfig,
         meter: Option<&telemetry::metrics::Meter>,
     ) -> Result<Self, Error> {
@@ -57,7 +58,7 @@ impl Client {
                 endpoint,
                 auth,
                 network: config.network,
-                provider_name: config.name,
+                provider_name: name,
                 metrics,
             }
         };

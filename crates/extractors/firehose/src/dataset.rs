@@ -48,7 +48,6 @@ pub struct Manifest {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct ProviderConfig {
-    pub name: String,
     pub kind: FirehoseDatasetKind,
     pub network: NetworkId,
     pub url: String,

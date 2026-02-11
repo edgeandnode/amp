@@ -30,6 +30,7 @@ version = "0.1.0"
 dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
+ "amp-providers-common",
  "amp-providers-registry",
  "async-trait",
  "axum",
@@ -1082,6 +1083,9 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "amp-providers-common",
+ "amp-providers-evm-rpc",
+ "amp-providers-firehose",
+ "amp-providers-solana",
  "async-stream",
  "datasets-common",
  "datasets-raw",

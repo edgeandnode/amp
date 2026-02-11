@@ -21,6 +21,10 @@ struct Cli {
     #[arg(long)]
     epoch: u64,
 
+    /// Provider name identifier.
+    #[arg(long)]
+    provider_name: String,
+
     /// Path to provider config TOML.
     #[arg(long)]
     provider_config: PathBuf,
@@ -49,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
         car_manager_rx,
         provider_cfg.of1_car_directory.clone(),
         provider_cfg.keep_of1_car_files,
-        provider_cfg.name.clone(),
+        cli.provider_name.clone(),
         provider_cfg.network.clone(),
         None,
     ));
@@ -57,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
         provider_cfg.rpc_provider_url,
         provider_cfg.max_rpc_calls_per_second,
-        provider_cfg.name.clone(),
+        cli.provider_name.clone(),
         provider_cfg.network.clone(),
     ));
 

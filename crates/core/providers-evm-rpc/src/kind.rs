@@ -32,6 +32,12 @@ impl EvmRpcProviderKind {
     }
 }
 
+impl AsRef<str> for EvmRpcProviderKind {
+    fn as_ref(&self) -> &str {
+        PROVIDER_KIND
+    }
+}
+
 impl From<EvmRpcProviderKind> for ProviderKindStr {
     fn from(value: EvmRpcProviderKind) -> Self {
         // SAFETY: The constant PROVIDER_KIND is "evm-rpc", which is non-empty
@@ -123,18 +129,6 @@ impl PartialEq<EvmRpcProviderKind> for String {
 impl PartialEq<ProviderKindStr> for EvmRpcProviderKind {
     fn eq(&self, other: &ProviderKindStr) -> bool {
         PROVIDER_KIND == other.as_str()
-    }
-}
-
-impl PartialEq<EvmRpcProviderKind> for ProviderKindStr {
-    fn eq(&self, _other: &EvmRpcProviderKind) -> bool {
-        self.as_str() == PROVIDER_KIND
-    }
-}
-
-impl PartialEq<EvmRpcProviderKind> for &ProviderKindStr {
-    fn eq(&self, _other: &EvmRpcProviderKind) -> bool {
-        self.as_str() == PROVIDER_KIND
     }
 }
 

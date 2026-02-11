@@ -1,74 +1,83 @@
 //! Client creation for raw dataset providers.
 
-use amp_providers_common::config::TryIntoConfig as _;
+use amp_providers_common::{
+    ProviderName,
+    config::{ConfigHeader, InvalidConfigError, ProviderResolvedConfigRaw, TryIntoConfig as _},
+};
+use amp_providers_evm_rpc::kind::EvmRpcProviderKind;
+use amp_providers_firehose::kind::FirehoseProviderKind;
+use amp_providers_solana::kind::SolanaProviderKind;
 use async_stream::stream;
 use datasets_common::{block_num::BlockNum, network_id::NetworkId};
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
     rows::Rows,
 };
-use evm_rpc_datasets::EvmRpcDatasetKind;
-use firehose_datasets::FirehoseDatasetKind;
 use futures::Stream;
 use monitoring::telemetry::metrics::Meter;
-use solana_datasets::SolanaDatasetKind;
-
-use crate::config::{ParseConfigError, ProviderConfig};
 
 /// Creates a block stream client from provider configuration. Supports EVM RPC, Solana, and Firehose providers.
 pub async fn create(
-    config: ProviderConfig,
+    name: ProviderName,
+    config: ProviderResolvedConfigRaw,
     meter: Option<&Meter>,
 ) -> Result<BlockStreamClient, CreateClientError> {
-    let provider_name = config.name.clone();
+    // Extract kind to dispatch to the right client
+    let header =
+        config
+            .try_into_config::<ConfigHeader>()
+            .map_err(|err| CreateClientError::ConfigParse {
+                name: name.clone(),
+                source: err,
+            })?;
 
-    if config.kind == EvmRpcDatasetKind {
+    if header.kind == EvmRpcProviderKind {
         let typed_config =
             config
                 .try_into_config()
                 .map_err(|err| CreateClientError::ConfigParse {
-                    name: provider_name.clone(),
+                    name: name.clone(),
                     source: err,
                 })?;
-        evm_rpc_datasets::client(typed_config, meter)
+        evm_rpc_datasets::client(name.to_string(), typed_config, meter)
             .await
             .map(BlockStreamClient::EvmRpc)
             .map_err(|err| CreateClientError::ProviderClient {
-                name: provider_name,
+                name,
                 source: ProviderClientError::EvmRpc(err),
             })
-    } else if config.kind == SolanaDatasetKind {
+    } else if header.kind == SolanaProviderKind {
         let typed_config =
             config
                 .try_into_config()
                 .map_err(|err| CreateClientError::ConfigParse {
-                    name: provider_name.clone(),
+                    name: name.clone(),
                     source: err,
                 })?;
-        solana_datasets::extractor(typed_config, meter)
+        solana_datasets::extractor(name.to_string(), typed_config, meter)
             .map(BlockStreamClient::Solana)
             .map_err(|err| CreateClientError::ProviderClient {
-                name: provider_name,
+                name,
                 source: ProviderClientError::Solana(err),
             })
-    } else if config.kind == FirehoseDatasetKind {
+    } else if header.kind == FirehoseProviderKind {
         let typed_config =
             config
                 .try_into_config()
                 .map_err(|err| CreateClientError::ConfigParse {
-                    name: provider_name.clone(),
+                    name: name.clone(),
                     source: err,
                 })?;
-        firehose_datasets::Client::new(typed_config, meter)
+        firehose_datasets::Client::new(name.to_string(), typed_config, meter)
             .await
             .map(|c| BlockStreamClient::Firehose(Box::new(c)))
             .map_err(|err| CreateClientError::ProviderClient {
-                name: provider_name,
+                name,
                 source: ProviderClientError::Firehose(err),
             })
     } else {
         Err(CreateClientError::UnsupportedKind {
-            kind: config.kind.to_string(),
+            kind: header.kind.to_string(),
         })
     }
 }
@@ -150,9 +159,9 @@ pub enum CreateClientError {
     /// expected type for the dataset kind (EvmRpc, Solana, or Firehose).
     #[error("failed to parse provider config for '{name}'")]
     ConfigParse {
-        name: String,
+        name: ProviderName,
         #[source]
-        source: ParseConfigError,
+        source: InvalidConfigError,
     },
 
     /// Failed to create provider client.
@@ -161,7 +170,7 @@ pub enum CreateClientError {
     /// during client initialization.
     #[error("failed to create client for provider '{name}'")]
     ProviderClient {
-        name: String,
+        name: ProviderName,
         #[source]
         source: ProviderClientError,
     },

@@ -1,5 +1,6 @@
 //! Providers get by ID handler
 
+use amp_providers_common::ProviderName;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -65,7 +66,7 @@ use crate::{
 )]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    path: Result<Path<String>, PathRejection>,
+    path: Result<Path<ProviderName>, PathRejection>,
 ) -> Result<Json<ProviderInfo>, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
@@ -99,10 +100,10 @@ pub async fn handler(
 /// to cache access.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The provider name in the URL path is invalid
+    /// The provider name is invalid
     ///
-    /// This occurs when the path parameter cannot be extracted properly,
-    /// typically due to URL encoding issues or empty names.
+    /// This occurs when the path parameter cannot be extracted or deserialized
+    /// to a valid ProviderName (e.g., URL encoding issues or invalid snake_case format).
     #[error("invalid provider name: {err}")]
     InvalidName {
         /// The rejection details from Axum's path extractor
@@ -118,20 +119,20 @@ pub enum Error {
     #[error("provider '{name}' not found")]
     NotFound {
         /// The provider name that was not found
-        name: String,
+        name: ProviderName,
     },
 
     /// Failed to convert provider configuration to info format
     ///
     /// This occurs when the provider configuration cannot be converted
-    /// to the API response format, typically due to invalid JSON data
-    /// in the provider's configuration.
+    /// to the API response format, typically due to invalid configuration
+    /// or data conversion failures.
     #[error("failed to convert provider '{name}' configuration: {err}")]
     ConversionError {
         /// The provider name that failed conversion
-        name: String,
+        name: ProviderName,
         /// The conversion error details
-        err: serde_json::Error,
+        err: super::provider_info::ProviderInfoConversionError,
     },
 }
 
