@@ -1,0 +1,18 @@
+[package]
+name = "amp-providers-solana"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[features]
+# JSON Schema generation support for provider configuration validation
+schemars = ["dep:schemars", "amp-providers-common/schemars", "dep:serde_json"]
+
+[dependencies]
+amp-providers-common = { path = "../providers-common" }
+schemars = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
+serde_with = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }

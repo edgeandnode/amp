@@ -67,7 +67,7 @@
 //!
 //! // Consume the handle to initiate shutdown (SIGTERM or SIGINT)
 //! let _shutting_down = handle.graceful_shutdown();
-//! // Or: let _shutting_down = handle.hard_shutdown();
+//! // Or: let _shutting_down = handle.force_shutdown();
 //!
 //! // Phase 2: wait for postgres to finish shutting down
 //! pg_fut.await?;
@@ -86,4 +86,6 @@
 mod postgres;
 pub mod service;
 
-pub use postgres::{PostgresBuilder, PostgresError};
+pub use postgres::{
+    DynamicSharedMemoryType, PostgresBuilder, PostgresError, SharedBuffers, SharedMemoryType,
+};

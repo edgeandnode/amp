@@ -8,38 +8,91 @@ use datafusion::{
         datatypes::{Field, i256},
     },
     common::scalar::ScalarStructBuilder,
+    error::DataFusionError,
     scalar::ScalarValue,
 };
 use num_traits::cast::ToPrimitive;
 use v8_value::V8Value;
 
-use crate::{BoxError, exception::catch};
+use crate::exception::{ExceptionMessage, catch};
 
 pub trait FromV8: Sized + Send {
     /// Converts a V8 value to a Rust value.
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self, BoxError>;
+    ) -> Result<Self, FromV8Error>;
+}
+
+/// Errors that occur when converting a V8 value to a Rust type
+///
+/// This is the error type for the [`FromV8`] trait. Each variant represents
+/// a different failure mode encountered during V8-to-Rust conversion.
+#[derive(Debug, thiserror::Error)]
+pub enum FromV8Error {
+    /// The V8 value could not be converted to the expected Rust type
+    ///
+    /// The first field is the string representation of the V8 value,
+    /// the second is the target Rust type name (e.g. `"i32"`, `"undefined"`).
+    #[error("Failed to convert V8 value {0} to {1}")]
+    Convert(String, String),
+    /// The V8 value is of a JavaScript type that has no Rust mapping
+    ///
+    /// This occurs when the JS function returns a type (e.g. `Symbol`, `Function`)
+    /// that cannot be represented as a supported Rust/Arrow type.
+    #[error("Unsupported JS type {0}")]
+    UnsupportedType(String),
+    /// Failed to convert a V8 value to an Arrow `ScalarValue`
+    ///
+    /// This wraps errors from the internal `scalar_value_from_v8` conversion,
+    /// which may fail due to JS exceptions during object traversal, unsupported
+    /// JS types, or Arrow struct building errors.
+    #[error("Failed to convert V8 value to ScalarValue")]
+    ScalarValue(#[source] Box<ScalarValueFromV8Error>),
 }
 
 pub trait ToV8: Send {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError>;
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error>;
+}
+
+/// Errors that occur when converting a Rust value to a V8 value
+///
+/// This is the error type for the [`ToV8`] trait. Used by all `ToV8`
+/// implementations including primitive types, strings, and `ScalarValue`.
+#[derive(Debug, thiserror::Error)]
+pub enum ToV8Error {
+    /// A Rust string exceeds the maximum length that V8 can represent
+    ///
+    /// V8 has an internal limit on string length. This occurs when converting
+    /// a `&str` whose byte length exceeds that limit.
+    #[error("String has length {0} which is too long for V8")]
+    StringTooLong(usize),
+
+    /// The Arrow data type is not yet supported for conversion to a V8 value
+    ///
+    /// This occurs when a `ScalarValue` variant (e.g. `Float16`, `Map`, timestamps,
+    /// intervals, durations, fractional decimals) has no V8 representation implemented yet.
+    #[error("{js_type} not yet supported in JS functions")]
+    UnsupportedType { js_type: String },
+
+    /// Failed to extract a scalar value from an Arrow array
+    ///
+    /// This occurs during `ScalarValue::to_v8` when converting struct fields
+    /// or list elements via `ScalarValue::try_from_array`.
+    #[error("Failed to extract scalar value from array")]
+    ExtractScalar(#[source] datafusion::error::DataFusionError),
 }
 
 impl FromV8 for i32 {
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, FromV8Error> {
         value.int32_value(scope).ok_or_else(|| {
-            BoxError::from(format!(
-                "value {} is not an i32",
-                value.to_rust_string_lossy(scope)
-            ))
+            FromV8Error::Convert(value.to_rust_string_lossy(scope), "i32".to_string())
         })
     }
 }
@@ -48,14 +101,14 @@ impl FromV8 for () {
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, FromV8Error> {
         if value.is_undefined() {
             Ok(())
         } else {
-            Err(BoxError::from(format!(
-                "value {} is not undefined",
-                value.to_rust_string_lossy(scope)
-            )))
+            Err(FromV8Error::Convert(
+                value.to_rust_string_lossy(scope),
+                "undefined".to_string(),
+            ))
         }
     }
 }
@@ -64,7 +117,7 @@ impl<R: FromV8> FromV8 for Option<R> {
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, FromV8Error> {
         if value.is_null_or_undefined() {
             Ok(None)
         } else {
@@ -77,7 +130,7 @@ impl ToV8 for bool {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::Boolean::new(scope, *self).into())
     }
 }
@@ -86,7 +139,7 @@ impl ToV8 for f64 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::Number::new(scope, *self).into())
     }
 }
@@ -95,7 +148,7 @@ impl ToV8 for i32 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::Integer::new(scope, *self).into())
     }
 }
@@ -104,7 +157,7 @@ impl ToV8 for u32 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::Integer::new_from_unsigned(scope, *self).into())
     }
 }
@@ -113,7 +166,7 @@ impl ToV8 for u64 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::BigInt::new_from_u64(scope, *self).into())
     }
 }
@@ -122,7 +175,7 @@ impl ToV8 for i64 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::BigInt::new_from_i64(scope, *self).into())
     }
 }
@@ -131,14 +184,9 @@ impl ToV8 for &str {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         Ok(v8::String::new(scope, self)
-            .ok_or_else(|| {
-                BoxError::from(format!(
-                    "string has length {} which is too long",
-                    self.len()
-                ))
-            })?
+            .ok_or(ToV8Error::StringTooLong(self.len()))?
             .into())
     }
 }
@@ -147,7 +195,7 @@ impl ToV8 for &[u8] {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         let boxed: Box<[u8]> = self.to_vec().into_boxed_slice();
         let store: v8::UniqueRef<v8::BackingStore> =
             v8::ArrayBuffer::new_backing_store_from_boxed_slice(boxed);
@@ -162,7 +210,7 @@ impl ToV8 for i128 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         let sign_bit = *self < 0;
         let magnitude = if sign_bit {
             self.wrapping_neg() as u128 // two's complement negation
@@ -186,7 +234,7 @@ impl ToV8 for i256 {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         let sign_bit = self < &i256::ZERO;
         let magnitude = if sign_bit { self.wrapping_neg() } else { *self };
 
@@ -213,7 +261,7 @@ impl<T: ToV8> ToV8 for Option<T> {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         match self {
             Some(value) => value.to_v8(scope),
             None => Ok(v8::null(scope).into()),
@@ -225,7 +273,7 @@ impl<T: ToV8 + Sync> ToV8 for &[T] {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         let elems = self
             .iter()
             .map(|e| e.to_v8(scope))
@@ -238,7 +286,7 @@ impl ToV8 for ScalarValue {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
-    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    ) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
         match self {
             ScalarValue::Null => Ok(v8::null(scope).into()),
             ScalarValue::Boolean(b) => b.to_v8(scope),
@@ -267,7 +315,8 @@ impl ToV8 for ScalarValue {
 
                 let obj = v8::Object::new(scope);
                 for (column, field) in struct_array.columns().iter().zip(struct_array.fields()) {
-                    let sv = ScalarValue::try_from_array(column, 0)?;
+                    let sv =
+                        ScalarValue::try_from_array(column, 0).map_err(ToV8Error::ExtractScalar)?;
 
                     // Unwrap: A field name would not exceed the max length of a v8 string
                     let key = v8::String::new(scope, field.name()).unwrap();
@@ -299,12 +348,12 @@ impl ToV8 for ScalarValue {
             }
 
             // Fractional decimals
-            ScalarValue::Decimal128(_, _, _) | ScalarValue::Decimal256(_, _, _) => {
-                Err(BoxError::from(
-                    "fractional Decimal128 or Decimal256 not yet supported in functions"
-                        .to_string(),
-                ))
-            }
+            ScalarValue::Decimal128(_, _, _) => Err(ToV8Error::UnsupportedType {
+                js_type: "fractional Decimal128".to_string(),
+            }),
+            ScalarValue::Decimal256(_, _, _) => Err(ToV8Error::UnsupportedType {
+                js_type: "fractional Decimal256".to_string(),
+            }),
 
             // TODOs
             ScalarValue::Float16(_)
@@ -329,10 +378,9 @@ impl ToV8 for ScalarValue {
             | ScalarValue::Union(_, _, _)
             | ScalarValue::Decimal32(_, _, _)
             | ScalarValue::Decimal64(_, _, _)
-            | ScalarValue::Dictionary(_, _) => Err(BoxError::from(format!(
-                "{} not yet supported in functions",
-                self.data_type()
-            ))),
+            | ScalarValue::Dictionary(_, _) => Err(ToV8Error::UnsupportedType {
+                js_type: self.data_type().to_string(),
+            }),
         }
     }
 }
@@ -340,10 +388,10 @@ impl ToV8 for ScalarValue {
 fn single_array_to_v8<'s>(
     array: &dyn Array,
     scope: &mut v8::HandleScope<'s>,
-) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+) -> Result<v8::Local<'s, v8::Value>, ToV8Error> {
     let mut sv_v8 = vec![];
     for i in 0..array.len() {
-        let sv = ScalarValue::try_from_array(array, i)?;
+        let sv = ScalarValue::try_from_array(array, i).map_err(ToV8Error::ExtractScalar)?;
         sv_v8.push(sv.to_v8(scope)?);
     }
     Ok(v8::Array::new_with_elements(scope, &sv_v8).into())
@@ -353,17 +401,17 @@ impl FromV8 for ScalarValue {
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, FromV8Error> {
         let v8_value = V8Value::new(scope, value)
-            .map_err(|e| format!("unsupported return value from JS: {}", e))?;
-        scalar_value_from_v8(scope, v8_value)
+            .map_err(|_| FromV8Error::UnsupportedType(value.to_rust_string_lossy(scope)))?;
+        scalar_value_from_v8(scope, v8_value).map_err(|e| FromV8Error::ScalarValue(Box::new(*e)))
     }
 }
 
 fn scalar_value_from_v8<'s>(
     scope: &mut v8::HandleScope<'s>,
     v8_value: V8Value<'s>,
-) -> Result<ScalarValue, BoxError> {
+) -> Result<ScalarValue, Box<ScalarValueFromV8Error>> {
     match v8_value {
         V8Value::Undefined | V8Value::Null => Ok(ScalarValue::Null),
         V8Value::Boolean(b) => Ok(ScalarValue::Boolean(Some(b))),
@@ -420,7 +468,8 @@ fn scalar_value_from_v8<'s>(
                         Some(v8_values)
                     });
 
-                res.ok_or_else(|| catch(s))?
+                res.ok_or_else(|| catch(s))
+                    .map_err(ScalarValueFromV8Error::JsException)?
             };
 
             let mut builder = ScalarStructBuilder::new();
@@ -431,13 +480,43 @@ fn scalar_value_from_v8<'s>(
                 builder = builder.with_scalar(field, value);
             }
 
-            Ok(builder.build()?)
+            Ok(builder
+                .build()
+                .map_err(ScalarValueFromV8Error::BuildScalarStruct)?)
         }
-        V8Value::Array(_) => Err(BoxError::from(
-            "Array is not yet supported in JS functions".to_string(),
-        )),
-        V8Value::TypedArray(_) => Err(BoxError::from(
-            "TypedArray is not yet supported in JS functions",
-        )),
+        V8Value::Array(_) => Err(Box::new(ScalarValueFromV8Error::UnsupportedType {
+            js_type: "Array".to_string(),
+        })),
+        V8Value::TypedArray(_) => Err(Box::new(ScalarValueFromV8Error::UnsupportedType {
+            js_type: "TypedArray".to_string(),
+        })),
     }
+}
+
+/// Errors specific to converting a V8 value into an Arrow `ScalarValue`
+///
+/// This is the error type for the internal `scalar_value_from_v8` function,
+/// which recursively converts V8 objects, primitives, and BigInts into
+/// Arrow scalar values. Wrapped by [`FromV8Error::ScalarValue`].
+#[derive(Debug, thiserror::Error)]
+pub enum ScalarValueFromV8Error {
+    /// A JavaScript exception was thrown during V8 object property access
+    ///
+    /// This occurs when iterating over object properties via
+    /// `get_own_property_names` or `get` triggers a JS exception
+    /// (e.g. a getter that throws).
+    #[error("JavaScript exception during V8 object conversion")]
+    JsException(#[source] ExceptionMessage),
+    /// Failed to build an Arrow `ScalarStruct` from the converted field values
+    ///
+    /// This occurs when `ScalarStructBuilder::build()` fails, typically due to
+    /// schema mismatches or invalid field combinations in the resulting struct.
+    #[error("Failed to build scalar struct")]
+    BuildScalarStruct(#[source] DataFusionError),
+    /// The JavaScript value is of a type not yet supported for `ScalarValue` conversion
+    ///
+    /// This occurs for V8 `Array` and `TypedArray` values, which do not yet have
+    /// a mapping to Arrow scalar types.
+    #[error("Unsupported JS type: {js_type}")]
+    UnsupportedType { js_type: String },
 }

@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 backon.workspace = true
+byte-unit = { version = "5.2", features = ["byte"] }
 fs-err = { workspace = true, features = ["tokio"] }
 nix = { workspace = true, features = ["signal"] }
 percent-encoding.workspace = true

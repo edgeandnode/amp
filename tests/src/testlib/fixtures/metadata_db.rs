@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use metadata_db::{DEFAULT_POOL_SIZE, MetadataDb as MetadataDbConnPool};
-use metadata_db_postgres::service::Handle;
+use metadata_db_postgres::{PostgresBuilder, SharedBuffers, service::Handle};
 use tokio::task::JoinHandle;
 
 /// Fixture for managing temporary metadata databases in tests.
@@ -60,7 +60,11 @@ impl MetadataDb {
     /// This allows tests to specify where the PostgreSQL data will be stored
     /// and customize the connection pool size.
     pub async fn with_data_dir_and_pool_size(data_dir: PathBuf, pool_size: u32) -> Self {
-        let (postgres_handle, service) = metadata_db_postgres::service::new(data_dir)
+        let (postgres_handle, service) = PostgresBuilder::new(data_dir)
+            .locale("C")
+            .encoding("UTF8")
+            .shared_buffers(SharedBuffers::from_mb(32))
+            .start()
             .await
             .expect("failed to start PostgreSQL for test");
 
@@ -91,6 +95,8 @@ impl MetadataDb {
 
 impl Drop for MetadataDb {
     fn drop(&mut self) {
+        // Abort the background future — PostgresProcess::Drop handles the full
+        // blocking shutdown sequence (SIGINT → waitpid → SIGKILL escalation).
         tracing::debug!("Aborting metadata database service task");
         self._task.abort();
     }

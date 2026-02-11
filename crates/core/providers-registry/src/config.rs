@@ -1,3 +1,5 @@
+pub use amp_providers_common::config::InvalidConfigError as ParseConfigError;
+use amp_providers_common::config::TryIntoConfig;
 use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
 
 /// Provider configuration with required and provider-specific fields.
@@ -30,13 +32,8 @@ impl std::fmt::Debug for ProviderConfig {
     }
 }
 
-impl ProviderConfig {
-    /// Convert this provider configuration into a specific configuration type.
-    ///
-    /// Deserializes all fields (`kind`, `network`, and provider-specific fields from `rest`)
-    /// into a strongly-typed configuration struct. The conversion can fail if required fields
-    /// are missing, field types don't match, or values are invalid for the target type.
-    pub fn try_into_config<T>(&self) -> Result<T, ParseConfigError>
+impl TryIntoConfig for ProviderConfig {
+    fn try_into_config<T>(&self) -> Result<T, ParseConfigError>
     where
         T: for<'de> serde::Deserialize<'de>,
     {
@@ -48,11 +45,6 @@ impl ProviderConfig {
         value.try_into().map_err(ParseConfigError)
     }
 }
-
-/// Error that can occur when parsing provider configuration into specific config types.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to parse provider configuration")]
-pub struct ParseConfigError(#[source] toml::de::Error);
 
 /// Internal EVM RPC provider configuration for parsing TOML config.
 ///

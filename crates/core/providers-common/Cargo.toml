@@ -1,0 +1,16 @@
+[package]
+name = "amp-providers-common"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+datafusion.workspace = true
+datasets-common = { path = "../datasets-common" }
+schemars = { workspace = true, optional = true }
+serde.workspace = true
+thiserror.workspace = true
+toml = { workspace = true, features = ["preserve_order"] }
+
+[dev-dependencies]
+serde_json.workspace = true

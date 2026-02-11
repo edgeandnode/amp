@@ -121,11 +121,7 @@ use datasets_derived::{
     deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::TableInput,
 };
-use futures::StreamExt as _;
-use metadata_db::NotificationMultiplexerHandle;
-use tracing::{Instrument, instrument};
-
-use crate::{
+use dump::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
     block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
     check::consistency_check,
@@ -143,6 +139,9 @@ use crate::{
     },
     tasks::{self, TryWaitAllError},
 };
+use futures::StreamExt as _;
+use metadata_db::NotificationMultiplexerHandle;
+use tracing::{Instrument, instrument};
 
 /// Dumps a set of derived dataset tables. All tables must belong to the same dataset.
 pub async fn dump(
@@ -163,7 +162,7 @@ pub async fn dump(
         .map(Arc::new)
         .map_err(Error::GetDerivedManifest)?;
 
-    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = dump::parquet_opts(&ctx.config.parquet);
 
     // Get dataset for table resolution
     let dataset = ctx
@@ -352,7 +351,7 @@ pub enum Error {
     ConsistencyCheck {
         table_name: String,
         #[source]
-        source: crate::check::ConsistencyError,
+        source: dump::check::ConsistencyError,
     },
 
     /// Failed to retrieve derived dataset manifest
@@ -960,7 +959,7 @@ pub enum DumpSqlQueryError {
     ///
     /// This occurs when initializing the streaming query executor fails.
     #[error("failed to spawn streaming query: {0}")]
-    StreamingQuerySpawn(#[source] crate::streaming_query::SpawnError),
+    StreamingQuerySpawn(#[source] dump::streaming_query::SpawnError),
 
     /// Failed to create the parquet file writer
     ///

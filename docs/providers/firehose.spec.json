@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FirehoseProviderConfig",
+  "description": "Configuration for a Firehose provider.\n\nThis structure defines the parameters required to connect to a Firehose\nstreaming endpoint for blockchain data extraction. The `kind` field validates\nthat the config belongs to a `firehose` provider at deserialization time.",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "The provider kind, must be `\"firehose\"`.",
+      "const": "firehose"
+    },
+    "network": {
+      "description": "The network this provider serves.",
+      "$ref": "#/$defs/NetworkId"
+    },
+    "token": {
+      "description": "Optional authentication token for the Firehose endpoint.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "description": "The URL of the Firehose endpoint.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "network",
+    "url"
+  ],
+  "$defs": {
+    "NetworkId": {
+      "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

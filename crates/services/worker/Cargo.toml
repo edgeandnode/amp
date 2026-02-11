@@ -7,11 +7,14 @@ license-file.workspace = true
 [dependencies]
 amp-config = { path = "../../config" }
 amp-data-store = { path = "../../core/data-store" }
+amp-worker-datasets-derived = { path = "../../core/worker-datasets-derived" }
+amp-worker-datasets-raw = { path = "../../core/worker-datasets-raw" }
 async-trait.workspace = true
 backon.workspace = true
 chrono.workspace = true
 common = { path = "../../core/common" }
 datasets-common = { path = "../../core/datasets-common" }
+datasets-derived = { path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
