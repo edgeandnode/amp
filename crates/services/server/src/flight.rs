@@ -20,7 +20,7 @@ use async_stream::stream;
 use axum::{Router, http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    BlockNum, BlockRange, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
+    BlockNum, BlockRange, ResumeWatermark,
     arrow::{
         self,
         array::RecordBatch,
@@ -41,8 +41,11 @@ use common::{
             },
         },
     },
+    context::{
+        planning::{DetachedLogicalPlan, PlanningContext},
+        query::{Error as CoreError, QueryContext, QueryEnv},
+    },
     dataset_store::{DatasetStore, GetDatasetError},
-    query_context::{Error as CoreError, QueryEnv},
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,

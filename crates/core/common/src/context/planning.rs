@@ -20,9 +20,9 @@ use tracing::instrument;
 use crate::{
     LogicalCatalog,
     catalog::logical::LogicalTable,
+    context::query::{Error, QueryContext, default_catalog_name},
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::{is_incremental, propagate_block_num},
-    query_context::{Error, QueryContext, default_catalog_name},
     sql::TableReference,
 };
 
@@ -48,7 +48,7 @@ impl PlanningContext {
     /// Infers the output schema of the query by planning it against empty tables.
     pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
         let ctx = self.datafusion_ctx()?;
-        let plan = crate::query_context::sql_to_plan(&ctx, query).await?;
+        let plan = crate::context::query::sql_to_plan(&ctx, query).await?;
         Ok(plan.schema().clone())
     }
 
@@ -61,7 +61,7 @@ impl PlanningContext {
         let ctx = SessionContext::new_with_state(state);
         for table in &self.catalog.tables {
             // The catalog schema needs to be explicitly created or table creation will fail.
-            crate::query_context::create_catalog_schema(&ctx, table.sql_table_ref_schema());
+            crate::context::query::create_catalog_schema(&ctx, table.sql_table_ref_schema());
             let planning_table = PlanningTable(table.clone());
             ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
                 .map_err(Error::DatasetError)?;
@@ -71,10 +71,10 @@ impl PlanningContext {
     }
 
     fn register_udfs(&self, ctx: &SessionContext) {
-        for udf in crate::query_context::udfs() {
+        for udf in crate::context::query::udfs() {
             ctx.register_udf(udf);
         }
-        for udaf in crate::query_context::udafs() {
+        for udaf in crate::context::query::udafs() {
             ctx.register_udaf(udaf);
         }
         for udf in self.catalog.udfs.iter() {
@@ -100,7 +100,7 @@ impl PlanningContext {
 
     pub async fn plan_sql(&self, query: parser::Statement) -> Result<DetachedLogicalPlan, Error> {
         let ctx = self.datafusion_ctx()?;
-        let plan = crate::query_context::sql_to_plan(&ctx, query).await?;
+        let plan = crate::context::query::sql_to_plan(&ctx, query).await?;
         Ok(DetachedLogicalPlan(plan))
     }
 }

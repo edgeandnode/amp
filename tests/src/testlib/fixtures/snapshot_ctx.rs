@@ -14,11 +14,12 @@ use std::sync::Arc;
 use amp_data_store::DataStore;
 use anyhow::Result;
 use common::{
-    LogicalCatalog, QueryContext,
+    LogicalCatalog,
     catalog::{
         logical::LogicalTable,
         physical::{Catalog, PhysicalTable},
     },
+    context::query::QueryContext,
 };
 use server::config::Config;
 /// Snapshot context fixture for comparing dataset snapshots in tests.
