@@ -9,6 +9,7 @@ alloy.workspace = true
 amp-data-store = { path = "../data-store" }
 amp-datasets-registry = { path = "../datasets-registry" }
 amp-providers-registry = { path = "../providers-registry" }
+arrow.workspace = true
 async-stream.workspace = true
 async-trait.workspace = true
 bigdecimal = "0.4"

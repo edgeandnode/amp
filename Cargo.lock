@@ -2877,6 +2877,7 @@ dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
  "amp-providers-registry",
+ "arrow",
  "async-stream",
  "async-trait",
  "bigdecimal",

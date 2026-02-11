@@ -3,15 +3,13 @@ use std::{
     task::{Context, Poll},
 };
 
+use arrow::{array::RecordBatch, error::ArrowError};
 use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 use datasets_raw::arrow::DataType;
 use futures::{Stream, ready};
 
 use super::QueryMessage;
-use crate::{
-    BlockNum,
-    arrow::{array::RecordBatch, error::ArrowError},
-};
+use crate::BlockNum;
 
 /// A stream adapter that enriches a `QueryMessage` stream with `BlockComplete` messages.
 ///
@@ -235,9 +233,9 @@ pub enum ProcessDataBatchError {
 }
 
 fn extract_block_numbers(
-    array: &dyn crate::arrow::array::Array,
+    array: &dyn arrow::array::Array,
 ) -> Result<Vec<BlockNum>, ExtractBlockNumbersError> {
-    use crate::arrow::{array::*, datatypes::DataType};
+    use arrow::{array::*, datatypes::DataType};
 
     let block_nums = match array.data_type() {
         DataType::UInt64 => {
@@ -366,16 +364,14 @@ pub enum SplitRecordBatchError {
 mod tests {
     use std::sync::Arc;
 
-    use futures::{StreamExt, stream};
+    use arrow::{
+        array::UInt64Array,
+        datatypes::{DataType, Field, Schema},
+    };
+    use futures::{StreamExt as _, stream};
 
     use super::*;
-    use crate::{
-        BlockRange,
-        arrow::{
-            array::UInt64Array,
-            datatypes::{DataType, Field, Schema},
-        },
-    };
+    use crate::BlockRange;
 
     fn create_test_batch(block_nums: Vec<u64>, data: Vec<u64>) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![
