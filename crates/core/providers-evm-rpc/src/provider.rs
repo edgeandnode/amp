@@ -15,6 +15,7 @@ use alloy::{
 use amp_providers_common::config::{InvalidConfigError, ProviderResolvedConfigRaw, TryIntoConfig};
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use tower::{Layer, Service};
+use url::Url;
 
 use crate::config::EvmRpcProviderConfig;
 
@@ -66,8 +67,8 @@ pub async fn create(
         match typed_config.rate_limit_per_minute {
             Some(rate_limit) => client_builder
                 .layer(RateLimitLayer::new(rate_limit))
-                .http(typed_config.url),
-            None => client_builder.http(typed_config.url),
+                .http(Url::clone(&typed_config.url)),
+            None => client_builder.http(Url::clone(&typed_config.url)),
         }
     };
 

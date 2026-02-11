@@ -1,6 +1,6 @@
-use std::{fmt, num::NonZeroU32, path::PathBuf};
+use std::{num::NonZeroU32, path::PathBuf};
 
-use amp_providers_common::network_id::NetworkId;
+use amp_providers_common::{network_id::NetworkId, redacted::Redacted};
 use url::Url;
 
 use crate::kind::SolanaProviderKind;
@@ -10,7 +10,7 @@ use crate::kind::SolanaProviderKind;
 /// This structure defines the parameters required to connect to a Solana
 /// RPC endpoint for blockchain data extraction. The `kind` field validates
 /// that the config belongs to a `solana` provider at deserialization time.
-#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct SolanaProviderConfig {
     /// The provider kind, must be `"solana"`.
@@ -20,9 +20,8 @@ pub struct SolanaProviderConfig {
     pub network: NetworkId,
 
     /// The URL of the Solana RPC endpoint.
-    #[serde(with = "serde_with::As::<serde_with::DisplayFromStr>")]
     #[cfg_attr(feature = "schemars", schemars(with = "String"))]
-    pub rpc_provider_url: Url,
+    pub rpc_provider_url: Redacted<Url>,
 
     /// Optional rate limit for RPC calls per second.
     pub max_rpc_calls_per_second: Option<NonZeroU32>,
@@ -39,22 +38,8 @@ pub struct SolanaProviderConfig {
     pub use_archive: UseArchive,
 }
 
-impl fmt::Debug for SolanaProviderConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SolanaProviderConfig")
-            .field("kind", &self.kind)
-            .field("network", &self.network)
-            .field("rpc_provider_url", &"<redacted>")
-            .field("max_rpc_calls_per_second", &self.max_rpc_calls_per_second)
-            .field("of1_car_directory", &self.of1_car_directory)
-            .field("keep_of1_car_files", &self.keep_of1_car_files)
-            .field("use_archive", &self.use_archive)
-            .finish()
-    }
-}
-
 /// Configures when to use the Solana archive for fetching historical data.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum UseArchive {

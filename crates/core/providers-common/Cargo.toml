@@ -14,3 +14,4 @@ toml = { workspace = true, features = ["preserve_order"] }
 
 [dev-dependencies]
 serde_json.workspace = true
+url.workspace = true

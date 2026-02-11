@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [features]
+# JSON Schema generation support for provider configuration validation.
 schemars = ["dep:schemars", "amp-providers-common/schemars", "dep:serde_json"]
 
 [dependencies]

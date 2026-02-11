@@ -36,8 +36,7 @@
     },
     "use_archive": {
       "description": "Controls when to use the Solana archive for historical data.",
-      "$ref": "#/$defs/UseArchive",
-      "default": "always"
+      "$ref": "#/$defs/UseArchive"
     }
   },
   "required": [
