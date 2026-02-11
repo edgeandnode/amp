@@ -148,29 +148,29 @@ where
         const WARN_RETRY_DELAY: Duration = Duration::from_millis(100);
         const ERROR_RETRY_DELAY: Duration = Duration::from_millis(300);
 
-        let mut current_block = start;
+        let mut next_block = start;
         let mut num_retries = 0;
 
         async_stream::stream! {
             'retry: loop {
-                let inner_stream = self.0.clone().block_stream(current_block, end).await;
+                let inner_stream = self.0.clone().block_stream(next_block, end).await;
                 futures::pin_mut!(inner_stream);
-                while let Some(rows) = inner_stream.next().await {
-                    match rows.as_ref() {
-                        Ok(r) => {
+                while let Some(row_result) = inner_stream.next().await {
+                    match row_result.as_ref() {
+                        Ok(rows) => {
                             num_retries = 0;
-                            current_block = r.block_num();
-                            yield rows;
+                            next_block = rows.block_num() + 1;
+                            yield row_result;
                         }
                         Err(BlockStreamError::Fatal(e)) => {
                             let error_source = monitoring::logging::error_source(e.as_ref());
                             tracing::error!(
-                                block = %current_block,
+                                block = %next_block,
                                 error = %e,
                                 error_source,
                                 "Fatal error in block streamer, aborting"
                             );
-                            yield rows;
+                            yield row_result;
                             return;
                         }
                         Err(BlockStreamError::Recoverable(e)) => {
@@ -181,7 +181,7 @@ where
                                     // First error, make sure it is visible in info (default) logs.
                                     num_retries += 1;
                                     tracing::info!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying"
@@ -191,7 +191,7 @@ where
                                 1..DEBUG_RETRY_LIMIT => {
                                     num_retries += 1;
                                     tracing::debug!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying");
@@ -200,7 +200,7 @@ where
                                 DEBUG_RETRY_LIMIT..WARN_RETRY_LIMIT => {
                                     num_retries += 1;
                                     tracing::warn!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying"
@@ -209,7 +209,7 @@ where
                                 }
                                 _ => {
                                     tracing::error!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying"
