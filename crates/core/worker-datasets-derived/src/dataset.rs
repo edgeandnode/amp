@@ -873,6 +873,7 @@ async fn dump_sql_query(
             }
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
+                let block_timestamp = range.timestamp();
                 // Close current file and commit metadata
                 let ParquetFileWriterOutput {
                     parquet_meta,
@@ -944,6 +945,9 @@ async fn dump_sql_query(
 
                 if let Some(ref metrics) = metrics {
                     metrics.record_file_written(table_name.to_string(), location_id);
+                    if let Some(ts) = block_timestamp {
+                        metrics.record_table_freshness(table_name.to_string(), location_id, ts);
+                    }
                 }
             }
         }
