@@ -281,11 +281,16 @@ where
         .map_err(Error::JobStatusUpdate)
 }
 
-/// Conditionally marks a job as `FAILED` from either `RUNNING` or `SCHEDULED` states
+/// Conditionally marks a job as `FAILED_RECOVERABLE` from either `RUNNING` or `SCHEDULED` states
+///
+/// This is used for recoverable failures where retry attempts can be made.
 ///
 /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_failed<'c, E>(exe: E, id: impl Into<JobId> + std::fmt::Debug) -> Result<(), Error>
+pub async fn mark_failed_recoverable<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
@@ -293,7 +298,30 @@ where
         exe,
         id.into(),
         &[JobStatus::Scheduled, JobStatus::Running],
-        JobStatus::Failed,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .map_err(Error::JobStatusUpdate)
+}
+
+/// Conditionally marks a job as `FAILED_FATAL` from either `RUNNING` or `SCHEDULED` states
+///
+/// This is used for unrecoverable failures where retry attempts should not be made.
+///
+/// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
+#[tracing::instrument(skip(exe), err)]
+pub async fn mark_failed_fatal<'c, E>(
+    exe: E,
+    id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<(), Error>
+where
+    E: Executor<'c>,
+{
+    sql::update_status_if_any_state(
+        exe,
+        id.into(),
+        &[JobStatus::Scheduled, JobStatus::Running],
+        JobStatus::FailedFatal,
     )
     .await
     .map_err(Error::JobStatusUpdate)
@@ -333,7 +361,7 @@ where
         .map_err(Error::Database)
 }
 
-/// Get failed jobs that are ready for retry
+/// Get failed (recoverable) jobs that are ready for retry
 ///
 /// Returns failed jobs where enough time has passed since last failure based on
 /// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.

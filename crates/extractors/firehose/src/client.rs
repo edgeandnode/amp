@@ -6,7 +6,9 @@ use std::{
 use async_stream::stream;
 use datasets_common::{block_num::BlockNum, network_id::NetworkId};
 use datasets_raw::{
-    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    client::{
+        BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
+    },
     rows::Rows,
 };
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
@@ -200,7 +202,7 @@ impl BlockStreamer for Client {
                         if let Some(ref metrics) = metrics {
                             metrics.record_stream_error(&provider, &network, "connection");
                         }
-                        yield Err(err.into());
+                        yield Err(err).recoverable();
                         return;
                     }
                 };
@@ -226,7 +228,7 @@ impl BlockStreamer for Client {
                                         "error converting Protobufs to rows on block {}: {}",
                                         block_num,
                                         err
-                                    ).into());
+                                    )).fatal();
                                     return;
                                 }
                             }

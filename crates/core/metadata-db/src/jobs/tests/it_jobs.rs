@@ -171,9 +171,14 @@ async fn get_jobs_for_node_filters_by_status() {
     .await
     .expect("Failed to register completed job");
 
-    jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to register failed job");
+    jobs::sql::insert(
+        &conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to register failed (recoverable) job");
 
     let job_id_stop_requested = jobs::sql::insert(
         &conn,
@@ -586,9 +591,14 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     )
     .await
     .expect("Failed to insert job 1");
-    let job_id2 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job 2");
+    let job_id2 = jobs::sql::insert(
+        &conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to insert job 2");
     let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Stopped)
         .await
         .expect("Failed to insert job 3");
@@ -599,7 +609,11 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     //* When
     let deleted_count = jobs::sql::delete_by_status(
         &conn,
-        [JobStatus::Completed, JobStatus::Failed, JobStatus::Stopped],
+        [
+            JobStatus::Completed,
+            JobStatus::FailedRecoverable,
+            JobStatus::Stopped,
+        ],
     )
     .await
     .expect("Failed to delete jobs");
@@ -652,10 +666,15 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    // Create a failed job
-    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job");
+    // Create a failed (recoverable) job
+    let job_id = jobs::sql::insert(
+        &conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to insert job");
 
     // Wait longer than initial backoff (1 second)
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -688,10 +707,15 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    // Create a failed job
-    jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job");
+    // Create a failed (recoverable) job
+    jobs::sql::insert(
+        &conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to insert job");
 
     //* When (immediately check, before backoff expires)
     let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
@@ -719,10 +743,15 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    // Create a failed job
-    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job");
+    // Create a failed (recoverable) job
+    let job_id = jobs::sql::insert(
+        &conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to insert job");
 
     // Insert multiple attempts
     job_attempts::insert_attempt(&conn, job_id, 0)
@@ -766,10 +795,15 @@ async fn get_failed_jobs_handles_missing_attempts() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    // Create a failed job WITHOUT any attempts (edge case)
-    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job");
+    // Create a failed (recoverable) job WITHOUT any attempts (edge case)
+    let job_id = jobs::sql::insert(
+        &conn,
+        worker_id.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to insert job");
 
     // Manually delete any backfilled attempts to simulate edge case
     sqlx::query("DELETE FROM job_attempts WHERE job_id = $1")
@@ -813,9 +847,14 @@ async fn reschedule_updates_status_and_worker() {
     let job_desc = serde_json::json!({"test": "job"});
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::sql::insert(&conn, worker_id1.clone(), &job_desc_str, JobStatus::Failed)
-        .await
-        .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(
+        &conn,
+        worker_id1.clone(),
+        &job_desc_str,
+        JobStatus::FailedRecoverable,
+    )
+    .await
+    .expect("Failed to insert job");
 
     //* When
     jobs::sql::reschedule(&conn, job_id, worker_id2.clone())

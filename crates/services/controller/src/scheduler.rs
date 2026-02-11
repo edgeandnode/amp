@@ -187,11 +187,12 @@ impl Scheduler {
                     actual,
                     ..
                 }) => match actual.into() {
-                    JobStatus::Stopped | JobStatus::Completed | JobStatus::Failed => {
-                        StopJobError::JobAlreadyTerminated {
-                            status: actual.into(),
-                        }
-                    }
+                    JobStatus::Stopped
+                    | JobStatus::Completed
+                    | JobStatus::FailedRecoverable
+                    | JobStatus::FailedFatal => StopJobError::JobAlreadyTerminated {
+                        status: actual.into(),
+                    },
                     _ => StopJobError::StateConflict {
                         current_status: actual.into(),
                     },
@@ -220,6 +221,11 @@ impl Scheduler {
     /// Jobs retry indefinitely with exponential backoff (2^next_retry_index seconds).
     /// Retry tracking is managed via the job_attempts table.
     pub async fn reconcile_failed_jobs(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // First, clean up any fatally failed jobs.
+        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::FailedFatal.into()])
+            .await?;
+
+        // Then, reschedule failed (recoverable) jobs that are ready for retry.
         let failed_jobs =
             metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db).await?;
 
@@ -350,9 +356,15 @@ impl SchedulerJobs for Scheduler {
     }
 
     async fn delete_failed_jobs(&self) -> Result<usize, DeleteJobsByStatusError> {
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::Failed.into()])
-            .await
-            .map_err(DeleteJobsByStatusError)
+        metadata_db::jobs::delete_all_by_status(
+            &self.metadata_db,
+            [
+                JobStatus::FailedRecoverable.into(),
+                JobStatus::FailedFatal.into(),
+            ],
+        )
+        .await
+        .map_err(DeleteJobsByStatusError)
     }
 
     async fn list_jobs_by_dataset(

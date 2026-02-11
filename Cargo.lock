@@ -4884,6 +4884,7 @@ name = "evm-rpc-datasets"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "anyhow",
  "async-stream",
  "datasets-common",
  "datasets-raw",

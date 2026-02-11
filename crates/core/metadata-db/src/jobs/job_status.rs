@@ -49,12 +49,19 @@ pub enum JobStatus {
     /// as soon as possible.
     Stopping,
 
-    /// Job has failed
+    /// Job has failed with a recoverable error
     ///
-    /// An error occurred while running the job.
+    /// A recoverable error occurred while running the job. The job may succeed if retried.
     ///
     /// This is a terminal state.
-    Failed,
+    FailedRecoverable,
+
+    /// Job has failed with a fatal error
+    ///
+    /// A fatal error occurred while running the job. The job will not succeed if retried.
+    ///
+    /// This is a terminal state.
+    FailedFatal,
 
     /// Unknown status
     ///
@@ -74,7 +81,8 @@ impl JobStatus {
             Self::Stopped => "STOPPED",
             Self::StopRequested => "STOP_REQUESTED",
             Self::Stopping => "STOPPING",
-            Self::Failed => "FAILED",
+            Self::FailedRecoverable => "FAILED_RECOVERABLE",
+            Self::FailedFatal => "FAILED_FATAL",
             Self::Unknown => "UNKNOWN",
         }
     }
@@ -88,15 +96,23 @@ impl JobStatus {
     ///
     /// Non-terminal states can still transition to other states
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Stopped | Self::Failed)
+        matches!(
+            self,
+            Self::Completed | Self::Stopped | Self::FailedRecoverable | Self::FailedFatal
+        )
     }
 
     /// Returns an array of all terminal job statuses
     ///
     /// These are the statuses that represent completed job lifecycles
     /// and can be safely deleted from the system.
-    pub fn terminal_statuses() -> [JobStatus; 3] {
-        [Self::Completed, Self::Stopped, Self::Failed]
+    pub fn terminal_statuses() -> [JobStatus; 4] {
+        [
+            Self::Completed,
+            Self::Stopped,
+            Self::FailedRecoverable,
+            Self::FailedFatal,
+        ]
     }
 
     /// Returns an array of all non-terminal (active) job statuses
@@ -125,7 +141,8 @@ impl std::str::FromStr for JobStatus {
             s if s.eq_ignore_ascii_case("STOPPED") => Ok(Self::Stopped),
             s if s.eq_ignore_ascii_case("STOP_REQUESTED") => Ok(Self::StopRequested),
             s if s.eq_ignore_ascii_case("STOPPING") => Ok(Self::Stopping),
-            s if s.eq_ignore_ascii_case("FAILED") => Ok(Self::Failed),
+            s if s.eq_ignore_ascii_case("FAILED_RECOVERABLE") => Ok(Self::FailedRecoverable),
+            s if s.eq_ignore_ascii_case("FAILED_FATAL") => Ok(Self::FailedFatal),
             _ => Ok(Self::Unknown), // Default to Unknown for Infallible
         }
     }

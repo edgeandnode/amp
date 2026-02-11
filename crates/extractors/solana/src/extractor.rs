@@ -18,7 +18,9 @@ use std::{
 use anyhow::Context;
 use datasets_common::{block_num::BlockNum, network_id::NetworkId};
 use datasets_raw::{
-    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    client::{
+        BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
+    },
     rows::Rows,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -26,6 +28,7 @@ use solana_clock::Slot;
 use url::Url;
 
 use crate::{
+    error::Of1StreamError,
     metrics, of1_client, rpc_client,
     tables::{self},
 };
@@ -134,13 +137,13 @@ impl SolanaExtractor {
                     let e = format!(
                         "historical block stream yielded slot {current_slot} outside of requested range {start}..={end}"
                     );
-                    yield Err(e.into());
+                    yield Err(e).fatal();
                     return;
                 }
 
                 // Don't emit rows for skipped slots.
-                let non_empty_slot = ok_or_bail!(non_empty_of1_slot(slot).map_err(Into::into));
-                yield non_empty_slot.into_db_rows(&self.network).map_err(Into::into);
+                let non_empty_slot = ok_or_bail!(non_empty_of1_slot(slot).fatal());
+                yield non_empty_slot.into_db_rows(&self.network).fatal();
 
                 if current_slot == end {
                     // Reached the end of the requested range.
@@ -166,13 +169,15 @@ impl SolanaExtractor {
 
                 match get_block_resp {
                     Ok(block) => {
-                        let non_empty_slot = ok_or_bail!(non_empty_rpc_slot(slot, block).map_err(Into::into));
-                        yield non_empty_slot.into_db_rows(&self.network).map_err(Into::into);
+                        let non_empty_slot = ok_or_bail!(
+                            non_empty_rpc_slot(slot, block).recoverable()
+                        );
+                        yield non_empty_slot.into_db_rows(&self.network).fatal();
                     }
                     Err(e) => {
                         // If block is missing (skipped slot), don't emit any rows.
                         if !rpc_client::is_block_missing_err(&e) {
-                            yield Err(e.into());
+                            yield Err(e).recoverable();
                             return;
                         }
                     }
@@ -283,7 +288,10 @@ impl BlockStreamer for SolanaExtractor {
                 get_block_config,
                 self.metrics.clone(),
             )
-            .map_err(Into::into)
+            .map_err(|err| match err {
+                Of1StreamError::RpcClient(_) => BlockStreamError::Recoverable(err.into()),
+                _ => BlockStreamError::Fatal(err.into()),
+            })
             .boxed()
         };
 

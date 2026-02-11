@@ -524,6 +524,20 @@ pub enum Error {
     Cleanup(#[source] CleanupError),
 }
 
+impl Error {
+    pub fn is_fatal(&self) -> bool {
+        // TODO: To keep things semantically the same, [TryWaitAllError::Panic] is not
+        // considered a fatal error, even though it indicates a bug. We may want to
+        // revisit this in the future.
+        matches!(
+            self,
+            Self::PartitionTask(TryWaitAllError::Error(RunRangeError::ReadStream(
+                BlockStreamError::Fatal(_)
+            )))
+        )
+    }
+}
+
 /// Dumps block ranges by partitioning them across multiple parallel workers.
 #[instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]

@@ -125,3 +125,12 @@ pub(crate) enum DumpError {
     #[error("Failed to dump derived dataset")]
     Derived(#[source] amp_worker_datasets_derived::Error),
 }
+
+impl DumpError {
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            Self::Raw(err) => err.is_fatal(),
+            Self::Derived(err) => err.is_fatal(),
+        }
+    }
+}
