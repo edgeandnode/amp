@@ -209,7 +209,6 @@ impl TreeNodeRewriter for BlockNumPropagator {
             }
 
             // Rebuild union schemas to match their child projections
-            // TODO: Use `Union::try_new` once DF 51 released.
             Union(union) => {
                 // Sanity check
                 if self.next_block_num_expr != Some(block_num_col()) {
@@ -219,9 +218,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
                     )));
                 }
 
-                Ok(Transformed::yes(Union(
-                    UnionStruct::try_new_with_loose_types(union.inputs)?,
-                )))
+                Ok(Transformed::yes(Union(UnionStruct::try_new(union.inputs)?)))
             }
 
             Join(ref join) => {
