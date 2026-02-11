@@ -2877,6 +2877,7 @@ dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
  "amp-providers-registry",
+ "async-stream",
  "async-trait",
  "bigdecimal",
  "bytes",
@@ -2903,6 +2904,8 @@ dependencies = [
  "solana-datasets",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "tracing",
  "url",
 ]
@@ -4612,14 +4615,10 @@ checksum = "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5"
 name = "dump"
 version = "0.1.0"
 dependencies = [
- "alloy",
  "amp-data-store",
- "async-stream",
  "common",
  "datafusion",
  "datasets-common",
- "datasets-derived",
- "datasets-raw",
  "futures",
  "metadata-db",
  "monitoring",
@@ -4629,8 +4628,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -9762,7 +9759,6 @@ dependencies = [
  "common",
  "datafusion",
  "datasets-common",
- "dump",
  "futures",
  "js-runtime",
  "metadata-db",
