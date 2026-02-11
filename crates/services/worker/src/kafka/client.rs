@@ -68,7 +68,7 @@ impl KafkaProducer {
             .as_ref()
             .ok_or(Error::MissingSaslPassword)?;
 
-        let credentials = Credentials::new(username.clone(), password.clone());
+        let credentials = Credentials::new(String::clone(username), String::clone(password));
 
         Ok(match mechanism {
             SaslMechanism::Plain => SaslConfig::Plain(credentials),
@@ -262,6 +262,7 @@ impl BackoffBuilder for FixedDelayBackoff {
 
 #[cfg(test)]
 mod tests {
+    use amp_config::Redacted;
     use prost::Message;
 
     use super::*;
@@ -398,8 +399,8 @@ mod tests {
             topic: "test".to_string(),
             partitions: 1,
             sasl_mechanism: mechanism.map(String::from),
-            sasl_username: username.map(String::from),
-            sasl_password: password.map(String::from),
+            sasl_username: username.map(|u| Redacted::from(String::from(u))),
+            sasl_password: password.map(|p| Redacted::from(String::from(p))),
             tls_enabled: false,
         }
     }
