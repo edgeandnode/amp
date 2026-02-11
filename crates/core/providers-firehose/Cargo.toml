@@ -13,6 +13,5 @@ amp-providers-common = { path = "../providers-common" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
-serde_with.workspace = true
 thiserror.workspace = true
 url.workspace = true
