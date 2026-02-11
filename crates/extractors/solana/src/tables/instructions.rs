@@ -47,7 +47,7 @@ fn schema() -> Schema {
     Schema::new(fields)
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Instruction {
     pub slot: Slot,
     pub tx_index: u32,

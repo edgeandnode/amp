@@ -75,7 +75,7 @@ fn address_table_lookups_dtype() -> DataType {
     )))
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Message {
     pub slot: Slot,
     pub tx_index: u32,
@@ -185,7 +185,7 @@ impl Message {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AddressTableLookup {
     pub account_key: String,
     pub writable_indexes: Vec<u8>,

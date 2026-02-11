@@ -121,7 +121,7 @@ fn reward_dtype() -> DataType {
     ]))
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Transaction {
     pub slot: Slot,
     pub index: u32,
@@ -182,7 +182,7 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TransactionVersion {
     #[default]
     Legacy,
@@ -198,7 +198,7 @@ impl fmt::Display for TransactionVersion {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransactionStatusMeta {
     // Instead of trying to represent the entire transaction error enumeration as a union, we
     // serialize it into a JSON string. This keeps the schema simpler and more stable, at the cost
@@ -507,7 +507,7 @@ impl TransactionStatusMeta {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransactionTokenBalance {
     pub account_index: u8,
     pub mint: String,
@@ -588,7 +588,7 @@ impl From<solana_storage_proto::confirmed_block::TokenBalance> for TransactionTo
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TokenAmount {
     /// Deprecated: https://solana.com/docs/rpc/json-structures#token-balances
     /// pub ui_amount: Option<f64>,
@@ -597,13 +597,13 @@ pub struct TokenAmount {
     pub ui_amount_string: String,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct LoadedAddresses {
     pub writable: Vec<String>,
     pub readonly: Vec<String>,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransactionReturnData {
     pub program_id: String,
     pub data: Vec<u8>,

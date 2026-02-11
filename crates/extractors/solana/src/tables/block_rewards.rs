@@ -39,7 +39,7 @@ fn schema() -> Schema {
     Schema::new(fields)
 }
 
-#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Reward {
     pub pubkey: String,
     pub lamports: i64,
@@ -48,7 +48,7 @@ pub struct Reward {
     pub commission: Option<u8>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RewardType {
     /// The `Unspecified` variant only in the protobuf version of
     /// RewardType, it is not defined by the Solana spec.
@@ -154,8 +154,7 @@ impl From<solana_reward_info::RewardType> for RewardType {
     }
 }
 
-/// Solana block rewards.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BlockRewards {
     pub slot: Slot,
     pub rewards: Vec<Reward>,

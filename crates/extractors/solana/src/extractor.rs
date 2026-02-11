@@ -140,7 +140,7 @@ impl SolanaExtractor {
 
                 // Don't emit rows for skipped slots.
                 let non_empty_slot = ok_or_bail!(non_empty_of1_slot(slot).map_err(Into::into));
-                yield tables::convert_slot_to_db_rows(non_empty_slot, &self.network).map_err(Into::into);
+                yield non_empty_slot.into_db_rows(&self.network).map_err(Into::into);
 
                 if current_slot == end {
                     // Reached the end of the requested range.
@@ -167,7 +167,7 @@ impl SolanaExtractor {
                 match get_block_resp {
                     Ok(block) => {
                         let non_empty_slot = ok_or_bail!(non_empty_rpc_slot(slot, block).map_err(Into::into));
-                        yield tables::convert_slot_to_db_rows(non_empty_slot, &self.network).map_err(Into::into);
+                        yield non_empty_slot.into_db_rows(&self.network).map_err(Into::into);
                     }
                     Err(e) => {
                         // If block is missing (skipped slot), don't emit any rows.
