@@ -9,18 +9,20 @@ use std::{
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use common::{
-    BlockNum, BlockRange, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
-    ResumeWatermark, Watermark,
+    BlockNum, BlockRange, LogicalCatalog, ResumeWatermark, Watermark,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::{
         logical::LogicalTable,
         physical::{CanonicalChainError, Catalog, PhysicalTable},
     },
+    context::{
+        planning::{DetachedLogicalPlan, PlanningContext},
+        query::{QueryContext, QueryEnv},
+    },
     dataset_store::{DatasetStore, ResolveRevisionError},
     incrementalizer::incrementalize_plan,
     metadata::segments::{Segment, WatermarkNotFoundError},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
-    query_context::QueryEnv,
     sql_str::SqlStr,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
@@ -82,7 +84,7 @@ pub enum SpawnError {
     /// Optimization failures prevent the streaming query from starting with an
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
-    OptimizePlan(#[source] common::query_context::Error),
+    OptimizePlan(#[source] common::context::query::Error),
 
     /// Query references tables from multiple blockchain networks
     ///
@@ -848,7 +850,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] common::query_context::Error),
+    QueryContext(#[source] common::context::query::Error),
 
     /// Failed to get the next microbatch range
     ///
@@ -860,7 +862,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be attached to the query context.
     #[error("failed to attach the plan to the query context: {0}")]
-    AttachToPlan(#[source] common::query_context::Error),
+    AttachToPlan(#[source] common::context::query::Error),
 
     /// Failed to incrementalize the plan
     ///
@@ -878,7 +880,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be executed.
     #[error("failed to execute the plan: {0}")]
-    ExecutePlan(#[source] common::query_context::Error),
+    ExecutePlan(#[source] common::context::query::Error),
 
     /// Failed to stream item
     ///
@@ -896,7 +898,7 @@ pub enum NextMicrobatchRangeError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] common::query_context::Error),
+    QueryContext(#[source] common::context::query::Error),
 
     /// Failed to get the latest source watermark
     ///
@@ -965,7 +967,7 @@ pub enum ReorgBaseError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] common::query_context::Error),
+    QueryContext(#[source] common::context::query::Error),
 
     /// Failed to fetch the blocks table
     ///
@@ -1008,13 +1010,13 @@ pub enum BlocksTableFetchError {
     ///
     /// This occurs when the SQL cannot be planned.
     #[error("failed to plan the SQL: {0}")]
-    PlanSql(#[source] common::query_context::Error),
+    PlanSql(#[source] common::context::query::Error),
 
     /// Failed to execute the SQL
     ///
     /// This occurs when the SQL cannot be executed.
     #[error("failed to execute the SQL: {0}")]
-    ExecuteSql(#[source] common::query_context::Error),
+    ExecuteSql(#[source] common::context::query::Error),
 
     /// Failed to get the hash value
     ///

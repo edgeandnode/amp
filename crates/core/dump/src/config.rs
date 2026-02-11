@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use common::{metadata::Overflow, query_context::QueryEnv};
+use common::{context::query::QueryEnv, metadata::Overflow};
 use datafusion::{
     common::DataFusionError,
     parquet::basic::{Compression, ZstdLevel},
@@ -40,7 +40,7 @@ pub struct Config {
 impl Config {
     /// Create a DataFusion query environment from this configuration
     pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
-        common::query_context::create_query_env(
+        common::context::query::create_query_env(
             self.max_mem_mb,
             self.query_max_mem_mb,
             &self.spill_location,

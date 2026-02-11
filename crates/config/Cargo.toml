@@ -6,8 +6,6 @@ license-file.workspace = true
 
 [dependencies]
 amp-object-store = { path = "../core/object-store" }
-common = { path = "../core/common" }
-datafusion.workspace = true
 dump = { path = "../core/dump" }
 figment.workspace = true
 fs-err.workspace = true

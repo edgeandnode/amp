@@ -98,7 +98,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use amp_data_store::file_name::FileName;
 use common::{
-    BlockNum, DetachedLogicalPlan, PlanningContext, QueryContext, ResumeWatermark,
+    BlockNum, ResumeWatermark,
     catalog::{
         logical::for_dump as logical_catalog,
         physical::{
@@ -106,10 +106,13 @@ use common::{
             for_dump as physical_catalog,
         },
     },
+    context::{
+        planning::{DetachedLogicalPlan, PlanningContext},
+        query::{QueryContext, QueryEnv},
+    },
     dataset_store::ResolveRevisionError,
     metadata::Generation,
     parquet::errors::ParquetError,
-    query_context::QueryEnv,
     sql::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
@@ -721,7 +724,7 @@ pub enum DumpTableSpawnError {
     /// This occurs when DataFusion cannot create an execution plan
     /// from the parsed SQL query.
     #[error("failed to plan SQL query: {0}")]
-    PlanSql(#[source] common::query_context::Error),
+    PlanSql(#[source] common::context::query::Error),
 
     /// The query is not incremental and cannot be synced
     ///

@@ -10,11 +10,10 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
+    context::{planning::PlanningContext, query::Error as QueryContextError},
     dataset_store::GetDatasetError,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
-    planning_context::PlanningContext,
-    query_context::Error as QueryContextError,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,

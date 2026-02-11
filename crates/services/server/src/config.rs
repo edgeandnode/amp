@@ -25,8 +25,8 @@ impl Config {
     /// and Parquet metadata cache based on the server configuration.
     pub fn make_query_env(
         &self,
-    ) -> Result<common::query_context::QueryEnv, datafusion::error::DataFusionError> {
-        common::query_context::create_query_env(
+    ) -> Result<common::context::query::QueryEnv, datafusion::error::DataFusionError> {
+        common::context::query::create_query_env(
             self.max_mem_mb,
             self.query_max_mem_mb,
             &self.spill_location,

@@ -4,8 +4,6 @@ use std::{
 };
 
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
-use common::query_context::QueryEnv;
-use datafusion::error::DataFusionError;
 use dump::{ConfigDuration, ParquetConfig};
 use fs_err as fs;
 use monitoring::config::OpenTelemetryConfig;
@@ -285,16 +283,6 @@ pub struct KafkaEventsConfig {
     /// When enabled, connections to Kafka brokers use TLS.
     #[serde(default)]
     pub tls_enabled: bool,
-}
-
-impl Config {
-    pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
-        common::query_context::create_query_env(
-            self.max_mem_mb,
-            self.query_max_mem_mb,
-            &self.spill_location,
-        )
-    }
 }
 
 /// Ensures the `.amp/` base directory structure exists (for solo mode).

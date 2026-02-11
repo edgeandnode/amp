@@ -9,9 +9,8 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
+    context::{planning::PlanningContext, query::Error as QueryContextErr},
     dataset_store::{DatasetStore, GetDatasetError},
-    planning_context::PlanningContext,
-    query_context::Error as QueryContextErr,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
