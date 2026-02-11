@@ -16,7 +16,6 @@ pub mod config;
 pub mod metrics;
 pub mod parquet_writer;
 pub mod progress;
-pub mod streaming_query;
 pub mod tasks;
 
 pub use self::{

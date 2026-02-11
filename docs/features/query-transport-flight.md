@@ -125,7 +125,7 @@ let stream = client.do_get(ticket).await?;
 ### Source Files
 
 - `crates/services/server/src/flight.rs` - Flight server
-- `crates/core/dump/src/streaming_query.rs` - Streaming queries
+- `crates/core/common/src/streaming_query.rs` - Streaming queries
 
 ## Limitations
 

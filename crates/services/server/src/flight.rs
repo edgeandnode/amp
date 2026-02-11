@@ -51,6 +51,7 @@ use common::{
         resolve_table_references,
     },
     sql_str::SqlStr,
+    streaming_query::{QueryMessage, StreamingQuery},
 };
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
@@ -59,7 +60,6 @@ use datasets_common::{
     network_id::NetworkId,
     partial_reference::{PartialReference, PartialReferenceError},
 };
-use dump::streaming_query::{QueryMessage, StreamingQuery};
 use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},

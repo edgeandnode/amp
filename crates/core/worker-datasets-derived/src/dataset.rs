@@ -117,6 +117,9 @@ use common::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
     },
+    streaming_query::{
+        QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
+    },
 };
 use datasets_common::hash_reference::HashReference;
 use datasets_derived::{
@@ -136,9 +139,6 @@ use dump::{
     },
     progress::{
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
-    },
-    streaming_query::{
-        QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
     tasks::{self, TryWaitAllError},
 };
@@ -965,7 +965,7 @@ pub enum DumpSqlQueryError {
     ///
     /// This occurs when initializing the streaming query executor fails.
     #[error("failed to spawn streaming query: {0}")]
-    StreamingQuerySpawn(#[source] dump::streaming_query::SpawnError),
+    StreamingQuerySpawn(#[source] common::streaming_query::SpawnError),
 
     /// Failed to create the parquet file writer
     ///
