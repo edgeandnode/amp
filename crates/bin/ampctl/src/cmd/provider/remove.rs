@@ -47,8 +47,7 @@ impl std::fmt::Display for RemoveResult {
 ///
 /// # Errors
 ///
-/// Returns [`Error`] for invalid name, provider not found (404),
-/// API errors (400/500), or network failures.
+/// Returns [`Error`] for invalid name, API errors (400/500), or network failures.
 #[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %name))]
 pub async fn run(Args { global, name }: Args) -> Result<(), Error> {
     tracing::debug!("Deleting provider from admin API");
@@ -78,10 +77,6 @@ async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
                 error_code: source.error_code,
                 message: source.error_message,
             },
-            DeleteError::NotFound(source) => Error::NotFound {
-                error_code: source.error_code,
-                message: source.error_message,
-            },
             DeleteError::StoreError(source) => Error::StoreError {
                 error_code: source.error_code,
                 message: source.error_message,
@@ -103,10 +98,6 @@ pub enum Error {
     /// Invalid provider name
     #[error("invalid provider name: [{error_code}] {message}")]
     InvalidName { error_code: String, message: String },
-
-    /// Provider not found
-    #[error("provider not found: [{error_code}] {message}")]
-    NotFound { error_code: String, message: String },
 
     /// Store error
     #[error("store error: [{error_code}] {message}")]

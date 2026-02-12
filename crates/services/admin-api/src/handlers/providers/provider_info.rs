@@ -38,7 +38,7 @@ impl TryFrom<(ProviderName, ProviderConfigRaw)> for ProviderInfo {
 
     fn try_from((name, config): (ProviderName, ProviderConfigRaw)) -> Result<Self, Self::Error> {
         // Extract kind from the config
-        let header = config
+        let ConfigHeader { kind } = config
             .try_into_config::<ConfigHeader>()
             .map_err(ProviderInfoConversionError::HeaderParse)?;
 
@@ -46,14 +46,11 @@ impl TryFrom<(ProviderName, ProviderConfigRaw)> for ProviderInfo {
         let mut rest = convert::from_toml_table_to_json_map(config.into_inner())
             .map_err(ProviderInfoConversionError::JsonConversion)?;
 
-        // Remove kind from rest as it's an explicit field
+        // Remove explicit fields from rest to avoid duplication in flattened output
+        rest.remove("name");
         rest.remove("kind");
 
-        Ok(Self {
-            name,
-            kind: header.kind,
-            rest,
-        })
+        Ok(Self { name, kind, rest })
     }
 }
 
