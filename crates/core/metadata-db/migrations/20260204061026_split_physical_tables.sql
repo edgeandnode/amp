@@ -34,6 +34,17 @@ INSERT INTO physical_table_revisions (id, created_at, updated_at, path, writer)
 SELECT id, created_at, created_at AS updated_at, path, writer
 FROM physical_tables;
 
+-- Populate metadata from the original table data
+UPDATE physical_table_revisions ptr
+SET metadata = jsonb_build_object(
+    'dataset_namespace', pt.dataset_namespace,
+    'dataset_name', pt.dataset_name,
+    'manifest_hash', pt.manifest_hash,
+    'table_name', pt.table_name
+)
+FROM physical_tables pt
+WHERE ptr.id = pt.id;
+
 -- Reset the identity sequence to continue from max ID (only if table has rows)
 DO $$
 BEGIN
