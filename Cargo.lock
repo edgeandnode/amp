@@ -1205,6 +1205,7 @@ dependencies = [
  "monitoring",
  "object_store",
  "reqwest 0.13.1",
+ "rustls",
  "serde",
  "serde_json",
  "solana-datasets",
