@@ -24,6 +24,7 @@ pub enum Commands {
     Register(register::Args),
 
     /// List all registered manifests
+    #[command(alias = "ls")]
     #[command(after_help = include_str!("manifest/list__after_help.md"))]
     List(list::Args),
 
