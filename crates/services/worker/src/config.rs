@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use amp_config::WorkerEventsConfig;
-use dump::ParquetConfig;
+use amp_worker_core::ParquetConfig;
 
 /// Configuration specific to the worker service
 ///
@@ -36,12 +36,12 @@ pub struct Config {
 }
 
 impl Config {
-    /// Create a dump::config::Config from this worker configuration
+    /// Create an amp_worker_core::config::Config from this worker configuration
     ///
-    /// This method extracts only the fields needed by the dump crate for
+    /// This method extracts only the fields needed by the worker core crate for
     /// executing dataset dump operations.
-    pub fn dump_config(&self) -> dump::config::Config {
-        dump::config::Config {
+    pub fn dump_config(&self) -> amp_worker_core::config::Config {
+        amp_worker_core::config::Config {
             poll_interval: self.poll_interval,
             keep_alive_interval: self.keep_alive_interval,
             max_mem_mb: self.max_mem_mb,

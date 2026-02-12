@@ -2,7 +2,7 @@
 name: "query-sql-batch"
 description: "One-shot SQL query execution that runs to completion before returning results. Load when asking about batch queries, one-shot queries, or non-streaming execution"
 type: feature
-components: "service:server,crate:common,crate:dump"
+components: "service:server,crate:common"
 ---
 
 # Batch SQL Queries
@@ -91,7 +91,7 @@ FROM eth_rpc.blocks
 
 ### Source Files
 
-- `crates/core/dump/src/query.rs` - Core query execution logic for batch queries
+- `crates/services/server/src/flight.rs` - Arrow Flight server and batch query execution
 - `crates/core/common/src/datafusion/` - DataFusion integration and SQL planning
 
 ## Limitations

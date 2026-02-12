@@ -19,6 +19,7 @@ pub mod metadata;
 pub mod plan_visitors;
 pub mod sql;
 pub mod stream_helpers;
+pub mod streaming_query;
 
 pub use self::{
     catalog::logical::{LogicalCatalog, LogicalTable},

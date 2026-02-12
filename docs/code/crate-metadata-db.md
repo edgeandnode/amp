@@ -56,7 +56,7 @@ The `metadata-db` crate has ONE responsibility: **provide safe, transactional da
 **❌ What `metadata-db` is NOT:**
 - A business logic container (validation, workflow rules, domain constraints belong in consuming crates)
 - A coordination service (consuming crates implement coordination using metadata-db data)
-- An application layer (application-specific logic belongs in dump, admin-api, server, etc.)
+- An application layer (application-specific logic belongs in worker-core, admin-api, server, etc.)
 - A decision-making component (consuming crates make decisions based on data retrieved from metadata-db)
 - A validation layer (all data in the database is trusted as valid; validation happens at system boundaries)
 
@@ -262,7 +262,7 @@ When contributing to `metadata-db`, ensure you follow these requirements:
 **Code Requirements:**
 
 - [ ] Follow all architectural patterns documented in this guide
-- [ ] **🚫 NO BUSINESS LOGIC**: The `metadata-db` crate must contain ONLY data access operations. Business logic, validation, domain-specific rules, and application-specific constraints belong in consuming crates (dump, admin-api, etc.)
+- [ ] **🚫 NO BUSINESS LOGIC**: The `metadata-db` crate must contain ONLY data access operations. Business logic, validation, domain-specific rules, and application-specific constraints belong in consuming crates (worker-core, admin-api, etc.)
 - [ ] **🚫 NO VALIDATION**: Follow "parse, don't validate" - trust database data and invariant-preserving types without re-validation
 - [ ] Implement two-layer architecture:
   - [ ] Public API functions in main module file (e.g., `jobs.rs`) that are generic over `Executor<'c>` and return `Result<T, metadata_db::Error>`

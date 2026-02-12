@@ -2,7 +2,7 @@
 name: "query-sql-streaming"
 description: "Real-time SQL query execution with microbatch processing and block-based streaming. Load when asking about streaming queries, SETTINGS stream, microbatches, or real-time data"
 type: feature
-components: "service:server,crate:common,crate:dump"
+components: "service:server,crate:common"
 ---
 
 # Streaming SQL Queries
@@ -146,7 +146,7 @@ Non-incrementalizable queries will be rejected with a `NonIncrementalOp` error.
 
 ### Source Files
 
-- `crates/core/dump/src/streaming_query.rs` - Streaming query engine
+- `crates/core/common/src/streaming_query.rs` - Streaming query engine
 - `crates/core/common/src/stream_helpers.rs` - Stream detection
 - `crates/core/common/src/plan_visitors.rs` - Plan validation
 - `crates/services/server/src/flight.rs` - Arrow Flight integration

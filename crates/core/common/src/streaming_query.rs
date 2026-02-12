@@ -8,7 +8,26 @@ use std::{
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
-use common::{
+use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
+use datasets_common::{
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, dataset::Dataset, hash_reference::HashReference,
+    network_id::NetworkId,
+};
+use datasets_derived::dataset::Dataset as DerivedDataset;
+use futures::stream::{self, BoxStream, StreamExt};
+use message_stream_with_block_complete::MessageStreamWithBlockComplete;
+use metadata_db::{LocationId, NotificationMultiplexerHandle};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinError,
+    time::MissedTickBehavior,
+};
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::task::AbortOnDropHandle;
+use tracing::{Instrument, instrument};
+
+use self::message_stream_with_block_complete::MessageStreamError;
+use crate::{
     BlockNum, BlockRange, LogicalCatalog, ResumeWatermark, Watermark,
     arrow::{
         array::{RecordBatch, TimestampNanosecondArray},
@@ -28,25 +47,6 @@ use common::{
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
     sql_str::SqlStr,
 };
-use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
-use datasets_common::{
-    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, dataset::Dataset, hash_reference::HashReference,
-    network_id::NetworkId,
-};
-use datasets_derived::dataset::Dataset as DerivedDataset;
-use futures::stream::{self, BoxStream, StreamExt};
-use message_stream_with_block_complete::MessageStreamWithBlockComplete;
-use metadata_db::{LocationId, NotificationMultiplexerHandle};
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinError,
-    time::MissedTickBehavior,
-};
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::task::AbortOnDropHandle;
-use tracing::{Instrument, instrument};
-
-use crate::streaming_query::message_stream_with_block_complete::MessageStreamError;
 
 /// Errors that occur when spawning a streaming query
 ///
@@ -87,7 +87,7 @@ pub enum SpawnError {
     /// Optimization failures prevent the streaming query from starting with an
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
-    OptimizePlan(#[source] common::context::query::Error),
+    OptimizePlan(#[source] crate::context::query::Error),
 
     /// Query references tables from multiple blockchain networks
     ///
@@ -811,7 +811,7 @@ impl StreamingQuery {
         // SAFETY: Validation is deferred to the SQL parser which will return appropriate errors
         // for empty or invalid SQL. The format! macro ensures non-empty output.
         let sql_str = SqlStr::new_unchecked(sql);
-        let query = common::sql::parse(&sql_str).map_err(BlocksTableFetchError::ParseSql)?;
+        let query = crate::sql::parse(&sql_str).map_err(BlocksTableFetchError::ParseSql)?;
         let plan = ctx
             .plan_sql(query)
             .await
@@ -875,7 +875,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] common::context::query::Error),
+    QueryContext(#[source] crate::context::query::Error),
 
     /// Failed to get the next microbatch range
     ///
@@ -887,7 +887,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be attached to the query context.
     #[error("failed to attach the plan to the query context: {0}")]
-    AttachToPlan(#[source] common::context::query::Error),
+    AttachToPlan(#[source] crate::context::query::Error),
 
     /// Failed to incrementalize the plan
     ///
@@ -905,7 +905,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be executed.
     #[error("failed to execute the plan: {0}")]
-    ExecutePlan(#[source] common::context::query::Error),
+    ExecutePlan(#[source] crate::context::query::Error),
 
     /// Failed to stream item
     ///
@@ -923,7 +923,7 @@ pub enum NextMicrobatchRangeError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] common::context::query::Error),
+    QueryContext(#[source] crate::context::query::Error),
 
     /// Failed to get the latest source watermark
     ///
@@ -992,7 +992,7 @@ pub enum ReorgBaseError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] common::context::query::Error),
+    QueryContext(#[source] crate::context::query::Error),
 
     /// Failed to fetch the blocks table
     ///
@@ -1029,19 +1029,19 @@ pub enum BlocksTableFetchError {
     ///
     /// This occurs when the SQL cannot be parsed.
     #[error("failed to parse the SQL: {0}")]
-    ParseSql(#[source] common::sql::ParseSqlError),
+    ParseSql(#[source] crate::sql::ParseSqlError),
 
     /// Failed to plan the SQL
     ///
     /// This occurs when the SQL cannot be planned.
     #[error("failed to plan the SQL: {0}")]
-    PlanSql(#[source] common::context::query::Error),
+    PlanSql(#[source] crate::context::query::Error),
 
     /// Failed to execute the SQL
     ///
     /// This occurs when the SQL cannot be executed.
     #[error("failed to execute the SQL: {0}")]
-    ExecuteSql(#[source] common::context::query::Error),
+    ExecuteSql(#[source] crate::context::query::Error),
 
     /// Failed to get the hash value
     ///
@@ -1286,7 +1286,7 @@ pub enum SearchDependenciesForRawDatasetError {
     /// This occurs when retrieving the dataset instance from the dataset store fails.
     /// The dataset store loads dataset manifests and parses them into Dataset instances.
     #[error("Failed to get dataset")]
-    GetDataset(#[source] common::dataset_store::GetDatasetError),
+    GetDataset(#[source] crate::dataset_store::GetDatasetError),
 
     /// Failed to resolve revision
     ///
@@ -1311,14 +1311,14 @@ pub enum SearchDependenciesForRawDatasetError {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use common::arrow::{
-        datatypes::{DataType, Field, Schema},
-        record_batch::RecordBatch,
-    };
     use datafusion::error::DataFusionError;
     use futures::stream;
 
     use super::keep_alive_stream;
+    use crate::arrow::{
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
 
     #[tokio::test]
     async fn test_keep_alive_stream() {
@@ -1332,16 +1332,16 @@ mod tests {
             RecordBatch::try_new(
                 schema.clone(),
                 vec![
-                    Arc::new(common::arrow::array::Int32Array::from(vec![1, 2, 3])),
-                    Arc::new(common::arrow::array::StringArray::from(vec!["x", "y", "z"])),
+                    Arc::new(crate::arrow::array::Int32Array::from(vec![1, 2, 3])),
+                    Arc::new(crate::arrow::array::StringArray::from(vec!["x", "y", "z"])),
                 ],
             )
             .unwrap(),
             RecordBatch::try_new(
                 schema.clone(),
                 vec![
-                    Arc::new(common::arrow::array::Int32Array::from(vec![4, 5, 6])),
-                    Arc::new(common::arrow::array::StringArray::from(vec!["u", "v", "w"])),
+                    Arc::new(crate::arrow::array::Int32Array::from(vec![4, 5, 6])),
+                    Arc::new(crate::arrow::array::StringArray::from(vec!["u", "v", "w"])),
                 ],
             )
             .unwrap(),

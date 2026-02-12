@@ -321,6 +321,11 @@ impl TestCtxBuilder {
     /// Creates a temporary directory structure, generates the configuration file,
     /// copies requested datasets and providers, and returns a ready-to-use test environment.
     pub async fn build(self) -> Result<TestCtx> {
+        // Initialize tracing/logging so test output includes structured logs for debugging.
+        // Set log level via the AMP_LOG env variable (e.g. AMP_LOG=debug), defaults to info.
+        // This call is idempotent.
+        monitoring::logging::init();
+
         // Load environment variables from .env file (if present)
         let _ = dotenvy::dotenv_override();
 
@@ -783,15 +788,24 @@ pub struct ProviderRegistration {
 }
 
 impl From<&str> for ProviderRegistration {
-    /// Create a provider registration where the provider name matches the file name.
+    /// Create a provider registration where the provider name is derived from the file name.
     ///
-    /// If the file name ends with `.toml`, the extension is stripped before using as the provider name.
+    /// The file path is used as-is for fixture resolution (supports subdirectories like
+    /// `per_tx_receipt/rpc_eth_base`). The provider name uses only the filename stem
+    /// (without directory components or `.toml` extension), since provider names must
+    /// contain only lowercase letters, digits, and underscores.
     fn from(file_name: &str) -> Self {
         let name_without_ext = file_name.strip_suffix(".toml").unwrap_or(file_name);
 
+        // Extract just the filename component for the provider name (strip directory path)
+        let provider_name = Path::new(name_without_ext)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(name_without_ext);
+
         Self {
             provider_file: file_name.to_string(),
-            provider_name: name_without_ext.to_string(),
+            provider_name: provider_name.to_string(),
         }
     }
 }

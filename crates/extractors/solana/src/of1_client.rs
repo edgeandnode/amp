@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use backon::{ExponentialBuilder, Retryable};
@@ -15,6 +15,9 @@ pub use yellowstone_faithful_car_parser as car_parser;
 use crate::{error::Of1StreamError, metrics, rpc_client};
 
 const OLD_FAITHFUL_ARCHIVE_URL: &str = "https://files.old-faithful.net";
+
+const CAR_DOWNLOAD_PROGRESS_REPORT_INTERVAL: Duration = Duration::from_secs(10);
+const BYTES_DOWNLOADED_METRICS_REPORT_THRESHOLD: usize = 10 * 1024 * 1024; // 10 MiB
 
 /// Maps epoch to a list of oneshot senders to notify when the download is complete.
 type PendingMessageMap = HashMap<Epoch, Vec<tokio::sync::oneshot::Sender<bool>>>;
@@ -394,26 +397,27 @@ async fn ensure_car_file_exists(
 
     let download_url = car_download_url(epoch);
 
+    // Get the actual file size from the server to determine if we need to resume, as well
+    // as for download progress reports.
+    let remote_file_size = {
+        let head_response = reqwest.head(&download_url).send().await?;
+        if head_response.status() != reqwest::StatusCode::OK {
+            return Err(FileDownloadError::Http(head_response.status().as_u16()));
+        }
+        let Some(content_length) = head_response.headers().get(reqwest::header::CONTENT_LENGTH)
+        else {
+            return Err(FileDownloadError::MissingContentLengthHeader);
+        };
+        content_length
+            .to_str()
+            .map_err(|_| FileDownloadError::ContentLengthParsing)?
+            .parse()
+            .map_err(|_| FileDownloadError::ContentLengthParsing)?
+    };
+
     let action = match fs_err::metadata(dest).map(|meta| meta.len()) {
         Ok(0) => DownloadAction::Download,
         Ok(local_file_size) => {
-            // Get the actual file size from the server to determine if we need to resume.
-            let head_response = reqwest.head(&download_url).send().await?;
-
-            if head_response.status() != reqwest::StatusCode::OK {
-                return Err(FileDownloadError::Http(head_response.status().as_u16()));
-            }
-
-            let Some(content_length) = head_response.headers().get(reqwest::header::CONTENT_LENGTH)
-            else {
-                return Err(FileDownloadError::MissingContentLengthHeader);
-            };
-            let remote_file_size = content_length
-                .to_str()
-                .map_err(|_| FileDownloadError::ContentLengthParsing)?
-                .parse()
-                .map_err(|_| FileDownloadError::ContentLengthParsing)?;
-
             match local_file_size.cmp(&remote_file_size) {
                 // Local file is partially downloaded, need to resume.
                 std::cmp::Ordering::Less => DownloadAction::Resume(local_file_size),
@@ -461,48 +465,89 @@ async fn ensure_car_file_exists(
         }
     }
 
-    let start = std::time::Instant::now();
-
-    let response = reqwest.get(download_url).headers(headers).send().await?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(FileDownloadError::Http(status.as_u16()));
-    }
-
-    if let DownloadAction::Resume(_) = action {
-        // Expecting a 206 Partial Content response when resuming.
-        if status != reqwest::StatusCode::PARTIAL_CONTENT {
-            return Err(FileDownloadError::PartialDownloadNotSupported);
-        }
-    }
-
     let mut file = tokio::fs::File::options()
         .create(true) // Create the file if it doesn't exist.
         .append(true) // Append to the file to support resuming.
         .open(&dest)
         .await?;
 
+    let download_start = Instant::now();
+
+    let download_response = reqwest.get(download_url).headers(headers).send().await?;
+    let status = download_response.status();
+    if !status.is_success() {
+        return Err(FileDownloadError::Http(status.as_u16()));
+    }
+
+    let mut bytes_downloaded: u64 = if let DownloadAction::Resume(offset) = action {
+        // Expecting a 206 Partial Content response when resuming.
+        if status != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err(FileDownloadError::PartialDownloadNotSupported);
+        }
+        offset
+    } else {
+        0
+    };
+
+    log_download_progress(epoch, bytes_downloaded, remote_file_size);
+    let mut last_progress_report = download_start;
+
     // Stream the file content since these files can be extremely large.
-    let mut stream = response.bytes_stream();
-    let mut bytes_downloaded = 0u64;
+    let mut stream = download_response.bytes_stream();
+    // Recording metrics for each stream output would be inefficient,
+    // so we report once for every 10 MiB downloaded.
+    let mut current_chunk = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         file.write_all(&chunk).await?;
-        bytes_downloaded += chunk.len() as u64;
 
-        if let Some(m) = metrics.as_ref() {
-            m.record_of1_car_download_bytes(chunk.len() as u64, epoch, provider, network);
+        // Report progress to the user.
+        bytes_downloaded += chunk.len() as u64;
+        if last_progress_report.elapsed() >= CAR_DOWNLOAD_PROGRESS_REPORT_INTERVAL {
+            log_download_progress(epoch, bytes_downloaded, remote_file_size);
+            last_progress_report = Instant::now();
+        }
+
+        // Record metrics.
+        current_chunk += chunk.len();
+        match metrics.as_ref() {
+            Some(m) if current_chunk >= BYTES_DOWNLOADED_METRICS_REPORT_THRESHOLD => {
+                m.record_of1_car_download_bytes(current_chunk as u64, epoch, provider, network);
+                current_chunk = 0;
+            }
+            _ => {}
         }
     }
 
-    let duration = start.elapsed().as_secs_f64();
-    tracing::debug!(%epoch, %bytes_downloaded, duration_secs = %duration, "downloaded CAR file");
+    if current_chunk > 0 {
+        // Record any remaining bytes that were not reported in the loop.
+        if let Some(m) = metrics.as_ref() {
+            m.record_of1_car_download_bytes(current_chunk as u64, epoch, provider, network);
+        }
+    }
+
+    let download_duration = download_start.elapsed().as_secs_f64();
+    let download_duration_str = format!("{download_duration:.2}");
+    tracing::info!(%epoch, %bytes_downloaded, duration_secs = %download_duration_str, "downloaded CAR file");
     if let Some(m) = metrics.as_ref() {
-        m.record_of1_car_download(duration, epoch, provider, network);
+        m.record_of1_car_download(download_duration, epoch, provider, network);
     }
 
     Ok(())
+}
+
+fn log_download_progress(epoch: Epoch, bytes_downloaded: u64, bytes_total: u64) {
+    let percent_done = {
+        let p = (bytes_downloaded as f64 / bytes_total as f64) * 100.0;
+        format!("{p:.2}")
+    };
+    tracing::info!(
+        %epoch,
+        %bytes_downloaded,
+        %bytes_total,
+        %percent_done,
+        "downloading CAR file"
+    );
 }
 
 #[derive(Debug, thiserror::Error)]

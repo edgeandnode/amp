@@ -290,8 +290,8 @@ The cache is thread-safe and lock-free for reads:
 - `crates/core/metadata-db/src/files.rs` - Database operations for footer retrieval
 - `crates/core/metadata-db/src/files/sql.rs` - SQL queries for `footer_cache` table
 - `crates/core/metadata-db/migrations/20251204183330_footer_cache.sql` - Database migration
-- `crates/core/dump/src/parquet_writer.rs` - Footer capture during file commit
-- `crates/core/dump/src/config.rs` - `cache_size_mb` configuration
+- `crates/core/worker-core/src/parquet_writer.rs` - Footer capture during file commit
+- `crates/core/worker-core/src/config.rs` - `cache_size_mb` configuration
 
 ## References
 

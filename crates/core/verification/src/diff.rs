@@ -166,14 +166,7 @@ pub fn create_block_diff(amp_block: &Block, rpc_block: &Block) -> String {
             .zip(rpc_block.transactions.iter())
             .enumerate()
         {
-            if amp_tx.tx_hash != rpc_tx.tx_hash
-                || amp_tx.from != rpc_tx.from
-                || amp_tx.to != rpc_tx.to
-                || amp_tx.value != rpc_tx.value
-                || amp_tx.input != rpc_tx.input
-                || amp_tx.gas_used != rpc_tx.gas_used
-                || amp_tx.status != rpc_tx.status
-            {
+            if amp_tx != rpc_tx {
                 differing_indices.push(idx);
             }
         }
@@ -217,10 +210,7 @@ pub fn create_block_diff(amp_block: &Block, rpc_block: &Block) -> String {
         for (idx, (amp_log, rpc_log)) in
             amp_block.logs.iter().zip(rpc_block.logs.iter()).enumerate()
         {
-            if amp_log.address != rpc_log.address
-                || amp_log.topics != rpc_log.topics
-                || amp_log.data != rpc_log.data
-            {
+            if amp_log != rpc_log {
                 differing_indices.push(idx);
             }
         }

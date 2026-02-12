@@ -1404,7 +1404,7 @@
           "providers"
         ],
         "summary": "Handler for the `POST /providers` endpoint",
-        "description": "Creates or updates a provider configuration in the dataset store.\n\n## Request Body\n- JSON object containing provider configuration with required fields:\n  - `name`: The unique identifier for the provider\n  - `kind`: The type of provider (e.g., \"evm-rpc\", \"firehose\")\n  - `network`: The blockchain network (e.g., \"mainnet\", \"goerli\", \"polygon\")\n  - Additional provider-specific configuration fields as needed\n\n## Response\n- **201 Created**: Provider created or updated successfully\n- **400 Bad Request**: Invalid request body or provider configuration\n- **500 Internal Server Error**: Store error\n\n## Error Codes\n- `INVALID_REQUEST_BODY`: Malformed JSON request body\n- `DATA_CONVERSION_ERROR`: Failed to convert JSON to TOML format\n- `STORE_ERROR`: Failed to save provider configuration\n\nThis handler:\n- Validates and extracts the provider data from the JSON request body\n- Converts additional JSON configuration fields to TOML format\n- Registers the provider configuration in the dataset store (overwrites if exists)\n- Returns HTTP 201 on successful creation",
+        "description": "Creates or updates a provider configuration in the dataset store.\n\n## Request Body\n- JSON object containing provider configuration with required fields:\n  - `name`: The unique identifier for the provider\n  - `kind`: The type of provider (e.g., \"evm-rpc\", \"firehose\")\n  - Additional provider-specific configuration fields as needed (e.g., `network`, `url`)\n\n## Response\n- **201 Created**: Provider created or updated successfully\n- **400 Bad Request**: Invalid request body or provider configuration\n- **500 Internal Server Error**: Store error\n\n## Error Codes\n- `INVALID_REQUEST_BODY`: Malformed JSON request body\n- `DATA_CONVERSION_ERROR`: Failed to convert JSON to TOML format\n- `STORE_ERROR`: Failed to save provider configuration\n\nThis handler:\n- Validates and extracts the provider data from the JSON request body\n- Converts additional JSON configuration fields to TOML format\n- Registers the provider configuration in the dataset store (overwrites if exists)\n- Returns HTTP 201 on successful creation",
         "operationId": "providers_create",
         "requestBody": {
           "content": {
@@ -2230,8 +2230,7 @@
         "description": "Provider information used for both API requests and responses\n\nThis struct represents provider metadata and configuration in a format\nsuitable for both creating providers (POST requests) and retrieving them\n(GET responses). It includes the complete provider configuration.\n\n## Security Note\n\nThe `rest` field contains the full provider configuration. Ensure that\nsensitive information like API keys and tokens are not stored in the\nprovider configuration if this data will be exposed through APIs.",
         "required": [
           "name",
-          "kind",
-          "network"
+          "kind"
         ],
         "properties": {
           "kind": {
@@ -2241,10 +2240,6 @@
           "name": {
             "type": "string",
             "description": "The name/identifier of the provider"
-          },
-          "network": {
-            "type": "string",
-            "description": "The blockchain network (e.g., \"mainnet\", \"goerli\", \"polygon\")"
           }
         },
         "additionalProperties": {

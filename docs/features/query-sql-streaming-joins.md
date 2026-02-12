@@ -3,7 +3,7 @@ name: "query-sql-streaming-joins"
 description: "Incremental SQL JOIN execution in streaming queries. Load when asking about streaming joins, incremental joins, or real-time join updates"
 type: feature
 status: "experimental"
-components: "service:server,crate:common,crate:dump"
+components: "service:server,crate:common"
 ---
 
 # Streaming SQL Joins

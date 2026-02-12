@@ -8,8 +8,8 @@
 use sqlx::{Executor, Postgres, types::JsonValue};
 
 use super::{
-    LocationId, LocationWithDetails, PhysicalTable,
-    name::{Name, NameOwned},
+    LocationId, LocationWithDetails, PhysicalTable, PhysicalTableId,
+    name::Name,
     path::{Path, PathOwned},
 };
 use crate::{
@@ -17,6 +17,7 @@ use crate::{
     ManifestHashOwned,
     jobs::{Job, JobId},
     manifests::ManifestHash,
+    physical_table::{PhysicalTableRevision, TableNameOwned},
     workers::WorkerNodeIdOwned,
 };
 
@@ -64,27 +65,67 @@ where
     Ok(id)
 }
 
-/// Get a revision by its ID (Only returns active revision)
-pub async fn get_by_id<'c, E>(exe: E, id: LocationId) -> Result<Option<PhysicalTable>, sqlx::Error>
+/// Get a physical table revision by location ID with active status
+///
+/// - Returns `None` if the location ID does not exist
+/// - Returns `Some((false, None))` if the location ID exists but is not active
+/// - Returns `Some((true, PhysicalTable))` if the location ID exists and is active
+pub async fn get_active_by_location_id<'c, E>(
+    exe: E,
+    id: LocationId,
+) -> Result<Option<Option<PhysicalTable>>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
         SELECT
-            ptr.id,
+            pt.id IS NOT NULL AS active,
+            pt.id,
             pt.manifest_hash,
             pt.dataset_namespace,
             pt.dataset_name,
             pt.table_name,
-            ptr.path,
-            (pt.active_revision_id = ptr.id) AS active,
-            ptr.writer
+            pt.active_revision_id
         FROM physical_table_revisions ptr
-        JOIN physical_tables pt ON pt.active_revision_id = ptr.id
+        LEFT JOIN physical_tables pt ON pt.active_revision_id = ptr.id
         WHERE ptr.id = $1
     "};
 
-    sqlx::query_as(query).bind(id).fetch_optional(exe).await
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        active: bool,
+        id: Option<PhysicalTableId>,
+        manifest_hash: Option<ManifestHashOwned>,
+        dataset_namespace: Option<DatasetNamespaceOwned>,
+        dataset_name: Option<DatasetNameOwned>,
+        table_name: Option<TableNameOwned>,
+        active_revision_id: Option<LocationId>,
+    }
+
+    let Some(row) = sqlx::query_as::<_, Row>(query)
+        .bind(id)
+        .fetch_optional(exe)
+        .await?
+    else {
+        // No revision found for the given location ID
+        return Ok(None);
+    };
+
+    // Active revision found for the given location ID
+    if row.active {
+        let err = || sqlx::Error::Protocol("unexpected NULL columns for active revision".into());
+        return Ok(Some(Some(PhysicalTable {
+            id: row.id.ok_or_else(&err)?,
+            manifest_hash: row.manifest_hash.ok_or_else(&err)?,
+            dataset_namespace: row.dataset_namespace.ok_or_else(&err)?,
+            dataset_name: row.dataset_name.ok_or_else(&err)?,
+            table_name: row.table_name.ok_or_else(&err)?,
+            active_revision_id: row.active_revision_id,
+        })));
+    }
+
+    // No active revision found for the given location ID
+    Ok(Some(None))
 }
 
 /// Get revision ID by path only, returns first match if multiple exist
@@ -101,8 +142,8 @@ where
     Ok(id)
 }
 
-/// Get a revision by its ID with full writer job details (Only returns active revision)
-pub async fn get_by_id_with_details<'c, E>(
+/// Get a revision by location ID with full writer job details
+pub async fn get_by_location_id_with_details<'c, E>(
     exe: E,
     id: LocationId,
 ) -> Result<Option<LocationWithDetails>, sqlx::Error>
@@ -113,12 +154,9 @@ where
         SELECT
             -- Revision fields
             ptr.id,
-            pt.manifest_hash,
-            pt.table_name,
             ptr.path,
-            (pt.active_revision_id = ptr.id) AS active,
-            pt.dataset_namespace,
-            pt.dataset_name,
+            EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
+            ptr.metadata,
 
             -- Writer job fields (optional)
             j.id          AS writer_job_id,
@@ -128,7 +166,6 @@ where
             j.created_at  AS writer_job_created_at,
             j.updated_at  AS writer_job_updated_at
         FROM physical_table_revisions ptr
-        JOIN physical_tables pt ON pt.active_revision_id = ptr.id
         LEFT JOIN jobs j ON ptr.writer = j.id
         WHERE ptr.id = $1
     "};
@@ -137,12 +174,9 @@ where
     #[derive(sqlx::FromRow)]
     struct Row {
         id: LocationId,
-        manifest_hash: ManifestHashOwned,
-        table_name: NameOwned,
-        path: PathOwned,
         active: bool,
-        dataset_namespace: DatasetNamespaceOwned,
-        dataset_name: DatasetNameOwned,
+        metadata: JsonValue,
+        path: PathOwned,
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeIdOwned>,
         writer_job_status: Option<JobStatus>,
@@ -181,39 +215,33 @@ where
         _ => None,
     };
 
-    let table = PhysicalTable {
+    let revision = PhysicalTableRevision {
         id: row.id,
-        manifest_hash: row.manifest_hash,
-        dataset_namespace: row.dataset_namespace,
-        dataset_name: row.dataset_name,
-        table_name: row.table_name,
         path: row.path,
         active: row.active,
         writer: writer.as_ref().map(|j| j.id),
+        metadata: sqlx::types::Json(serde_json::from_value(row.metadata).unwrap_or_default()),
     };
 
-    Ok(Some(LocationWithDetails { table, writer }))
+    Ok(Some(LocationWithDetails { revision, writer }))
 }
 
 /// Get the active revision for a physical table
-pub async fn get_active_physical_table<'c, E>(
+pub async fn get_active<'c, E>(
     exe: E,
     manifest_hash: ManifestHash<'_>,
     table_name: Name<'_>,
-) -> Result<Option<PhysicalTable>, sqlx::Error>
+) -> Result<Option<PhysicalTableRevision>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
         SELECT
             ptr.id,
-            pt.manifest_hash,
-            pt.dataset_namespace,
-            pt.dataset_name,
-            pt.table_name,
             ptr.path,
             true AS active,
-            ptr.writer
+            ptr.writer,
+            ptr.metadata
         FROM physical_tables pt
         JOIN physical_table_revisions ptr ON ptr.id = pt.active_revision_id
         WHERE pt.manifest_hash = $1 AND pt.table_name = $2
@@ -323,26 +351,25 @@ where
     Ok(result.rows_affected() > 0)
 }
 
-/// List the first page of active physical table revisions
+/// List the first page of physical table revisions
 ///
 /// Returns a paginated list of revisions ordered by ID in descending order (newest first).
 /// This function is used to fetch the initial page when no cursor is available.
-pub async fn list_first_page<'c, E>(exe: E, limit: i64) -> Result<Vec<PhysicalTable>, sqlx::Error>
+pub async fn list_first_page<'c, E>(
+    exe: E,
+    limit: i64,
+) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT
             ptr.id,
-            pt.manifest_hash,
-            pt.dataset_namespace,
-            pt.dataset_name,
-            pt.table_name,
             ptr.path,
-            (pt.active_revision_id = ptr.id) AS active,
-            ptr.writer
+            EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
+            ptr.writer,
+            ptr.metadata
         FROM physical_table_revisions ptr
-        JOIN physical_tables pt ON pt.active_revision_id = ptr.id
         ORDER BY ptr.id DESC
         LIMIT $1
     "#};
@@ -350,7 +377,7 @@ where
     sqlx::query_as(query).bind(limit).fetch_all(exe).await
 }
 
-/// List subsequent pages of active physical table revisions using cursor-based pagination
+/// List subsequent pages of physical table revisions using cursor-based pagination
 ///
 /// Returns a paginated list of revisions with IDs less than the provided cursor,
 /// ordered by ID in descending order (newest first). This implements cursor-based
@@ -359,22 +386,18 @@ pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
     last_id: LocationId,
-) -> Result<Vec<PhysicalTable>, sqlx::Error>
+) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT
             ptr.id,
-            pt.manifest_hash,
-            pt.dataset_namespace,
-            pt.dataset_name,
-            pt.table_name,
             ptr.path,
-            (pt.active_revision_id = ptr.id) AS active,
-            ptr.writer
+            EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
+            ptr.writer,
+            ptr.metadata
         FROM physical_table_revisions ptr
-        JOIN physical_tables pt ON pt.active_revision_id = ptr.id
         WHERE ptr.id < $2
         ORDER BY ptr.id DESC
         LIMIT $1

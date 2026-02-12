@@ -120,7 +120,7 @@ Total bytes sent incrementally via streaming queries. Updated in real-time as ea
 
 ## Dump & Extraction Metrics
 
-**Location:** `crates/core/dump/src/metrics.rs`
+**Location:** `crates/core/worker-core/src/metrics.rs`
 
 ### rows_ingested_total
 

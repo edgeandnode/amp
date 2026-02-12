@@ -1,9 +1,12 @@
 //! Provider information types for API requests and responses
 
-use datasets_common::{dataset_kind_str::DatasetKindStr, network_id::NetworkId};
+use amp_providers_common::{
+    ProviderName,
+    config::{ConfigHeader, ProviderConfigRaw, TryIntoConfig},
+    kind::ProviderKindStr,
+};
 
 use super::convert;
-use crate::handlers::common::NonEmptyString;
 
 /// Provider information used for both API requests and responses
 ///
@@ -21,36 +24,47 @@ use crate::handlers::common::NonEmptyString;
 pub struct ProviderInfo {
     /// The name/identifier of the provider
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub name: NonEmptyString,
+    pub name: ProviderName,
     /// The type of provider (e.g., "evm-rpc", "firehose")
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub kind: DatasetKindStr,
-    /// The blockchain network (e.g., "mainnet", "goerli", "polygon")
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub network: NetworkId,
+    pub kind: ProviderKindStr,
     /// Additional provider-specific configuration fields
     #[serde(flatten)]
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
-impl TryFrom<(String, amp_providers_registry::ProviderConfig)> for ProviderInfo {
-    type Error = serde_json::Error;
+impl TryFrom<(ProviderName, ProviderConfigRaw)> for ProviderInfo {
+    type Error = ProviderInfoConversionError;
 
-    fn try_from(
-        (name, config): (String, amp_providers_registry::ProviderConfig),
-    ) -> Result<Self, Self::Error> {
-        // SAFETY: Provider names from the dataset store are guaranteed to be non-empty
-        // as they are validated during provider registration and storage.
-        let name = unsafe { NonEmptyString::new_unchecked(name) };
-        let network = config.network.clone();
+    fn try_from((name, config): (ProviderName, ProviderConfigRaw)) -> Result<Self, Self::Error> {
+        // Extract kind from the config
+        let header = config
+            .try_into_config::<ConfigHeader>()
+            .map_err(ProviderInfoConversionError::HeaderParse)?;
 
-        let rest = convert::from_toml_table_to_json_map(config.rest)?;
+        // Convert the full TOML table to JSON map
+        let mut rest = convert::from_toml_table_to_json_map(config.into_inner())
+            .map_err(ProviderInfoConversionError::JsonConversion)?;
+
+        // Remove kind from rest as it's an explicit field
+        rest.remove("kind");
 
         Ok(Self {
             name,
-            kind: config.kind,
-            network,
+            kind: header.kind,
             rest,
         })
     }
+}
+
+/// Error that can occur when converting from ProviderConfigRaw to ProviderInfo
+#[derive(Debug, thiserror::Error)]
+pub enum ProviderInfoConversionError {
+    /// Failed to parse the header fields (kind) from the config
+    #[error("failed to parse provider config header: {0}")]
+    HeaderParse(#[source] amp_providers_common::config::InvalidConfigError),
+
+    /// Failed to convert TOML table to JSON map
+    #[error("failed to convert TOML table to JSON map: {0}")]
+    JsonConversion(#[source] serde_json::Error),
 }

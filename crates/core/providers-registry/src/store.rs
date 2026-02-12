@@ -1,11 +1,10 @@
 use std::{collections::BTreeMap, sync::Arc};
 
+use amp_providers_common::{ProviderName, config::ProviderConfigRaw};
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
 use object_store::ObjectStore;
 use parking_lot::RwLock;
-
-use crate::config::ProviderConfig;
 
 /// Store for provider configuration files with integrated caching.
 ///
@@ -27,7 +26,7 @@ use crate::config::ProviderConfig;
 #[derive(Debug, Clone)]
 pub struct ProviderConfigsStore<S: ObjectStore = Arc<dyn ObjectStore>> {
     object_store: S,
-    cache: Arc<RwLock<BTreeMap<String, ProviderConfig>>>,
+    cache: Arc<RwLock<BTreeMap<ProviderName, ProviderConfigRaw>>>,
 }
 
 impl<S> ProviderConfigsStore<S>
@@ -44,7 +43,7 @@ where
 
     /// Get all cached provider configurations.
     ///
-    /// Returns a read guard that dereferences to the cached `BTreeMap<String, ProviderConfig>`.
+    /// Returns a read guard that dereferences to the cached `BTreeMap<ProviderName, ProviderConfigRaw>`.
     /// This provides efficient access to all provider configurations without cloning.
     ///
     /// # Deadlock Warning
@@ -56,7 +55,7 @@ where
     #[must_use]
     pub async fn get_all(
         &self,
-    ) -> impl std::ops::Deref<Target = BTreeMap<String, ProviderConfig>> + '_ {
+    ) -> impl std::ops::Deref<Target = BTreeMap<ProviderName, ProviderConfigRaw>> + '_ {
         // Load and populate cache if empty
         if self.cache.read().is_empty() {
             self.load_into_cache().await;
@@ -67,7 +66,7 @@ where
     }
 
     /// Gets a provider configuration by name. Returns None if not found.
-    pub async fn get(&self, name: &str) -> Option<ProviderConfig> {
+    pub async fn get(&self, name: &str) -> Option<ProviderConfigRaw> {
         // Load and populate cache if empty
         if self.cache.read().is_empty() {
             self.load_into_cache().await;
@@ -82,13 +81,13 @@ where
     /// and updates the cache.
     pub async fn store(
         &self,
-        name: &str,
-        provider: ProviderConfig,
+        name: ProviderName,
+        config: ProviderConfigRaw,
     ) -> Result<(), ConfigStoreError> {
         let path: object_store::path::Path = format!("{}.toml", name).into();
 
         // Serialize provider to TOML
-        let content = toml::to_string(&provider)
+        let content = toml::to_string(&config)
             .map_err(ConfigStoreError::SerializeError)?
             .into_bytes();
 
@@ -99,7 +98,7 @@ where
             .map_err(ConfigStoreError::ObjectStoreError)?;
 
         // Update cache after successful store
-        self.cache.write().insert(name.to_string(), provider);
+        self.cache.write().insert(name, config);
 
         Ok(())
     }
@@ -183,15 +182,17 @@ where
         *self.cache.write() = provider_map;
     }
 
-    /// Fetch all [`ProviderConfig`]s from the underlying store and parse them.
+    /// Fetch all [`ProviderConfigRaw`]s from the underlying store and parse them.
     ///
     /// Filters for non-empty `.toml` files with valid filenames, then loads and parses each file.
     /// Returns a stream of provider configuration results that can fail individually.
     /// Store enumeration failure returns an error immediately.
     async fn fetch_from_store(
         &self,
-    ) -> Result<impl Stream<Item = Result<(String, ProviderConfig), LoadFileError>>, ListError>
-    {
+    ) -> Result<
+        impl Stream<Item = Result<(ProviderName, ProviderConfigRaw), LoadFileError>>,
+        ListError,
+    > {
         let files: Vec<_> = self
             .object_store
             .list(None) // None = no prefix filter, list all files
@@ -218,9 +219,18 @@ where
             .map_err(ListError)?;
 
         let store = self.object_store.clone();
-        let stream = stream::iter(files).then(move |(name, path)| {
+        let stream = stream::iter(files).then(move |(name_str, path)| {
             let store = store.clone();
             async move {
+                // Parse provider name and validate
+                let name = name_str.parse::<ProviderName>().map_err(|source| {
+                    LoadFileError::InvalidName {
+                        path: path.to_string(),
+                        name: name_str,
+                        source,
+                    }
+                })?;
+
                 let provider = load_and_parse_file(&store, &path).await?;
                 Ok((name, provider))
             }
@@ -250,13 +260,13 @@ pub struct ConfigDeleteError(#[source] pub object_store::Error);
 /// Load and parse a single provider configuration file.
 ///
 /// Loads a provider configuration file from storage, parses it as TOML,
-/// and deserializes it into a [`ProviderConfig`] struct.
+/// and deserializes it into a [`ProviderConfigRaw`] struct.
 ///
 /// Returns detailed error information suitable for structured logging and diagnostics.
 async fn load_and_parse_file(
     store: &impl ObjectStore,
     location: &object_store::path::Path,
-) -> Result<ProviderConfig, LoadFileError> {
+) -> Result<ProviderConfigRaw, LoadFileError> {
     let path = location.to_string();
 
     // Fetch file contents
@@ -283,20 +293,15 @@ async fn load_and_parse_file(
             source,
         })?;
 
-    // Parse TOML and deserialize directly to ProviderConfig
-    let mut provider = toml::from_str::<ProviderConfig>(&content).map_err(|source| {
+    // Parse TOML and deserialize directly to ProviderConfigRaw
+    let config = toml::from_str::<ProviderConfigRaw>(&content).map_err(|source| {
         LoadFileError::TomlParseError {
             path: path.clone(),
             source,
         }
     })?;
 
-    // Auto-populate name field from file path if not present in TOML
-    if provider.name.is_empty() {
-        provider.name = path.strip_suffix(".toml").unwrap_or(&path).to_string();
-    }
-
-    Ok(provider)
+    Ok(config)
 }
 
 /// Error that can occur when loading provider configurations from the store into the cache.
@@ -335,6 +340,14 @@ enum LoadFileError {
         path: String,
         source: toml::de::Error,
     },
+
+    /// Invalid provider name (does not follow snake_case convention)
+    #[error("Invalid provider name '{name}': {source}")]
+    InvalidName {
+        path: String,
+        name: String,
+        source: amp_providers_common::InvalidProviderName,
+    },
 }
 
 impl LoadFileError {
@@ -344,7 +357,8 @@ impl LoadFileError {
             LoadFileError::StoreFetchFailed { path, .. }
             | LoadFileError::StoreReadFailed { path, .. }
             | LoadFileError::InvalidUtf8 { path, .. }
-            | LoadFileError::TomlParseError { path, .. } => path,
+            | LoadFileError::TomlParseError { path, .. }
+            | LoadFileError::InvalidName { path, .. } => path,
         }
     }
 }

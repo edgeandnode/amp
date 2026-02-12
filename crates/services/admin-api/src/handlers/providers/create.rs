@@ -1,6 +1,6 @@
 //! Provider create handler
 
-use amp_providers_registry::ProviderConfig;
+use amp_providers_common::config::ProviderConfigRaw;
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -22,8 +22,7 @@ use crate::{
 /// - JSON object containing provider configuration with required fields:
 ///   - `name`: The unique identifier for the provider
 ///   - `kind`: The type of provider (e.g., "evm-rpc", "firehose")
-///   - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
-///   - Additional provider-specific configuration fields as needed
+///   - Additional provider-specific configuration fields as needed (e.g., `network`, `url`)
 ///
 /// ## Response
 /// - **201 Created**: Provider created or updated successfully
@@ -68,18 +67,25 @@ pub async fn handler(
         }
     };
 
-    let provider_name = provider_info.name.to_string();
-    let provider_rest_table =
-        convert::json_map_to_toml_table(provider_info.rest).map_err(Error::ConversionError)?;
-    let provider_config = ProviderConfig {
-        name: provider_info.name.to_string(),
-        kind: provider_info.kind,
-        network: provider_info.network,
-        rest: provider_rest_table,
+    let provider_name = provider_info.name;
+    let provider_kind = provider_info.kind;
+
+    let provider_config = {
+        // Convert the rest fields to TOML table
+        let mut table =
+            convert::json_map_to_toml_table(provider_info.rest).map_err(Error::ConversionError)?;
+
+        // Insert kind into the TOML table
+        table.insert(
+            "kind".to_string(),
+            toml::Value::String(provider_kind.to_string()),
+        );
+
+        ProviderConfigRaw::new(table)
     };
 
     ctx.providers_registry
-        .register(provider_config)
+        .register(provider_name.clone(), provider_config)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -105,7 +111,7 @@ pub enum Error {
     ///
     /// This occurs when:
     /// - The request body is not valid JSON
-    /// - Required fields are missing (name, kind, network)
+    /// - Required fields are missing (name, kind)
     /// - Field values have incorrect types
     /// - The JSON structure doesn't match the expected schema
     #[error("invalid request body: {err}")]

@@ -4,13 +4,14 @@ use std::{
 };
 
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
-use dump::{ConfigDuration, ParquetConfig};
+use amp_worker_core::{ConfigDuration, ParquetConfig};
 use fs_err as fs;
 use monitoring::config::OpenTelemetryConfig;
 
 mod config_file;
 pub mod controller;
 pub mod metadb;
+mod redacted;
 pub mod server;
 
 pub use self::{
@@ -20,6 +21,7 @@ pub use self::{
         DEFAULT_SERVER_MICROBATCH_MAX_INTERVAL, no_defaults_override,
     },
     metadb::{DEFAULT_METADB_CONN_POOL_SIZE, DEFAULT_METADB_DIRNAME, MetadataDbConfig},
+    redacted::Redacted,
 };
 use self::{controller::ControllerAddrs, server::ServerAddrs};
 
@@ -273,10 +275,10 @@ pub struct KafkaEventsConfig {
     pub sasl_mechanism: Option<String>,
 
     /// SASL username (required if sasl_mechanism is set)
-    pub sasl_username: Option<String>,
+    pub sasl_username: Option<Redacted<String>>,
 
     /// SASL password (required if sasl_mechanism is set)
-    pub sasl_password: Option<String>,
+    pub sasl_password: Option<Redacted<String>>,
 
     /// Enable TLS encryption (default: false)
     ///

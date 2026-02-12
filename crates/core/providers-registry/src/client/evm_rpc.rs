@@ -1,9 +1,11 @@
 //! EVM RPC provider creation.
 
-use amp_providers_common::config::TryIntoConfig as _;
+use amp_providers_common::{
+    ProviderName,
+    config::{InvalidConfigError, ProviderResolvedConfigRaw, TryIntoConfig as _},
+};
+use amp_providers_evm_rpc::config::EvmRpcProviderConfig;
 use url::Url;
-
-use crate::config::{EvmRpcProviderConfig, ParseConfigError, ProviderConfig};
 
 /// Type alias for an EVM RPC provider that works with any network.
 ///
@@ -17,25 +19,25 @@ pub type EvmRpcProvider = alloy::providers::RootProvider<alloy::network::AnyNetw
 /// This function parses the provider configuration and constructs an EVM RPC provider.
 /// It automatically detects whether to use IPC or HTTP/HTTPS based on the URL scheme
 /// in the provider configuration.
-pub async fn create(config: ProviderConfig) -> Result<EvmRpcProvider, CreateEvmRpcClientError> {
+pub async fn create(
+    name: ProviderName,
+    config: ProviderResolvedConfigRaw,
+) -> Result<EvmRpcProvider, CreateEvmRpcClientError> {
     use evm_rpc_datasets::provider as evm_provider;
 
-    let provider_name = config.name.clone();
     let typed_config = config
         .try_into_config::<EvmRpcProviderConfig>()
-        .map_err(|source| CreateEvmRpcClientError::ConfigParse {
-            name: provider_name,
-            source,
-        })?;
+        .map_err(|source| CreateEvmRpcClientError::ConfigParse { name, source })?;
 
     // Construct the provider based on URL scheme
-    let provider = if typed_config.url.scheme() == "ipc" {
+    // Access URL via Deref from Redacted<Url>
+    let provider: EvmRpcProvider = if typed_config.url.scheme() == "ipc" {
         evm_provider::new_ipc(typed_config.url.path(), typed_config.rate_limit_per_minute)
             .await
             .map_err(CreateEvmRpcClientError::IpcConnection)?
     } else {
         evm_provider::new(
-            Url::clone(&typed_config.url),
+            Url::clone(&*typed_config.url),
             typed_config.rate_limit_per_minute,
         )
     };
@@ -57,9 +59,9 @@ pub enum CreateEvmRpcClientError {
     /// - Invalid value type for `rate_limit_per_minute` (must be positive integer)
     #[error("failed to parse provider configuration for '{name}'")]
     ConfigParse {
-        name: String,
+        name: ProviderName,
         #[source]
-        source: ParseConfigError,
+        source: InvalidConfigError,
     },
 
     /// Failed to establish IPC connection.

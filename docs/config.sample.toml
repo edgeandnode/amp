@@ -71,6 +71,7 @@ url = "postgres://<pg_url>"
 # bloom_filters = false      # Enable bloom filters (default: false)
 # cache_size_mb = 1024       # Parquet metadata cache size in MB (default: 1024)
 # max_row_group_mb = 512     # Max row group size in MB (default: 512)
+# segment_flush_interval_secs = 600.0  # Max wall-clock seconds before closing a segment (default: 600 = 10 min)
 
 # Target partition size configuration
 # Overflow is a tuning parameter that provides some flexibility for some cases,

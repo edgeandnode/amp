@@ -232,7 +232,7 @@ impl Ord for FileState {
     ///
     /// # Examples
     /// ```
-    /// use dump::compaction::algorithm::FileState;
+    /// use amp_worker_core::compaction::algorithm::FileState;
     /// assert!(FileState::Cold > FileState::Hot);
     /// assert!(FileState::Cold > FileState::Live);
     /// assert!(FileState::Hot > FileState::Live);

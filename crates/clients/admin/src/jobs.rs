@@ -86,7 +86,7 @@ impl<'a> JobsClient<'a> {
             .join(&job_get_by_id(id))
             .expect("valid URL");
 
-        tracing::debug!("Sending GET request");
+        tracing::trace!("Sending GET request");
 
         let response = self
             .client
@@ -100,7 +100,7 @@ impl<'a> JobsClient<'a> {
             })?;
 
         let status = response.status();
-        tracing::debug!(status = %status, "Received API response");
+        tracing::trace!(status = %status, "Received API response");
 
         match status.as_u16() {
             200 => {

@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
+use amp_providers_common::{
+    ProviderName,
+    config::{ConfigHeaderWithNetwork, ProviderConfigRaw, TryIntoConfig},
+};
 use object_store::{ObjectStore, memory::InMemory};
 
-use crate::{ProviderConfig, ProviderConfigsStore, ProvidersRegistry};
+use crate::{ProviderConfigsStore, ProvidersRegistry};
 
 #[tokio::test]
 async fn get_all_with_empty_store_returns_empty_list() {
@@ -20,11 +24,11 @@ async fn get_all_with_empty_store_returns_empty_list() {
 async fn register_with_valid_provider_stores_and_retrieves() {
     //* Given
     let (store, _configs_store, _raw_store) = create_test_providers_store();
-    let provider_name = "test-evm";
-    let provider = create_test_evm_provider(provider_name);
+    let provider_name = "test_evm";
+    let (name, config) = create_test_evm_provider(provider_name);
 
     //* When
-    let register_result = store.register(provider.clone()).await;
+    let register_result = store.register(name.clone(), config.clone()).await;
 
     //* Then
     assert!(
@@ -37,15 +41,24 @@ async fn register_with_valid_provider_stores_and_retrieves() {
     let all_providers = store.get_all().await;
     assert_eq!(all_providers.len(), 1, "Expected exactly one provider");
     let stored_provider = all_providers.values().next().unwrap();
-    assert_eq!(stored_provider.kind, provider.kind);
-    assert_eq!(stored_provider.network, provider.network);
+    let stored_header = stored_provider
+        .try_into_config::<ConfigHeaderWithNetwork>()
+        .expect("should parse header");
+    let config_header = config
+        .try_into_config::<ConfigHeaderWithNetwork>()
+        .expect("should parse header");
+    assert_eq!(stored_header.kind, config_header.kind);
+    assert_eq!(stored_header.network, config_header.network);
 
     // Verify get_by_name returns the provider
     let retrieved = store.get_by_name(provider_name).await;
     assert!(retrieved.is_some(), "Expected provider to be found by name");
     let retrieved_provider = retrieved.expect("should have provider");
-    assert_eq!(retrieved_provider.kind, provider.kind);
-    assert_eq!(retrieved_provider.network, provider.network);
+    let retrieved_header = retrieved_provider
+        .try_into_config::<ConfigHeaderWithNetwork>()
+        .expect("should parse header");
+    assert_eq!(retrieved_header.kind, config_header.kind);
+    assert_eq!(retrieved_header.network, config_header.network);
 
     // Note: With in-memory storage, we don't verify disk files since they don't exist
 }
@@ -54,12 +67,12 @@ async fn register_with_valid_provider_stores_and_retrieves() {
 async fn register_with_multiple_providers_all_retrievable() {
     //* Given
     let (store, _configs_store, _raw_store) = create_test_providers_store();
-    let evm_provider = create_test_evm_provider("evm-mainnet");
-    let fhs_provider = create_test_firehose_provider("fhs-polygon");
+    let (evm_name, evm_config) = create_test_evm_provider("evm_mainnet");
+    let (fhs_name, fhs_config) = create_test_firehose_provider("fhs_polygon");
 
     //* When
-    let evm_result = store.register(evm_provider.clone()).await;
-    let firehose_result = store.register(fhs_provider.clone()).await;
+    let evm_result = store.register(evm_name.clone(), evm_config).await;
+    let firehose_result = store.register(fhs_name.clone(), fhs_config).await;
 
     //* Then
     assert!(
@@ -78,8 +91,8 @@ async fn register_with_multiple_providers_all_retrievable() {
     assert_eq!(all_providers.len(), 2, "Expected exactly two providers");
 
     // Verify both can be retrieved by name
-    let evm_retrieved = store.get_by_name("evm-mainnet").await;
-    let firehose_retrieved = store.get_by_name("fhs-polygon").await;
+    let evm_retrieved = store.get_by_name("evm_mainnet").await;
+    let firehose_retrieved = store.get_by_name("fhs_polygon").await;
 
     assert!(evm_retrieved.is_some(), "Expected EVM provider to be found");
     assert!(
@@ -90,10 +103,17 @@ async fn register_with_multiple_providers_all_retrievable() {
     let evm = evm_retrieved.expect("should have EVM provider");
     let firehose = firehose_retrieved.expect("should have Firehose provider");
 
-    assert_eq!(evm.kind, "evm-rpc");
-    assert_eq!(evm.network, "mainnet");
-    assert_eq!(firehose.kind, "firehose");
-    assert_eq!(firehose.network, "polygon");
+    let evm_header = evm
+        .try_into_config::<ConfigHeaderWithNetwork>()
+        .expect("should parse EVM header");
+    let firehose_header = firehose
+        .try_into_config::<ConfigHeaderWithNetwork>()
+        .expect("should parse Firehose header");
+
+    assert_eq!(evm_header.kind, "evm-rpc");
+    assert_eq!(evm_header.network, "mainnet");
+    assert_eq!(firehose_header.kind, "firehose");
+    assert_eq!(firehose_header.network, "polygon");
 
     // Note: With in-memory storage, we don't verify disk files since they don't exist
 }
@@ -102,13 +122,13 @@ async fn register_with_multiple_providers_all_retrievable() {
 async fn register_with_duplicate_name_overwrites_existing() {
     //* Given
     let (store, _configs_store, _raw_store) = create_test_providers_store();
-    let provider_name = "duplicate-name";
-    let evm_provider = create_test_evm_provider(provider_name);
-    let fhs_provider = create_test_firehose_provider(provider_name);
+    let provider_name = "duplicate_name";
+    let (evm_name, evm_config) = create_test_evm_provider(provider_name);
+    let (fhs_name, fhs_config) = create_test_firehose_provider(provider_name);
 
     //* When
-    let first_result = store.register(evm_provider).await;
-    let second_result = store.register(fhs_provider).await;
+    let first_result = store.register(evm_name.clone(), evm_config).await;
+    let second_result = store.register(fhs_name.clone(), fhs_config).await;
 
     //* Then
     assert!(
@@ -130,8 +150,11 @@ async fn register_with_duplicate_name_overwrites_existing() {
         .get_by_name(provider_name)
         .await
         .expect("should have provider");
+    let header = provider
+        .try_into_config::<ConfigHeaderWithNetwork>()
+        .expect("should parse header");
     assert_eq!(
-        provider.kind, "firehose",
+        header.kind, "firehose",
         "Expected provider to be overwritten with firehose type"
     );
 }
@@ -140,11 +163,11 @@ async fn register_with_duplicate_name_overwrites_existing() {
 async fn delete_with_existing_provider_removes_from_store_and_cache() {
     //* Given
     let (store, _configs_store, _raw_store) = create_test_providers_store();
-    let provider_name = "test-delete";
-    let provider = create_test_evm_provider(provider_name);
+    let provider_name = "test_delete";
+    let (name, config) = create_test_evm_provider(provider_name);
 
     store
-        .register(provider)
+        .register(name.clone(), config)
         .await
         .expect("should register provider");
 
@@ -175,55 +198,26 @@ async fn delete_with_existing_provider_removes_from_store_and_cache() {
     // Note: With in-memory storage, we don't verify disk files since they don't exist
 }
 
-#[tokio::test]
-async fn register_with_subdirectory_path_stores_at_correct_location() {
+#[test]
+fn provider_name_with_path_separator_is_rejected() {
     //* Given
-    let (store, _configs_store, raw_store) = create_test_providers_store();
-    let provider_name = "networks/mainnet/primary-rpc";
-    let provider = create_test_evm_provider(provider_name);
+    let name_with_slash = "networks/mainnet/primary_rpc";
 
     //* When
-    let result = store.register(provider).await;
+    let result = name_with_slash.parse::<ProviderName>();
 
     //* Then
     assert!(
-        result.is_ok(),
-        "registration should succeed with subdirectory path"
+        result.is_err(),
+        "Expected ProviderName to reject path separator"
     );
-
-    // Verify file exists at expected path in underlying store
-    let expected_path = format!("{}.toml", provider_name);
-    let file_exists = raw_store.head(&expected_path.clone().into()).await.is_ok();
-    assert!(file_exists, "file should exist at path: {}", expected_path);
-}
-
-#[tokio::test]
-async fn delete_with_subdirectory_path_removes_correct_file() {
-    //* Given
-    let (store, _configs_store, raw_store) = create_test_providers_store();
-    let provider_name = "networks/mainnet/primary-rpc";
-    let provider = create_test_evm_provider(provider_name);
-
-    // Pre-register the provider
-    let register_result = store.register(provider).await;
-    assert!(register_result.is_ok(), "setup registration should succeed");
-
-    //* When
-    let result = store.delete(provider_name).await;
-
-    //* Then
     assert!(
-        result.is_ok(),
-        "deletion should succeed with subdirectory path"
-    );
-
-    // Verify file was deleted from correct path
-    let expected_path = format!("{}.toml", provider_name);
-    let file_exists = raw_store.head(&expected_path.clone().into()).await.is_ok();
-    assert!(
-        !file_exists,
-        "file should not exist after deletion at path: {}",
-        expected_path
+        matches!(
+            result,
+            Err(amp_providers_common::InvalidProviderName::InvalidCharacter { character: '/', .. })
+        ),
+        "Expected InvalidCharacter error for '/', got: {:?}",
+        result
     );
 }
 
@@ -243,25 +237,31 @@ fn create_test_providers_store() -> (
 }
 
 /// Create a test EVM RPC provider with mainnet configuration
-fn create_test_evm_provider(name: &str) -> ProviderConfig {
+fn create_test_evm_provider(name: &str) -> (ProviderName, ProviderConfigRaw) {
     let toml_str = indoc::formatdoc! {r#"
-        name = "{name}"
         kind = "evm-rpc"
         network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
-    toml::from_str(&toml_str).expect("should parse valid EVM provider TOML")
+    let config = toml::from_str(&toml_str).expect("should parse valid EVM provider TOML");
+    let provider_name = name
+        .parse::<ProviderName>()
+        .expect("should be valid provider name");
+    (provider_name, config)
 }
 
 /// Create a test Firehose provider with polygon configuration
-fn create_test_firehose_provider(name: &str) -> ProviderConfig {
+fn create_test_firehose_provider(name: &str) -> (ProviderName, ProviderConfigRaw) {
     let toml_str = indoc::formatdoc! {r#"
-        name = "{name}"
         kind = "firehose"
         network = "polygon"
         url = "https://polygon.firehose.io"
         token = "secret"
     "#};
-    toml::from_str(&toml_str).expect("should parse valid Firehose provider TOML")
+    let config = toml::from_str(&toml_str).expect("should parse valid Firehose provider TOML");
+    let provider_name = name
+        .parse::<ProviderName>()
+        .expect("should be valid provider name");
+    (provider_name, config)
 }

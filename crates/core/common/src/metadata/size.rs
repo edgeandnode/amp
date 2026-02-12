@@ -973,8 +973,8 @@ mod test {
     ///
     /// # Sanity Check
     /// ```
+    /// use amp_worker_core::compaction::size::test;
     /// use common::Timestamp;
-    /// use dump::compaction::size::test;
     /// let now = Timestamp::now();
     /// let meta = test::parquet_meta(1000, 3, 400, 100, 10000, 2u64.into(), now);
     /// assert_eq!(meta.file_metadata().num_rows(), 3000);

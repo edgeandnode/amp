@@ -2,6 +2,12 @@ use std::{fmt, str::FromStr};
 
 use amp_providers_common::kind::ProviderKindStr;
 
+/// The canonical string identifier for Solana providers.
+///
+/// This constant defines the string representation used in provider configurations
+/// to identify providers that interact with Solana RPC endpoints.
+const PROVIDER_KIND: &str = "solana";
+
 /// Zero-sized type representing the Solana provider kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -13,24 +19,30 @@ use amp_providers_common::kind::ProviderKindStr;
 pub struct SolanaProviderKind;
 
 impl SolanaProviderKind {
-    pub const PROVIDER_KIND: &'static str = "solana";
-
+    /// Returns the canonical string identifier for this provider kind.
     #[inline]
-    pub const fn as_str(&self) -> &'static str {
-        Self::PROVIDER_KIND
+    pub const fn as_str(self) -> &'static str {
+        PROVIDER_KIND
+    }
+}
+
+impl AsRef<str> for SolanaProviderKind {
+    fn as_ref(&self) -> &str {
+        PROVIDER_KIND
     }
 }
 
 impl From<SolanaProviderKind> for ProviderKindStr {
-    fn from(_: SolanaProviderKind) -> Self {
-        ProviderKindStr::new_unchecked(SolanaProviderKind::PROVIDER_KIND.to_string())
+    fn from(value: SolanaProviderKind) -> Self {
+        // SAFETY: The constant PROVIDER_KIND is "solana", which is non-empty
+        ProviderKindStr::new_unchecked(value.to_string())
     }
 }
 
 #[cfg(feature = "schemars")]
 fn solana_provider_kind_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let schema_obj = serde_json::json!({
-        "const": SolanaProviderKind::PROVIDER_KIND
+        "const": PROVIDER_KIND
     });
     serde_json::from_value(schema_obj).unwrap()
 }
@@ -39,7 +51,7 @@ impl FromStr for SolanaProviderKind {
     type Err = SolanaProviderKindError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == Self::PROVIDER_KIND {
+        if s == PROVIDER_KIND {
             Ok(SolanaProviderKind)
         } else {
             Err(SolanaProviderKindError::InvalidKind(s.to_string()))
@@ -93,7 +105,7 @@ impl PartialEq<String> for SolanaProviderKind {
 
 impl PartialEq<ProviderKindStr> for SolanaProviderKind {
     fn eq(&self, other: &ProviderKindStr) -> bool {
-        self.as_str() == other.as_str()
+        PROVIDER_KIND == other.as_str()
     }
 }
 
@@ -113,12 +125,6 @@ impl PartialEq<SolanaProviderKind> for &str {
 impl PartialEq<SolanaProviderKind> for String {
     fn eq(&self, other: &SolanaProviderKind) -> bool {
         self.as_str() == other.as_str()
-    }
-}
-
-impl PartialEq<SolanaProviderKind> for ProviderKindStr {
-    fn eq(&self, _other: &SolanaProviderKind) -> bool {
-        self.as_str() == SolanaProviderKind::PROVIDER_KIND
     }
 }
 
