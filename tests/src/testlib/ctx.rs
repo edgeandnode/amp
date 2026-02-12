@@ -321,6 +321,8 @@ impl TestCtxBuilder {
     /// Creates a temporary directory structure, generates the configuration file,
     /// copies requested datasets and providers, and returns a ready-to-use test environment.
     pub async fn build(self) -> Result<TestCtx> {
+        monitoring::logging::init();
+
         // Load environment variables from .env file (if present)
         let _ = dotenvy::dotenv_override();
 
