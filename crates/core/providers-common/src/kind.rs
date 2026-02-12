@@ -11,7 +11,7 @@
 ///
 /// Provider kind strings must be non-empty. This invariant is enforced at construction time
 /// through the [`FromStr`] implementation.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialOrd, Ord, Hash)]
 pub struct ProviderKindStr(String);
 
 impl ProviderKindStr {
@@ -31,6 +31,26 @@ impl ProviderKindStr {
     /// Returns the provider kind as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl AsRef<str> for ProviderKindStr {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl<T: AsRef<str>> PartialEq<T> for ProviderKindStr {
+    fn eq(&self, other: &T) -> bool {
+        self.0.as_str() == other.as_ref()
+    }
+}
+
+impl Eq for ProviderKindStr {}
+
+impl PartialEq<ProviderKindStr> for str {
+    fn eq(&self, other: &ProviderKindStr) -> bool {
+        self == other.as_str()
     }
 }
 
@@ -65,18 +85,6 @@ impl<'de> serde::Deserialize<'de> for ProviderKindStr {
     {
         let value = String::deserialize(deserializer)?;
         value.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl PartialEq<&str> for ProviderKindStr {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
-    }
-}
-
-impl PartialEq<ProviderKindStr> for &str {
-    fn eq(&self, other: &ProviderKindStr) -> bool {
-        *self == other.0
     }
 }
 

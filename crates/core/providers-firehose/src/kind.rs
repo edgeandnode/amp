@@ -32,6 +32,12 @@ impl FirehoseProviderKind {
     }
 }
 
+impl AsRef<str> for FirehoseProviderKind {
+    fn as_ref(&self) -> &str {
+        PROVIDER_KIND
+    }
+}
+
 impl From<FirehoseProviderKind> for ProviderKindStr {
     fn from(value: FirehoseProviderKind) -> Self {
         // SAFETY: The constant PROVIDER_KIND is "firehose", which is non-empty
@@ -123,18 +129,6 @@ impl PartialEq<FirehoseProviderKind> for String {
 impl PartialEq<ProviderKindStr> for FirehoseProviderKind {
     fn eq(&self, other: &ProviderKindStr) -> bool {
         PROVIDER_KIND == other.as_str()
-    }
-}
-
-impl PartialEq<FirehoseProviderKind> for ProviderKindStr {
-    fn eq(&self, _other: &FirehoseProviderKind) -> bool {
-        self.as_str() == PROVIDER_KIND
-    }
-}
-
-impl PartialEq<FirehoseProviderKind> for &ProviderKindStr {
-    fn eq(&self, _other: &FirehoseProviderKind) -> bool {
-        self.as_str() == PROVIDER_KIND
     }
 }
 

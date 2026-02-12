@@ -62,7 +62,6 @@ pub struct Manifest {
 #[serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub struct ProviderConfig {
-    pub name: String,
     pub kind: EvmRpcDatasetKind,
     pub network: NetworkId,
     #[serde_as(as = "serde_with::DisplayFromStr")]
@@ -94,6 +93,7 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 }
 
 pub async fn client(
+    name: String,
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<JsonRpcClient, ProviderError> {
@@ -104,7 +104,7 @@ pub async fn client(
             JsonRpcClient::new_ipc(
                 PathBuf::from(path),
                 config.network,
-                config.name,
+                name,
                 request_limit,
                 config.rpc_batch_size,
                 config.rate_limit_per_minute,
@@ -117,7 +117,7 @@ pub async fn client(
             JsonRpcClient::new_ws(
                 config.url,
                 config.network,
-                config.name,
+                name,
                 request_limit,
                 config.rpc_batch_size,
                 config.rate_limit_per_minute,
@@ -129,7 +129,7 @@ pub async fn client(
         _ => JsonRpcClient::new(
             config.url,
             config.network,
-            config.name,
+            name,
             request_limit,
             config.rpc_batch_size,
             config.rate_limit_per_minute,

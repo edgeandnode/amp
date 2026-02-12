@@ -7,6 +7,9 @@ license-file.workspace = true
 [dependencies]
 alloy.workspace = true
 amp-providers-common = { path = "../providers-common" }
+amp-providers-evm-rpc = { path = "../providers-evm-rpc" }
+amp-providers-firehose = { path = "../providers-firehose" }
+amp-providers-solana = { path = "../providers-solana" }
 async-stream.workspace = true
 datasets-common = { path = "../datasets-common" }
 datasets-raw = { path = "../datasets-raw" }
