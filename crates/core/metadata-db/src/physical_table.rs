@@ -392,6 +392,7 @@ pub struct RevisionMetadata {
     /// Manifest hash
     pub manifest_hash: String,
     /// Table name
+    #[serde(default)] // TODO: remove this once all revisions have a table_name
     pub table_name: String,
 }
 
