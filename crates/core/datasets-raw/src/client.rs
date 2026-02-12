@@ -8,7 +8,70 @@ use futures::{Stream, StreamExt as _};
 use crate::rows::Rows;
 
 /// Error type for [`BlockStreamer::block_stream`].
-pub type BlockStreamError = Box<dyn std::error::Error + Sync + Send + 'static>;
+///
+/// Block streams distinguish between recoverable and fatal errors to allow [`BlockStreamerWithRetry`]
+/// to automatically retry transient failures while immediately aborting on unrecoverable ones.
+#[derive(Debug, thiserror::Error)]
+pub enum BlockStreamError {
+    /// Transient error that may succeed on retry (e.g., network timeouts, rate limits).
+    #[error("Recoverable error: {0}")]
+    Recoverable(#[source] RecoverableError),
+    /// Permanent error that should abort the stream (e.g., invalid data, out-of-range blocks).
+    #[error("Fatal error: {0}")]
+    Fatal(#[source] FatalError),
+}
+
+/// Extension trait for converting `Result<T, E>` into `Result<T, BlockStreamError>`.
+///
+/// Provides ergonomic methods to classify errors as recoverable or fatal when yielding
+/// from a block stream.
+///
+/// # Example
+///
+/// ```ignore
+/// // Mark RPC errors as recoverable (will be retried)
+/// let block = rpc_client.get_block(slot).await.recoverable()?;
+///
+/// // Mark data conversion errors as fatal (no retry)
+/// let rows = block.into_db_rows().fatal()?;
+/// ```
+pub trait BlockStreamResultExt<T> {
+    /// Converts the error into [`BlockStreamError::Recoverable`].
+    fn recoverable(self) -> Result<T, BlockStreamError>;
+
+    /// Converts the error into [`BlockStreamError::Fatal`].
+    fn fatal(self) -> Result<T, BlockStreamError>;
+}
+
+impl<T, E> BlockStreamResultExt<T> for Result<T, E>
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+{
+    fn recoverable(self) -> Result<T, BlockStreamError> {
+        self.map_err(|e| BlockStreamError::Recoverable(e.into()))
+    }
+
+    fn fatal(self) -> Result<T, BlockStreamError> {
+        self.map_err(|e| BlockStreamError::Fatal(e.into()))
+    }
+}
+
+/// Errors that are expected to be transient and may succeed if retried
+/// (e.g., network timeouts, rate limiting, temporary service unavailability).
+pub type RecoverableError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Errors that indicate a permanent failure and should not be retried
+/// (e.g., malformed data, unsupported versions, blocks outside requested range).
+pub type FatalError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+impl std::convert::AsRef<dyn std::error::Error + 'static> for BlockStreamError {
+    fn as_ref(&self) -> &(dyn std::error::Error + 'static) {
+        match self {
+            BlockStreamError::Recoverable(e) => e.as_ref(),
+            BlockStreamError::Fatal(e) => e.as_ref(),
+        }
+    }
+}
 
 /// Error type for [`BlockStreamer::latest_block`].
 pub type LatestBlockError = Box<dyn std::error::Error + Sync + Send + 'static>;
@@ -16,13 +79,23 @@ pub type LatestBlockError = Box<dyn std::error::Error + Sync + Send + 'static>;
 /// Error type for [`BlockStreamer::wait_for_cleanup`].
 pub type CleanupError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
+/// Trait for extracting raw blockchain data as a stream of rows.
+///
+/// Implementations fetch blocks from a data source (RPC, archive, etc.) and convert them
+/// into database rows. Use [`BlockStreamerExt::with_retry`] to wrap with automatic retry
+/// handling for recoverable errors.
 pub trait BlockStreamer: Clone + 'static {
+    /// Streams blocks in the inclusive range `[start, end]`.
+    ///
+    /// Yields [`Rows`] for each successfully processed block. Skipped blocks (e.g., empty
+    /// slots in Solana) should not yield any rows for that block.
     fn block_stream(
         self,
         start: BlockNum,
         end: BlockNum,
     ) -> impl Future<Output = impl Stream<Item = Result<Rows, BlockStreamError>> + Send> + Send;
 
+    /// Returns the latest available block number, or `None` if no blocks exist.
     fn latest_block(
         &mut self,
         finalized: bool,
@@ -43,7 +116,9 @@ pub trait BlockStreamer: Clone + 'static {
     fn provider_name(&self) -> &str;
 }
 
+/// Extension trait providing retry functionality for [`BlockStreamer`].
 pub trait BlockStreamerExt: BlockStreamer {
+    /// Wraps this streamer with automatic retry handling.
     fn with_retry(self) -> BlockStreamerWithRetry<Self> {
         BlockStreamerWithRetry(self)
     }
@@ -51,6 +126,10 @@ pub trait BlockStreamerExt: BlockStreamer {
 
 impl<T> BlockStreamerExt for T where T: BlockStreamer {}
 
+/// A [`BlockStreamer`] wrapper that automatically retries on [`BlockStreamError::Recoverable`].
+///
+/// When a recoverable error occurs, the wrapper restarts the stream from the last successful
+/// block with progressive backoff. Fatal errors immediately terminate the stream.
 #[derive(Clone)]
 pub struct BlockStreamerWithRetry<T: BlockStreamer>(T);
 
@@ -69,21 +148,32 @@ where
         const WARN_RETRY_DELAY: Duration = Duration::from_millis(100);
         const ERROR_RETRY_DELAY: Duration = Duration::from_millis(300);
 
-        let mut current_block = start;
+        let mut next_block = start;
         let mut num_retries = 0;
 
         async_stream::stream! {
             'retry: loop {
-                let inner_stream = self.0.clone().block_stream(current_block, end).await;
+                let inner_stream = self.0.clone().block_stream(next_block, end).await;
                 futures::pin_mut!(inner_stream);
-                while let Some(rows) = inner_stream.next().await {
-                    match &rows {
-                        Ok(r) => {
+                while let Some(row_result) = inner_stream.next().await {
+                    match row_result.as_ref() {
+                        Ok(rows) => {
                             num_retries = 0;
-                            current_block = r.block_num();
-                            yield rows;
+                            next_block = rows.block_num() + 1;
+                            yield row_result;
                         }
-                        Err(e) => {
+                        Err(BlockStreamError::Fatal(e)) => {
+                            let error_source = monitoring::logging::error_source(e.as_ref());
+                            tracing::error!(
+                                block = %next_block,
+                                error = %e,
+                                error_source,
+                                "Fatal error in block streamer, aborting"
+                            );
+                            yield row_result;
+                            return;
+                        }
+                        Err(BlockStreamError::Recoverable(e)) => {
                             let error_source = monitoring::logging::error_source(e.as_ref());
                             // Progressively more severe logging and longer retry interval.
                             match num_retries {
@@ -91,7 +181,7 @@ where
                                     // First error, make sure it is visible in info (default) logs.
                                     num_retries += 1;
                                     tracing::info!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying"
@@ -101,7 +191,7 @@ where
                                 1..DEBUG_RETRY_LIMIT => {
                                     num_retries += 1;
                                     tracing::debug!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying");
@@ -110,7 +200,7 @@ where
                                 DEBUG_RETRY_LIMIT..WARN_RETRY_LIMIT => {
                                     num_retries += 1;
                                     tracing::warn!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying"
@@ -119,7 +209,7 @@ where
                                 }
                                 _ => {
                                     tracing::error!(
-                                        block = %current_block,
+                                        block = %next_block,
                                         error = %e,
                                         error_source,
                                         "Block streaming failed, retrying"

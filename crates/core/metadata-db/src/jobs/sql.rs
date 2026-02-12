@@ -401,7 +401,7 @@ where
     }
 }
 
-/// Get failed jobs that are ready for retry
+/// Get failed (recoverable) jobs that are ready for retry
 ///
 /// Returns failed jobs where enough time has passed since last failure based on
 /// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
@@ -426,7 +426,7 @@ where
             COALESCE(MAX(ja.retry_index), -1) + 1 as next_retry_index
         FROM jobs j
         LEFT JOIN job_attempts ja ON j.id = ja.job_id
-        WHERE j.status = 'FAILED'
+        WHERE j.status = 'FAILED_RECOVERABLE'
         GROUP BY j.id, j.node_id, j.status, j.descriptor, j.created_at, j.updated_at
         HAVING j.updated_at + INTERVAL '1 second' * POW(2, COALESCE(MAX(ja.retry_index), -1) + 1)::bigint
             <= timezone('UTC', now())

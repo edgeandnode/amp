@@ -1,4 +1,4 @@
-use datasets_raw::rows::TableRowError;
+use datasets_raw::{client::BlockStreamError, rows::TableRowError};
 pub use yellowstone_faithful_car_parser as car_parser;
 use yellowstone_faithful_car_parser::node::{NodeError, ReassableError};
 
@@ -160,6 +160,28 @@ pub enum Of1StreamError {
     /// typically due to missing or corrupted fragment nodes.
     #[error("CAR dataframe reassembly error")]
     DataframeReassembly(#[source] ReassableError),
+}
+
+impl From<Of1StreamError> for BlockStreamError {
+    fn from(value: Of1StreamError) -> Self {
+        match value {
+            Of1StreamError::RpcClient(_) => BlockStreamError::Recoverable(value.into()),
+            // This is intentionally not a catch-all, to force consideration of
+            // each error type when mapping to recoverable vs fatal.
+            Of1StreamError::PrevBlockhashNotFound(_)
+            | Of1StreamError::ChannelClosed(_)
+            | Of1StreamError::FileOpen(_)
+            | Of1StreamError::Mmap(_)
+            | Of1StreamError::UnexpectedNode { .. }
+            | Of1StreamError::MissingNode { .. }
+            | Of1StreamError::RewardSlotMismatch { .. }
+            | Of1StreamError::Zstd { .. }
+            | Of1StreamError::Bincode(_)
+            | Of1StreamError::DecodeField { .. }
+            | Of1StreamError::NodeParse(_)
+            | Of1StreamError::DataframeReassembly(_) => BlockStreamError::Fatal(value.into()),
+        }
+    }
 }
 
 /// Error during Solana extractor initialization or operation.

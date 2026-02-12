@@ -21,11 +21,14 @@ use alloy::{
     },
     transports::http::reqwest::Url,
 };
+use anyhow::Context;
 use async_stream::stream;
 use datasets_common::{block_num::BlockNum, block_range::BlockRange, network_id::NetworkId};
 use datasets_raw::{
     Timestamp,
-    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    client::{
+        BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
+    },
     evm::{
         EvmCurrency,
         tables::{
@@ -243,18 +246,18 @@ impl JsonRpcClient {
                 let block = match block {
                     Ok(Some(block)) => block,
                     Ok(None) => {
-                        yield Err(format!("block {} not found", block_num).into());
+                        yield Err(format!("block {} not found", block_num)).recoverable();
                         continue;
                     }
                     Err(err) => {
-                        yield Err(err.into());
+                        yield Err(err).recoverable();
                         continue;
                     }
                 };
 
                 if block.transactions.is_empty() {
                     // Avoid sending an RPC request just to get an empty vector.
-                    yield rpc_to_rows(block, Vec::new(), &self.network).map_err(Into::into);
+                    yield rpc_to_rows(block, Vec::new(), &self.network).fatal();
                     continue;
                 }
 
@@ -271,7 +274,7 @@ impl JsonRpcClient {
                             }
                         });
                     let Ok(receipts) = try_join_all(calls).await else {
-                        yield Err(format!("error fetching receipts for block {}", block.header.number).into());
+                        yield Err(format!("error fetching receipts for block {}", block.header.number)).recoverable();
                         continue;
                     };
                     let mut received_receipts = Vec::new();
@@ -279,32 +282,35 @@ impl JsonRpcClient {
                         match receipt {
                             Some(receipt) => received_receipts.push(receipt),
                             None => {
-                                yield Err(format!("missing receipt for transaction: {}", hex::encode(hash)).into());
+                                yield Err(format!("missing receipt for transaction: {}", hex::encode(hash))).recoverable();
                                 continue 'outer;
                             }
                         }
                     }
                     received_receipts
                 } else {
-                    let receipts = self.client
+                    let receipts_result = self.client
                         .with_metrics("eth_getBlockReceipts", async |c| {
                             c.get_block_receipts(BlockId::Number(block_num)).await
                         })
                         .await
-                        .map_err(Into::<BlockStreamError>::into)
+                        .with_context(|| format!("error fetching receipts for block {}", block.header.number))
                         .and_then(|receipts| {
-                            let mut receipts = receipts.ok_or_else(|| format!("no receipts for block {}", block.header.number))?;
+                            let mut receipts = receipts.context("no receipts returned for block")?;
                             receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
                             Ok(receipts)
                         });
-                    let Ok(receipts) = receipts else {
-                        yield Err("error fetching receipts".into());
-                        continue;
-                    };
-                    receipts
+
+                    match receipts_result {
+                        Ok(receipts) => receipts,
+                        Err(err) => {
+                            yield Err(err).recoverable();
+                            continue;
+                        }
+                    }
                 };
 
-                yield rpc_to_rows(block, receipts, &self.network).map_err(Into::into);
+                yield rpc_to_rows(block, receipts, &self.network).fatal();
             }
         }
     }
@@ -341,7 +347,7 @@ impl JsonRpcClient {
                 let blocks = match blocks_result {
                     Ok(blocks) => blocks,
                     Err(err) => {
-                        yield Err(err.into());
+                        yield Err(err).recoverable();
                         return;
                     }
                 };
@@ -352,7 +358,7 @@ impl JsonRpcClient {
                     // No transactions in any block, just yield the block rows
                     for block in blocks.into_iter() {
                         blocks_completed += 1;
-                        yield rpc_to_rows(block, Vec::new(), &self.network).map_err(Into::into);
+                        yield rpc_to_rows(block, Vec::new(), &self.network).fatal();
                     }
                 } else {
                     let all_receipts_result: Result<Vec<_>, BatchingError> = if self.fetch_receipts_per_tx {
@@ -382,7 +388,7 @@ impl JsonRpcClient {
                     let all_receipts = match all_receipts_result {
                         Ok(receipts) => receipts,
                         Err(err) => {
-                            yield Err(err.into());
+                            yield Err(err).recoverable();
                             return;
                         }
                     };
@@ -393,7 +399,7 @@ impl JsonRpcClient {
                             total_tx_count,
                             all_receipts.len()
                         );
-                        yield Err(err.into());
+                        yield Err(err).recoverable();
                         return;
                     }
 
@@ -405,7 +411,7 @@ impl JsonRpcClient {
                         block_receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
                         blocks_completed += 1;
                         txns_completed += block.transactions.len();
-                        yield rpc_to_rows(block, block_receipts, &self.network).map_err(Into::into);
+                        yield rpc_to_rows(block, block_receipts, &self.network).fatal();
                     }
                 }
 

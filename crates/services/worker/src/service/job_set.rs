@@ -95,7 +95,14 @@ impl JobSet {
             // The job completed successfully
             Ok(Ok(())) => (job_id, Ok(())),
             // The job returned an error
-            Ok(Err(err)) => (job_id, Err(JoinError::Failed(Box::new(err)))),
+            Ok(Err(err)) => {
+                let join_err = if err.is_fatal() {
+                    JoinError::FailedFatal(Box::new(err))
+                } else {
+                    JoinError::FailedRecoverable(Box::new(err))
+                };
+                (job_id, Err(join_err))
+            }
             // The job was aborted
             Err(err) if err.is_cancelled() => (job_id, Err(JoinError::Aborted)),
             // The job panicked
@@ -109,9 +116,12 @@ impl JobSet {
 /// The error type for the [`JobSet::join_next`] method
 #[derive(Debug, thiserror::Error)]
 pub enum JoinError {
-    /// The job failed
-    #[error("Job failed: {0}")]
-    Failed(Box<DumpError>),
+    /// The job failed with a recoverable error
+    #[error("Job failed with a recoverable error: {0}")]
+    FailedRecoverable(Box<DumpError>),
+    /// The job failed with a fatal error
+    #[error("Job failed with a fatal error: {0}")]
+    FailedFatal(Box<DumpError>),
     /// The job was aborted
     #[error("Job was aborted")]
     Aborted,

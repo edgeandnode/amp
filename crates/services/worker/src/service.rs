@@ -333,16 +333,39 @@ impl Worker {
                         source: error,
                     })?;
             }
-            Err(JobSetJoinError::Failed(err)) => {
-                tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job failed");
+            Err(JobSetJoinError::FailedRecoverable(err)) => {
+                tracing::error!(
+                    node_id=%self.node_id,
+                    %job_id, error=%err,
+                    error_source = logging::error_source(&err),
+                    "job failed with recoverable error"
+                );
 
-                // Mark the job as FAILED (retry on failure)
-                self.queue.mark_job_failed(job_id).await.map_err(|error| {
-                    JobResultError::MarkFailedFailed {
+                // Mark the job as FAILED_RECOVERABLE (retry on failure)
+                self.queue
+                    .mark_job_failed(job_id, /* fatal */ false)
+                    .await
+                    .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
                         source: error,
-                    }
-                })?;
+                    })?;
+            }
+            Err(JobSetJoinError::FailedFatal(err)) => {
+                tracing::error!(node_id=%self.node_id,
+                    %job_id,
+                    error=%err,
+                    error_source = logging::error_source(&err),
+                    "job failed with fatal error"
+                );
+
+                // Mark the job as FAILED_FATAL (retry on failure)
+                self.queue
+                    .mark_job_failed(job_id, /* fatal */ true)
+                    .await
+                    .map_err(|error| JobResultError::MarkFailedFailed {
+                        job_id,
+                        source: error,
+                    })?;
             }
             Err(JobSetJoinError::Aborted) => {
                 tracing::info!(node_id=%self.node_id, %job_id, "job cancelled");
@@ -358,13 +381,14 @@ impl Worker {
             Err(JobSetJoinError::Panicked(err)) => {
                 tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job panicked");
 
-                // Mark the job as FAILED (retry on failure)
-                self.queue.mark_job_failed(job_id).await.map_err(|error| {
-                    JobResultError::MarkFailedFailed {
+                // Mark the job as FAILED_FATAL (retry on failure)
+                self.queue
+                    .mark_job_failed(job_id, /* fatal */ true)
+                    .await
+                    .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
                         source: error,
-                    }
-                })?;
+                    })?;
             }
         }
 

@@ -411,6 +411,14 @@ pub enum Error {
     },
 }
 
+impl Error {
+    // TODO: Determine which errors are fatal (non-retryable) vs transient (retryable)
+    // for more efficient job scheduling.
+    pub fn is_fatal(&self) -> bool {
+        false
+    }
+}
+
 /// Dumps a derived dataset table
 #[instrument(skip_all, fields(table = %table.table_name()), err)]
 #[expect(clippy::too_many_arguments)]
