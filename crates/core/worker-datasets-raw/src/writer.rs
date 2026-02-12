@@ -1,6 +1,15 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use amp_data_store::{DataStore, file_name::FileName};
+use amp_worker_core::{
+    WriterProperties,
+    compaction::{AmpCompactor, AmpCompactorTaskError},
+    metrics,
+    parquet_writer::{
+        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
+        ParquetFileWriterOutput, commit_metadata,
+    },
+};
 use common::{
     BlockNum, BlockRange,
     arrow::array::RecordBatch,
@@ -10,15 +19,6 @@ use common::{
 };
 use datasets_common::table_name::TableName;
 use datasets_raw::rows::TableRows;
-use dump::{
-    WriterProperties,
-    compaction::{AmpCompactor, AmpCompactorTaskError},
-    metrics,
-    parquet_writer::{
-        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
-        ParquetFileWriterOutput, commit_metadata,
-    },
-};
 use metadata_db::MetadataDb;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;

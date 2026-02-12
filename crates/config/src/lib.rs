@@ -4,7 +4,7 @@ use std::{
 };
 
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
-use dump::{ConfigDuration, ParquetConfig};
+use amp_worker_core::{ConfigDuration, ParquetConfig};
 use fs_err as fs;
 use monitoring::config::OpenTelemetryConfig;
 

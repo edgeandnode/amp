@@ -10,6 +10,7 @@ pub mod git;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
+use amp_worker_core::consistency_check;
 use anyhow::{Result, anyhow};
 use common::{
     BlockRange, LogicalCatalog,
@@ -23,7 +24,6 @@ use common::{
     sql_str::SqlStr,
 };
 use datasets_common::{reference::Reference, table_name::TableName};
-use dump::consistency_check;
 use worker::job::JobId;
 
 use super::fixtures::SnapshotContext;
