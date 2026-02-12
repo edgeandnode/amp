@@ -17,9 +17,9 @@ pub enum Commands {
     Inspect(inspect::Args),
 
     /// List all providers
-    #[command(alias = "list")]
+    #[command(alias = "ls")]
     #[command(after_help = include_str!("provider/list__after_help.md"))]
-    Ls(list::Args),
+    List(list::Args),
 
     /// Remove a provider by its name
     #[command(alias = "remove")]
@@ -32,7 +32,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
     match command {
         Commands::Register(args) => register::run(args).await?,
         Commands::Inspect(args) => inspect::run(args).await?,
-        Commands::Ls(args) => list::run(args).await?,
+        Commands::List(args) => list::run(args).await?,
         Commands::Rm(args) => remove::run(args).await?,
     }
     Ok(())
