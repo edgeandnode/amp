@@ -77,6 +77,9 @@ pub struct ParquetConfig {
     pub compactor: CompactorConfig,
     #[serde(alias = "garbage_collector", default)]
     pub collector: CollectorConfig,
+    /// Max wall-clock time before closing a segment, in seconds (default: 600 = 10 min)
+    #[serde(default)]
+    pub segment_flush_interval_secs: ConfigDuration<600>,
 }
 
 impl Default for ParquetConfig {
@@ -89,6 +92,7 @@ impl Default for ParquetConfig {
             target_size: SizeLimitConfig::default_upper_limit(),
             compactor: CompactorConfig::default(),
             collector: CollectorConfig::default(),
+            segment_flush_interval_secs: ConfigDuration::default(),
         }
     }
 }

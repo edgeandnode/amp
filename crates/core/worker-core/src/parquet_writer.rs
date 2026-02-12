@@ -110,6 +110,7 @@ pub struct ParquetFileWriter {
     filename: FileName,
     table: Arc<PhysicalTable>,
     max_row_group_bytes: usize,
+    rows_written: usize,
 }
 
 impl ParquetFileWriter {
@@ -128,10 +129,12 @@ impl ParquetFileWriter {
             filename,
             table,
             max_row_group_bytes,
+            rows_written: 0,
         })
     }
 
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
+        self.rows_written += batch.num_rows();
         self.writer.write(batch).await?;
 
         // Criteria: If adding another batch of this size would exceed the max row group size, flush now.
@@ -193,19 +196,20 @@ impl ParquetFileWriter {
             .await
             .map_err(ParquetFileWriterCloseError::Close)?;
 
-        tracing::debug!(
-            "wrote {} for range {} to {}, row count {}",
-            self.filename,
-            range.start(),
-            range.end(),
-            meta.file_metadata().num_rows(),
-        );
-
         let object_meta = self
             .store
             .head_revision_file_in_object_store(self.table.revision(), &self.filename)
             .await
             .map_err(ParquetFileWriterCloseError::HeadObject)?;
+
+        tracing::debug!(
+            "wrote {} for range {} to {}, row count {}, size {}",
+            self.filename,
+            range.start(),
+            range.end(),
+            meta.file_metadata().num_rows(),
+            format_size(object_meta.size),
+        );
 
         let footer = extract_footer_bytes_from_file(&self.store, &object_meta)
             .await
@@ -228,6 +232,25 @@ impl ParquetFileWriter {
     // size of row groups flushed to storage + encoded (but uncompressed) size of the in progress row group
     pub fn bytes_written(&self) -> usize {
         self.writer.bytes_written() + self.writer.in_progress_size()
+    }
+
+    pub fn rows_written(&self) -> usize {
+        self.rows_written
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.2} GiB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MiB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KiB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
     }
 }
 
