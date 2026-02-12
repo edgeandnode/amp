@@ -1,6 +1,6 @@
 //! # Worker Core
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use common::{
@@ -58,6 +58,7 @@ pub struct WriterProperties {
     pub partition: SegmentSizeLimit,
     pub cache_size_mb: usize,
     pub max_row_group_bytes: usize,
+    pub segment_flush_interval: Duration,
 }
 
 pub fn parquet_opts(config: &ParquetConfig) -> Arc<WriterProperties> {
@@ -85,6 +86,8 @@ pub fn parquet_opts(config: &ParquetConfig) -> Arc<WriterProperties> {
     let cache_size_mb = (config.cache_size_mb * 1024 * 1024) as usize;
     let max_row_group_bytes = (config.max_row_group_mb * 1024 * 1024) as usize;
 
+    let segment_flush_interval = config.segment_flush_interval_secs.clone().into();
+
     WriterProperties {
         parquet,
         compactor,
@@ -92,6 +95,7 @@ pub fn parquet_opts(config: &ParquetConfig) -> Arc<WriterProperties> {
         partition,
         cache_size_mb,
         max_row_group_bytes,
+        segment_flush_interval,
     }
     .into()
 }

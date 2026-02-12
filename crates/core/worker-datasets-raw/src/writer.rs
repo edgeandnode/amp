@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 
 use amp_data_store::{DataStore, file_name::FileName};
 use amp_worker_core::{
@@ -197,6 +197,8 @@ struct RawTableWriter {
     current_file: Option<ParquetFileWriter>,
     current_range: Option<BlockRange>,
 
+    segment_opened_at: Instant,
+
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 
     compactor: Arc<AmpCompactor>,
@@ -236,6 +238,7 @@ impl RawTableWriter {
             ranges_to_write,
             current_file,
             current_range: None,
+            segment_opened_at: Instant::now(),
             metrics,
             compactor,
         })
@@ -283,6 +286,7 @@ impl RawTableWriter {
                 .transpose()
                 .map_err(RawTableWriterError::CreateNewFile)?;
             self.current_file = new_file;
+            self.segment_opened_at = Instant::now();
         }
 
         if self.ranges_to_write.is_empty() {
@@ -308,7 +312,10 @@ impl RawTableWriter {
         // We also split the segment if we have reached the configured max `partition_size`.
         let partition_size_exceeded = self.current_file.as_ref().unwrap().bytes_written()
             >= self.opts.partition.0.bytes as usize;
-        if reorg || partition_size_exceeded {
+        // Close the segment if wall-clock time exceeded, but only if rows have been written.
+        let time_exceeded = self.segment_opened_at.elapsed() >= self.opts.segment_flush_interval
+            && self.current_file.as_ref().unwrap().rows_written() > 0;
+        if reorg || partition_size_exceeded || time_exceeded {
             // `parquet_meta` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
             assert!(parquet_meta.is_none());
@@ -343,6 +350,7 @@ impl RawTableWriter {
                 .map_err(RawTableWriterError::CreateNewFile)?,
             );
             self.current_file = new_file;
+            self.segment_opened_at = Instant::now();
         }
 
         let rows = &table_rows.rows;
