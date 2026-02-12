@@ -4,6 +4,10 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
+[features]
+# JSON Schema generation support for configuration types
+schemars = ["dep:schemars"]
+
 [dependencies]
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
@@ -32,6 +36,7 @@ object_store.workspace = true
 parking_lot = "0.12.4"
 rand.workspace = true
 regex.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 solana-datasets = { path = "../../extractors/solana" }
