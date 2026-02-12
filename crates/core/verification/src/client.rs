@@ -40,7 +40,7 @@ pub struct Block {
     pub logs: Vec<Log>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Transaction {
     pub block_number: BlockNumber,
     pub tx_index: u32,
@@ -68,7 +68,7 @@ pub struct Transaction {
     pub authorization_list: Option<Vec<AuthorizationTuple>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Log {
     pub block_number: BlockNumber,
     pub tx_index: u32,
