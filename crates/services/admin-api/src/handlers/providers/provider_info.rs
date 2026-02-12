@@ -1,9 +1,9 @@
 //! Provider information types for API requests and responses
 
 use amp_providers_common::{
-    ProviderName,
     config::{ConfigHeader, ProviderConfigRaw, TryIntoConfig},
     kind::ProviderKindStr,
+    provider_name::ProviderName,
 };
 
 use super::convert;

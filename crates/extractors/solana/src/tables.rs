@@ -1,4 +1,5 @@
-use datasets_common::{block_range::BlockRange, network_id::NetworkId};
+use amp_providers_common::network_id::NetworkId;
+use datasets_common::{block_range::BlockRange, network_id::NetworkId as DatasetNetworkId};
 use datasets_raw::rows::Rows;
 use solana_clock::Slot;
 
@@ -13,7 +14,7 @@ pub mod transactions;
 /// Maximum number of ASCII characters in a base58-encoded 32-byte hash.
 pub(crate) const BASE58_ENCODED_HASH_LEN: usize = 44;
 
-pub fn all(network: &NetworkId) -> Vec<datasets_common::dataset::Table> {
+pub fn all(network: &DatasetNetworkId) -> Vec<datasets_common::dataset::Table> {
     vec![
         block_headers::table(network.clone()),
         block_rewards::table(network.clone()),
@@ -51,10 +52,16 @@ impl NonEmptySlot {
             block_rewards,
         } = self;
 
+        // SAFETY: The NetworkId comes from validated provider configuration that was checked during
+        // provider lookup. The amp_providers_common::NetworkId type enforces the same non-empty
+        // invariant as DatasetNetworkId, so converting the validated string representation is guaranteed
+        // to produce a valid DatasetNetworkId without re-validation.
+        let dataset_network_id = DatasetNetworkId::new_unchecked(network.to_string());
+
         let range = BlockRange {
             // Using the slot as a block number since some blocks do not have a block_height.
             numbers: slot..=slot,
-            network: network.clone(),
+            network: dataset_network_id,
             hash: blockhash.into(),
             prev_hash: prev_blockhash.into(),
             timestamp: blocktime.and_then(|t| u64::try_from(t).ok()),

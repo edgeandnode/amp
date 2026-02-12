@@ -1,6 +1,6 @@
 //! Providers delete handler
 
-use amp_providers_common::ProviderName;
+use amp_providers_common::provider_name::ProviderName;
 use amp_providers_registry::DeleteError;
 use axum::{
     extract::{Path, State, rejection::PathRejection},

@@ -18,6 +18,16 @@ impl<T> From<T> for Redacted<T> {
     }
 }
 
+impl<T> Redacted<T> {
+    /// Consumes the wrapper and returns the inner value.
+    ///
+    /// This follows standard Rust newtype conventions (like `Arc::into_inner`, `Mutex::into_inner`)
+    /// and avoids unnecessary clones when consuming the wrapper.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<T> std::ops::Deref for Redacted<T> {
     type Target = T;
 

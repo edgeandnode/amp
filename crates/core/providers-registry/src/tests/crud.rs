@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use amp_providers_common::{
-    ProviderName,
     config::{ConfigHeaderWithNetwork, ProviderConfigRaw, TryIntoConfig},
+    provider_name::{InvalidProviderName, ProviderName},
 };
 use object_store::{ObjectStore, memory::InMemory};
 
@@ -214,7 +214,7 @@ fn provider_name_with_path_separator_is_rejected() {
     assert!(
         matches!(
             result,
-            Err(amp_providers_common::InvalidProviderName::InvalidCharacter { character: '/', .. })
+            Err(InvalidProviderName::InvalidCharacter { character: '/', .. })
         ),
         "Expected InvalidCharacter error for '/', got: {:?}",
         result

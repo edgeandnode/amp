@@ -1,4 +1,4 @@
-use datasets_common::network_id::NetworkId;
+use amp_providers_common::network_id::NetworkId;
 use monitoring::telemetry;
 
 #[derive(Debug, Clone)]

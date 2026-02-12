@@ -8,6 +8,8 @@ license-file.workspace = true
 schemars = ["dep:schemars", "datasets-common/schemars"]
 
 [dependencies]
+amp-providers-common = { path = "../../core/providers-common" }
+amp-providers-solana = { path = "../../core/providers-solana" }
 anyhow.workspace = true
 async-stream.workspace = true
 backon.workspace = true
@@ -24,7 +26,6 @@ reqwest.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
-serde_with = "3.9.0"
 solana-clock = "3.0.0"
 solana-client = "3.0.0"
 solana-rpc-client-api = "3.0.0"

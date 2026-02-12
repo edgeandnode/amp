@@ -16,12 +16,27 @@
 ///
 /// A valid network identifier must:
 /// - **Not be empty** (minimum length of 1 character)
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 pub struct NetworkId(#[cfg_attr(feature = "schemars", schemars(length(min = 1)))] String);
 
 impl NetworkId {
+    /// Creates a NetworkId without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the value is a valid, non-empty network identifier that satisfies
+    /// the following invariants:
+    /// - The string must not be empty (length >= 1)
+    /// - The string should conform to network naming conventions (lowercase, alphanumeric with hyphens)
+    ///
+    /// Violating these invariants may cause panics in deserialization, schema validation failures,
+    /// or incorrect behavior when comparing NetworkIds across different type boundaries.
+    pub fn new_unchecked(value: String) -> Self {
+        Self(value)
+    }
+
     /// Returns a reference to the inner string value
     pub fn as_str(&self) -> &str {
         &self.0
@@ -33,11 +48,22 @@ impl NetworkId {
     }
 }
 
-impl PartialEq<String> for NetworkId {
-    fn eq(&self, other: &String) -> bool {
-        self.0 == *other
+impl AsRef<str> for NetworkId {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
     }
 }
+
+impl<T> PartialEq<T> for NetworkId
+where
+    T: AsRef<str>,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.0 == *other.as_ref()
+    }
+}
+
+impl Eq for NetworkId {}
 
 impl PartialEq<NetworkId> for String {
     fn eq(&self, other: &NetworkId) -> bool {
@@ -45,21 +71,9 @@ impl PartialEq<NetworkId> for String {
     }
 }
 
-impl PartialEq<str> for NetworkId {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other
-    }
-}
-
 impl PartialEq<NetworkId> for str {
     fn eq(&self, other: &NetworkId) -> bool {
         *self == other.0
-    }
-}
-
-impl PartialEq<&str> for NetworkId {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == **other
     }
 }
 

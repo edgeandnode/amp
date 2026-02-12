@@ -24,7 +24,6 @@ solana-datasets = { path = "../../extractors/solana" }
 tracing.workspace = true
 toml = { workspace = true, features = ["preserve_order"] }
 url.workspace = true
-serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 

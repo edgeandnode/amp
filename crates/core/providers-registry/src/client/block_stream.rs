@@ -1,8 +1,8 @@
 //! Client creation for raw dataset providers.
 
 use amp_providers_common::{
-    ProviderName,
     config::{ConfigHeader, InvalidConfigError, ProviderResolvedConfigRaw, TryIntoConfig as _},
+    provider_name::ProviderName,
 };
 use amp_providers_evm_rpc::kind::EvmRpcProviderKind;
 use amp_providers_firehose::kind::FirehoseProviderKind;
@@ -39,7 +39,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        evm_rpc_datasets::client(name.to_string(), typed_config, meter)
+        evm_rpc_datasets::client(name.clone(), typed_config, meter)
             .await
             .map(BlockStreamClient::EvmRpc)
             .map_err(|err| CreateClientError::ProviderClient {
@@ -54,7 +54,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        solana_datasets::extractor(name.to_string(), typed_config, meter)
+        solana_datasets::extractor(name.clone(), typed_config, meter)
             .map(BlockStreamClient::Solana)
             .map_err(|err| CreateClientError::ProviderClient {
                 name,
@@ -68,7 +68,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        firehose_datasets::Client::new(name.to_string(), typed_config, meter)
+        firehose_datasets::Client::new(name.clone(), typed_config, meter)
             .await
             .map(|c| BlockStreamClient::Firehose(Box::new(c)))
             .map_err(|err| CreateClientError::ProviderClient {

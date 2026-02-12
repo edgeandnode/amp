@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use amp_providers_common::{
-    ProviderName,
     config::{ConfigHeaderWithNetwork, ProviderConfigRaw, TryIntoConfig},
+    provider_name::ProviderName,
 };
 use object_store::{ObjectStore, memory::InMemory, path::Path};
 

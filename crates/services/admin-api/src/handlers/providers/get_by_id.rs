@@ -1,6 +1,6 @@
 //! Providers get by ID handler
 
-use amp_providers_common::ProviderName;
+use amp_providers_common::provider_name::ProviderName;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},

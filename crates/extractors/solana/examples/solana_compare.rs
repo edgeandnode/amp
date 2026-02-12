@@ -9,7 +9,7 @@ use clap::Parser;
 use futures::StreamExt;
 use solana_clock::Slot;
 use solana_datasets::{
-    ProviderConfig, non_empty_of1_slot, non_empty_rpc_slot, of1_client, rpc_client, tables,
+    SolanaProviderConfig, non_empty_of1_slot, non_empty_rpc_slot, of1_client, rpc_client, tables,
 };
 
 const SLOT_MISMATCH_LIMIT: u8 = 10;
@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
 
     let provider_toml =
         fs_err::read_to_string(&cli.provider_config).context("reading provider config")?;
-    let provider_cfg: ProviderConfig =
+    let provider_cfg: SolanaProviderConfig =
         toml::from_str(&provider_toml).context("deserializing provider config")?;
 
     let slots_per_epoch = solana_clock::DEFAULT_SLOTS_PER_EPOCH;
@@ -59,9 +59,9 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
-        provider_cfg.rpc_provider_url,
+        provider_cfg.rpc_provider_url.into_inner(),
         provider_cfg.max_rpc_calls_per_second,
-        cli.provider_name.clone(),
+        cli.provider_name,
         provider_cfg.network.clone(),
     ));
 

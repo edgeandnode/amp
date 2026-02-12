@@ -1,6 +1,6 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use datasets_common::network_id::NetworkId;
+use amp_providers_common::network_id::NetworkId;
 pub use solana_client::rpc_config;
 use solana_clock::Slot;
 pub use solana_rpc_client_api::client_error;

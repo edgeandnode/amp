@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use alloy::primitives::U256;
-use datasets_common::{block_range::BlockRange, network_id::NetworkId};
+use amp_providers_common::network_id::NetworkId;
+use datasets_common::{block_range::BlockRange, network_id::NetworkId as DatasetNetworkId};
 use datasets_raw::{
     Timestamp,
     evm::{
@@ -13,7 +14,6 @@ use datasets_raw::{
     },
     rows::{Rows, TableRowError},
 };
-use thiserror::Error;
 
 use super::{
     pbethereum,
@@ -21,7 +21,7 @@ use super::{
 };
 use crate::evm::tables::{calls::CallRowsBuilder, transactions::TransactionRowsBuilder};
 
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProtobufToRowError {
     #[error("malformed field {}, bytes: {}", .0, hex::encode(.1))]
     Malformed(&'static str, Vec<u8>),
@@ -231,9 +231,15 @@ pub fn protobufs_to_rows(
         }
     }
 
+    // SAFETY: The NetworkId comes from validated provider configuration that was checked during
+    // provider lookup. The amp_providers_common::NetworkId type enforces the same non-empty
+    // invariant as DatasetNetworkId, so converting the validated string representation is guaranteed
+    // to produce a valid DatasetNetworkId without re-validation.
+    let dataset_network_id = DatasetNetworkId::new_unchecked(network.to_string());
+
     let block = BlockRange {
         numbers: header.block_num..=header.block_num,
-        network: network.clone(),
+        network: dataset_network_id,
         hash: header.hash.into(),
         prev_hash: header.parent_hash.into(),
         timestamp: Some(header.timestamp.0.as_secs()),
