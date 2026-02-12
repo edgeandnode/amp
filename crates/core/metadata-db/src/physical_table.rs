@@ -9,6 +9,8 @@ mod name;
 mod path;
 pub(crate) mod sql;
 
+use sqlx::{Postgres, error::BoxDynError};
+
 pub use self::{
     location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
     name::{Name as TableName, NameOwned as TableNameOwned},
@@ -33,7 +35,7 @@ pub async fn register<'c, E>(
     dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug + serde::Serialize,
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug + serde::Serialize,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug + serde::Serialize,
-    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug + serde::Serialize,
     path: impl Into<TablePath<'_>> + std::fmt::Debug,
 ) -> Result<LocationId, Error>
 where
@@ -43,6 +45,7 @@ where
         "dataset_namespace": dataset_namespace,
         "dataset_name": dataset_name,
         "manifest_hash": manifest_hash,
+        "table_name": table_name,
     });
     sql::insert(
         exe,
@@ -57,30 +60,45 @@ where
     .map_err(Error::Database)
 }
 
-/// Get a physical table location by its ID (Only returns active revision)
+/// Get an active physical table location by its ID.
+///
+/// # Errors
+///
+/// - `GetActiveByLocationIdError::NotFound` if no revision exists with this location ID
+/// - `GetActiveByLocationIdError::Inactive` if the revision exists but is not currently active
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_id<'c, E>(
+pub async fn get_active_by_location_id<'c, E>(
     exe: E,
     id: impl Into<LocationId> + std::fmt::Debug,
-) -> Result<Option<PhysicalTable>, Error>
+) -> Result<PhysicalTable, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_by_id(exe, id.into())
+    let row = sql::get_active_by_location_id(exe, id.into())
         .await
-        .map_err(Error::Database)
+        .map_err(Error::Database)?;
+
+    match row {
+        None => Err(Error::GetActiveByLocationId(
+            GetActiveByLocationIdError::NotFound,
+        )),
+        Some(None) => Err(Error::GetActiveByLocationId(
+            GetActiveByLocationIdError::Inactive,
+        )),
+        Some(Some(table)) => Ok(table),
+    }
 }
 
-/// Get a physical table location with full writer job details
+/// Get an active physical table location with full writer job details
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_id_with_details<'c, E>(
+pub async fn get_by_location_id_with_details<'c, E>(
     exe: E,
     id: impl Into<LocationId> + std::fmt::Debug,
 ) -> Result<Option<LocationWithDetails>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_by_id_with_details(exe, id.into())
+    sql::get_by_location_id_with_details(exe, id.into())
         .await
         .map_err(Error::Database)
 }
@@ -111,11 +129,11 @@ pub async fn get_active<'c, E>(
     exe: E,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
     table_name: impl Into<TableName<'_>> + std::fmt::Debug,
-) -> Result<Option<PhysicalTable>, Error>
+) -> Result<Option<PhysicalTableRevision>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_active_physical_table(exe, manifest_hash.into(), table_name.into())
+    sql::get_active(exe, manifest_hash.into(), table_name.into())
         .await
         .map_err(Error::Database)
 }
@@ -232,7 +250,7 @@ pub async fn list<'c, E>(
     exe: E,
     limit: i64,
     last_id: Option<impl Into<LocationId> + std::fmt::Debug>,
-) -> Result<Vec<PhysicalTable>, Error>
+) -> Result<Vec<PhysicalTableRevision>, Error>
 where
     E: Executor<'c>,
 {
@@ -274,37 +292,114 @@ where
         .map_err(|err| Error::Database(err.0))
 }
 
-/// Physical table revision information from the database
+/// Unique identifier for a logical physical table entity in the database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PhysicalTableId(i64);
+
+impl TryFrom<i64> for PhysicalTableId {
+    type Error = PhysicalTableIdI64ConvError;
+
+    /// Attempts to convert an `i64` to a [`PhysicalTableId`] with validation.
+    ///
+    /// # Errors
+    ///
+    /// - `PhysicalTableId::NonPositive` if the value is zero or negative
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        if value <= 0 {
+            Err(PhysicalTableIdI64ConvError::NonPositive(value))
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+/// Errors that can occur when converting from `i64` to [`PhysicalTableId`].
+#[derive(Debug, thiserror::Error)]
+pub enum PhysicalTableIdI64ConvError {
+    /// The provided value is zero or negative, but [`PhysicalTableId`] requires positive values.
+    #[error("PhysicalTableId must be positive, got: {0}")]
+    NonPositive(i64),
+}
+
+impl<'r> sqlx::Decode<'r, Postgres> for PhysicalTableId {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let id = <i64 as sqlx::Decode<Postgres>>::decode(value)?;
+        id.try_into().map_err(|err| Box::new(err) as BoxDynError)
+    }
+}
+
+impl sqlx::Type<Postgres> for PhysicalTableId {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::Type<Postgres>>::type_info()
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for PhysicalTableId {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+/// Logical physical table entity from the database
 ///
-/// Represents a specific revision (storage location) of a physical table.
-/// The `active` field indicates whether this revision is the currently active
-/// one for its parent physical table.
+/// Represents a physical table with its dataset metadata and an optional
+/// pointer to its currently active revision.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PhysicalTable {
-    /// Unique identifier for the revision (location_id)
-    pub id: LocationId,
+    /// Unique identifier for the physical table
+    pub id: PhysicalTableId,
     /// Manifest hash identifying the dataset version
     pub manifest_hash: ManifestHashOwned,
 
-    // Labels for the dataset name under which this location was created
+    /// Labels for the dataset name under which this location was created
     pub dataset_namespace: DatasetNamespaceOwned,
     pub dataset_name: DatasetNameOwned,
 
     /// Name of the table within the dataset
     pub table_name: TableNameOwned,
-    /// Relative path to the storage location
-    pub path: TablePathOwned,
-    /// Whether this revision is currently active for queries
-    pub active: bool,
-    /// Writer job ID (if one exists)
-    pub writer: Option<JobId>,
+    /// Location ID of the currently active revision, if one exists
+    pub active_revision_id: Option<LocationId>,
 }
 
-/// Location information with detailed writer job information
+/// A specific storage revision (location) of a physical table
+///
+/// Each revision has its own storage path and an optional writer job that
+/// populates it.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PhysicalTableRevision {
+    /// Unique identifier for this revision (location ID)
+    pub id: LocationId,
+    /// Relative path to the storage location
+    pub path: TablePathOwned,
+    /// Whether this revision is currently active
+    pub active: bool,
+    /// Writer job responsible for populating this revision, if one exists
+    pub writer: Option<JobId>,
+    /// Metadata about the revision
+    pub metadata: sqlx::types::Json<RevisionMetadata>,
+}
+
+/// Metadata stored as JSONB on each physical table revision.
+///
+/// Captures the dataset context under which the revision was created,
+/// enabling lookups without joining back to `physical_tables`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RevisionMetadata {
+    /// Dataset namespace
+    pub dataset_namespace: String,
+    /// Dataset name
+    pub dataset_name: String,
+    /// Manifest hash
+    pub manifest_hash: String,
+    /// Table name
+    pub table_name: String,
+}
+
+/// A physical table combined with its active revision and writer job details
 #[derive(Debug, Clone)]
 pub struct LocationWithDetails {
-    pub table: PhysicalTable,
-
+    /// The active revision of the physical table
+    pub revision: PhysicalTableRevision,
     /// Writer job (if one exists)
     pub writer: Option<Job>,
 }
@@ -312,17 +407,12 @@ pub struct LocationWithDetails {
 impl LocationWithDetails {
     /// Get the unique identifier for the location
     pub fn id(&self) -> LocationId {
-        self.table.id
-    }
-
-    /// Get the storage path for this location
-    pub fn path(&self) -> &TablePathOwned {
-        &self.table.path
+        self.revision.id
     }
 
     /// Check if this location is currently active for queries
     pub fn active(&self) -> bool {
-        self.table.active
+        self.revision.active
     }
 }
 
@@ -382,6 +472,30 @@ where
     sql::get_tables_by_writer(exe, writer_id.into())
         .await
         .map_err(Error::Database)
+}
+
+/// Error type for looking up an active physical table by location ID
+///
+/// This error is returned when `get_active_by_location_id` cannot return
+/// a valid active physical table for the given location ID.
+#[derive(Debug, thiserror::Error)]
+pub enum GetActiveByLocationIdError {
+    /// The location ID does not exist in the database
+    ///
+    /// This occurs when the provided location ID has no corresponding row
+    /// in the `physical_table_revisions` table. The ID may have never existed
+    /// or the revision may have been deleted.
+    #[error("Location not found")]
+    NotFound,
+
+    /// The location exists but is not currently active
+    ///
+    /// This occurs when the revision exists in `physical_table_revisions` but
+    /// no `physical_tables` row references it as the `active_revision_id`.
+    /// The revision may have been superseded by a newer revision or explicitly
+    /// deactivated.
+    #[error("Location exists but is inactive")]
+    Inactive,
 }
 
 /// In-tree integration tests

@@ -97,7 +97,7 @@ async fn list_locations_first_page_respects_limit() {
     );
     for location in &locations {
         assert!(
-            location.table_name.starts_with("test_table_"),
+            location.metadata.table_name.starts_with("test_table_"),
             "list should return locations with correct table_name prefix"
         );
         assert!(

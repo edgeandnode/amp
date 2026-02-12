@@ -150,6 +150,15 @@ pub enum Error {
     /// See `JobStatusUpdateError` for specific transition validation errors.
     #[error("Job status update error: {0}")]
     JobStatusUpdate(#[source] crate::jobs::JobStatusUpdateError),
+
+    /// Failed to get active physical table by location ID
+    ///
+    /// This occurs when looking up an active physical table by its location ID
+    /// and the location either doesn't exist or exists but is inactive.
+    ///
+    /// See `GetActiveByLocationIdError` for specific failure modes.
+    #[error("Get active by location ID error")]
+    GetActiveByLocationId(#[source] crate::physical_table::GetActiveByLocationIdError),
 }
 
 impl Error {
