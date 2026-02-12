@@ -61,14 +61,14 @@ impl KafkaProducer {
     ) -> Result<SaslConfig, Error> {
         let username = config
             .sasl_username
-            .as_ref()
+            .clone()
             .ok_or(Error::MissingSaslUsername)?;
         let password = config
             .sasl_password
-            .as_ref()
+            .clone()
             .ok_or(Error::MissingSaslPassword)?;
 
-        let credentials = Credentials::new(username.clone(), password.clone());
+        let credentials = Credentials::new(username.into_inner(), password.into_inner());
 
         Ok(match mechanism {
             SaslMechanism::Plain => SaslConfig::Plain(credentials),
@@ -349,21 +349,29 @@ mod tests {
 
     #[test]
     fn build_sasl_config_plain() {
-        let config = make_kafka_config(Some("PLAIN"), Some("user"), Some("pass"));
+        let config = make_kafka_config(Some("PLAIN"), Some("user".into()), Some("pass".into()));
         let result = KafkaProducer::build_sasl_config(SaslMechanism::Plain, &config);
         assert!(matches!(result, Ok(SaslConfig::Plain(_))));
     }
 
     #[test]
     fn build_sasl_config_scram_sha_256() {
-        let config = make_kafka_config(Some("SCRAM-SHA-256"), Some("user"), Some("pass"));
+        let config = make_kafka_config(
+            Some("SCRAM-SHA-256"),
+            Some("user".into()),
+            Some("pass".into()),
+        );
         let result = KafkaProducer::build_sasl_config(SaslMechanism::ScramSha256, &config);
         assert!(matches!(result, Ok(SaslConfig::ScramSha256(_))));
     }
 
     #[test]
     fn build_sasl_config_scram_sha_512() {
-        let config = make_kafka_config(Some("SCRAM-SHA-512"), Some("user"), Some("pass"));
+        let config = make_kafka_config(
+            Some("SCRAM-SHA-512"),
+            Some("user".into()),
+            Some("pass".into()),
+        );
         let result = KafkaProducer::build_sasl_config(SaslMechanism::ScramSha512, &config);
         assert!(matches!(result, Ok(SaslConfig::ScramSha512(_))));
     }
@@ -371,14 +379,14 @@ mod tests {
     #[test]
     fn build_sasl_config_missing_credentials() {
         // Missing username
-        let config = make_kafka_config(Some("PLAIN"), None, Some("pass"));
+        let config = make_kafka_config(Some("PLAIN"), None, Some("pass".into()));
         assert!(matches!(
             KafkaProducer::build_sasl_config(SaslMechanism::Plain, &config),
             Err(Error::MissingSaslUsername)
         ));
 
         // Missing password
-        let config = make_kafka_config(Some("PLAIN"), Some("user"), None);
+        let config = make_kafka_config(Some("PLAIN"), Some("user".into()), None);
         assert!(matches!(
             KafkaProducer::build_sasl_config(SaslMechanism::Plain, &config),
             Err(Error::MissingSaslPassword)
@@ -390,16 +398,16 @@ mod tests {
     /// Creates a test Kafka config with optional SASL credentials.
     fn make_kafka_config(
         mechanism: Option<&str>,
-        username: Option<&str>,
-        password: Option<&str>,
+        username: Option<String>,
+        password: Option<String>,
     ) -> KafkaEventsConfig {
         KafkaEventsConfig {
             brokers: vec!["localhost:9092".to_string()],
             topic: "test".to_string(),
             partitions: 1,
             sasl_mechanism: mechanism.map(String::from),
-            sasl_username: username.map(String::from),
-            sasl_password: password.map(String::from),
+            sasl_username: username.map(Into::into),
+            sasl_password: password.map(Into::into),
             tls_enabled: false,
         }
     }
