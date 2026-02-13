@@ -114,7 +114,6 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     test_helpers::assert_snapshots_eq(&dumped, &reference).await;
 }
 
-#[ignore = "Test is failing, see https://github.com/edgeandnode/amp/issues/1737"]
 #[tokio::test]
 async fn eth_firehose_single_dump() {
     //* Given
@@ -143,7 +142,6 @@ async fn eth_firehose_single_dump() {
     test_helpers::assert_snapshots_eq(&dumped, &reference).await;
 }
 
-#[ignore = "Test is failing, see https://github.com/edgeandnode/amp/issues/1737"]
 #[tokio::test]
 async fn base_firehose_single_dump() {
     //* Given
