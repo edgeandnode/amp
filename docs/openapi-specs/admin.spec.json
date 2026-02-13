@@ -1595,6 +1595,60 @@
         }
       }
     },
+    "/revisions/{id}": {
+      "get": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `GET /revisions/{id}` endpoint",
+        "description": "Returns a specific revision by location ID.\n\n## Path Parameters\n- `id`: The unique identifier of the revision (must be a valid LocationId)\n\n## Response\n- **200 OK**: Successfully retrieved revision\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Revision not found\n- **500 Internal Server Error**: Database error during retrieval\n\n## Error Codes\n- `INVALID_PATH_PARAMETERS`: Invalid path parameters\n- `REVISION_NOT_FOUND`: No revision exists with the specified location ID\n- `GET_REVISION_BY_LOCATION_ID_ERROR`: Failed to retrieve revision from database\n\n## Behavior\nThis endpoint looks up a single physical table revision by its location ID\nand returns its details including path, active status, writer, and metadata.",
+        "operationId": "get_revision_by_location_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/revisions/{id}/activate": {
       "post": {
         "tags": [
@@ -2365,6 +2419,71 @@
           "url": {
             "type": "string",
             "description": "Full URL to the storage location"
+          }
+        }
+      },
+      "RevisionInfo": {
+        "type": "object",
+        "description": "Revision information returned by the API",
+        "required": [
+          "id",
+          "path",
+          "active",
+          "metadata"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether this revision is currently active"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unique identifier for this revision (location ID)"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/RevisionMetadataInfo",
+            "description": "Metadata about the revision"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative path to the storage location"
+          },
+          "writer": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Writer job ID responsible for populating this revision, if one exists"
+          }
+        }
+      },
+      "RevisionMetadataInfo": {
+        "type": "object",
+        "description": "Revision metadata returned by the API",
+        "required": [
+          "dataset_namespace",
+          "dataset_name",
+          "manifest_hash",
+          "table_name"
+        ],
+        "properties": {
+          "dataset_name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "dataset_namespace": {
+            "type": "string",
+            "description": "Dataset namespace"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Manifest hash"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "Table name"
           }
         }
       },

@@ -27,7 +27,7 @@ pub struct Args {
     pub table_name: String,
 
     /// The location ID of the revision to activate
-    pub location_id: u64,
+    pub location_id: i64,
 }
 
 /// Activate a table revision via the admin API.
@@ -85,7 +85,7 @@ pub async fn run(
 struct ActivateOutput {
     dataset: String,
     table_name: String,
-    location_id: u64,
+    location_id: i64,
 }
 
 impl std::fmt::Display for ActivateOutput {

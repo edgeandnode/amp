@@ -10,7 +10,7 @@ components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
 
 ## Summary
 
-The Table Revision Management API provides endpoints to activate and deactivate physical table revisions, controlling which revision of a table is served for queries. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors.
+The Table Revision Management API provides endpoints to retrieve, activate, and deactivate physical table revisions, controlling which revision of a table is served for queries. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors.
 
 ## Table of Contents
 
@@ -39,7 +39,8 @@ The Table Revision Management API provides endpoints to activate and deactivate 
 | **Admin API**     | Presentation - returns HTTP status codes to REST clients                       |
 | **`DataStore`**   | Transaction management for activate (begin, mark inactive, mark active, commit) |
 | **`DataStore`**   | Single-operation deactivate (mark inactive)                                    |
-| **`metadata_db`** | SQL operations on `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
+| **`DataStore`**   | Single-operation get revision by location ID                                   |
+| **`metadata_db`** | SQL operations on `physical_tables` (mark_inactive_by_table_name, mark_active_by_id, get_by_location_id) |
 
 **Key Principle**: Admin API handlers do not interact with `metadata_db` directly. All database access is encapsulated in `DataStore` methods, keeping handlers as pure orchestration and presentation logic.
 
@@ -71,6 +72,15 @@ The Table Revision Management API provides endpoints to activate and deactivate 
 5. Return HTTP 200 (no body)
 ```
 
+**Get By ID (`GET /revisions/{id}`):**
+
+```
+1. Parse location_id from path
+2. Call DataStore::get_revision_by_location_id(location_id)
+3. If not found → return REVISION_NOT_FOUND (404)
+4. Return HTTP 200 with RevisionInfo JSON body
+```
+
 ### Atomicity
 
 - **Activate**: Wrapped in a database transaction to ensure exactly one revision is active. If any step fails, the transaction rolls back automatically
@@ -78,10 +88,11 @@ The Table Revision Management API provides endpoints to activate and deactivate 
 
 ## API Reference
 
-| Endpoint                 | Method | Description                                    |
-| ------------------------ | ------ | ---------------------------------------------- |
+| Endpoint                      | Method | Description                                       |
+| ----------------------------- | ------ | ------------------------------------------------- |
+| `/revisions/{id}`             | GET    | Retrieve a specific revision by location ID       |
 | `/revisions/{id}/activate`    | POST   | Activate a specific table revision by location ID |
-| `/revisions/deactivate`  | POST   | Deactivate all revisions for a table           |
+| `/revisions/deactivate`       | POST   | Deactivate all revisions for a table              |
 
 ### Request Schemas
 
@@ -103,16 +114,38 @@ The Table Revision Management API provides endpoints to activate and deactivate 
 }
 ```
 
-**Response (both endpoints):** HTTP 200 with no body on success.
+**Response (activate/deactivate):** HTTP 200 with no body on success.
+
+**Response (get by ID) — `RevisionInfo`:**
+
+```json
+{
+  "id": 42,
+  "path": "relative/path/to/revision",
+  "active": true,
+  "writer": 7,
+  "metadata": {
+    "dataset_namespace": "_",
+    "dataset_name": "eth_rpc",
+    "manifest_hash": "abc123",
+    "table_name": "blocks"
+  }
+}
+```
+
+The `writer` field is omitted when no writer job is assigned.
 
 ### Error Codes
 
-| Code                              | Status | Description                              |
-| --------------------------------- | ------ | ---------------------------------------- |
-| `DATASET_NOT_FOUND`               | 404    | Dataset or revision not found            |
-| `ACTIVATE_TABLE_REVISION_ERROR`   | 500    | Database error during activation         |
-| `DEACTIVATE_TABLE_REVISION_ERROR` | 500    | Database error during deactivation       |
-| `RESOLVE_REVISION_ERROR`          | 500    | Failed to resolve dataset revision       |
+| Code                              | Status | Description                                      |
+| --------------------------------- | ------ | ------------------------------------------------ |
+| `INVALID_PATH_PARAMETERS`         | 400    | Invalid path parameters                          |
+| `DATASET_NOT_FOUND`               | 404    | Dataset or revision not found                    |
+| `REVISION_NOT_FOUND`              | 404    | No revision with the specified location ID       |
+| `ACTIVATE_TABLE_REVISION_ERROR`   | 500    | Database error during activation                 |
+| `DEACTIVATE_TABLE_REVISION_ERROR` | 500    | Database error during deactivation               |
+| `GET_REVISION_BY_LOCATION_ID_ERROR` | 500  | Database error during retrieval                  |
+| `RESOLVE_REVISION_ERROR`          | 500    | Failed to resolve dataset revision               |
 
 ## Usage
 
@@ -132,10 +165,17 @@ curl -X POST http://localhost:1610/revisions/42/activate \
   -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks"}'
 ```
 
+**Retrieve a revision by location ID:**
+
+```bash
+curl http://localhost:1610/revisions/42
+```
+
 ## Implementation
 
 ### Source Files
 
+- `crates/services/admin-api/src/handlers/revisions/get_by_id.rs` - Get by ID endpoint handler, `RevisionInfo` response type, and error types
 - `crates/services/admin-api/src/handlers/revisions/activate.rs` - Activate endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/deactivate.rs` - Deactivate endpoint handler and error types
 - `crates/core/data-store/src/lib.rs` - `activate_table_revision` (transactional) and `deactivate_table_revision` methods
