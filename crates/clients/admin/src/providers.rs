@@ -57,7 +57,7 @@ impl<'a> ProvidersClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`RegisterError`] for network errors, API errors (400/409/500),
+    /// Returns [`RegisterError`] for network errors, API errors (400/500),
     /// or unexpected responses.
     #[tracing::instrument(skip(self, config), fields(name = %name))]
     pub async fn register(
@@ -101,7 +101,7 @@ impl<'a> ProvidersClient<'a> {
 
         match status.as_u16() {
             201 => Ok(()),
-            400 | 409 | 500 => {
+            400 | 500 => {
                 let text = response.text().await.map_err(|err| {
                     tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     RegisterError::UnexpectedResponse {
@@ -125,7 +125,6 @@ impl<'a> ProvidersClient<'a> {
                     "DATA_CONVERSION_ERROR" => {
                         Err(RegisterError::DataConversionError(error_response.into()))
                     }
-                    "PROVIDER_CONFLICT" => Err(RegisterError::Conflict(error_response.into())),
                     "STORE_ERROR" => Err(RegisterError::StoreError(error_response.into())),
                     _ => Err(RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
@@ -323,7 +322,7 @@ impl<'a> ProvidersClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`DeleteError`] for network errors, API errors (400/404/500),
+    /// Returns [`DeleteError`] for network errors, API errors (400/500),
     /// or unexpected responses.
     #[tracing::instrument(skip(self), fields(name = %name))]
     pub async fn delete(&self, name: &str) -> Result<(), DeleteError> {
@@ -354,7 +353,7 @@ impl<'a> ProvidersClient<'a> {
                 tracing::debug!("Provider deleted successfully");
                 Ok(())
             }
-            400 | 404 | 500 => {
+            400 | 500 => {
                 let text = response.text().await.map_err(|err| {
                     tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
                     DeleteError::UnexpectedResponse {
@@ -373,7 +372,6 @@ impl<'a> ProvidersClient<'a> {
 
                 match error_response.error_code.as_str() {
                     "INVALID_PROVIDER_NAME" => Err(DeleteError::InvalidName(error_response.into())),
-                    "PROVIDER_NOT_FOUND" => Err(DeleteError::NotFound(error_response.into())),
                     "STORE_ERROR" => Err(DeleteError::StoreError(error_response.into())),
                     _ => Err(DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
@@ -408,11 +406,9 @@ pub struct ProviderInfo {
     pub name: String,
     /// Provider kind (e.g., "evm-rpc", "firehose")
     pub kind: String,
-    /// Network identifier
-    pub network: String,
-    /// Additional provider fields
+    /// Additional provider fields (e.g., network, if present)
     #[serde(flatten)]
-    pub rest: serde_json::Value,
+    pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Errors that can occur when registering a provider.
@@ -442,14 +438,6 @@ pub enum RegisterError {
     /// - **Invalid TOML table keys**: Keys that are not valid TOML identifiers
     #[error("data conversion error")]
     DataConversionError(#[source] ApiError),
-
-    /// A provider with the same name already exists (409, PROVIDER_CONFLICT)
-    ///
-    /// This occurs when:
-    /// - Attempting to create a provider configuration with a name that is already in use
-    /// - Provider names must be unique within the system
-    #[error("provider conflict")]
-    Conflict(#[source] ApiError),
 
     /// Failed to store the provider configuration (500, STORE_ERROR)
     ///
@@ -530,13 +518,6 @@ pub enum DeleteError {
     /// - URL encoding issues or empty names
     #[error("invalid provider name")]
     InvalidName(#[source] ApiError),
-
-    /// The requested provider was not found in the store (404, PROVIDER_NOT_FOUND)
-    ///
-    /// This occurs when:
-    /// - The provider name is valid but no provider configuration exists with that name
-    #[error("provider not found")]
-    NotFound(#[source] ApiError),
 
     /// Failed to delete the provider configuration from the store (500, STORE_ERROR)
     ///

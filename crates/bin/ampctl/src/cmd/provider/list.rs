@@ -34,11 +34,7 @@ impl std::fmt::Display for ListResult {
         } else {
             writeln!(f, "Providers:")?;
             for provider in &self.providers {
-                writeln!(
-                    f,
-                    "  {} ({}) - {}",
-                    provider.name, provider.kind, provider.network
-                )?;
+                writeln!(f, "  {} ({})", provider.name, provider.kind)?;
             }
             Ok(())
         }
