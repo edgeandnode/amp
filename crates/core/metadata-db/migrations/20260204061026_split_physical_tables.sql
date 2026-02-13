@@ -115,19 +115,21 @@ INSERT INTO physical_tables (
     active_revision_id
 )
 SELECT
-    MIN(created_at) AS created_at,
-    MIN(created_at) AS updated_at,
-    dataset_namespace,
-    dataset_name,
-    table_name,
-    manifest_hash,
-    (SELECT id FROM physical_tables_old pt2
-     WHERE pt2.manifest_hash = physical_tables_old.manifest_hash
-       AND pt2.table_name = physical_tables_old.table_name
+    MIN(pt.created_at) AS created_at,
+    MIN(pt.created_at) AS updated_at,
+    pt.dataset_namespace,
+    pt.dataset_name,
+    pt.table_name,
+    pt.manifest_hash,
+    (SELECT pt2.id FROM physical_tables_old pt2
+     WHERE pt2.dataset_namespace = pt.dataset_namespace
+       AND pt2.dataset_name = pt.dataset_name
+       AND pt2.manifest_hash = pt.manifest_hash
+       AND pt2.table_name = pt.table_name
        AND pt2.active = true
      LIMIT 1) AS active_revision_id
-FROM physical_tables_old
-GROUP BY dataset_namespace, dataset_name, table_name, manifest_hash;
+FROM physical_tables_old pt
+GROUP BY pt.dataset_namespace, pt.dataset_name, pt.table_name, pt.manifest_hash;
 
 -- =============================================================================
 -- STEP 7: Create indexes
