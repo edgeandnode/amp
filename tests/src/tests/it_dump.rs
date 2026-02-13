@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use amp_data_store::DataStore;
 use datasets_common::reference::Reference;
-use monitoring::logging;
 
 use crate::testlib::{
     self, ctx::TestCtxBuilder, fixtures::SnapshotContext, helpers as test_helpers,
@@ -193,8 +192,6 @@ impl TestCtx {
     /// Creates a test environment with the specified dataset manifest,
     /// provider configuration, and snapshot data.
     async fn setup(test_name: &str, dataset: &str, provider: &str) -> Self {
-        logging::init();
-
         let dataset_ref: Reference = dataset.parse().expect("Failed to parse dataset reference");
 
         let ctx = TestCtxBuilder::new(test_name)
