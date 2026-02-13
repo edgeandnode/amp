@@ -130,6 +130,12 @@ async fn main() {
         } => {
             let _ = dotenvy::dotenv_override();
 
+            // Install rustls crypto provider before any TLS operations.
+            // Required when both ring and aws-lc-rs are available in the dependency tree.
+            rustls::crypto::ring::default_provider()
+                .install_default()
+                .expect("Failed to install default crypto provider");
+
             // Create temporary metadata database
             let sysdb = MetadataDbFixture::new().await;
 

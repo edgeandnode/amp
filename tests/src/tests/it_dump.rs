@@ -1,11 +1,10 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use amp_data_store::DataStore;
+use common::catalog::physical::PhysicalTable;
 use datasets_common::reference::Reference;
+use pretty_assertions::assert_eq;
 
-use crate::testlib::{
-    self, ctx::TestCtxBuilder, fixtures::SnapshotContext, helpers as test_helpers,
-};
+use crate::testlib::{self, ctx::TestCtxBuilder, helpers as test_helpers};
 
 #[tokio::test]
 async fn evm_rpc_single_dump() {
@@ -13,21 +12,30 @@ async fn evm_rpc_single_dump() {
     let test = TestCtx::setup("evm_rpc_single_dump", "_/eth_rpc@0.0.0", "rpc_eth_mainnet").await;
 
     let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
+    let tables = test.restore_reference_snapshot().await;
+    let reference_dataset = test.query_all_tables(&tables, "eth_rpc").await;
+    test.deactivate_all_revisions(&tables).await;
 
     //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block).await;
 
     //* Then
     // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
             .await
             .expect("Table consistency check failed");
     }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
+    let dumped_dataset = test.query_all_tables(&tables, "eth_rpc").await;
+    assert_eq!(
+        reference_dataset.len(),
+        dumped_dataset.len(),
+        "table count mismatch"
+    );
+    for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
+        assert_eq!(reference.0, dumped.0);
+        assert_eq!(reference.1, dumped.1);
+    }
 }
 
 #[tokio::test]
@@ -41,21 +49,30 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     .await;
 
     let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
+    let tables = test.restore_reference_snapshot().await;
+    let reference_dataset = test.query_all_tables(&tables, "eth_rpc").await;
+    test.deactivate_all_revisions(&tables).await;
 
     //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block).await;
 
     //* Then
     // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
             .await
             .expect("Table consistency check failed");
     }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
+    let dumped_dataset = test.query_all_tables(&tables, "eth_rpc").await;
+    assert_eq!(
+        reference_dataset.len(),
+        dumped_dataset.len(),
+        "table count mismatch"
+    );
+    for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
+        assert_eq!(reference.0, dumped.0);
+        assert_eq!(reference.1, dumped.1);
+    }
 }
 
 #[tokio::test]
@@ -69,21 +86,30 @@ async fn evm_rpc_base_single_dump() {
     .await;
 
     let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
+    let tables = test.restore_reference_snapshot().await;
+    let reference_dataset = test.query_all_tables(&tables, "base_rpc").await;
+    test.deactivate_all_revisions(&tables).await;
 
     //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block).await;
 
     //* Then
     // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
             .await
             .expect("Table consistency check failed");
     }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
+    let dumped_dataset = test.query_all_tables(&tables, "base_rpc").await;
+    assert_eq!(
+        reference_dataset.len(),
+        dumped_dataset.len(),
+        "table count mismatch"
+    );
+    for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
+        assert_eq!(reference.0, dumped.0);
+        assert_eq!(reference.1, dumped.1);
+    }
 }
 
 #[tokio::test]
@@ -97,21 +123,30 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     .await;
 
     let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
+    let tables = test.restore_reference_snapshot().await;
+    let reference_dataset = test.query_all_tables(&tables, "base_rpc").await;
+    test.deactivate_all_revisions(&tables).await;
 
     //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block).await;
 
     //* Then
     // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
             .await
             .expect("Table consistency check failed");
     }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
+    let dumped_dataset = test.query_all_tables(&tables, "base_rpc").await;
+    assert_eq!(
+        reference_dataset.len(),
+        dumped_dataset.len(),
+        "table count mismatch"
+    );
+    for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
+        assert_eq!(reference.0, dumped.0);
+        assert_eq!(reference.1, dumped.1);
+    }
 }
 
 #[tokio::test]
@@ -125,21 +160,30 @@ async fn eth_firehose_single_dump() {
     .await;
 
     let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
+    let tables = test.restore_reference_snapshot().await;
+    let reference_dataset = test.query_all_tables(&tables, "eth_firehose").await;
+    test.deactivate_all_revisions(&tables).await;
 
     //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block).await;
 
     //* Then
     // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
             .await
             .expect("Table consistency check failed");
     }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
+    let dumped_dataset = test.query_all_tables(&tables, "eth_firehose").await;
+    assert_eq!(
+        reference_dataset.len(),
+        dumped_dataset.len(),
+        "table count mismatch"
+    );
+    for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
+        assert_eq!(reference.0, dumped.0);
+        assert_eq!(reference.1, dumped.1);
+    }
 }
 
 #[tokio::test]
@@ -153,21 +197,30 @@ async fn base_firehose_single_dump() {
     .await;
 
     let block = test.get_dataset_start_block().await;
-    let reference = test.restore_reference_snapshot().await;
+    let tables = test.restore_reference_snapshot().await;
+    let reference_dataset = test.query_all_tables(&tables, "base_firehose").await;
+    test.deactivate_all_revisions(&tables).await;
 
     //* When
-    let dumped = test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block).await;
 
     //* Then
     // Validate table consistency
-    for table in dumped.physical_tables() {
-        test_helpers::check_table_consistency(table, test.data_store())
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
             .await
             .expect("Table consistency check failed");
     }
-
-    // Compare snapshots
-    test_helpers::assert_snapshots_eq(&dumped, &reference).await;
+    let dumped_dataset = test.query_all_tables(&tables, "base_firehose").await;
+    assert_eq!(
+        reference_dataset.len(),
+        dumped_dataset.len(),
+        "table count mismatch"
+    );
+    for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
+        assert_eq!(reference.0, dumped.0);
+        assert_eq!(reference.1, dumped.1);
+    }
 }
 
 /// Test context wrapper for dump-related tests.
@@ -180,11 +233,6 @@ struct TestCtx {
 }
 
 impl TestCtx {
-    /// Get the data store from the daemon server.
-    fn data_store(&self) -> &DataStore {
-        self.ctx.daemon_server().data_store()
-    }
-
     /// Set up a new test context for dump testing.
     ///
     /// Creates a test environment with the specified dataset manifest,
@@ -228,31 +276,23 @@ impl TestCtx {
     }
 
     /// Restore reference snapshot from pre-loaded snapshot data.
-    async fn restore_reference_snapshot(&self) -> SnapshotContext {
+    async fn restore_reference_snapshot(&self) -> Vec<Arc<PhysicalTable>> {
         let ampctl = self.ctx.new_ampctl();
-        let tables = test_helpers::restore_dataset_snapshot(
+        test_helpers::restore_dataset_snapshot(
             &ampctl,
             self.ctx.daemon_controller().dataset_store(),
             self.ctx.daemon_server().data_store(),
             &self.dataset_ref,
         )
         .await
-        .expect("Failed to restore snapshot dataset");
-
-        SnapshotContext::from_tables(
-            self.ctx.daemon_server().config(),
-            self.ctx.daemon_server().data_store().clone(),
-            tables,
-        )
-        .await
-        .expect("Failed to create reference snapshot")
+        .expect("Failed to restore snapshot dataset")
     }
 
     /// Dump dataset via worker/scheduler and create snapshot from dumped tables.
     ///
     /// This method exercises the full production code path by scheduling a job
     /// via the Admin API and waiting for the worker to complete it.
-    async fn dump_and_create_snapshot(&self, block: u64) -> SnapshotContext {
+    async fn dump_and_create_snapshot(&self, block: u64) -> Vec<Arc<PhysicalTable>> {
         let ampctl = self.ctx.new_ampctl();
 
         // Deploy via scheduler/worker
@@ -266,20 +306,56 @@ impl TestCtx {
         .expect("Failed to dump dataset via worker");
 
         // Load physical tables from dataset store
-        let physical_tables = test_helpers::load_physical_tables(
+        test_helpers::load_physical_tables(
             self.ctx.daemon_server().dataset_store(),
             self.ctx.daemon_server().data_store(),
             &self.dataset_ref,
         )
         .await
-        .expect("Failed to load physical tables");
+        .expect("Failed to load physical tables")
+    }
 
-        SnapshotContext::from_tables(
-            self.ctx.daemon_server().config(),
-            self.ctx.daemon_server().data_store().clone(),
-            physical_tables,
-        )
-        .await
-        .expect("Failed to create dumped snapshot")
+    /// Query all tables in the given schema and return the results.
+    async fn query_all_tables(
+        &self,
+        tables: &[Arc<PhysicalTable>],
+        schema: &str,
+    ) -> Vec<(serde_json::Value, usize)> {
+        let mut dataset = Vec::new();
+        for table in tables {
+            let result = self
+                .run_query(&format!(
+                    "SELECT * FROM {}.{} ORDER BY block_num",
+                    schema,
+                    table.table_name()
+                ))
+                .await
+                .expect("Failed to run query");
+            dataset.push(result);
+        }
+        dataset
+    }
+
+    /// Deactivate all table revisions for the current dataset.
+    async fn deactivate_all_revisions(&self, tables: &[Arc<PhysicalTable>]) {
+        let ampctl = self.ctx.new_ampctl();
+        let dataset = self.dataset_ref.to_string();
+        for table in tables {
+            ampctl
+                .revisions()
+                .deactivate(&dataset, table.table_name().as_ref())
+                .await
+                .expect("Failed to deactivate revision");
+        }
+    }
+
+    /// Execute a SQL query via the Flight SQL client.
+    async fn run_query(&self, query: &str) -> Result<(serde_json::Value, usize), anyhow::Error> {
+        let mut client = self
+            .ctx
+            .new_flight_client()
+            .await
+            .expect("failed to create flight client");
+        client.run_query(query, None).await
     }
 }

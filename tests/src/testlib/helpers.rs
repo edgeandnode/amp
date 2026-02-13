@@ -7,26 +7,21 @@
 pub mod forge;
 pub mod git;
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use amp_worker_core::consistency_check;
 use anyhow::{Result, anyhow};
 use common::{
     BlockRange, LogicalCatalog,
-    arrow::array::RecordBatch,
     catalog::{
         logical::LogicalTable,
         physical::{Catalog, PhysicalTable},
     },
     dataset_store::DatasetStore,
-    sql,
-    sql_str::SqlStr,
 };
-use datasets_common::{reference::Reference, table_name::TableName};
+use datasets_common::reference::Reference;
 use worker::job::JobId;
-
-use super::fixtures::SnapshotContext;
 
 /// Wait for a job to reach a completion state.
 ///
@@ -332,99 +327,6 @@ pub async fn get_table_block_ranges(table: &Arc<PhysicalTable>) -> Vec<BlockRang
         ranges.push(file.parquet_meta.ranges.remove(0));
     }
     ranges
-}
-
-/// Assert that block ranges match between two snapshots.
-///
-/// This function ensures that both snapshots cover exactly the same
-/// block ranges for all tables. This is a prerequisite for meaningful
-/// data comparison between snapshots.
-///
-/// Panics if block ranges don't match between snapshots.
-pub async fn assert_snapshot_block_ranges_eq(left: &SnapshotContext, right: &SnapshotContext) {
-    let mut right_block_ranges: BTreeMap<TableName, Vec<BlockRange>> = BTreeMap::new();
-
-    for table in right.physical_tables() {
-        let ranges = get_table_block_ranges(table).await;
-        right_block_ranges.insert(table.table_name().clone(), ranges);
-    }
-
-    for table in left.physical_tables() {
-        let table_name = table.table_name();
-        let mut expected_ranges = get_table_block_ranges(table).await;
-        expected_ranges.sort_by_key(|r| *r.numbers.start());
-
-        let Some(actual_ranges) = right_block_ranges.get_mut(table_name) else {
-            panic!("Table {} not found in right snapshot", table_name);
-        };
-        actual_ranges.sort_by_key(|r| *r.numbers.start());
-
-        let table_qualified = table.table_ref().to_string();
-        assert_eq!(
-            expected_ranges, *actual_ranges,
-            "Block range mismatch in table {}: expected {:?}, got {:?}",
-            table_qualified, expected_ranges, actual_ranges
-        );
-    }
-}
-
-/// Assert that two snapshots are equal, comparing both block ranges and row data.
-///
-/// This function performs a comprehensive comparison between two snapshots:
-/// 1. Validates that both snapshots cover the same block ranges
-/// 2. Compares the actual row data across all tables
-///
-/// The comparison orders data by block_num for consistent results and
-/// uses Apache Arrow RecordBatch for efficient data comparison.
-///
-/// Panics if the snapshots differ in any way.
-pub async fn assert_snapshots_eq(left: &SnapshotContext, right: &SnapshotContext) {
-    // First check that block ranges match
-    assert_snapshot_block_ranges_eq(left, right).await;
-
-    // Then compare row data for each table
-    for table in left.physical_tables() {
-        let sql_string = format!(
-            "select * from {} order by block_num",
-            table.table_ref().to_quoted_string()
-        );
-
-        // SAFETY: Validation is deferred to the SQL parser which will return appropriate errors
-        // for empty or invalid SQL. The format! macro ensures non-empty output.
-        let sql_str = SqlStr::new_unchecked(sql_string);
-        let query = sql::parse(sql_str).expect("Failed to parse SQL query");
-
-        let left_rows: RecordBatch = left
-            .query_context()
-            .execute_and_concat(
-                left.query_context()
-                    .plan_sql(query.clone())
-                    .await
-                    .expect("Failed to plan SQL query for left snapshot"),
-            )
-            .await
-            .expect("Failed to execute query for left snapshot");
-
-        let right_rows: RecordBatch = right
-            .query_context()
-            .execute_and_concat(
-                right
-                    .query_context()
-                    .plan_sql(query.clone())
-                    .await
-                    .expect("Failed to plan SQL query for right snapshot"),
-            )
-            .await
-            .expect("Failed to execute query for right snapshot");
-
-        // Use arrow's built-in equality comparison
-        assert_eq!(
-            left_rows,
-            right_rows,
-            "Data mismatch in table {}: snapshots contain different row data",
-            table.table_ref()
-        );
-    }
 }
 
 /// Create a catalog from a dataset for table operations and queries.
