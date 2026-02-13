@@ -46,14 +46,6 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct ProviderConfig {
-    pub kind: FirehoseDatasetKind,
-    pub network: NetworkId,
-    pub url: String,
-    pub token: Option<String>,
-}
-
 pub struct Dataset {
     pub(crate) tables: Vec<DatasetTable>,
     pub(crate) start_block: Option<BlockNum>,

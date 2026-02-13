@@ -21,9 +21,12 @@ use alloy::{
     },
     transports::http::reqwest::Url,
 };
+use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
 use anyhow::Context;
 use async_stream::stream;
-use datasets_common::{block_num::BlockNum, block_range::BlockRange, network_id::NetworkId};
+use datasets_common::{
+    block_num::BlockNum, block_range::BlockRange, network_id::NetworkId as DatasetNetworkId,
+};
 use datasets_raw::{
     Timestamp,
     client::{
@@ -111,7 +114,7 @@ impl BatchingRpcWrapper {
 pub struct JsonRpcClient {
     client: RootProviderWithMetrics,
     network: NetworkId,
-    provider_name: String,
+    provider_name: ProviderName,
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
     fetch_receipts_per_tx: bool,
@@ -122,7 +125,7 @@ impl JsonRpcClient {
     pub fn new(
         url: Url,
         network: NetworkId,
-        provider_name: String,
+        provider_name: ProviderName,
         request_limit: u16,
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
@@ -132,7 +135,7 @@ impl JsonRpcClient {
         assert!(request_limit >= 1);
         let client = crate::provider::new(url, rate_limit);
         let client =
-            RootProviderWithMetrics::new(client, meter, provider_name.clone(), network.clone());
+            RootProviderWithMetrics::new(client, meter, provider_name.to_string(), network.clone());
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -148,7 +151,7 @@ impl JsonRpcClient {
     pub async fn new_ipc(
         path: std::path::PathBuf,
         network: NetworkId,
-        provider_name: String,
+        provider_name: ProviderName,
         request_limit: u16,
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
@@ -157,7 +160,7 @@ impl JsonRpcClient {
     ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
         let client = crate::provider::new_ipc(path, rate_limit).await.map(|c| {
-            RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
+            RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
         })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
@@ -174,7 +177,7 @@ impl JsonRpcClient {
     pub async fn new_ws(
         url: Url,
         network: NetworkId,
-        provider_name: String,
+        provider_name: ProviderName,
         request_limit: u16,
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
@@ -183,7 +186,7 @@ impl JsonRpcClient {
     ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
         let client = crate::provider::new_ws(url, rate_limit).await.map(|c| {
-            RootProviderWithMetrics::new(c, meter, provider_name.clone(), network.clone())
+            RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
         })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
@@ -641,9 +644,15 @@ fn rpc_to_rows(
         );
     }
 
+    // SAFETY: The NetworkId comes from validated provider configuration that was checked during
+    // provider lookup. The amp_providers_common::NetworkId type enforces the same non-empty
+    // invariant as DatasetNetworkId, so converting the validated string representation is guaranteed
+    // to produce a valid DatasetNetworkId without re-validation.
+    let dataset_network_id = DatasetNetworkId::new_unchecked(network.to_string());
+
     let block = BlockRange {
         numbers: header.block_num..=header.block_num,
-        network: network.clone(),
+        network: dataset_network_id,
         hash: header.hash.into(),
         prev_hash: header.parent_hash.into(),
         timestamp: Some(header.timestamp.0.as_secs()),

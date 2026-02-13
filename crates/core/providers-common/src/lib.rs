@@ -6,5 +6,3 @@ pub mod kind;
 pub mod network_id;
 pub mod provider_name;
 pub mod redacted;
-
-pub use provider_name::{InvalidProviderName, ProviderName};

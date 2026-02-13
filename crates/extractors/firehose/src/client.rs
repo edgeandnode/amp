@@ -3,8 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
+use amp_providers_firehose::config::FirehoseProviderConfig;
 use async_stream::stream;
-use datasets_common::{block_num::BlockNum, network_id::NetworkId};
+use datasets_common::block_num::BlockNum;
 use datasets_raw::{
     client::{
         BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
@@ -25,7 +27,6 @@ use tracing::instrument;
 
 use crate::{
     Error,
-    dataset::ProviderConfig,
     evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,
 };
@@ -36,26 +37,29 @@ pub struct Client {
     endpoint: Endpoint,
     auth: AuthInterceptor,
     network: NetworkId,
-    provider_name: String,
+    provider_name: ProviderName,
     metrics: Option<crate::metrics::MetricsRegistry>,
 }
 
 impl Client {
     /// Configure the client from a Firehose dataset definition.
     pub async fn new(
-        name: String,
-        config: ProviderConfig,
+        name: ProviderName,
+        config: FirehoseProviderConfig,
         meter: Option<&telemetry::metrics::Meter>,
     ) -> Result<Self, Error> {
         let metrics = meter.map(crate::metrics::MetricsRegistry::new);
 
+        let url = config.url.into_inner();
+        let token = config.token.map(|t| t.into_inner());
+
         let client = {
-            let uri = Uri::from_str(&config.url).map_err(Error::UriParse)?;
+            let uri = Uri::from_str(url.as_str()).map_err(Error::UriParse)?;
             let mut endpoint = Endpoint::from(uri);
             endpoint = endpoint
                 .tls_config(ClientTlsConfig::new().with_native_roots())
                 .map_err(Error::Connection)?;
-            let auth = AuthInterceptor::new(config.token)?;
+            let auth = AuthInterceptor::new(token)?;
             Client {
                 endpoint,
                 auth,

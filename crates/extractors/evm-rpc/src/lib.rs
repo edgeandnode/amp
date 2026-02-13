@@ -1,8 +1,8 @@
-use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf};
 
+use amp_providers_common::provider_name::ProviderName;
+use amp_providers_evm_rpc::config::EvmRpcProviderConfig;
 use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
-use serde_with::serde_as;
-use url::Url;
 
 mod client;
 mod dataset;
@@ -59,24 +59,6 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
-#[serde_as]
-#[derive(Debug, serde::Deserialize)]
-pub struct ProviderConfig {
-    pub kind: EvmRpcDatasetKind,
-    pub network: NetworkId,
-    #[serde_as(as = "serde_with::DisplayFromStr")]
-    pub url: Url,
-    pub concurrent_request_limit: Option<u16>,
-    /// Maximum number of json-rpc requests to batch together.
-    #[serde(default)]
-    pub rpc_batch_size: usize,
-    pub rate_limit_per_minute: Option<NonZeroU32>,
-    /// Whether to use `eth_getTransactionReceipt` to fetch receipts for each transaction
-    /// or `eth_getBlockReceipts` to fetch all receipts for a block in one call.
-    #[serde(default)]
-    pub fetch_receipts_per_tx: bool,
-}
-
 /// Convert an EVM RPC manifest into a logical dataset representation.
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
@@ -93,14 +75,16 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 }
 
 pub async fn client(
-    name: String,
-    config: ProviderConfig,
+    name: ProviderName,
+    config: EvmRpcProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<JsonRpcClient, ProviderError> {
+    let url = config.url.into_inner();
+
     let request_limit = u16::max(1, config.concurrent_request_limit.unwrap_or(1024));
-    let client = match config.url.scheme() {
+    let client = match url.scheme() {
         "ipc" => {
-            let path = config.url.path();
+            let path = url.path();
             JsonRpcClient::new_ipc(
                 PathBuf::from(path),
                 config.network,
@@ -115,7 +99,7 @@ pub async fn client(
         }
         "ws" | "wss" => {
             JsonRpcClient::new_ws(
-                config.url,
+                url,
                 config.network,
                 name,
                 request_limit,
@@ -127,7 +111,7 @@ pub async fn client(
             .await?
         }
         _ => JsonRpcClient::new(
-            config.url,
+            url,
             config.network,
             name,
             request_limit,

@@ -111,7 +111,7 @@ async fn anvil_rpc_reorg_with_depth_one_maintains_canonical_chain() {
         }
     );
     assert_eq!(ranges[1].numbers, 3..=3);
-    assert_eq!(&ranges[1].network, "anvil");
+    assert_eq!(ranges[1].network.as_str(), "anvil");
     assert_ne!(&ranges[1].prev_hash, &ranges[0].hash);
 }
 

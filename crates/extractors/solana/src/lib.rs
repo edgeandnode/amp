@@ -12,14 +12,13 @@
 //! resulting in gaps in the block number sequence. Chain integrity is maintained through hash-based
 //! validation where each block's parent_hash must match the previous block's hash.
 
-use std::{collections::BTreeMap, num::NonZeroU32, path::PathBuf};
+use std::collections::BTreeMap;
 
+use amp_providers_common::provider_name::ProviderName;
 use datasets_common::{
     block_num::BlockNum, hash_reference::HashReference, manifest::TableSchema,
     network_id::NetworkId,
 };
-use serde_with::serde_as;
-use url::Url;
 
 mod dataset;
 mod dataset_kind;
@@ -29,6 +28,8 @@ mod metrics;
 pub mod of1_client;
 pub mod rpc_client;
 pub mod tables;
+
+pub use amp_providers_solana::config::{SolanaProviderConfig, UseArchive};
 
 pub use self::{
     dataset::Dataset,
@@ -54,19 +55,6 @@ impl Table {
     }
 }
 
-/// Archive usage mode for historical data extraction.
-#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UseArchive {
-    /// Smart selection: use RPC for recent slots (last 10k), archive for historical data.
-    Auto,
-    /// Always use archive (CAR files), even for recent data.
-    #[default]
-    Always,
-    /// Never use archive, RPC-only mode.
-    Never,
-}
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
@@ -86,27 +74,12 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
-#[serde_as]
-#[derive(Debug, serde::Deserialize)]
-pub struct ProviderConfig {
-    pub kind: SolanaDatasetKind,
-    pub network: NetworkId,
-    #[serde_as(as = "serde_with::DisplayFromStr")]
-    pub rpc_provider_url: Url,
-    pub max_rpc_calls_per_second: Option<NonZeroU32>,
-    pub of1_car_directory: PathBuf,
-    #[serde(default)]
-    pub keep_of1_car_files: bool,
-    #[serde(default)]
-    pub use_archive: UseArchive,
-}
-
 /// Convert a Solana manifest into a logical dataset representation.
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
-    crate::dataset::Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
+    Dataset {
         reference,
         kind: manifest.kind,
         start_block: Some(manifest.start_block),
@@ -117,10 +90,12 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::
 
 /// Create a Solana extractor based on the provided configuration.
 pub fn extractor(
-    name: String,
-    config: ProviderConfig,
+    name: ProviderName,
+    config: SolanaProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, ExtractorError> {
+    let rpc_provider_url = config.rpc_provider_url.into_inner();
+
     if config.network != "mainnet" {
         let err = format!(
             "unsupported Solana network: {}. Only 'mainnet' is supported.",
@@ -129,9 +104,9 @@ pub fn extractor(
         return Err(ExtractorError(err));
     }
 
-    let client = match config.rpc_provider_url.scheme() {
+    let client = match rpc_provider_url.scheme() {
         "http" | "https" => SolanaExtractor::new(
-            config.rpc_provider_url,
+            rpc_provider_url,
             config.max_rpc_calls_per_second,
             config.network,
             name,

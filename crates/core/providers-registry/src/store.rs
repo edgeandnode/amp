@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use amp_providers_common::{ProviderName, config::ProviderConfigRaw};
+use amp_providers_common::{
+    config::ProviderConfigRaw,
+    provider_name::{InvalidProviderName, ProviderName},
+};
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use monitoring::logging;
 use object_store::ObjectStore;
@@ -346,7 +349,7 @@ enum LoadFileError {
     InvalidName {
         path: String,
         name: String,
-        source: amp_providers_common::InvalidProviderName,
+        source: InvalidProviderName,
     },
 }
 
