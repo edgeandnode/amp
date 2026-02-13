@@ -970,9 +970,19 @@ dependencies = [
  "fs-err",
  "metadata-db",
  "monitoring",
+ "schemars 1.2.1",
  "serde",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "amp-config-gen"
+version = "0.1.0"
+dependencies = [
+ "amp-config",
+ "schemars 1.2.1",
+ "serde_json",
 ]
 
 [[package]]
@@ -1141,6 +1151,7 @@ dependencies = [
  "monitoring",
  "object_store",
  "parking_lot",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2923,6 +2934,7 @@ dependencies = [
  "parking_lot",
  "rand 0.9.2",
  "regex",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "solana-datasets",
@@ -6983,6 +6995,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "schemars 1.2.1",
  "serde",
  "thiserror 2.0.18",
  "tracing",

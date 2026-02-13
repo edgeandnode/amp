@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConfigFile",
+  "description": "Raw configuration as deserialized from the TOML config file.\n\nFields use serde defaults and are resolved into a [`Config`](crate::Config) by [`load_config`](crate::load_config).",
+  "type": "object",
+  "properties": {
+    "admin_api_addr": {
+      "description": "Admin API server address (default: \"0.0.0.0:1610\")",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "data_dir": {
+      "description": "Where the extracted datasets are stored (default: `data`)",
+      "type": "string",
+      "default": "data"
+    },
+    "flight_addr": {
+      "description": "Arrow Flight RPC server address (default: \"0.0.0.0:1602\")",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "jsonl_addr": {
+      "description": "JSON Lines server address (default: \"0.0.0.0:1603\")",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "keep_alive_interval": {
+      "description": "Keep-alive interval for streaming server in seconds (default: 30; min: 30)",
+      "type": "integer",
+      "format": "uint64",
+      "default": 30,
+      "minimum": 0
+    },
+    "manifests_dir": {
+      "description": "Path to a directory containing dataset manifest files (default: `manifests`)",
+      "type": "string",
+      "default": "manifests"
+    },
+    "max_mem_mb": {
+      "description": "How much memory the server can use in MB. 0 means unlimited (default: 0)",
+      "type": "integer",
+      "format": "uint",
+      "default": 0,
+      "minimum": 0
+    },
+    "microbatch_max_interval": {
+      "description": "Max interval for derived dataset dump microbatches in blocks (default: 100000)",
+      "type": "integer",
+      "format": "uint64",
+      "default": 100000,
+      "minimum": 0
+    },
+    "opentelemetry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OpenTelemetryConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "poll_interval_secs": {
+      "description": "Polling interval for new blocks during dump in seconds (default: 1.0)",
+      "$ref": "#/$defs/ConfigDuration"
+    },
+    "providers_dir": {
+      "description": "Path to a providers directory. Each provider is configured as a separate toml file in this directory (default: `providers`)",
+      "type": "string",
+      "default": "providers"
+    },
+    "query_max_mem_mb": {
+      "description": "Per-query memory limit in MB. 0 means unlimited per-query (default: 0)",
+      "type": "integer",
+      "format": "uint",
+      "default": 0,
+      "minimum": 0
+    },
+    "server_microbatch_max_interval": {
+      "description": "Max interval for streaming server microbatches in blocks (default: 1000)",
+      "type": "integer",
+      "format": "uint64",
+      "default": 1000,
+      "minimum": 0
+    },
+    "spill_location": {
+      "description": "Paths for DataFusion temporary files for spill-to-disk (default: [])",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "worker_events": {
+      "$ref": "#/$defs/WorkerEventsConfig"
+    },
+    "writer": {
+      "$ref": "#/$defs/ParquetConfig"
+    }
+  },
+  "$defs": {
+    "CollectorConfig": {
+      "type": "object",
+      "properties": {
+        "active": {
+          "description": "Enable or disable the collector (default: false)",
+          "type": "boolean",
+          "default": false
+        },
+        "deletion_lock_duration": {
+          "description": "Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)",
+          "$ref": "#/$defs/ConfigDuration"
+        },
+        "min_interval": {
+          "description": "Interval in seconds to run the garbage collector (default: 30.0)",
+          "$ref": "#/$defs/ConfigDuration"
+        }
+      }
+    },
+    "CompactorConfig": {
+      "type": "object",
+      "properties": {
+        "active": {
+          "description": "Enable or disable the compactor (default: false)",
+          "type": "boolean",
+          "default": false
+        },
+        "bytes": {
+          "description": "Target bytes per file (default: 2147483648 = 2GB for target_size, 0 for eager limits)",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "cooldown_duration": {
+          "description": "Base cooldown duration in seconds (default: 1024.0)",
+          "$ref": "#/$defs/ConfigDuration"
+        },
+        "file_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "generation": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "metadata_concurrency": {
+          "description": "Max concurrent metadata operations (default: 2)",
+          "type": "integer",
+          "format": "uint",
+          "default": 2,
+          "minimum": 0
+        },
+        "min_interval": {
+          "description": "Interval in seconds to run the compactor (default: 1.0)",
+          "$ref": "#/$defs/ConfigDuration"
+        },
+        "overflow": {
+          "description": "Overflow multiplier: 1x target size (default: \"1\"), can use \"1.5\" for 1.5x, etc.",
+          "$ref": "#/$defs/Overflow"
+        },
+        "rows": {
+          "description": "Target rows per file, 0 means no limit (default: 0)",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "write_concurrency": {
+          "description": "Max concurrent compaction write operations (default: 2)",
+          "type": "integer",
+          "format": "uint",
+          "default": 2,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "file_count",
+        "generation",
+        "overflow",
+        "bytes",
+        "rows"
+      ]
+    },
+    "ConfigDuration": {
+      "description": "Duration in seconds (floating-point)",
+      "type": "number"
+    },
+    "KafkaEventsConfig": {
+      "description": "Kafka configuration for worker events.",
+      "type": "object",
+      "properties": {
+        "brokers": {
+          "description": "Kafka broker addresses (e.g., [\"kafka-1:9092\", \"kafka-2:9092\"])",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "partitions": {
+          "description": "Number of partitions for the Kafka topic (default: 16)\n\nThis should match the actual partition count of your Kafka topic.\nUsed for consistent partition key hashing.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 16,
+          "minimum": 0
+        },
+        "sasl_mechanism": {
+          "description": "SASL authentication mechanism (optional)\n\nSupported values: \"PLAIN\", \"SCRAM-SHA-256\", \"SCRAM-SHA-512\"\nIf not set, no SASL authentication is used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sasl_password": {
+          "description": "SASL password (required if sasl_mechanism is set)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sasl_username": {
+          "description": "SASL username (required if sasl_mechanism is set)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_enabled": {
+          "description": "Enable TLS encryption (default: false)\n\nWhen enabled, connections to Kafka brokers use TLS.",
+          "type": "boolean",
+          "default": false
+        },
+        "topic": {
+          "description": "Kafka topic name (default: \"amp.worker.events\")",
+          "type": "string",
+          "default": "amp.worker.events"
+        }
+      },
+      "required": [
+        "brokers"
+      ]
+    },
+    "OpenTelemetryConfig": {
+      "type": "object",
+      "properties": {
+        "metrics_export_interval_secs": {
+          "description": "The interval (in seconds) at which to export metrics to the OpenTelemetry collector.\n\nOnly used when `metrics_url` is provided. If not set, uses the default export interval.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "metrics_url": {
+          "description": "Remote OpenTelemetry metrics collector endpoint. Metrics are sent over binary HTTP.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace_ratio": {
+          "description": "The ratio of traces to sample (f64). Samples all traces by default (1.0).\n\nOnly used when `trace_url` is provided. Valid range: 0.0 to 1.0.",
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        },
+        "trace_url": {
+          "description": "Remote OpenTelemetry traces collector endpoint. Traces are sent over HTTP.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Overflow": {
+      "description": "Overflow multiplier as an integer, float, or fraction (e.g. 1, 1.5, \"3/2\")",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "ParquetConfig": {
+      "type": "object",
+      "properties": {
+        "bloom_filters": {
+          "description": "Enable bloom filters (default: false)",
+          "type": "boolean",
+          "default": false
+        },
+        "bytes": {
+          "description": "Target bytes per file (default: 2147483648 = 2GB for target_size, 0 for eager limits)",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "cache_size_mb": {
+          "description": "Parquet metadata cache size in MB (default: 1024)",
+          "type": "integer",
+          "format": "uint64",
+          "default": 1024,
+          "minimum": 0
+        },
+        "collector": {
+          "$ref": "#/$defs/CollectorConfig"
+        },
+        "compactor": {
+          "$ref": "#/$defs/CompactorConfig"
+        },
+        "compression": {
+          "description": "Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))",
+          "type": "string",
+          "default": "zstd(1)"
+        },
+        "file_count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "generation": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_row_group_mb": {
+          "description": "Max row group size in MB (default: 512)",
+          "type": "integer",
+          "format": "uint64",
+          "default": 512,
+          "minimum": 0
+        },
+        "overflow": {
+          "description": "Overflow multiplier: 1x target size (default: \"1\"), can use \"1.5\" for 1.5x, etc.",
+          "$ref": "#/$defs/Overflow"
+        },
+        "rows": {
+          "description": "Target rows per file, 0 means no limit (default: 0)",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "segment_flush_interval_secs": {
+          "description": "Max wall-clock time before closing a segment, in seconds (default: 600 = 10 min)",
+          "$ref": "#/$defs/ConfigDuration"
+        }
+      },
+      "required": [
+        "file_count",
+        "generation",
+        "overflow",
+        "bytes",
+        "rows"
+      ]
+    },
+    "WorkerEventsConfig": {
+      "description": "Configuration for worker event streaming.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable/disable event emission (default: false)",
+          "type": "boolean",
+          "default": false
+        },
+        "kafka": {
+          "description": "Kafka-specific configuration",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KafkaEventsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress_interval": {
+          "description": "Progress event emission interval (default: 10 seconds).\nProgress events are emitted at most once per this interval when there is new progress.",
+          "$ref": "#/$defs/ConfigDuration"
+        }
+      }
+    }
+  }
+}

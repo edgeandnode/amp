@@ -142,6 +142,7 @@ pub fn load(
 ///
 /// Fields use serde defaults and are resolved into a [`Config`](crate::Config) by [`load_config`](crate::load_config).
 #[derive(Debug, Clone, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ConfigFile {
     // Storage paths
     /// Where the extracted datasets are stored (default: `data`)
