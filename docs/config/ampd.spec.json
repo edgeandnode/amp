@@ -325,7 +325,8 @@
         },
         "compression": {
           "description": "Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))",
-          "type": "string"
+          "type": "string",
+          "default": "zstd(1)"
         },
         "file_count": {
           "type": "integer",

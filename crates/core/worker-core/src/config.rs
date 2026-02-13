@@ -56,7 +56,10 @@ pub struct ParquetConfig {
         default = "default_compression",
         deserialize_with = "deserialize_compression"
     )]
-    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(with = "String", default = "default_compression_str")
+    )]
     pub compression: Compression,
     /// Enable bloom filters (default: false)
     #[serde(default)]
@@ -292,6 +295,11 @@ impl<const DEFAULT_SECS: u64> schemars::JsonSchema for ConfigDuration<DEFAULT_SE
 
 fn default_compression() -> Compression {
     Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
+}
+
+#[cfg(feature = "schemars")]
+fn default_compression_str() -> String {
+    "zstd(1)".to_string()
 }
 
 fn default_cache_size_mb() -> u64 {

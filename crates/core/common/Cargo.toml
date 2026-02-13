@@ -4,10 +4,6 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
-[features]
-# JSON Schema generation support for configuration types
-schemars = ["dep:schemars"]
-
 [dependencies]
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
