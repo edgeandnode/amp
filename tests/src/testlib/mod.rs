@@ -67,7 +67,6 @@ pub mod fixtures {
     mod metadata_db;
     mod mock_event_emitter;
     mod package;
-    mod snapshot_ctx;
 
     // Re-export commonly used types for convenience
     pub use ampctl::*;
@@ -84,5 +83,4 @@ pub mod fixtures {
     pub use metadata_db::*;
     pub use mock_event_emitter::*;
     pub use package::*;
-    pub use snapshot_ctx::*;
 }
