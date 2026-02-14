@@ -59,6 +59,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/revisions/deactivate",
             post(revisions::deactivate::handler),
         )
+        .route("/revisions/create", post(revisions::create::handler))
         .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/jobs",
@@ -145,6 +146,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::activate::handler,
         handlers::revisions::deactivate::handler,
         handlers::revisions::get_by_id::handler,
+        handlers::revisions::create::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
         handlers::workers::get_by_id::handler,
@@ -189,6 +191,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::deactivate::DeactivationPayload,
         handlers::revisions::get_by_id::RevisionInfo,
         handlers::revisions::get_by_id::RevisionMetadataInfo,
+        handlers::revisions::create::CreatePayload,
+        handlers::revisions::create::CreateRevisionResponse,
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,

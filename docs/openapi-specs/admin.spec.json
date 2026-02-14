@@ -1550,6 +1550,58 @@
         }
       }
     },
+    "/revisions/create": {
+      "post": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `POST /revisions/create` endpoint",
+        "description": "Registers a new table revision from a given path.\n\n## Request Body\n- `dataset`: Dataset reference (namespace/name or with revision)\n- `table_name`: Name of the table to create a revision for\n- `path`: Physical table revision path in object storage\n\n## Response\n- **200 OK**: Successfully registered the table revision\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database error during registration\n\n## Error Codes\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `REGISTER_TABLE_REVISION_ERROR`: Failed to register the table revision\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n\nThis handler:\n1. Resolves the dataset reference to a manifest hash\n2. Registers the table revision path in the metadata database\n3. Returns the assigned location ID",
+        "operationId": "create_table_revision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully registered the table revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRevisionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/revisions/deactivate": {
       "post": {
         "tags": [
@@ -1882,6 +1934,43 @@
           "table_name": {
             "type": "string",
             "description": "Table name"
+          }
+        }
+      },
+      "CreatePayload": {
+        "type": "object",
+        "description": "Payload for creating a table revision",
+        "required": [
+          "table_name",
+          "dataset",
+          "path"
+        ],
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "description": "Dataset reference"
+          },
+          "path": {
+            "type": "string",
+            "description": "Revision path in object storage"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "Table name"
+          }
+        }
+      },
+      "CreateRevisionResponse": {
+        "type": "object",
+        "description": "Response for creating a table revision",
+        "required": [
+          "location_id"
+        ],
+        "properties": {
+          "location_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Location ID assigned to the new revision"
           }
         }
       },

@@ -134,28 +134,44 @@ pub async fn handler(
         let task = tokio::spawn(async move {
             let sql_table_ref_schema = dataset_ref.to_reference().to_string();
 
-            // Restore latest revision from object storage
-            let info = data_store
-                .restore_latest_table_revision(&dataset_ref, table_def.name())
+            let active_revision = data_store
+                .get_table_active_revision(&dataset_ref, table_def.name())
                 .await
                 .map_err(|err| {
                     tracing::error!(
+                        table = %table_name,
                         error = %err,
                         error_source = logging::error_source(&err),
-                        table = %table_name,
-                        "failed to restore table revision from storage"
+                        "failed to get active revision of table"
                     );
-                    Error::RestoreTableRevision {
-                        table: table_name.clone(),
-                        source: err,
-                    }
-                })?
-                .ok_or_else(|| Error::TableNotFound {
-                    table: table_name.clone(),
+                    Error::GetActiveRevision(err)
                 })?;
 
+            let revision = if let Some(active_revision) = active_revision {
+                active_revision
+            } else {
+                data_store
+                    .restore_latest_table_revision(&dataset_ref, table_def.name())
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(
+                            table = %table_name,
+                            error = %err,
+                            error_source = logging::error_source(&err),
+                            "failed to restore table revision from storage"
+                        );
+                        Error::RestoreTableRevision {
+                            table: table_name.clone(),
+                            source: err,
+                        }
+                    })?
+                    .ok_or_else(|| Error::TableNotFound {
+                        table: table_name.clone(),
+                    })?
+            };
+
             // Register all files in the revision
-            register_revision_files(&data_store, &info)
+            register_revision_files(&data_store, &revision)
                 .await
                 .map_err(|err| {
                     tracing::error!(
@@ -176,7 +192,7 @@ pub async fn handler(
                 dataset_ref.clone(),
                 start_block,
                 table_def.clone(),
-                info,
+                revision,
                 sql_table_ref_schema,
             );
 
@@ -287,6 +303,13 @@ pub enum Error {
     #[error("Failed to load dataset: {0}")]
     GetDataset(#[source] common::dataset_store::GetDatasetError),
 
+    /// Failed to get active revision of table
+    ///
+    /// This occurs when:
+    /// - Failed to get active revision of table from metadata database
+    #[error("Failed to get active revision of table: {0}")]
+    GetActiveRevision(#[source] amp_data_store::GetTableActiveRevisionError),
+
     /// Failed to restore table revision from storage
     ///
     /// This occurs when:
@@ -339,6 +362,7 @@ impl IntoErrorResponse for Error {
             Error::NotFound { .. } => "DATASET_NOT_FOUND",
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
+            Error::GetActiveRevision(_) => "GET_ACTIVE_REVISION_ERROR",
             Error::RestoreTableRevision { .. } => "RESTORE_TABLE_REVISION_ERROR",
             Error::RegisterFiles { .. } => "REGISTER_FILES_ERROR",
             Error::TableNotFound { .. } => "TABLE_NOT_FOUND",
@@ -352,6 +376,7 @@ impl IntoErrorResponse for Error {
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetActiveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::RestoreTableRevision { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::RegisterFiles { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TableNotFound { .. } => StatusCode::NOT_FOUND,
