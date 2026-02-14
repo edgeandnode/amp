@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use amp_data_store::DataStore;
 use datasets_common::reference::Reference;
-use monitoring::logging;
 
 use crate::testlib::{
     self, ctx::TestCtxBuilder, fixtures::SnapshotContext, helpers as test_helpers,
@@ -115,7 +114,6 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     test_helpers::assert_snapshots_eq(&dumped, &reference).await;
 }
 
-#[ignore = "Test is failing, see https://github.com/edgeandnode/amp/issues/1737"]
 #[tokio::test]
 async fn eth_firehose_single_dump() {
     //* Given
@@ -144,7 +142,6 @@ async fn eth_firehose_single_dump() {
     test_helpers::assert_snapshots_eq(&dumped, &reference).await;
 }
 
-#[ignore = "Test is failing, see https://github.com/edgeandnode/amp/issues/1737"]
 #[tokio::test]
 async fn base_firehose_single_dump() {
     //* Given
@@ -193,8 +190,6 @@ impl TestCtx {
     /// Creates a test environment with the specified dataset manifest,
     /// provider configuration, and snapshot data.
     async fn setup(test_name: &str, dataset: &str, provider: &str) -> Self {
-        logging::init();
-
         let dataset_ref: Reference = dataset.parse().expect("Failed to parse dataset reference");
 
         let ctx = TestCtxBuilder::new(test_name)
