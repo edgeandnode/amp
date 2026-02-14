@@ -60,6 +60,22 @@ where
     .map_err(Error::Database)
 }
 
+/// Get a physical table revision by its location ID
+///
+/// Returns `None` if no revision exists with the given location ID.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_by_location_id<'c, E>(
+    exe: E,
+    location_id: impl Into<LocationId> + std::fmt::Debug,
+) -> Result<Option<PhysicalTableRevision>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_by_location_id(exe, location_id.into())
+        .await
+        .map_err(Error::Database)
+}
+
 /// Get an active physical table location by its ID.
 ///
 /// # Errors

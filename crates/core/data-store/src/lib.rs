@@ -22,7 +22,7 @@ use foyer::Cache;
 // Re-export foyer::Cache for use by downstream crates
 pub use foyer::Cache as FoyerCache;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream::BoxStream};
-use metadata_db::{LocationId, MetadataDb, files::FileId};
+use metadata_db::{LocationId, MetadataDb, files::FileId, physical_table::PhysicalTableRevision};
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
 use url::Url;
 use uuid::Uuid;
@@ -244,6 +244,18 @@ impl DataStore {
             path,
             url,
         }))
+    }
+
+    /// Gets a physical table revision by its location ID from the metadata database.
+    ///
+    /// Returns the revision info if found, or `None` if no revision exists with the given ID.
+    pub async fn get_revision_by_location_id(
+        &self,
+        location_id: LocationId,
+    ) -> Result<Option<PhysicalTableRevision>, GetRevisionByLocationIdError> {
+        metadata_db::physical_table::get_by_location_id(&self.metadata_db, location_id)
+            .await
+            .map_err(GetRevisionByLocationIdError)
     }
 
     /// Gets the active revision of a table from the metadata database.
@@ -769,6 +781,13 @@ pub enum RegisterTableRevisionError {
     #[error("Failed to commit transaction")]
     TransactionCommit(#[source] metadata_db::Error),
 }
+
+/// Errors that occur when getting a revision by location ID
+///
+/// This error type is used by `DataStore::get_revision_by_location_id()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to get revision by location ID from metadata database")]
+pub struct GetRevisionByLocationIdError(#[source] metadata_db::Error);
 
 /// Failed to retrieve active physical table revision from metadata database
 ///

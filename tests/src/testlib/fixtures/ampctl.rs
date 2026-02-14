@@ -175,6 +175,14 @@ impl Ampctl {
         self.client.jobs()
     }
 
+    /// Get the revisions client for revision management.
+    ///
+    /// This provides access to the revisions API for activating, deactivating,
+    /// and retrieving table revisions.
+    pub fn revisions(&self) -> ampctl::client::revisions::RevisionsClient<'_> {
+        self.client.revisions()
+    }
+
     /// Deploy a dataset by scheduling a dump job.
     ///
     /// Takes a dataset reference string (namespace/name@version) and optional parameters,

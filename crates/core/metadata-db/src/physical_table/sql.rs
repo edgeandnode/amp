@@ -65,6 +65,34 @@ where
     Ok(id)
 }
 
+/// Get a physical table revision by its location ID
+///
+/// Returns `None` if no revision exists with the given location ID.
+pub async fn get_by_location_id<'c, E>(
+    exe: E,
+    id: LocationId,
+) -> Result<Option<PhysicalTableRevision>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        SELECT
+            ptr.id,
+            ptr.path,
+            EXISTS (
+                SELECT 1
+                FROM physical_tables
+                WHERE active_revision_id = ptr.id
+            ) AS active,
+            ptr.writer,
+            ptr.metadata
+        FROM physical_table_revisions ptr
+        WHERE ptr.id = $1;
+    "};
+
+    sqlx::query_as(query).bind(id).fetch_optional(exe).await
+}
+
 /// Get a physical table revision by location ID with active status
 ///
 /// - Returns `None` if the location ID does not exist
@@ -267,8 +295,14 @@ where
 {
     let query = indoc::indoc! {"
         UPDATE physical_tables
-        SET active_revision_id = NULL, updated_at = now()
-        WHERE dataset_namespace = $1 AND dataset_name = $2 AND manifest_hash = $3 AND table_name = $4
+        SET
+            active_revision_id = NULL,
+            updated_at = now()
+        WHERE
+            dataset_namespace = $1
+            AND dataset_name = $2
+            AND manifest_hash = $3
+            AND table_name = $4;
     "};
 
     let result = sqlx::query(query)
@@ -295,8 +329,12 @@ where
 {
     let query = indoc::indoc! {"
         UPDATE physical_tables
-        SET active_revision_id = $1, updated_at = now()
-        WHERE dataset_namespace = $2 AND dataset_name = $3 AND manifest_hash = $4 AND table_name = $5
+        SET active_revision_id = $1,
+            updated_at = now()
+        WHERE dataset_namespace = $2
+        AND dataset_name      = $3
+        AND manifest_hash     = $4
+        AND table_name        = $5;
     "};
 
     let result = sqlx::query(query)
