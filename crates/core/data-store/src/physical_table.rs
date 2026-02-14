@@ -1,10 +1,7 @@
-use datasets_common::{name::Name, table_name::TableName};
+use datasets_common::{name::Name, namespace::Namespace, table_name::TableName};
 use object_store::path::Path;
 use url::Url;
 use uuid::Uuid;
-
-/// Path delimiter used in object store paths.
-const PATH_DELIMITER: char = '/';
 
 /// Physical table URL _new-type_ wrapper
 ///
@@ -13,19 +10,20 @@ const PATH_DELIMITER: char = '/';
 ///
 /// ## URL Format
 ///
-/// `<store_base_url>/<dataset_name>/<table_name>/<revision_id>/`
+/// `<store_base_url>/<namespace>/<dataset_name>/<table_name>/<revision_id>/`
 ///
 /// Where:
 /// - `store_base_url`: Object store base URL, may include path prefix after bucket
 ///   (e.g., `s3://bucket/prefix`, `file:///data/subdir`)
-/// - `dataset_name`: Dataset name (without namespace)
+/// - `namespace`: Dataset namespace
+/// - `dataset_name`: Dataset name
 /// - `table_name`: Table name
 /// - `revision_id`: Unique identifier for this table revision (typically UUIDv7)
 ///
 /// ## Example
 ///
 /// ```text
-/// s3://my-bucket/prefix/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
+/// s3://my-bucket/prefix/edgeandnode/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PhyTableUrl(Url);
@@ -37,7 +35,7 @@ impl PhyTableUrl {
     ///
     /// Where:
     /// - `base_url`: Object store root URL (e.g., `s3://bucket/prefix/`, `file:///data/`)
-    /// - `revision_path`: Complete path to the table revision (dataset_name/table_name/revision_uuid)
+    /// - `revision_path`: Complete path to the table revision (namespace/dataset_name/table_name/revision_uuid)
     pub fn new(base_url: &Url, revision_path: &PhyTableRevisionPath) -> Self {
         // SAFETY: Path components (Name, TableName, Uuid) contain only URL-safe characters
         let raw_url = base_url
@@ -78,7 +76,10 @@ impl std::fmt::Display for PhyTableUrl {
 /// Path to a table directory in object storage (without revision).
 ///
 /// Represents the parent directory containing all revisions of a table.
-/// Format: `<dataset_name>/<table_name>`
+/// Format: `<namespace>/<dataset_name>/<table_name>`
+///
+/// For backward compatibility with revisions stored before the namespace prefix was added,
+/// use [`PhyTablePath::from_legacy`] which produces the legacy format: `<dataset_name>/<table_name>`.
 ///
 /// **NOTE**: The underlying [`object_store::Path`] type automatically strips leading and
 /// trailing slashes, so the string representation will not contain a trailing slash.
@@ -86,14 +87,38 @@ impl std::fmt::Display for PhyTableUrl {
 /// ## Example
 ///
 /// ```text
-/// ethereum_mainnet/logs
+/// edgeandnode/ethereum_mainnet/logs
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhyTablePath(Path);
 
 impl PhyTablePath {
-    /// Constructs the path to a table directory (without revision).
-    pub fn new(dataset_name: impl AsRef<Name>, table_name: impl AsRef<TableName>) -> Self {
+    /// Constructs the path to a table directory including namespace.
+    ///
+    /// Format: `<namespace>/<dataset_name>/<table_name>`
+    pub fn new(
+        namespace: impl AsRef<Namespace>,
+        dataset_name: impl AsRef<Name>,
+        table_name: impl AsRef<TableName>,
+    ) -> Self {
+        Self(
+            format!(
+                "{}/{}/{}",
+                namespace.as_ref(),
+                dataset_name.as_ref(),
+                table_name.as_ref()
+            )
+            .into(),
+        )
+    }
+
+    /// Constructs the legacy path to a table directory (without namespace).
+    ///
+    /// Format: `<dataset_name>/<table_name>`
+    ///
+    /// This is kept for backward compatibility with revisions stored before
+    /// the namespace prefix was added to the storage layout.
+    pub fn from_legacy(dataset_name: impl AsRef<Name>, table_name: impl AsRef<TableName>) -> Self {
         Self(format!("{}/{}", dataset_name.as_ref(), table_name.as_ref()).into())
     }
 
@@ -131,7 +156,7 @@ impl std::ops::Deref for PhyTablePath {
 /// Path to a table revision directory in object storage.
 ///
 /// Represents a specific revision of a table, identified by a UUID.
-/// Format: `<dataset_name>/<table_name>/<revision_uuid>`
+/// Format: `<namespace>/<dataset_name>/<table_name>/<revision_uuid>`
 ///
 /// **NOTE**: The underlying [`object_store::Path`] type automatically strips leading and
 /// trailing slashes, so the string representation will not contain a trailing slash.
@@ -139,7 +164,7 @@ impl std::ops::Deref for PhyTablePath {
 /// ## Example
 ///
 /// ```text
-/// ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef
+/// edgeandnode/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhyTableRevisionPath(Path);
@@ -147,19 +172,30 @@ pub struct PhyTableRevisionPath(Path);
 impl PhyTableRevisionPath {
     /// Constructs the path to a table revision directory.
     pub fn new(
+        namespace: impl AsRef<Namespace>,
         dataset_name: impl AsRef<Name>,
         table_name: impl AsRef<TableName>,
         revision_id: impl AsRef<Uuid>,
     ) -> Self {
         Self(
             format!(
-                "{}/{}/{}",
+                "{}/{}/{}/{}",
+                namespace.as_ref(),
                 dataset_name.as_ref(),
                 table_name.as_ref(),
                 revision_id.as_ref()
             )
             .into(),
         )
+    }
+
+    /// Constructs a `PhyTableRevisionPath` from a pre-validated object store path.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the path represents a valid revision path structure.
+    fn new_unchecked(path: object_store::path::Path) -> Self {
+        Self(path)
     }
 
     /// Get a reference to the underlying [`Path`]
@@ -174,33 +210,17 @@ impl PhyTableRevisionPath {
 }
 
 impl std::str::FromStr for PhyTableRevisionPath {
-    type Err = PhyTableRevisionPathError;
+    type Err = PhyTableRevisionPathParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.trim_end_matches(PATH_DELIMITER).split(PATH_DELIMITER);
+        if s.is_empty() {
+            return Err(PhyTableRevisionPathParseError::Empty);
+        }
+        let path =
+            object_store::path::Path::parse(s).map_err(PhyTableRevisionPathParseError::Invalid)?;
 
-        let revision_uuid: Uuid = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(0))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidRevisionUuid)?;
-
-        let table_name: TableName = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(1))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidTableName)?;
-
-        let dataset_name: Name = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(2))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidDatasetName)?;
-
-        Ok(Self::new(dataset_name, table_name, revision_uuid))
+        // SAFETY: Path has been validated by object_store::Path::parse above
+        Ok(Self::new_unchecked(path))
     }
 }
 
@@ -218,20 +238,37 @@ impl std::ops::Deref for PhyTableRevisionPath {
     }
 }
 
+impl<'de> serde::Deserialize<'de> for PhyTableRevisionPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// Error when parsing a path into a [`PhyTableRevisionPath`]
 #[derive(Debug, thiserror::Error)]
-pub enum PhyTableRevisionPathError {
-    #[error("path must have at least 3 components, got {0}")]
-    NotEnoughComponents(usize),
+pub enum PhyTableRevisionPathParseError {
+    /// The provided path string is empty
+    ///
+    /// A physical table revision path must contain at least the path components
+    /// `namespace/dataset/table/revision_id`. An empty string cannot represent
+    /// a valid revision path.
+    #[error("physical table revision path cannot be empty")]
+    Empty,
 
-    #[error("invalid dataset name")]
-    InvalidDatasetName(#[source] datasets_common::name::NameError),
-
-    #[error("invalid table name")]
-    InvalidTableName(#[source] datasets_common::table_name::TableNameError),
-
-    #[error("invalid revision UUID")]
-    InvalidRevisionUuid(#[source] uuid::Error),
+    /// The path contains invalid characters or malformed segments
+    ///
+    /// This error occurs when the path string fails object store path validation.
+    ///
+    /// Common causes:
+    /// - Empty segments (consecutive slashes like `foo//bar`)
+    /// - Invalid characters in path segments
+    /// - Malformed path encoding
+    #[error("invalid physical table revision path: {0}")]
+    Invalid(#[source] object_store::path::Error),
 }
 
 /// Error type for PhyTableUrl parsing

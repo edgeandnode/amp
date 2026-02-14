@@ -30,6 +30,13 @@ fn revision_deactivate() -> &'static str {
     "revisions/deactivate"
 }
 
+/// Build URL path for creating a table revision.
+///
+/// POST `/revisions/create`
+fn revision_create() -> &'static str {
+    "revisions/create"
+}
+
 /// Client for revision-related API operations.
 ///
 /// Created via [`Client::revisions`](crate::Client::revisions).
@@ -353,6 +360,111 @@ impl<'a> RevisionsClient<'a> {
             }
         }
     }
+
+    /// Create a table revision from a given path.
+    ///
+    /// POSTs to `/revisions/create` endpoint.
+    ///
+    /// Resolves the dataset reference, registers the table revision path in the
+    /// metadata database, and returns the assigned location ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CreateError`] for network errors, API errors (404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(dataset = %dataset, table_name = %table_name, path = %path))]
+    pub async fn create(
+        &self,
+        dataset: &str,
+        table_name: &str,
+        path: &str,
+    ) -> Result<CreateResponse, CreateError> {
+        let url = self
+            .client
+            .base_url()
+            .join(revision_create())
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "Sending POST request to create table revision");
+
+        let payload = CreatePayload {
+            table_name: table_name.to_owned(),
+            dataset: dataset.to_owned(),
+            path: path.to_owned(),
+        };
+
+        let response = self
+            .client
+            .http()
+            .post(url.as_str())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|err| CreateError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let info =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| CreateError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("Failed to parse response: {err}"),
+                        })?;
+                tracing::debug!("Table revision created successfully");
+                Ok(info)
+            }
+            404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    CreateError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse =
+                    serde_json::from_str(&text).map_err(|err| {
+                        tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                        CreateError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: text.clone(),
+                        }
+                    })?;
+
+                match error_response.error_code.as_str() {
+                    "DATASET_NOT_FOUND" => Err(CreateError::DatasetNotFound(error_response.into())),
+                    "RESOLVE_REVISION_ERROR" => {
+                        Err(CreateError::ResolveRevision(error_response.into()))
+                    }
+                    "REGISTER_TABLE_REVISION_ERROR" => {
+                        Err(CreateError::RegisterTableRevision(error_response.into()))
+                    }
+                    _ => Err(CreateError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(CreateError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Request payload for activating a table revision.
@@ -367,6 +479,21 @@ struct ActivationPayload {
 struct DeactivationPayload {
     table_name: String,
     dataset: String,
+}
+
+/// Request payload for creating a table revision.
+#[derive(Debug, serde::Serialize)]
+struct CreatePayload {
+    table_name: String,
+    dataset: String,
+    path: String,
+}
+
+/// Response from creating a table revision.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CreateResponse {
+    /// Location ID assigned to the new revision.
+    pub location_id: i64,
 }
 
 /// Errors that can occur when activating a table revision.
@@ -490,6 +617,36 @@ pub enum GetByIdError {
     /// The database query to get the revision failed.
     #[error("failed to get revision")]
     GetRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when creating a table revision.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateError {
+    /// Dataset or revision not found (404, DATASET_NOT_FOUND)
+    ///
+    /// The specified dataset or revision does not exist.
+    #[error("dataset not found")]
+    DatasetNotFound(#[source] ApiError),
+
+    /// Failed to resolve revision (500, RESOLVE_REVISION_ERROR)
+    ///
+    /// Failed to resolve the dataset reference to a manifest hash.
+    #[error("failed to resolve revision")]
+    ResolveRevision(#[source] ApiError),
+
+    /// Failed to register table revision (500, REGISTER_TABLE_REVISION_ERROR)
+    ///
+    /// The database operation to register the table revision failed.
+    #[error("failed to register table revision")]
+    RegisterTableRevision(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

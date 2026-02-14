@@ -1,4 +1,6 @@
-use ampctl::client::revisions::{ActivateError, DeactivateError, GetByIdError, RevisionInfo};
+use ampctl::client::revisions::{
+    ActivateError, CreateError, CreateResponse, DeactivateError, GetByIdError, RevisionInfo,
+};
 use datasets_common::reference::Reference;
 use monitoring::logging;
 
@@ -270,6 +272,65 @@ async fn get_revision_with_invalid_id_returns_400() {
     }
 }
 
+#[tokio::test]
+async fn create_revision_for_non_registered_dataset_fails() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_minimal("create_revision_for_non_registered_dataset_fails").await;
+
+    //* When
+    let resp = ctx
+        .create_revision("_/nonexistent@0.0.0", "blocks", "some/path")
+        .await;
+
+    //* Then
+    assert!(
+        resp.is_err(),
+        "create revision for non-registered dataset should fail"
+    );
+    let err = resp.unwrap_err();
+    match err {
+        CreateError::DatasetNotFound(api_err) => {
+            assert_eq!(
+                api_err.error_code, "DATASET_NOT_FOUND",
+                "Expected DATASET_NOT_FOUND error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected DatasetNotFound error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn create_revision_from_custom_path_and_query() {
+    logging::init();
+
+    //* Given
+    let ctx =
+        TestCtx::setup_with_custom_snapshot("create_revision_from_custom_path_and_query").await;
+
+    // Create revisions for each table pointing to eth_rpc_custom paths
+    for table_name in ["blocks", "logs", "transactions"] {
+        let path = format!("eth_rpc_custom/{}", table_name);
+        ctx.create_revision("_/eth_rpc@0.0.0", table_name, &path)
+            .await
+            .expect("failed to create revision");
+    }
+
+    //* When
+    let restored_tables = ctx.restore_dataset().await;
+
+    //* Then
+    assert_eq!(restored_tables.len(), 3, "should restore all 3 tables");
+
+    let (_result, row_count) = ctx
+        .run_query("SELECT block_num FROM eth_rpc.blocks LIMIT 1")
+        .await
+        .expect("query should succeed after restore");
+    assert!(row_count > 0, "should have at least one row");
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: Ampctl,
@@ -280,6 +341,38 @@ impl TestCtx {
         let ctx = TestCtxBuilder::new(test_name)
             .with_dataset_manifests(["eth_rpc"])
             .with_dataset_snapshots(["eth_rpc"])
+            .build()
+            .await
+            .expect("failed to build test context");
+
+        let ampctl = ctx.new_ampctl();
+
+        Self {
+            ctx,
+            ampctl_client: ampctl,
+        }
+    }
+
+    /// Setup with no manifests or snapshots — bare test environment.
+    async fn setup_minimal(test_name: &str) -> Self {
+        let ctx = TestCtxBuilder::new(test_name)
+            .build()
+            .await
+            .expect("failed to build test context");
+
+        let ampctl = ctx.new_ampctl();
+
+        Self {
+            ctx,
+            ampctl_client: ampctl,
+        }
+    }
+
+    /// Setup with eth_rpc manifest and eth_rpc_custom snapshot data.
+    async fn setup_with_custom_snapshot(test_name: &str) -> Self {
+        let ctx = TestCtxBuilder::new(test_name)
+            .with_dataset_manifests(["eth_rpc"])
+            .with_dataset_snapshots(["eth_rpc_custom"])
             .build()
             .await
             .expect("failed to build test context");
@@ -351,6 +444,19 @@ impl TestCtx {
     /// Fetches a revision by its location ID, returning `None` if not found.
     async fn get_revision(&self, location_id: i64) -> Result<Option<RevisionInfo>, GetByIdError> {
         self.ampctl_client.revisions().get_by_id(location_id).await
+    }
+
+    /// Creates a table revision from a custom path.
+    async fn create_revision(
+        &self,
+        dataset: &str,
+        table_name: &str,
+        path: &str,
+    ) -> Result<CreateResponse, CreateError> {
+        self.ampctl_client
+            .revisions()
+            .create(dataset, table_name, path)
+            .await
     }
 
     /// Executes a SQL query via the Flight client and returns the result with row count.
