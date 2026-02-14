@@ -1550,6 +1550,62 @@
         }
       }
     },
+    "/revisions": {
+      "get": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `GET /revisions` endpoint",
+        "description": "Returns all physical table revisions, with an optional active status filter.\n\n## Query Parameters\n- `active` (optional): Filter by active status (`true` or `false`)\n\n## Response\n- **200 OK**: Successfully retrieved revisions\n- **400 Bad Request**: Invalid query parameters\n- **500 Internal Server Error**: Database error during listing\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters\n- `METADATA_DB_ERROR`: Internal database error occurred\n\n## Behavior\nThis endpoint lists all physical table revisions. When the `active` query\nparameter is provided, only revisions matching that active status are returned.",
+        "operationId": "list_revisions",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "description": "Filter by active status",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved revisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RevisionInfo"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/revisions/deactivate": {
       "post": {
         "tags": [

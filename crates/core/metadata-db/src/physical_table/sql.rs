@@ -282,6 +282,38 @@ where
         .await
 }
 
+/// List table revisions for a dataset and table
+pub async fn list_table_revisions<'c, E>(
+    exe: E,
+    manifest_hash: ManifestHash<'_>,
+    table_name: Name<'_>,
+) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        SELECT
+            ptr.id,
+            EXISTS (
+                SELECT 1
+                FROM physical_tables pt
+                WHERE pt.active_revision_id = ptr.id
+            ) AS active,
+            ptr.path,
+            ptr.writer,
+            ptr.metadata
+        FROM physical_table_revisions ptr
+        WHERE ptr.metadata->>'manifest_hash' = $1
+        AND ptr.metadata->>'table_name' = $2;
+    "};
+
+    sqlx::query_as(query)
+        .bind(manifest_hash)
+        .bind(table_name)
+        .fetch_all(exe)
+        .await
+}
+
 /// Deactivate all revisions for a specific table (set active_revision_id to NULL)
 pub async fn mark_inactive_by_table_name<'c, E>(
     exe: E,
@@ -446,6 +478,45 @@ where
         .bind(last_id)
         .fetch_all(exe)
         .await
+}
+
+/// List all physical table revisions with an optional active status filter
+///
+/// Returns all revisions ordered by ID in descending order (newest first).
+/// When `active` is `None`, all revisions are returned. When `Some(true)` or
+/// `Some(false)`, only revisions matching that active status are returned.
+pub async fn list_all<'c, E>(
+    exe: E,
+    active: Option<bool>,
+) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            ptr.id,
+            ptr.path,
+            EXISTS (
+                SELECT 1
+                FROM physical_tables
+                WHERE active_revision_id = ptr.id
+            ) AS active,
+            ptr.writer,
+            ptr.metadata
+        FROM physical_table_revisions AS ptr
+        WHERE (
+            $1::boolean IS NULL
+            OR EXISTS (
+                SELECT 1
+                FROM physical_tables
+                WHERE active_revision_id = ptr.id
+            ) = $1
+        )
+        ORDER BY
+            ptr.id DESC;
+    "#};
+
+    sqlx::query_as(query).bind(active).fetch_all(exe).await
 }
 
 /// Query active tables and their writer info for a dataset

@@ -23,6 +23,16 @@ fn revision_get_by_id(id: i64) -> String {
     format!("revisions/{id}")
 }
 
+/// Build URL path for listing all revisions.
+///
+/// GET `/revisions` with optional `?active=true|false` query parameter
+fn revisions_list(active: Option<bool>) -> String {
+    match active {
+        Some(v) => format!("revisions?active={v}"),
+        None => "revisions".to_owned(),
+    }
+}
+
 /// Build URL path for deactivating table revisions.
 ///
 /// POST `/revisions/deactivate`
@@ -353,6 +363,92 @@ impl<'a> RevisionsClient<'a> {
             }
         }
     }
+
+    /// List all revisions, optionally filtered by active status.
+    ///
+    /// Sends GET to `/revisions` endpoint with optional `?active=true|false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ListError`] for network errors, API errors (400/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self))]
+    pub async fn list(&self, active: Option<bool>) -> Result<Vec<RevisionInfo>, ListError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&revisions_list(active))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "Sending GET request to list revisions");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|err| ListError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let revisions =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| ListError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("Failed to parse response: {err}"),
+                        })?;
+                Ok(revisions)
+            }
+            400 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    ListError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse =
+                    serde_json::from_str(&text).map_err(|err| {
+                        tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                        ListError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: text.clone(),
+                        }
+                    })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_QUERY_PARAMETERS" => {
+                        Err(ListError::InvalidQueryParams(error_response.into()))
+                    }
+                    "METADATA_DB_ERROR" => Err(ListError::MetadataDbError(error_response.into())),
+                    _ => Err(ListError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(ListError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Request payload for activating a table revision.
@@ -466,6 +562,30 @@ pub enum DeactivateError {
     /// Failed to resolve the dataset reference to a manifest hash.
     #[error("failed to resolve revision")]
     ResolveRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when listing revisions.
+#[derive(Debug, thiserror::Error)]
+pub enum ListError {
+    /// Invalid query parameters (400, INVALID_QUERY_PARAMETERS)
+    ///
+    /// The query string could not be parsed.
+    #[error("invalid query parameters")]
+    InvalidQueryParams(#[source] ApiError),
+
+    /// Metadata database error (500, METADATA_DB_ERROR)
+    ///
+    /// The database query to list revisions failed.
+    #[error("metadata db error")]
+    MetadataDbError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
