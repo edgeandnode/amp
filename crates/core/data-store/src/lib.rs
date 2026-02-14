@@ -258,6 +258,23 @@ impl DataStore {
             .map_err(GetRevisionByLocationIdError)
     }
 
+    /// Lists all physical table revisions for a table from the metadata database.
+    ///
+    /// Returns all revisions (both active and inactive) for the specified table.
+    pub async fn list_table_revisions(
+        &self,
+        dataset_ref: &HashReference,
+        table_name: &TableName,
+    ) -> Result<Vec<PhysicalTableRevision>, ListTableRevisionsError> {
+        metadata_db::physical_table::list_table_revisions(
+            &self.metadata_db,
+            dataset_ref.hash(),
+            table_name,
+        )
+        .await
+        .map_err(ListTableRevisionsError)
+    }
+
     /// Gets the active revision of a table from the metadata database.
     ///
     /// Returns the active revision info if one exists, or None if not found.
@@ -968,6 +985,13 @@ pub enum RestoreLatestTableRevisionError {
     #[error("Failed to register revision in metadata database")]
     RegisterRevision(#[source] RegisterTableRevisionError),
 }
+
+/// Errors that occur when listing table revisions
+///
+/// This error type is used by `DataStore::list_table_revisions()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list table revisions")]
+pub struct ListTableRevisionsError(#[source] pub metadata_db::Error);
 
 /// Errors that occur when truncating a physical table
 ///

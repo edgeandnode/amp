@@ -277,6 +277,38 @@ where
     .map_err(Error::Database)
 }
 
+/// List table revisions for a dataset and table
+///
+/// This function returns a list of all revisions for the given dataset and table.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_table_revisions<'c, E>(
+    exe: E,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+) -> Result<Vec<PhysicalTableRevision>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_table_revisions(exe, manifest_hash.into(), table_name.into())
+        .await
+        .map_err(Error::Database)
+}
+
+/// List all physical table revisions with an optional active status filter
+///
+/// When `active` is `None`, returns all revisions. When `Some(true)` or `Some(false)`,
+/// returns only revisions matching that active status.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_all<'c, E>(
+    exe: E,
+    active: Option<bool>,
+) -> Result<Vec<PhysicalTableRevision>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_all(exe, active).await.map_err(Error::Database)
+}
+
 /// Listen for location change notifications
 ///
 /// Creates a new PostgreSQL LISTEN connection to receive notifications when
