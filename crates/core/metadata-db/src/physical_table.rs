@@ -277,6 +277,24 @@ where
     .map_err(Error::Database)
 }
 
+/// List all physical table revisions with an optional active status filter
+///
+/// When `active` is `None`, returns all revisions. When `Some(true)` or `Some(false)`,
+/// returns only revisions matching that active status.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_all<'c, E>(
+    exe: E,
+    active: Option<bool>,
+    limit: i64,
+) -> Result<Vec<PhysicalTableRevision>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_all(exe, active, limit)
+        .await
+        .map_err(Error::Database)
+}
+
 /// Listen for location change notifications
 ///
 /// Creates a new PostgreSQL LISTEN connection to receive notifications when

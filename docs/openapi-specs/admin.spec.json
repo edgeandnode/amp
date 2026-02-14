@@ -1550,6 +1550,72 @@
         }
       }
     },
+    "/revisions": {
+      "get": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `GET /revisions` endpoint",
+        "description": "Returns all physical table revisions, with an optional active status filter.\n\n## Query Parameters\n- `active` (optional): Filter by active status (`true` or `false`)\n- `limit` (optional): Maximum number of revisions to return (default: 100)\n\n## Response\n- **200 OK**: Successfully retrieved revisions\n- **400 Bad Request**: Invalid query parameters\n- **500 Internal Server Error**: Database error during listing\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters\n- `LIST_ALL_TABLE_REVISIONS_ERROR`: Failed to list table revisions\n\nThis handler:\n- Validates and extracts optional `active` and `limit` query parameters\n- Calls the data store to list table revisions with the given filters\n- Returns revision information as a JSON array",
+        "operationId": "list_revisions",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "description": "Filter by active status",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of revisions to return (default: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved revisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RevisionInfo"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/revisions/deactivate": {
       "post": {
         "tags": [
