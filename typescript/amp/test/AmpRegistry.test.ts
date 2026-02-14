@@ -6,17 +6,17 @@ import { afterEach, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 
 import * as AmpRegistry from "@edgeandnode/amp/AmpRegistry"
-import * as Auth from "@edgeandnode/amp/Auth"
 import type * as ManifestContext from "@edgeandnode/amp/ManifestContext"
 import * as Model from "@edgeandnode/amp/Model"
 
 // Test Fixtures
 
-const mockAuthStorage = Auth.AuthStorageSchema.make({
-  accessToken: Model.AccessToken.make("test-access-token"),
-  refreshToken: Model.RefreshToken.make("test-refresh-token"),
+const mockAuthStorage = Model.CachedAuthInfo.make({
+  accessToken: Redacted.make(Model.AccessToken.make("test-access-token")),
+  refreshToken: Redacted.make(Model.RefreshToken.make("test-refresh-token")),
   userId: "cmfoby1bt005el70b0fjd3glv",
   accounts: ["cmfoby1bt005el70b0fjd3glv", "0x04913E13A937cf63Fad3786FEE42b3d44dA558aA"],
   expiry: Date.now() + 3600000,

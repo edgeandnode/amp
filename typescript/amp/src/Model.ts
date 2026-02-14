@@ -5,13 +5,29 @@ import { isAddress } from "viem"
 
 export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => isAddress(val)))
 
+export const AuthenticatedUserId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
+).annotations({ identifier: "AuthenticatedUserId" })
+export type AuthenticatedUserId = typeof AuthenticatedUserId.Type
+
 export const AccessToken = Schema.NonEmptyTrimmedString.pipe(
   Schema.brand("AccessToken"),
-)
+).annotations({ identifier: "AccessToken" })
+export type AccessToken = typeof AccessToken.Type
 
 export const RefreshToken = Schema.NonEmptyTrimmedString.pipe(
   Schema.brand("RefreshToken"),
-)
+).annotations({ identifier: "RefreshToken" })
+export type RefreshToken = typeof RefreshToken.Type
+
+export const CachedAuthInfo = Schema.Struct({
+  accessToken: Schema.Redacted(AccessToken),
+  refreshToken: Schema.Redacted(RefreshToken),
+  userId: AuthenticatedUserId,
+  accounts: Schema.optional(Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Address))),
+  expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
+}).annotations({ identifier: "CachedAuthInfo" })
+export type CachedAuthInfo = typeof CachedAuthInfo.Type
 
 export const Network = Schema.Lowercase.pipe(
   Schema.annotations({

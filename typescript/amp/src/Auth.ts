@@ -43,7 +43,7 @@ export class GenerateAccessTokenRequest extends Schema.Class<GenerateAccessToken
 export class GenerateAccessTokenResponse extends Schema.Class<GenerateAccessTokenResponse>(
   "Amp/models/auth/GenerateAccessTokenResponse",
 )({
-  token: Schema.NonEmptyTrimmedString,
+  token: Schema.Redacted(Schema.NonEmptyTrimmedString),
   token_type: Schema.Literal("Bearer"),
   exp: Schema.Int.pipe(Schema.positive()),
   sub: Schema.NonEmptyTrimmedString,
@@ -60,17 +60,13 @@ export class GenerateAccessTokenError extends Data.TaggedError("Amp/errors/auth/
 // Refresh Tokens
 // =============================================================================
 
-const AuthUserId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(/^(c[a-z0-9]{24}|did:privy:c[a-z0-9]{24})$/),
-)
-
 export class RefreshTokenRequest extends Schema.Class<RefreshTokenRequest>(
   "Amp/models/auth/RefreshTokenRequest",
 )({
-  refresh_token: Model.RefreshToken,
-  user_id: AuthUserId,
+  refresh_token: Schema.Redacted(Model.RefreshToken),
+  user_id: Model.AuthenticatedUserId,
 }) {
-  static fromCache(cache: AuthStorageSchema) {
+  static fromCache(cache: Model.CachedAuthInfo) {
     return RefreshTokenRequest.make({
       user_id: cache.userId,
       refresh_token: cache.refreshToken,
@@ -91,7 +87,7 @@ export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>(
     description: "Seconds from receipt of when the token expires (def is 1hr)",
   }),
   user: Schema.Struct({
-    id: AuthUserId,
+    id: Model.AuthenticatedUserId,
     accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).annotations({
       description: "List of accounts (connected wallets, etc) belonging to the user",
       examples: [["cmfd6bf6u006vjx0b7xb2eybx", "0x5c8fA0bDf68C915a88cD68291fC7CF011C126C29"]],
@@ -99,18 +95,6 @@ export class RefreshTokenResponse extends Schema.Class<RefreshTokenResponse>(
   }).annotations({
     description: "The user the access token belongs to",
   }),
-}) {}
-
-// =============================================================================
-// Token Cache
-// =============================================================================
-
-export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/models/auth/AuthStorageSchema")({
-  accessToken: Model.AccessToken,
-  refreshToken: Model.RefreshToken,
-  userId: AuthUserId,
-  accounts: Schema.Array(Schema.Union(Schema.NonEmptyTrimmedString, Model.Address)).pipe(Schema.optional),
-  expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
 }) {}
 
 // =============================================================================
@@ -138,11 +122,11 @@ export class VerifySignedAccessTokenError extends Data.TaggedError("Amp/errors/a
   readonly cause: unknown
 }> {}
 
-export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService", {
+export class Auth extends Effect.Service<Auth>()("Amp/Auth", {
   dependencies: [LocalCache, FetchHttpClient.layer],
   effect: Effect.gen(function*() {
     const store = yield* KeyValueStore.KeyValueStore
-    const kvs = store.forSchema(AuthStorageSchema)
+    const kvs = store.forSchema(Model.CachedAuthInfo)
 
     // Setup the `${AUTH_PLATFORM_URL}/v1/auth` base URL for the HTTP client
     const v1AuthUrl = new URL("api/v1/auth", AUTH_PLATFORM_URL)
@@ -157,7 +141,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
     // ------------------------------------------------------------------------
 
     const generateAccessToken = Effect.fn("AuthService.generateAccessToken")(function*(args: {
-      readonly storedAuth: AuthStorageSchema
+      readonly cache: Model.CachedAuthInfo
       readonly exp: Model.GenrateTokenDuration | undefined
       readonly audience: ReadonlyArray<string> | null | undefined
     }) {
@@ -169,7 +153,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
           audience: args.audience ?? undefined,
         })),
         acceptJson: true,
-      }).pipe(HttpClientRequest.bearerToken(args.storedAuth.accessToken))
+      }).pipe(HttpClientRequest.bearerToken(args.cache.accessToken))
 
       return yield* httpClient.execute(request).pipe(
         Effect.flatMap(HttpClientResponse.matchStatus({
@@ -211,7 +195,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       )
 
     const refreshAccessToken = Effect.fn("AuthService.refreshAccessToken")(function*(
-      cache: AuthStorageSchema,
+      cache: Model.CachedAuthInfo,
     ) {
       const request = HttpClientRequest.post("/refresh", {
         // Unsafely creating the JSON body is acceptable here as the `user_id`
@@ -259,12 +243,12 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
 
       const expiry = DateTime.toEpochMillis(DateTime.add(now, { seconds: response.expires_in }))
       const accessToken = Model.AccessToken.make(response.token)
-      const refreshToken = Model.RefreshToken.make(response.refresh_token ?? cache.refreshToken)
-      const refreshedAuth = AuthStorageSchema.make({
+      const refreshToken = Model.RefreshToken.make(response.refresh_token ?? Redacted.value(cache.refreshToken))
+      const refreshedAuth = Model.CachedAuthInfo.make({
         userId: response.user.id,
         accounts: response.user.accounts,
-        accessToken,
-        refreshToken,
+        accessToken: Redacted.make(accessToken),
+        refreshToken: Redacted.make(refreshToken),
         expiry,
       })
 
@@ -315,7 +299,7 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       return cache
     }, Effect.option)
 
-    const setCache = Effect.fn("AuthService.setToken")(function*(cache: AuthStorageSchema) {
+    const setCache = Effect.fn("AuthService.setToken")(function*(cache: Model.CachedAuthInfo) {
       yield* kvs.set(AUTH_TOKEN_CACHE_KEY, cache)
     })
 
@@ -337,4 +321,4 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
   }),
 }) {}
 
-export const layer = AuthService.Default
+export const layer = Auth.Default
