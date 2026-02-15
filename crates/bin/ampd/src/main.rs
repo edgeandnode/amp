@@ -35,24 +35,24 @@ enum Command {
         /// If `--config` is not provided, searches for `config.toml` within this directory.
         #[arg(long, env = "AMP_DIR")]
         amp_dir: Option<PathBuf>,
-        /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "FLIGHT_SERVER")]
-        flight_server: bool,
-        /// Enable JSON Lines Server.
-        #[arg(long, env = "JSONL_SERVER")]
-        jsonl_server: bool,
-        /// Enable Admin API Server.
-        #[arg(long, env = "ADMIN_SERVER")]
-        admin_server: bool,
+        /// Enable Arrow Flight RPC Server (env: AMP_FLIGHT_SERVER).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        flight_server: Option<bool>,
+        /// Enable JSON Lines Server (env: AMP_JSONL_SERVER).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        jsonl_server: Option<bool>,
+        /// Enable Admin API Server (env: AMP_ADMIN_SERVER).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        admin_server: Option<bool>,
     },
     /// Run query server (Arrow Flight, JSON Lines)
     Server {
-        /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "FLIGHT_SERVER")]
-        flight_server: bool,
-        /// Enable JSON Lines Server.
-        #[arg(long, env = "JSONL_SERVER")]
-        jsonl_server: bool,
+        /// Enable Arrow Flight RPC Server (env: AMP_FLIGHT_SERVER).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        flight_server: Option<bool>,
+        /// Enable JSON Lines Server (env: AMP_JSONL_SERVER).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        jsonl_server: Option<bool>,
     },
     /// Run a distributed worker node
     Worker {
@@ -107,16 +107,10 @@ async fn main_inner() -> Result<(), Error> {
     match command {
         Command::Solo {
             amp_dir,
-            mut flight_server,
-            mut jsonl_server,
-            mut admin_server,
+            flight_server,
+            jsonl_server,
+            admin_server,
         } => {
-            if !flight_server && !jsonl_server && !admin_server {
-                flight_server = true;
-                jsonl_server = true;
-                admin_server = true;
-            }
-
             // Resolve the amp state directory, creating it if needed.
             let amp_dir = match amp_dir {
                 Some(dir) => dir,
@@ -150,17 +144,21 @@ async fn main_inner() -> Result<(), Error> {
             Ok(())
         }
         Command::Server {
-            mut flight_server,
-            mut jsonl_server,
+            flight_server: cli_flight_server,
+            jsonl_server: cli_jsonl_server,
         } => {
-            // If neither of the flags are set, enable both servers
+            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
+            let config = config::load(config_path).map_err(Error::LoadConfig)?;
+
+            // Merge CLI flags with config values (CLI takes precedence when provided)
+            let mut flight_server = cli_flight_server.unwrap_or(config.flight_server);
+            let mut jsonl_server = cli_jsonl_server.unwrap_or(config.jsonl_server);
+
+            // If neither flag is set (CLI or config), enable both servers
             if !flight_server && !jsonl_server {
                 flight_server = true;
                 jsonl_server = true;
             }
-
-            let config_path = config_path.as_ref().ok_or(Error::MissingConfigPath)?;
-            let config = config::load(config_path).map_err(Error::LoadConfig)?;
             let metadata_db_config = amp_config::metadb::load(config_path, None)
                 .ok_or(Error::MissingMetadataDbConfig)?;
             let addrs = config.server_addrs.clone();

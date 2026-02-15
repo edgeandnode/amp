@@ -90,29 +90,29 @@
     },
     "server": {
       "summary": "Start query servers",
-      "description": "Starts one or more query servers for serving blockchain data through different protocols. By default, both query servers (Arrow Flight and JSON Lines) are started. Servers can be selectively enabled using flags. If no server flags (--flight-server, --jsonl-server) are specified, BOTH servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Default ports: Arrow Flight (1602), JSON Lines (1603). The server runs continuously until terminated (Ctrl+C or kill signal).",
+      "description": "Starts one or more query servers for serving blockchain data through different protocols. By default, both query servers (Arrow Flight and JSON Lines) are started. Servers can be selectively enabled or disabled using flags. If no server flags (--flight-server, --jsonl-server) are specified, BOTH servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start. Use --flag false to explicitly disable a server enabled in the config file. Default ports: Arrow Flight (1602), JSON Lines (1603). The server runs continuously until terminated (Ctrl+C or kill signal).",
       "parameters": [
         {
           "name": "flight-server",
           "in": "flag",
-          "description": "Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.",
+          "description": "Enable or disable Arrow Flight RPC Server. Pass without a value or with 'true' to enable, pass 'false' to disable. When omitted, the config file value is used.",
           "required": false,
           "schema": {
             "type": "boolean",
-            "default": false
+            "x-optional": true
           },
-          "x-environment": "FLIGHT_SERVER"
+          "x-environment": "AMP_FLIGHT_SERVER"
         },
         {
           "name": "jsonl-server",
           "in": "flag",
-          "description": "Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.",
+          "description": "Enable or disable JSON Lines Server. Pass without a value or with 'true' to enable, pass 'false' to disable. When omitted, the config file value is used.",
           "required": false,
           "schema": {
             "type": "boolean",
-            "default": false
+            "x-optional": true
           },
-          "x-environment": "JSONL_SERVER"
+          "x-environment": "AMP_JSONL_SERVER"
         }
       ],
       "responses": {
@@ -140,40 +140,40 @@
     },
     "dev": {
       "summary": "Start development mode with embedded worker and query servers",
-      "description": "Starts a combined server, controller, and worker in a single process for simplified local development and testing. By default, all three components (Arrow Flight, JSON Lines, and Admin API) are started along with an embedded worker. Components can be selectively enabled using flags. If no flags (--flight-server, --jsonl-server, --admin-server) are specified, ALL THREE are enabled by default. When any flag is specified, only the explicitly enabled components will start. The worker always runs with node ID 'worker'. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). Dev mode allows temporary database configuration for quick local testing. The process runs continuously until terminated (Ctrl+C or kill signal).",
+      "description": "Starts a combined server, controller, and worker in a single process for simplified local development and testing. By default, all three components (Arrow Flight, JSON Lines, and Admin API) are started along with an embedded worker. Components can be selectively enabled or disabled using flags. If no flags (--flight-server, --jsonl-server, --admin-server) are specified, ALL THREE are enabled by default. When any flag is specified, only the explicitly enabled components will start. Use --flag false to explicitly disable a component enabled in the config file. The worker always runs with node ID 'worker'. Default ports: Arrow Flight (1602), JSON Lines (1603), Admin API (1610). Dev mode allows temporary database configuration for quick local testing. The process runs continuously until terminated (Ctrl+C or kill signal).",
       "parameters": [
         {
           "name": "flight-server",
           "in": "flag",
-          "description": "Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.",
+          "description": "Enable or disable Arrow Flight RPC Server. Pass without a value or with 'true' to enable, pass 'false' to disable. When omitted, the config file value is used.",
           "required": false,
           "schema": {
             "type": "boolean",
-            "default": false
+            "x-optional": true
           },
-          "x-environment": "FLIGHT_SERVER"
+          "x-environment": "AMP_FLIGHT_SERVER"
         },
         {
           "name": "jsonl-server",
           "in": "flag",
-          "description": "Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.",
+          "description": "Enable or disable JSON Lines Server. Pass without a value or with 'true' to enable, pass 'false' to disable. When omitted, the config file value is used.",
           "required": false,
           "schema": {
             "type": "boolean",
-            "default": false
+            "x-optional": true
           },
-          "x-environment": "JSONL_SERVER"
+          "x-environment": "AMP_JSONL_SERVER"
         },
         {
           "name": "admin-server",
           "in": "flag",
-          "description": "Enable Admin API Server. This provides management and administrative endpoints (default port 1610) for monitoring and controlling the amp system.",
+          "description": "Enable or disable Admin API Server. Pass without a value or with 'true' to enable, pass 'false' to disable. When omitted, the config file value is used.",
           "required": false,
           "schema": {
             "type": "boolean",
-            "default": false
+            "x-optional": true
           },
-          "x-environment": "ADMIN_SERVER"
+          "x-environment": "AMP_ADMIN_SERVER"
         }
       ],
       "responses": {
