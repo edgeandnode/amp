@@ -380,19 +380,22 @@ where
 
 /// Reschedule a failed job for retry with atomically tracked attempt
 ///
-/// This function performs in a single transaction:
-///  1. Updates job status to SCHEDULED
-///  2. Updates node_id (for potential worker reassignment)
-///  3. Inserts job attempt record with given retry_index
+/// This function performs two operations using the provided transaction:
+///  1. Updates job status to SCHEDULED and assigns to the given worker node
+///  2. Inserts job attempt record with given retry_index
 ///
-/// If any operation fails, the entire transaction is rolled back.
+/// If any operation fails, the error is returned and no further operations are attempted.
+/// The caller is responsible for transaction management (commit/rollback).
 ///
-/// **Note:** This function does not send notifications. The caller is responsible for
-/// calling `send_job_notification` after successful rescheduling if worker notification
-/// is required.
-#[tracing::instrument(skip(db), err)]
+/// **Note:** This function accepts `&mut Transaction` instead of a generic `Executor<'c>`
+/// because it performs multiple sequential database operations that require re-borrowable
+/// access.
+///
+/// This function does not send notifications. The caller is responsible
+/// for sending notifications after successful rescheduling.
+#[tracing::instrument(skip(tx), err)]
 pub async fn reschedule(
-    db: &crate::MetadataDb,
+    tx: &mut crate::Transaction<'_>,
     job_id: impl Into<JobId> + std::fmt::Debug,
     new_node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
     retry_index: i32,
@@ -400,19 +403,16 @@ pub async fn reschedule(
     let job_id = job_id.into();
     let new_node_id = new_node_id.into();
 
-    let mut tx = db.begin_txn().await?;
-
     // Update job status to SCHEDULED and assign to worker
-    sql::reschedule(&mut tx, job_id, new_node_id)
+    sql::reschedule(&mut *tx, job_id, new_node_id)
         .await
         .map_err(Error::Database)?;
 
     // Insert job attempt record
-    job_attempts::sql::insert_attempt(&mut tx, job_id, retry_index)
+    job_attempts::sql::insert_attempt(&mut *tx, job_id, retry_index)
         .await
         .map_err(Error::Database)?;
 
-    tx.commit().await?;
     Ok(())
 }
 

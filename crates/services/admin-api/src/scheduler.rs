@@ -158,6 +158,15 @@ pub enum ScheduleJobError {
     #[error("failed to register job: {0}")]
     RegisterJob(#[source] metadata_db::Error),
 
+    /// Failed to begin transaction for schedule operation
+    ///
+    /// This occurs when:
+    /// - Database connection pool is exhausted
+    /// - Database connection fails or is lost
+    /// - Transaction initialization encounters an error
+    #[error("failed to begin transaction")]
+    BeginTransaction(#[source] metadata_db::Error),
+
     /// Failed to send job notification to worker
     ///
     /// This occurs when:
@@ -166,6 +175,15 @@ pub enum ScheduleJobError {
     /// - Connection is lost during notification
     #[error("failed to notify worker: {0}")]
     NotifyWorker(#[source] metadata_db::Error),
+
+    /// Failed to commit transaction for schedule operation
+    ///
+    /// This occurs when:
+    /// - Transaction commit fails due to conflicts
+    /// - Connection is lost before commit completes
+    /// - Database encounters an error during commit
+    #[error("failed to commit transaction")]
+    CommitTransaction(#[source] metadata_db::Error),
 
     /// No active workers match the glob pattern
     ///
