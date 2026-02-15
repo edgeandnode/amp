@@ -143,7 +143,7 @@ impl DetachedLogicalPlan {
     pub fn attach_to(self, ctx: &QueryContext) -> Result<LogicalPlan, Error> {
         Ok(self
             .0
-            .transform(|mut node| match &mut node {
+            .transform_with_subqueries(|mut node| match &mut node {
                 // Insert the clauses in non-view table scans
                 LogicalPlan::TableScan(TableScan {
                     table_name, source, ..

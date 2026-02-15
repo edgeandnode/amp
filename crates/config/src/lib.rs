@@ -16,7 +16,7 @@ pub mod server;
 
 pub use self::{
     config_file::{
-        ConfigDefaultsOverride, DEFAULT_DATA_DIRNAME, DEFAULT_KEEP_ALIVE_INTERVAL,
+        ConfigDefaultsOverride, ConfigFile, DEFAULT_DATA_DIRNAME, DEFAULT_KEEP_ALIVE_INTERVAL,
         DEFAULT_MANIFESTS_DIRNAME, DEFAULT_MICROBATCH_MAX_INTERVAL, DEFAULT_PROVIDERS_DIRNAME,
         DEFAULT_SERVER_MICROBATCH_MAX_INTERVAL, no_defaults_override,
     },
@@ -229,6 +229,7 @@ pub struct Config {
 
 /// Configuration for worker event streaming.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct WorkerEventsConfig {
     /// Enable/disable event emission (default: false)
     #[serde(default)]
@@ -253,6 +254,7 @@ fn default_kafka_partitions() -> u32 {
 
 /// Kafka configuration for worker events.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct KafkaEventsConfig {
     /// Kafka broker addresses (e.g., ["kafka-1:9092", "kafka-2:9092"])
     pub brokers: Vec<String>,

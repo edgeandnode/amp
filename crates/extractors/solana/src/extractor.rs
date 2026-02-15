@@ -15,8 +15,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
+use amp_providers_solana::config::UseArchive;
 use anyhow::Context;
-use datasets_common::{block_num::BlockNum, network_id::NetworkId};
+use datasets_common::block_num::BlockNum;
 use datasets_raw::{
     client::{
         BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
@@ -27,10 +29,7 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use solana_clock::Slot;
 use url::Url;
 
-use crate::{
-    metrics, of1_client, rpc_client,
-    tables::{self},
-};
+use crate::{metrics, of1_client, rpc_client, tables};
 
 /// Handles related to the OF1 CAR manager task, stored in the extractor for cleanup.
 struct Of1CarManagerHandles {
@@ -44,9 +43,9 @@ pub struct SolanaExtractor {
     rpc_client: Arc<rpc_client::SolanaRpcClient>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     network: NetworkId,
-    provider_name: String,
+    provider_name: ProviderName,
     of1_car_directory: PathBuf,
-    use_archive: crate::UseArchive,
+    use_archive: UseArchive,
 }
 
 impl SolanaExtractor {
@@ -55,10 +54,10 @@ impl SolanaExtractor {
         rpc_provider_url: Url,
         max_rpc_calls_per_second: Option<NonZeroU32>,
         network: NetworkId,
-        provider_name: String,
+        provider_name: ProviderName,
         of1_car_directory: PathBuf,
         keep_of1_car_files: bool,
-        use_archive: crate::UseArchive,
+        use_archive: UseArchive,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         assert_eq!(network, "mainnet", "only mainnet is supported");
@@ -68,7 +67,7 @@ impl SolanaExtractor {
         let rpc_client = rpc_client::SolanaRpcClient::new(
             rpc_provider_url,
             max_rpc_calls_per_second,
-            provider_name.clone(),
+            provider_name.to_string(),
             network.clone(),
         );
 
@@ -77,7 +76,7 @@ impl SolanaExtractor {
             of1_car_manager_rx,
             of1_car_directory.clone(),
             keep_of1_car_files,
-            provider_name.clone(),
+            provider_name.to_string(),
             network.clone(),
             metrics.clone(),
         ));
@@ -222,15 +221,15 @@ impl BlockStreamer for SolanaExtractor {
 
         // Determine archive usage based on configuration
         let use_rpc_only = match self.use_archive {
-            crate::UseArchive::Never => {
+            UseArchive::Never => {
                 tracing::info!("Using RPC-only mode (use_archive = never)");
                 true
             }
-            crate::UseArchive::Always => {
+            UseArchive::Always => {
                 tracing::info!("Using archive mode (use_archive = always)");
                 false
             }
-            crate::UseArchive::Auto => {
+            UseArchive::Auto => {
                 // Auto mode: skip archive for recent slots, use it for historical data
                 match self.rpc_client.get_slot(self.metrics.clone()).await {
                     Ok(current_slot) => {
@@ -492,6 +491,7 @@ fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
 mod tests {
     use std::path::PathBuf;
 
+    use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
     use solana_clock::Slot;
     use url::Url;
@@ -517,14 +517,20 @@ mod tests {
 
     #[tokio::test]
     async fn historical_blocks_only() {
+        let url = Url::parse("https://example.net").expect("Failed to parse URL");
+        let network = "mainnet".parse().expect("Failed to parse network id");
+        let provider_name = "test_provider"
+            .parse()
+            .expect("Failed to parse provider name");
+
         let extractor = SolanaExtractor::new(
-            Url::parse("https://example.net").unwrap(),
+            url,
             None,
-            "mainnet".parse().expect("valid network id"),
-            String::new(),
+            network,
+            provider_name,
             PathBuf::new(),
             false,
-            crate::UseArchive::Auto,
+            UseArchive::Auto,
             None,
         );
 
@@ -549,7 +555,12 @@ mod tests {
 
         let mut expected_block = start;
 
-        while let Some(rows) = block_stream.next().await.transpose().unwrap() {
+        while let Some(rows) = block_stream
+            .next()
+            .await
+            .transpose()
+            .expect("stream should not error")
+        {
             assert_eq!(rows.block_num(), expected_block);
             expected_block += 1;
         }
@@ -559,19 +570,22 @@ mod tests {
 
     #[tokio::test]
     async fn historical_to_json_rpc_transition() {
-        let solana_rpc_provider_url: Url = std::env::var("SOLANA_MAINNET_HTTP_URL")
-            .expect("missing environment variable")
+        let url_str = std::env::var("SOLANA_MAINNET_HTTP_URL")
+            .expect("Missing environment variable SOLANA_MAINNET_HTTP_URL");
+        let solana_rpc_provider_url = url_str.parse::<Url>().expect("Failed to parse URL");
+        let network = "mainnet".parse().expect("Failed to parse network id");
+        let provider_name = "test_provider"
             .parse()
-            .expect("invalid URL");
+            .expect("Failed to parse provider name");
 
         let extractor = SolanaExtractor::new(
             solana_rpc_provider_url,
             None,
-            "mainnet".parse().expect("valid network id"),
-            String::new(),
+            network,
+            provider_name,
             PathBuf::new(),
             false,
-            crate::UseArchive::Auto,
+            UseArchive::Auto,
             None,
         );
 
@@ -599,7 +613,12 @@ mod tests {
 
         let mut expected_block = start;
 
-        while let Some(rows) = block_stream.next().await.transpose().unwrap() {
+        while let Some(rows) = block_stream
+            .next()
+            .await
+            .transpose()
+            .expect("stream should not error")
+        {
             assert_eq!(rows.block_num(), expected_block);
             expected_block += 1;
         }

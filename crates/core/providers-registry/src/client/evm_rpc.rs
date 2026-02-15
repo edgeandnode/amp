@@ -1,8 +1,8 @@
 //! EVM RPC provider creation.
 
 use amp_providers_common::{
-    ProviderName,
     config::{InvalidConfigError, ProviderResolvedConfigRaw, TryIntoConfig as _},
+    provider_name::ProviderName,
 };
 use amp_providers_evm_rpc::config::EvmRpcProviderConfig;
 use url::Url;

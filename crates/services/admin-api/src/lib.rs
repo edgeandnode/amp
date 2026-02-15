@@ -50,6 +50,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/datasets/{namespace}/{name}/versions/{revision}/jobs",
             get(datasets::list_jobs::handler),
         )
+        .route("/revisions/{id}", get(revisions::get_by_id::handler))
         .route(
             "/revisions/{id}/activate",
             post(revisions::activate::handler),
@@ -143,6 +144,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // Revision endpoints
         handlers::revisions::activate::handler,
         handlers::revisions::deactivate::handler,
+        handlers::revisions::get_by_id::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
         handlers::workers::get_by_id::handler,
@@ -185,6 +187,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // Revision schemas
         handlers::revisions::activate::ActivationPayload,
         handlers::revisions::deactivate::DeactivationPayload,
+        handlers::revisions::get_by_id::RevisionInfo,
+        handlers::revisions::get_by_id::RevisionMetadataInfo,
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,

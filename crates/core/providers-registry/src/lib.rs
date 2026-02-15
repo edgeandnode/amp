@@ -15,10 +15,10 @@
 use std::{collections::BTreeMap, ops::Deref};
 
 use amp_providers_common::{
-    ProviderName,
     config::{
         ConfigHeaderWithNetwork, ProviderConfigRaw, ProviderResolvedConfigRaw, TryIntoConfig,
     },
+    provider_name::ProviderName,
 };
 use amp_providers_evm_rpc::kind::EvmRpcProviderKind;
 use datasets_common::network_id::NetworkId;
@@ -156,7 +156,7 @@ where
             .filter_map(|(name, config)| {
                 // Extract kind and network from config
                 let header = config.try_into_config::<ConfigHeaderWithNetwork>().ok()?;
-                if header.kind == kind && &header.network == network {
+                if header.kind == kind && header.network == network {
                     Some((name.clone(), config.clone()))
                 } else {
                     None

@@ -12,8 +12,15 @@ use super::{
 /// Build URL path for activating a table revision.
 ///
 /// POST `/revisions/{id}/activate`
-fn revision_activate(id: u64) -> String {
+fn revision_activate(id: i64) -> String {
     format!("revisions/{id}/activate")
+}
+
+/// Build URL path for getting a revision by location ID.
+///
+/// GET `/revisions/{id}`
+fn revision_get_by_id(id: i64) -> String {
+    format!("revisions/{id}")
 }
 
 /// Build URL path for deactivating table revisions.
@@ -51,7 +58,7 @@ impl<'a> RevisionsClient<'a> {
     #[tracing::instrument(skip(self), fields(location_id = %location_id, dataset = %dataset, table_name = %table_name))]
     pub async fn activate(
         &self,
-        location_id: u64,
+        location_id: i64,
         dataset: &str,
         table_name: &str,
     ) -> Result<(), ActivateError> {
@@ -232,6 +239,120 @@ impl<'a> RevisionsClient<'a> {
             }
         }
     }
+
+    /// Get a revision by location ID.
+    ///
+    /// Sends GET to `/revisions/{id}` endpoint.
+    ///
+    /// Returns `None` if the revision is not found (404).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GetByIdError`] for network errors, API errors (400/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(location_id = %location_id))]
+    pub async fn get_by_id(&self, location_id: i64) -> Result<Option<RevisionInfo>, GetByIdError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&revision_get_by_id(location_id))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "Sending GET request to retrieve revision");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|err| GetByIdError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let info =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| GetByIdError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("Failed to parse response: {err}"),
+                        })?;
+                Ok(Some(info))
+            }
+            404 => {
+                let text =
+                    response
+                        .text()
+                        .await
+                        .map_err(|err| GetByIdError::UnexpectedResponse {
+                            status: 404,
+                            message: format!("Failed to read error response: {err}"),
+                        })?;
+
+                let error_response: ErrorResponse =
+                    serde_json::from_str(&text).map_err(|_| GetByIdError::UnexpectedResponse {
+                        status: 404,
+                        message: text.clone(),
+                    })?;
+
+                match error_response.error_code.as_str() {
+                    "REVISION_NOT_FOUND" => Ok(None),
+                    _ => Err(GetByIdError::UnexpectedResponse {
+                        status: 404,
+                        message: text,
+                    }),
+                }
+            }
+            400 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    GetByIdError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse =
+                    serde_json::from_str(&text).map_err(|err| {
+                        tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                        GetByIdError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: text.clone(),
+                        }
+                    })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH_PARAMETERS" => {
+                        Err(GetByIdError::InvalidPath(error_response.into()))
+                    }
+                    "GET_REVISION_BY_LOCATION_ID_ERROR" => {
+                        Err(GetByIdError::GetRevision(error_response.into()))
+                    }
+                    _ => Err(GetByIdError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(GetByIdError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Request payload for activating a table revision.
@@ -290,6 +411,35 @@ pub enum ActivateError {
     UnexpectedResponse { status: u16, message: String },
 }
 
+/// Revision information returned by the API.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RevisionInfo {
+    /// Unique identifier for this revision (location ID).
+    pub id: i64,
+    /// Relative path to the storage location.
+    pub path: String,
+    /// Whether this revision is currently active.
+    pub active: bool,
+    /// Writer job ID responsible for populating this revision, if one exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writer: Option<i64>,
+    /// Metadata about the revision.
+    pub metadata: RevisionMetadataInfo,
+}
+
+/// Revision metadata returned by the API.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RevisionMetadataInfo {
+    /// Dataset namespace.
+    pub dataset_namespace: String,
+    /// Dataset name.
+    pub dataset_name: String,
+    /// Manifest hash.
+    pub manifest_hash: String,
+    /// Table name.
+    pub table_name: String,
+}
+
 /// Errors that can occur when deactivating table revisions.
 #[derive(Debug, thiserror::Error)]
 pub enum DeactivateError {
@@ -316,6 +466,30 @@ pub enum DeactivateError {
     /// Failed to resolve the dataset reference to a manifest hash.
     #[error("failed to resolve revision")]
     ResolveRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when getting a revision by location ID.
+#[derive(Debug, thiserror::Error)]
+pub enum GetByIdError {
+    /// Invalid path parameters (400, INVALID_PATH_PARAMETERS)
+    ///
+    /// The location ID in the URL path is invalid.
+    #[error("invalid path parameters")]
+    InvalidPath(#[source] ApiError),
+
+    /// Failed to get revision (500, GET_REVISION_BY_LOCATION_ID_ERROR)
+    ///
+    /// The database query to get the revision failed.
+    #[error("failed to get revision")]
+    GetRevision(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

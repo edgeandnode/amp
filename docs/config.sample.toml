@@ -1,3 +1,5 @@
+# JSON Schema: docs/config/ampd.spec.json
+#
 # Sample of a configuration. Copy this file and edit it.
 #
 # For `ampd solo`: place this file at `.amp/config.toml` for auto-discovery,

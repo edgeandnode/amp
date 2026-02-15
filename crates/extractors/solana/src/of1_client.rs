@@ -5,8 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use amp_providers_common::network_id::NetworkId;
 use backon::{ExponentialBuilder, Retryable};
-use datasets_common::network_id::NetworkId;
 use futures::{Stream, StreamExt};
 use solana_clock::{Epoch, Slot};
 use tokio::io::AsyncWriteExt;
