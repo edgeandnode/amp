@@ -6443,6 +6443,7 @@ dependencies = [
  "deadpool",
  "hex",
  "indoc",
+ "lru",
  "num-traits",
  "num_cpus",
  "thiserror 2.0.18",
