@@ -216,22 +216,19 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Reconcile failed jobs by retrying them with exponential backoff
+    /// Reconcile failed jobs by retrying recoverable failures with exponential backoff
     ///
     /// This method:
-    /// 1. Queries failed jobs that are ready for retry (based on exponential backoff timing)
-    /// 2. Lists active workers
-    /// 3. For each job: reschedules it on the same worker, and sends notification
+    /// 1. Queries failed recoverable jobs that are ready for retry (based on exponential backoff timing)
+    /// 2. For each job: reschedules it on the same worker and sends notification
+    ///
+    /// Only `FailedRecoverable` jobs are retried. `FailedFatal` jobs remain in the database
+    /// until manually removed by operators using `ampctl job prune --status error`.
     ///
     /// Jobs retry indefinitely with exponential backoff (2^next_retry_index seconds).
     /// Retry tracking is managed via the job_attempts table.
     pub async fn reconcile_failed_jobs(&self) -> Result<(), ReconcileFailedJobsError> {
-        // First, clean up any fatally failed jobs.
-        metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::FailedFatal.into()])
-            .await
-            .map_err(ReconcileFailedJobsError::DeleteFailedFatalJobs)?;
-
-        // Then, reschedule failed (recoverable) jobs that are ready for retry.
+        // Reschedule failed (recoverable) jobs that are ready for retry.
         let failed_jobs = metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db)
             .await
             .map_err(ReconcileFailedJobsError::GetFailedJobsReadyForRetry)?;
@@ -289,14 +286,6 @@ impl Scheduler {
 /// Errors that occur during failed job reconciliation [`Scheduler::reconcile_failed_jobs`]
 #[derive(Debug, thiserror::Error)]
 pub enum ReconcileFailedJobsError {
-    /// Failed to delete fatally failed jobs from the metadata database
-    ///
-    /// This occurs when the bulk deletion of jobs with `FailedFatal` status fails.
-    /// These jobs are not retryable and must be cleaned up before processing
-    /// recoverable failures.
-    #[error("failed to delete failed fatal jobs")]
-    DeleteFailedFatalJobs(#[source] metadata_db::Error),
-
     /// Failed to query jobs that are ready for retry
     ///
     /// This occurs when the database query to retrieve recoverable failed jobs
