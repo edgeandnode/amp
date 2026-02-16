@@ -36,6 +36,270 @@ fn downcast_checked<'a, T: 'static>(arr: &'a dyn Array, field: &str) -> Result<&
     }
 }
 
+fn encode_jsonb_value(
+    field: &str,
+    value: &serde_json::Value,
+    buf: &mut BytesMut,
+) -> Result<(), Error> {
+    let json = serde_json::to_vec(value).map_err(|e| Error::Encode {
+        reason: format!("failed to serialize field '{field}' to JSON: {e}"),
+    })?;
+    let len = json.len() + 1; // 1 byte for JSONB format version
+    match i32::try_from(len) {
+        Ok(v) => buf.put_i32(v),
+        Err(_) => return Err(Error::field_too_large(field, len)),
+    }
+    buf.put_u8(JSONB_VERSION);
+    buf.extend_from_slice(&json);
+    Ok(())
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(2 + bytes.len() * 2);
+    out.push_str("0x");
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn decimal128_to_string(value: i128, scale: i8) -> String {
+    if scale <= 0 {
+        let mut out = value.to_string();
+        out.push_str(&"0".repeat(scale.unsigned_abs() as usize));
+        return out;
+    }
+
+    let scale = scale as usize;
+    let sign = if value.is_negative() { "-" } else { "" };
+    let digits = value.unsigned_abs().to_string();
+
+    if digits.len() <= scale {
+        format!("{sign}0.{}{}", "0".repeat(scale - digits.len()), digits)
+    } else {
+        let split = digits.len() - scale;
+        format!("{sign}{}.{}", &digits[..split], &digits[split..])
+    }
+}
+
+fn fixed_size_list_to_json(
+    arr: &arrow_array::FixedSizeListArray,
+    row: usize,
+    field: &str,
+) -> Result<serde_json::Value, Error> {
+    let values = arr.value(row);
+    let mut out = Vec::with_capacity(values.len());
+    for i in 0..values.len() {
+        out.push(array_value_to_json(values.as_ref(), i, field)?);
+    }
+    Ok(serde_json::Value::Array(out))
+}
+
+fn list_to_json<T: OffsetSizeTrait>(
+    arr: &arrow_array::GenericListArray<T>,
+    row: usize,
+    field: &str,
+) -> Result<serde_json::Value, Error> {
+    let values = arr.value(row);
+    let mut out = Vec::with_capacity(values.len());
+    for i in 0..values.len() {
+        out.push(array_value_to_json(values.as_ref(), i, field)?);
+    }
+    Ok(serde_json::Value::Array(out))
+}
+
+fn struct_to_json(
+    arr: &arrow_array::StructArray,
+    row: usize,
+    _field: &str,
+) -> Result<serde_json::Value, Error> {
+    let DataType::Struct(fields) = arr.data_type() else {
+        unreachable!("StructArray should always have DataType::Struct");
+    };
+
+    let mut map = serde_json::Map::with_capacity(fields.len());
+    for (child_field, child_column) in fields.iter().zip(arr.columns()) {
+        map.insert(
+            child_field.name().to_string(),
+            array_value_to_json(child_column.as_ref(), row, child_field.name())?,
+        );
+    }
+
+    Ok(serde_json::Value::Object(map))
+}
+
+fn array_value_to_json(
+    arr: &dyn Array,
+    row: usize,
+    field: &str,
+) -> Result<serde_json::Value, Error> {
+    if arr.is_null(row) {
+        return Ok(serde_json::Value::Null);
+    }
+
+    let value = match arr.data_type() {
+        DataType::Boolean => {
+            let v = downcast_checked::<arrow_array::BooleanArray>(arr, field)?.value(row);
+            serde_json::Value::Bool(v)
+        }
+        DataType::UInt8 => {
+            let v = downcast_checked::<arrow_array::UInt8Array>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::UInt16 => {
+            let v = downcast_checked::<arrow_array::UInt16Array>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::UInt32 => {
+            let v = downcast_checked::<arrow_array::UInt32Array>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::UInt64 => {
+            let v = downcast_checked::<arrow_array::UInt64Array>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Int8 => {
+            let v = downcast_checked::<arrow_array::Int8Array>(arr, field)?.value(row);
+            serde_json::Value::Number((v as i64).into())
+        }
+        DataType::Int16 => {
+            let v = downcast_checked::<arrow_array::Int16Array>(arr, field)?.value(row);
+            serde_json::Value::Number((v as i64).into())
+        }
+        DataType::Int32 => {
+            let v = downcast_checked::<arrow_array::Int32Array>(arr, field)?.value(row);
+            serde_json::Value::Number((v as i64).into())
+        }
+        DataType::Int64 => {
+            let v = downcast_checked::<arrow_array::Int64Array>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Float16 => {
+            let v = downcast_checked::<arrow_array::Float16Array>(arr, field)?
+                .value(row)
+                .to_f64();
+            let number = serde_json::Number::from_f64(v).ok_or_else(|| Error::Encode {
+                reason: format!("cannot encode non-finite FLOAT16 value in field '{field}'"),
+            })?;
+            serde_json::Value::Number(number)
+        }
+        DataType::Float32 => {
+            let v = downcast_checked::<arrow_array::Float32Array>(arr, field)?.value(row) as f64;
+            let number = serde_json::Number::from_f64(v).ok_or_else(|| Error::Encode {
+                reason: format!("cannot encode non-finite FLOAT32 value in field '{field}'"),
+            })?;
+            serde_json::Value::Number(number)
+        }
+        DataType::Float64 => {
+            let v = downcast_checked::<arrow_array::Float64Array>(arr, field)?.value(row);
+            let number = serde_json::Number::from_f64(v).ok_or_else(|| Error::Encode {
+                reason: format!("cannot encode non-finite FLOAT64 value in field '{field}'"),
+            })?;
+            serde_json::Value::Number(number)
+        }
+        DataType::Decimal128(_, scale) => {
+            let v = downcast_checked::<arrow_array::Decimal128Array>(arr, field)?.value(row);
+            serde_json::Value::String(decimal128_to_string(v, *scale))
+        }
+        DataType::Timestamp(TimeUnit::Second, _) => {
+            let v = downcast_checked::<arrow_array::TimestampSecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => {
+            let v =
+                downcast_checked::<arrow_array::TimestampMillisecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Timestamp(TimeUnit::Microsecond, _) => {
+            let v =
+                downcast_checked::<arrow_array::TimestampMicrosecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+            let v =
+                downcast_checked::<arrow_array::TimestampNanosecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Date32 => {
+            let v = downcast_checked::<arrow_array::Date32Array>(arr, field)?.value(row);
+            serde_json::Value::Number((v as i64).into())
+        }
+        DataType::Time32(TimeUnit::Second) => {
+            let v = downcast_checked::<arrow_array::Time32SecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number((v as i64).into())
+        }
+        DataType::Time32(TimeUnit::Millisecond) => {
+            let v = downcast_checked::<arrow_array::Time32MillisecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number((v as i64).into())
+        }
+        DataType::Time64(TimeUnit::Microsecond) => {
+            let v = downcast_checked::<arrow_array::Time64MicrosecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Duration(TimeUnit::Second) => {
+            let v = downcast_checked::<arrow_array::DurationSecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Duration(TimeUnit::Millisecond) => {
+            let v =
+                downcast_checked::<arrow_array::DurationMillisecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Duration(TimeUnit::Microsecond) => {
+            let v =
+                downcast_checked::<arrow_array::DurationMicrosecondArray>(arr, field)?.value(row);
+            serde_json::Value::Number(v.into())
+        }
+        DataType::Utf8 => {
+            let v = downcast_checked::<arrow_array::StringArray>(arr, field)?.value(row);
+            serde_json::Value::String(v.to_string())
+        }
+        DataType::LargeUtf8 => {
+            let v = downcast_checked::<arrow_array::LargeStringArray>(arr, field)?.value(row);
+            serde_json::Value::String(v.to_string())
+        }
+        DataType::Binary => {
+            let v = downcast_checked::<arrow_array::BinaryArray>(arr, field)?.value(row);
+            serde_json::Value::String(bytes_to_hex(v))
+        }
+        DataType::LargeBinary => {
+            let v = downcast_checked::<arrow_array::LargeBinaryArray>(arr, field)?.value(row);
+            serde_json::Value::String(bytes_to_hex(v))
+        }
+        DataType::FixedSizeBinary(_) => {
+            let v = downcast_checked::<arrow_array::FixedSizeBinaryArray>(arr, field)?.value(row);
+            serde_json::Value::String(bytes_to_hex(v))
+        }
+        DataType::List(_) => {
+            let list = downcast_checked::<arrow_array::ListArray>(arr, field)?;
+            list_to_json(list, row, field)?
+        }
+        DataType::LargeList(_) => {
+            let list = downcast_checked::<arrow_array::LargeListArray>(arr, field)?;
+            list_to_json(list, row, field)?
+        }
+        DataType::FixedSizeList(_, _) => {
+            let list = downcast_checked::<arrow_array::FixedSizeListArray>(arr, field)?;
+            fixed_size_list_to_json(list, row, field)?
+        }
+        DataType::Struct(_) => {
+            let struct_array = downcast_checked::<arrow_array::StructArray>(arr, field)?;
+            struct_to_json(struct_array, row, field)?
+        }
+        _ => {
+            return Err(Error::type_unsupported(
+                field,
+                arr.data_type(),
+                "unsupported type for struct-to-JSONB conversion",
+            ));
+        }
+    };
+
+    Ok(value)
+}
+
 #[enum_dispatch]
 pub trait Encode: std::fmt::Debug {
     fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error>;
@@ -74,6 +338,7 @@ pub enum Encoder<'a> {
     FixedSizeBinary(FixedSizeBinaryEncoder<'a>),
     String(StringEncoder<'a>),
     LargeString(LargeStringEncoder<'a>),
+    Struct(StructEncoder<'a>),
     List(ListEncoder<'a>),
     LargeList(LargeListEncoder<'a>),
 }
@@ -888,6 +1153,41 @@ impl<'a, T: OffsetSizeTrait> Encode for GenericStringEncoder<'a, T> {
 
 type StringEncoder<'a> = GenericStringEncoder<'a, i32>;
 type LargeStringEncoder<'a> = GenericStringEncoder<'a, i64>;
+
+#[derive(Debug)]
+pub struct StructEncoder<'a> {
+    arr: &'a arrow_array::StructArray,
+    field: String,
+}
+
+impl<'a> Encode for StructEncoder<'a> {
+    fn encode(&self, row: usize, buf: &mut BytesMut) -> Result<(), Error> {
+        if self.arr.is_null(row) {
+            buf.put_i32(-1);
+            return Ok(());
+        }
+
+        let value = struct_to_json(self.arr, row, &self.field)?;
+        encode_jsonb_value(&self.field, &value, buf)
+    }
+
+    fn size_hint(&self) -> Result<usize, Error> {
+        let mut total = 0;
+        for row in 0..self.arr.len() {
+            if self.arr.is_null(row) {
+                total += 4;
+                continue;
+            }
+
+            let value = struct_to_json(self.arr, row, &self.field)?;
+            let json = serde_json::to_vec(&value).map_err(|e| Error::Encode {
+                reason: format!("failed to serialize field '{}' to JSON: {e}", self.field),
+            })?;
+            total += 4 + 1 + json.len();
+        }
+        Ok(total)
+    }
+}
 
 #[derive(Debug)]
 pub struct GenericListEncoder<'a, T: OffsetSizeTrait> {
@@ -1728,6 +2028,18 @@ impl_encoder_builder_stateless_with_field!(
     |dt: &DataType| matches!(dt, DataType::FixedSizeBinary(_))
 );
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructEncoderBuilder {
+    field: Arc<Field>,
+}
+impl_encoder_builder_stateless_with_field!(
+    StructEncoderBuilder,
+    Encoder::Struct,
+    StructEncoder,
+    PostgresType::Jsonb,
+    |dt: &DataType| matches!(dt, DataType::Struct(_))
+);
+
 macro_rules! impl_list_encoder_builder {
     ($struct_name:ident, $enum_name:expr, $encoder_name:ident) => {
         impl $struct_name {
@@ -1840,6 +2152,7 @@ pub enum EncoderBuilder {
     Binary(BinaryEncoderBuilder),
     LargeBinary(LargeBinaryEncoderBuilder),
     FixedSizeBinary(FixedSizeBinaryEncoderBuilder),
+    Struct(StructEncoderBuilder),
     List(ListEncoderBuilder),
     LargeList(LargeListEncoderBuilder),
 }
@@ -1927,6 +2240,7 @@ impl EncoderBuilder {
             DataType::FixedSizeBinary(_) => {
                 Self::FixedSizeBinary(FixedSizeBinaryEncoderBuilder { field })
             }
+            DataType::Struct(_) => Self::Struct(StructEncoderBuilder { field }),
             DataType::List(inner) => {
                 if matches!(
                     inner.data_type(),
@@ -1977,8 +2291,11 @@ impl EncoderBuilder {
 mod tests {
     use std::sync::Arc;
 
-    use arrow_array::{Decimal128Array, FixedSizeBinaryArray, UInt64Array};
-    use arrow_schema::{DataType, Field};
+    use arrow_array::{
+        ArrayRef, Decimal128Array, FixedSizeBinaryArray, Int32Array, StringArray, StructArray,
+        UInt64Array,
+    };
+    use arrow_schema::{DataType, Field, Fields};
     use bytes::BytesMut;
 
     use super::*;
@@ -2142,8 +2459,6 @@ mod tests {
 
     #[test]
     fn test_text_encoding_no_validation() {
-        use arrow_array::StringArray;
-
         // Test that TEXT encoding doesn't validate JSON (allows invalid JSON)
         let array = StringArray::from(vec![r#"{"unclosed": true"#]);
         let field = Arc::new(Field::new("text_field", DataType::Utf8, false));
@@ -2155,6 +2470,73 @@ mod tests {
         // Should succeed - TEXT doesn't validate
         encoder.encode(0, &mut buf).unwrap();
         assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_struct_encoder_outputs_jsonb() {
+        let struct_array = StructArray::from(vec![
+            (
+                Arc::new(Field::new("id", DataType::Int32, false)),
+                Arc::new(Int32Array::from(vec![42])) as ArrayRef,
+            ),
+            (
+                Arc::new(Field::new("label", DataType::Utf8, false)),
+                Arc::new(StringArray::from(vec!["ok"])) as ArrayRef,
+            ),
+        ]);
+        let field = Arc::new(Field::new(
+            "payload",
+            struct_array.data_type().clone(),
+            false,
+        ));
+        let builder = StructEncoderBuilder::new(field).unwrap();
+        let schema = builder.schema();
+
+        assert_eq!(schema.data_type, PostgresType::Jsonb);
+
+        let encoder = builder.try_new(&struct_array).unwrap();
+        let mut buf = BytesMut::new();
+        encoder.encode(0, &mut buf).unwrap();
+
+        assert_eq!(buf[4], JSONB_VERSION);
+        let parsed: serde_json::Value = serde_json::from_slice(&buf[5..]).unwrap();
+        assert_eq!(parsed["id"], 42);
+        assert_eq!(parsed["label"], "ok");
+    }
+
+    #[test]
+    fn test_list_of_struct_builder_is_supported() {
+        let item_type = DataType::Struct(Fields::from(vec![
+            Field::new("address", DataType::FixedSizeBinary(20), false),
+            Field::new(
+                "storage_keys",
+                DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::FixedSizeBinary(32),
+                    false,
+                ))),
+                false,
+            ),
+        ]));
+        let field = Arc::new(Field::new(
+            "access_list",
+            DataType::List(Arc::new(Field::new("item", item_type, true))),
+            true,
+        ));
+
+        let builder = EncoderBuilder::try_new(field).unwrap();
+        let schema = builder.schema();
+
+        assert_eq!(
+            schema,
+            Column {
+                data_type: PostgresType::List(Box::new(Column {
+                    data_type: PostgresType::Jsonb,
+                    nullable: true,
+                })),
+                nullable: true,
+            }
+        );
     }
 
     #[test]
