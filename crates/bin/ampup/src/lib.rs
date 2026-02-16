@@ -4,6 +4,7 @@ pub mod config;
 pub mod github;
 pub mod install;
 pub mod platform;
+pub mod rate_limiter;
 pub mod shell;
 pub mod token;
 pub mod updater;

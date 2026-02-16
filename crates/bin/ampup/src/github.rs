@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
+
+use crate::rate_limiter::GitHubRateLimiter;
 
 const AMPUP_API_URL: &str = "https://ampup.sh/api";
 const GITHUB_API_URL: &str = "https://api.github.com";
@@ -36,6 +40,10 @@ pub enum GitHubError {
         status_code: u16,
         url: String,
         body: String,
+    },
+    RateLimited {
+        retry_after_secs: u64,
+        has_token: bool,
     },
 }
 
@@ -144,6 +152,18 @@ impl std::fmt::Display for GitHubError {
                     writeln!(f, "  Response: {}", body)?;
                 }
             }
+            Self::RateLimited {
+                retry_after_secs,
+                has_token,
+            } => {
+                writeln!(f, "GitHub API rate limit exceeded")?;
+                writeln!(f, "  Retry after: {} seconds", retry_after_secs)?;
+                writeln!(f)?;
+                if !*has_token {
+                    writeln!(f, "  Unauthenticated requests have lower rate limits.")?;
+                    writeln!(f, "  Try: export GITHUB_TOKEN=$(gh auth token)")?;
+                }
+            }
         }
         Ok(())
     }
@@ -166,12 +186,16 @@ struct Asset {
     url: String,
 }
 
+/// Clone is cheap: `reqwest::Client` and `rate_limiter` are both `Arc`-backed.
+/// Needed so `DownloadManager` can move a handle into each spawned download task.
+#[derive(Clone)]
 pub struct GitHubClient {
     client: reqwest::Client,
     repo: String,
     token: Option<String>,
     /// Base URL for API requests (either custom API or GitHub API)
     api: String,
+    rate_limiter: Arc<GitHubRateLimiter>,
 }
 
 impl GitHubClient {
@@ -203,11 +227,14 @@ impl GitHubClient {
             format!("{}/repos/{}/releases", GITHUB_API_URL, repo)
         };
 
+        let rate_limiter = Arc::new(GitHubRateLimiter::new(github_token.is_some()));
+
         Ok(Self {
             client,
             repo,
             token: github_token,
             api,
+            rate_limiter,
         })
     }
 
@@ -227,16 +254,59 @@ impl GitHubClient {
         self.get_release(&format!("tags/{}", version)).await
     }
 
+    /// Send a request with rate-limit awareness and one retry on 429.
+    async fn send_with_rate_limit(
+        &self,
+        build_request: impl Fn() -> reqwest::RequestBuilder,
+        context_msg: &str,
+    ) -> Result<reqwest::Response> {
+        self.rate_limiter.wait_if_paused().await;
+
+        let response = build_request()
+            .send()
+            .await
+            .context(context_msg.to_string())?;
+
+        if let Some(retry_after) = self.rate_limiter.update_from_response(&response).await {
+            crate::ui::warn!(
+                "Rate limited by GitHub API, retrying in {} seconds...",
+                retry_after
+            );
+            self.rate_limiter.wait_if_paused().await;
+
+            let response = build_request()
+                .send()
+                .await
+                .context(context_msg.to_string())?;
+
+            if let Some(retry_after) = self.rate_limiter.update_from_response(&response).await {
+                return Err(GitHubError::RateLimited {
+                    retry_after_secs: retry_after,
+                    has_token: self.token.is_some(),
+                }
+                .into());
+            }
+
+            return Ok(response);
+        }
+
+        // Warn if rate limit is exhausted (preemptive pause applies to next request)
+        if self.rate_limiter.remaining().await == Some(0) {
+            crate::ui::warn!(
+                "GitHub API rate limit exhausted, subsequent requests will be paused until reset"
+            );
+        }
+
+        Ok(response)
+    }
+
     /// Fetch release from GitHub API
     async fn get_release(&self, path: &str) -> Result<Release> {
         let url = format!("{}/{}", self.api, path);
 
         let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context("Failed to fetch release")?;
+            .send_with_rate_limit(|| self.client.get(&url), "Failed to fetch release")
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -312,12 +382,15 @@ impl GitHubClient {
         );
 
         let response = self
-            .client
-            .get(&url)
-            .header(reqwest::header::ACCEPT, "application/octet-stream")
-            .send()
-            .await
-            .context("Failed to download asset")?;
+            .send_with_rate_limit(
+                || {
+                    self.client
+                        .get(&url)
+                        .header(reqwest::header::ACCEPT, "application/octet-stream")
+                },
+                "Failed to download asset",
+            )
+            .await?;
 
         self.download_with_progress(response, &url, asset_name)
             .await
@@ -326,11 +399,8 @@ impl GitHubClient {
     /// Download asset directly (for public repos)
     async fn download_asset_direct(&self, url: &str, asset_name: &str) -> Result<Vec<u8>> {
         let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .context("Failed to download asset")?;
+            .send_with_rate_limit(|| self.client.get(url), "Failed to download asset")
+            .await?;
 
         self.download_with_progress(response, url, asset_name).await
     }
