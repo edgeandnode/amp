@@ -1,4 +1,6 @@
-use datafusion::common::HashMap;
+use std::num::NonZero;
+
+use lru::LruCache;
 use v8::{
     Handle as _,
     script_compiler::{CompileOptions, NoCacheReason},
@@ -9,6 +11,9 @@ use crate::{
     exception::{ExceptionMessage, catch},
     init_platform,
 };
+
+/// Maximum number of compiled scripts cached per isolate.
+const SCRIPT_CACHE_CAPACITY: NonZero<usize> = NonZero::<usize>::new(1000).unwrap();
 
 /// Errors that occur during JavaScript isolate operations
 ///
@@ -61,12 +66,18 @@ pub enum Error {
     PoolError(#[source] deadpool::unmanaged::PoolError),
 }
 
+/// A single-threaded V8 isolate with an LRU cache of compiled scripts.
+///
+/// Each isolate owns a V8 engine instance and caches compiled scripts keyed by
+/// content hash, evicting least-recently-used entries when the cache is full.
+/// Isolates are not `Send` or `Sync` — use [`crate::IsolatePool`] for async access.
 #[derive(Debug)]
 pub struct Isolate {
+    /// The underlying V8 engine instance owned by this isolate.
     isolate: v8::OwnedIsolate,
 
-    // TODO: Use cache capable of evicting
-    scripts: HashMap<blake3::Hash, v8::Global<v8::UnboundScript>>,
+    /// LRU cache of compiled scripts, keyed by blake3 hash of the script source.
+    scripts: LruCache<blake3::Hash, v8::Global<v8::UnboundScript>>,
 }
 
 impl Default for Isolate {
@@ -83,7 +94,7 @@ impl Isolate {
         let isolate = v8::Isolate::new(v8::CreateParams::default());
         Self {
             isolate,
-            scripts: HashMap::new(),
+            scripts: LruCache::new(SCRIPT_CACHE_CAPACITY),
         }
     }
 
@@ -121,7 +132,7 @@ impl Isolate {
                 None => return Err(Error::Exception(Box::new(catch(s)))),
             }
         };
-        self.scripts.insert(key, compiled_script.clone());
+        self.scripts.put(key, compiled_script.clone());
         Ok(compiled_script)
     }
 
