@@ -1,10 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
-use common::{context::query::QueryEnv, metadata::Overflow};
-use datafusion::{
-    common::DataFusionError,
-    parquet::basic::{Compression, ZstdLevel},
-};
+use common::metadata::Overflow;
+use datafusion::parquet::basic::{Compression, ZstdLevel};
 use serde::Deserialize as _;
 
 /// Configuration specific to dump operations
@@ -35,17 +32,6 @@ pub struct Config {
     /// Progress events are emitted at most once per this interval when there is new progress.
     /// Default: 10 seconds.
     pub progress_interval: Duration,
-}
-
-impl Config {
-    /// Create a DataFusion query environment from this configuration
-    pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
-        common::context::query::create_query_env(
-            self.max_mem_mb,
-            self.query_max_mem_mb,
-            &self.spill_location,
-        )
-    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

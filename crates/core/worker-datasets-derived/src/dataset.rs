@@ -123,11 +123,12 @@ use common::{
     },
     context::{
         planning::{DetachedLogicalPlan, PlanningContext},
-        query::{QueryContext, QueryEnv},
+        query::QueryContext,
     },
     dataset_store::ResolveRevisionError,
     metadata::Generation,
     parquet::errors::ParquetError,
+    query_env::QueryEnv,
     sql::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
@@ -243,7 +244,13 @@ pub async fn dump(
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set = tasks::FailFastJoinSet::<Result<(), DumpTableError>>::new();
 
-    let env = ctx.config.make_query_env().map_err(Error::CreateQueryEnv)?;
+    let env = common::query_env::create(
+        ctx.config.max_mem_mb,
+        ctx.config.query_max_mem_mb,
+        &ctx.config.spill_location,
+        ctx.data_store.clone(),
+    )
+    .map_err(Error::CreateQueryEnv)?;
     for (table, compactor) in &tables {
         let ctx = ctx.clone();
         let env = env.clone();
@@ -537,13 +544,8 @@ async fn dump_table(
             let start = manifest_start_block.unwrap_or(dependency_earliest_block);
 
             let resolved = resolve_end_block(&end, start, async {
-                let query_ctx = QueryContext::for_catalog(
-                    catalog.clone(),
-                    env.clone(),
-                    ctx.data_store.clone(),
-                    false,
-                )
-                .await?;
+                let query_ctx =
+                    QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
                 let max_end_blocks = query_ctx
                     .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
                     .await?;
@@ -814,7 +816,6 @@ async fn dump_sql_query(
             env.clone(),
             catalog.clone(),
             &ctx.dataset_store,
-            ctx.data_store.clone(),
             query,
             start,
             end,

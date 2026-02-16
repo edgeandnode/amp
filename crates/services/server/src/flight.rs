@@ -43,9 +43,10 @@ use common::{
     },
     context::{
         planning::{DetachedLogicalPlan, PlanningContext},
-        query::{Error as CoreError, QueryContext, QueryEnv},
+        query::{Error as CoreError, QueryContext},
     },
     dataset_store::{DatasetStore, GetDatasetError},
+    query_env::QueryEnv,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
@@ -84,7 +85,6 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: QueryEnv,
-    data_store: DataStore,
     dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -98,7 +98,13 @@ impl Service {
         dataset_store: DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, InitError> {
-        let env = config.make_query_env().map_err(InitError::QueryEnv)?;
+        let env = common::query_env::create(
+            config.max_mem_mb,
+            config.query_max_mem_mb,
+            &config.spill_location,
+            data_store,
+        )
+        .map_err(InitError::QueryEnv)?;
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
         let metrics = meter.as_ref().map(|m| Arc::new(MetricsRegistry::new(m)));
@@ -106,7 +112,6 @@ impl Service {
         Ok(Self {
             config,
             env,
-            data_store,
             dataset_store,
             notification_multiplexer,
             metrics,
@@ -133,7 +138,7 @@ impl Service {
             )
             .await
             .map_err(Error::CreateLogicalCatalogError)?;
-            create_physical_catalog(&self.dataset_store, &self.data_store, logical)
+            create_physical_catalog(&self.dataset_store, &self.env.store, logical)
                 .await
                 .map_err(Error::PhysicalCatalogError)
         }?;
@@ -189,14 +194,9 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = QueryContext::for_catalog(
-                catalog,
-                self.env.clone(),
-                self.data_store.clone(),
-                false,
-            )
-            .await
-            .map_err(Error::CoreError)?;
+            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false)
+                .await
+                .map_err(Error::CoreError)?;
             let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
 
             let block_ranges = ctx.common_ranges(&plan).await.map_err(Error::CoreError)?;
@@ -254,7 +254,6 @@ impl Service {
                 self.env.clone(),
                 catalog,
                 dataset_store,
-                self.data_store.clone(),
                 plan,
                 earliest_block,
                 None,
