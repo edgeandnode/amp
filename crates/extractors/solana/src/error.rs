@@ -56,14 +56,6 @@ pub enum Of1StreamError {
     #[error("RPC client error")]
     RpcClient(#[source] solana_client::client_error::ClientError),
 
-    /// Could not find the previous blockhash for the given slot.
-    ///
-    /// When streaming blocks, the extractor needs the previous block's hash to
-    /// maintain chain continuity. This error occurs when walking back through
-    /// slots fails to find a valid parent block.
-    #[error("could not find previous blockhash for slot {0}")]
-    PrevBlockhashNotFound(u64),
-
     /// The CAR manager communication channel was closed unexpectedly.
     ///
     /// The CAR manager runs as a separate task handling file downloads. This error
@@ -168,8 +160,7 @@ impl From<Of1StreamError> for BlockStreamError {
             Of1StreamError::RpcClient(_) => BlockStreamError::Recoverable(value.into()),
             // This is intentionally not a catch-all, to force consideration of
             // each error type when mapping to recoverable vs fatal.
-            Of1StreamError::PrevBlockhashNotFound(_)
-            | Of1StreamError::ChannelClosed(_)
+            Of1StreamError::ChannelClosed(_)
             | Of1StreamError::FileOpen(_)
             | Of1StreamError::Mmap(_)
             | Of1StreamError::UnexpectedNode { .. }

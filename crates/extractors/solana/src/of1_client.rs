@@ -257,14 +257,7 @@ pub fn stream(
                             .expect("invalid base-58 string")
                             .expect("blockhash is 32 bytes");
                     },
-                    Err(e) if rpc_client::is_block_missing_err(&e) => {
-                        if slot == 0 {
-                            yield Err(Of1StreamError::PrevBlockhashNotFound(start));
-                            return;
-                        } else {
-                            slot -= 1;
-                        }
-                }
+                    Err(e) if rpc_client::is_block_missing_err(&e) => slot += 1,
                     Err(e) => {
                         yield Err(Of1StreamError::RpcClient(e));
                         return;
