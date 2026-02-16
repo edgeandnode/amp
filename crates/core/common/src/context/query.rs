@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use amp_data_store::DataStore;
 use arrow::{array::ArrayRef, compute::concat_batches};
 use datafusion::{
     self,
@@ -11,17 +10,13 @@ use datafusion::{
     catalog::MemorySchemaProvider,
     error::DataFusionError,
     execution::{
-        SendableRecordBatchStream, SessionStateBuilder,
-        config::SessionConfig,
-        context::{SQLOptions, SessionContext},
-        memory_pool::human_readable_size,
-        runtime_env::RuntimeEnv,
+        SendableRecordBatchStream, SessionStateBuilder, config::SessionConfig,
+        context::SessionContext, memory_pool::human_readable_size, runtime_env::RuntimeEnv,
     },
-    logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF},
+    logical_expr::LogicalPlan,
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
-    scalar::ScalarValue,
     sql::parser,
 };
 use datafusion_tracing::{
@@ -30,206 +25,19 @@ use datafusion_tracing::{
 use datasets_common::network_id::NetworkId;
 use futures::{TryStreamExt, stream};
 use regex::Regex;
-use thiserror::Error;
-use tracing::{field, instrument};
+use tracing::field;
 
 use crate::{
     BlockNum, BlockRange, arrow,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
-    evm::udfs::{
-        EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
-        EvmEncodeType, EvmTopic, ShiftUnits,
+    context::common::{
+        ReadOnlyCheckError, SqlToPlanError, builtin_udfs, read_only_check, sql_to_plan,
     },
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
-    plan_visitors::{
-        extract_table_references_from_plan, forbid_duplicate_field_names,
-        forbid_underscore_prefixed_aliases,
-    },
+    plan_visitors::{extract_table_references_from_plan, forbid_duplicate_field_names},
     query_env::QueryEnv,
     sql::{TableReference, TableReferenceConversionError},
 };
-
-pub fn default_catalog_name() -> ScalarValue {
-    ScalarValue::Utf8(Some("amp".to_string()))
-}
-
-/// Errors that occur during query context operations
-///
-/// This error type covers failures in SQL parsing, query planning, execution,
-/// and catalog operations within the query context.
-#[derive(Error, Debug)]
-pub enum Error {
-    /// Failed to extract table references from a logical query plan
-    ///
-    /// This occurs when traversing the logical plan to identify all referenced
-    /// tables fails. The system needs to know which tables are referenced in
-    /// order to compute common synced block ranges across all tables.
-    ///
-    /// Possible causes:
-    /// - Malformed or corrupted logical plan structure
-    /// - Internal DataFusion error during plan traversal
-    /// - Unexpected plan node types that cannot be processed
-    #[error("failed to extract table references from plan")]
-    ExtractTableReferences(#[source] DataFusionError),
-
-    /// Failed to convert a DataFusion table reference to the project's format
-    ///
-    /// This occurs when converting DataFusion's `TableReference` into the
-    /// project's validated `TableReference<String>` type. The conversion
-    /// validates table names and schema identifiers.
-    ///
-    /// Possible causes:
-    /// - Invalid table name that doesn't conform to identifier rules
-    /// - Schema name cannot be parsed or validated
-    /// - Catalog-qualified reference (3-part name) which is not supported
-    /// - Table name contains invalid characters
-    #[error("failed to convert table reference")]
-    TableReferenceConversion(#[source] TableReferenceConversionError),
-
-    /// Query plan violates system constraints
-    ///
-    /// This occurs when a query plan contains operations that are not allowed
-    /// in the current context. The query context enforces read-only access
-    /// and reserves certain naming conventions for internal use.
-    ///
-    /// Possible causes:
-    /// - DDL operations (CREATE, DROP, ALTER) in a read-only context
-    /// - DML operations (INSERT, UPDATE, DELETE) in a read-only context
-    /// - Column aliases starting with underscore (`_`) which are reserved
-    ///   for special columns like `_block_num`
-    ///
-    /// This is typically a user error that requires modifying the query.
-    #[error("invalid plan")]
-    InvalidPlan(#[source] DataFusionError),
-
-    /// Failed during query planning phase
-    ///
-    /// This occurs during SQL-to-logical-plan conversion, logical plan
-    /// optimization, physical plan creation, or plan validation. This is
-    /// a general-purpose error for plan manipulation failures.
-    ///
-    /// Possible causes:
-    /// - SQL syntax is valid but semantically incorrect (e.g., type mismatch)
-    /// - Referenced columns do not exist in the schema
-    /// - Optimizer rule failure during logical optimization
-    /// - Physical plan creation failure (e.g., unsupported operation)
-    /// - Duplicate field names in the output schema
-    /// - Stream execution initialization failure
-    ///
-    /// Some causes indicate user error (bad query), while others may indicate
-    /// internal issues or unsupported operations.
-    #[error("planning error: {0}")]
-    PlanningError(#[source] DataFusionError),
-
-    /// Failed during query execution phase
-    ///
-    /// This occurs after planning completes successfully, during the actual
-    /// execution of the query when materializing record batches from the
-    /// result stream.
-    ///
-    /// Possible causes:
-    /// - I/O error reading parquet files from storage
-    /// - Memory allocation failure during batch processing
-    /// - Data corruption in source files
-    /// - Network interruption when accessing remote storage
-    /// - Timeout during long-running operations
-    ///
-    /// This error may be transient (network issues) or permanent (data corruption).
-    #[error("query execution error")]
-    ExecutionError(#[source] DataFusionError),
-
-    /// Failed to register a dataset table with the query context
-    ///
-    /// This occurs when attempting to register a table snapshot with
-    /// DataFusion's session context. Tables must be registered before
-    /// they can be queried.
-    ///
-    /// Possible causes:
-    /// - Schema mismatch between table metadata and actual data
-    /// - Table with the same name already exists in the context
-    /// - Invalid table configuration or metadata
-    /// - Object store registration failure
-    #[error("dataset error")]
-    DatasetError(#[source] DataFusionError),
-
-    /// Failed to create a catalog snapshot from the physical catalog
-    ///
-    /// This occurs during `QueryContext` initialization when creating
-    /// snapshots of physical tables. The snapshot captures the current
-    /// state of synced data including canonical chain information.
-    ///
-    /// Possible causes:
-    /// - Failed to fetch segment metadata from the data store
-    /// - Failed to compute canonical blockchain chain (reorg handling)
-    /// - Database connection issues when querying metadata
-    /// - Inconsistent state between metadata and actual data files
-    ///
-    /// This error prevents query context creation and requires investigation
-    /// of the catalog and data store state.
-    #[error("failed to create catalog snapshot")]
-    CatalogSnapshot(#[source] crate::catalog::physical::FromCatalogError),
-
-    /// Failed during metadata table operations
-    ///
-    /// This occurs when querying or operating on internal metadata tables.
-    /// Metadata tables provide system information about the query context.
-    ///
-    /// Possible causes:
-    /// - Internal metadata table schema mismatch
-    /// - Metadata table registration failure
-    /// - Query against metadata table failed
-    #[error("meta table error")]
-    MetaTableError(#[source] DataFusionError),
-
-    /// Failed to parse SQL query string
-    ///
-    /// This occurs during the initial SQL parsing phase before any planning
-    /// begins. The SQL string could not be parsed into a valid statement.
-    ///
-    /// Possible causes:
-    /// - Invalid SQL syntax (typos, missing keywords, unbalanced parentheses)
-    /// - Empty SQL input (no statements provided)
-    /// - Multiple SQL statements in a single query string (not supported)
-    /// - Unsupported SQL dialect features
-    ///
-    /// This is a user error that requires fixing the SQL query.
-    #[error("SQL parse error")]
-    SqlParseError(#[source] crate::sql::ParseSqlError),
-
-    /// Failed to configure DataFusion session
-    ///
-    /// This occurs during `QueryContext` initialization when configuring
-    /// the DataFusion session from environment variables. DataFusion supports
-    /// various tuning parameters via environment variables.
-    ///
-    /// Possible causes:
-    /// - Invalid environment variable value for a DataFusion setting
-    /// - Malformed configuration string
-    /// - Unsupported configuration option
-    ///
-    /// Check environment variables like `DATAFUSION_OPTIMIZER_*` and
-    /// `DATAFUSION_EXECUTION_*` for invalid values.
-    #[error("DataFusion configuration error")]
-    ConfigError(#[source] DataFusionError),
-
-    /// Referenced table does not exist in the catalog
-    ///
-    /// This occurs when a query references a table that is not registered
-    /// in the current query context's catalog. The table name is valid but
-    /// the table itself is not available.
-    ///
-    /// Possible causes:
-    /// - Typo in the table name
-    /// - Table exists but is not synced (no data available)
-    /// - Table was removed or renamed
-    /// - Insufficient permissions to access the table
-    /// - Table is in a different schema than expected
-    ///
-    /// This is typically a user error. Verify the table name and ensure
-    /// the table has synced data.
-    #[error("table not found: {0}")]
-    TableNotFoundError(TableReference),
-}
 
 /// A context for executing queries against a catalog.
 #[derive(Clone)]
@@ -242,45 +50,17 @@ pub struct QueryContext {
 }
 
 impl QueryContext {
+    /// Creates a query context from a physical catalog.
     pub async fn for_catalog(
-        catalog: Catalog,
         env: QueryEnv,
+        catalog: Catalog,
         ignore_canonical_segments: bool,
-    ) -> Result<Self, Error> {
-        // This contains various tuning options for the query engine.
-        // Using `from_env` allows tinkering without re-compiling.
-        let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?.set(
-            "datafusion.catalog.default_catalog",
-            &default_catalog_name(),
-        );
-
-        let opts = session_config.options_mut();
-
-        // Rationale for DataFusion settings:
-        //
-        // `prefer_existing_sort` takes advantage of our files being time-partitioned and each file
-        // having the rows written in sorted order.
-        //
-        // `pushdown_filters` should be helpful for very selective queries, which is something we
-        // want to optimize for.
-
-        // Set `prefer_existing_sort` by default.
-        if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
-            opts.optimizer.prefer_existing_sort = true;
-        }
-
-        // Set `parquet.pushdown_filters` by default.
-        //
-        // See https://github.com/apache/datafusion/issues/3463 for upstream default tracking.
-        if std::env::var_os("DATAFUSION_EXECUTION_PARQUET_PUSHDOWN_FILTERS").is_none() {
-            opts.execution.parquet.pushdown_filters = true;
-        }
-
+    ) -> Result<Self, CreateContextError> {
         // Create a catalog snapshot with canonical chain locked in
         let catalog_snapshot =
             CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments, env.store.clone())
                 .await
-                .map_err(Error::CatalogSnapshot)?;
+                .map_err(CreateContextError::CatalogSnapshot)?;
 
         let tiered_memory_pool: Arc<TieredMemoryPool> = {
             let per_query_bytes = env.query_max_mem_mb * 1024 * 1024;
@@ -293,101 +73,95 @@ impl QueryContext {
         };
 
         Ok(Self {
+            session_config: env.session_config.clone(),
             env,
-            session_config,
             catalog: catalog_snapshot,
             tiered_memory_pool,
         })
     }
 
+    /// Returns the catalog snapshot backing this query context.
     pub fn catalog(&self) -> &CatalogSnapshot {
         &self.catalog
     }
 
-    pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = sql_to_plan(&ctx, query).await?;
+    /// Converts a parsed SQL statement into a logical plan against the physical catalog.
+    pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, PlanSqlError> {
+        let ctx = new_session_ctx(
+            self.session_config.clone(),
+            &self.tiered_memory_pool,
+            &self.env,
+            &self.catalog,
+        )
+        .map_err(PlanSqlError::RegisterTable)?;
+
+        let plan = sql_to_plan(&ctx, query)
+            .await
+            .map_err(PlanSqlError::SqlToPlan)?;
         Ok(plan)
     }
 
-    /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
-    /// sessions created by this function, and they will behave the same as if they had been run
-    /// against a persistent `SessionContext`
-    fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        // Build per-query RuntimeEnv
-        let runtime_env = Arc::new(RuntimeEnv {
-            memory_pool: self.tiered_memory_pool.clone(),
-            disk_manager: self.env.disk_manager.clone(),
-            cache_manager: self.env.cache_manager.clone(),
-            object_store_registry: self.env.object_store_registry.clone(),
-        });
-
-        let state = SessionStateBuilder::new()
-            .with_config(self.session_config.clone())
-            .with_runtime_env(runtime_env)
-            .with_default_features()
-            .with_physical_optimizer_rule(create_instrumentation_rule())
-            .build();
-        let ctx = SessionContext::new_with_state(state);
-
-        for table in self.catalog.table_snapshots() {
-            register_table(&ctx, table.clone(), &self.env.store).map_err(Error::DatasetError)?;
-        }
-
-        self.register_udfs(&ctx);
-
-        Ok(ctx)
-    }
-
-    fn register_udfs(&self, ctx: &SessionContext) {
-        for udf in udfs() {
-            ctx.register_udf(udf);
-        }
-        for udaf in udafs() {
-            ctx.register_udaf(udaf);
-        }
-        for udf in self.catalog.udfs() {
-            ctx.register_udf(udf.clone());
-        }
-    }
-
+    /// Executes a logical plan and returns a streaming result set.
     pub async fn execute_plan(
         &self,
         plan: LogicalPlan,
         logical_optimize: bool,
-    ) -> Result<SendableRecordBatchStream, Error> {
-        let ctx = self.datafusion_ctx()?;
+    ) -> Result<SendableRecordBatchStream, ExecutePlanError> {
+        let ctx = new_session_ctx(
+            self.session_config.clone(),
+            &self.tiered_memory_pool,
+            &self.env,
+            &self.catalog,
+        )
+        .map_err(ExecutePlanError::RegisterTable)?;
 
-        let result = execute_plan(&ctx, plan, logical_optimize).await;
+        let result = execute_plan(&ctx, plan, logical_optimize)
+            .await
+            .map_err(ExecutePlanError::Execute)?;
 
         tracing::debug!(
             peak_memory_mb = human_readable_size(self.tiered_memory_pool.peak_reserved()),
             "Query memory usage"
         );
 
-        result
+        Ok(result)
     }
 
     /// This will load the result set entirely in memory, so it should be used with caution.
-    pub async fn execute_and_concat(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
+    pub async fn execute_and_concat(
+        &self,
+        plan: LogicalPlan,
+    ) -> Result<RecordBatch, ExecuteAndConcatError> {
         let schema = plan.schema().inner().clone();
-        let ctx = self.datafusion_ctx()?;
+        let ctx = new_session_ctx(
+            self.session_config.clone(),
+            &self.tiered_memory_pool,
+            &self.env,
+            &self.catalog,
+        )
+        .map_err(ExecuteAndConcatError::RegisterTable)?;
+
         let batch_stream = execute_plan(&ctx, plan, true)
-            .await?
+            .await
+            .map_err(ExecuteAndConcatError::Execute)?
             .try_collect::<Vec<_>>()
             .await
-            .map_err(Error::ExecutionError)?;
+            .map_err(ExecuteAndConcatError::CollectResults)?;
+
         Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
 
-    /// Returns table or `TableNotFoundError`
-    pub fn get_table(&self, table_ref: &TableReference) -> Result<Arc<TableSnapshot>, Error> {
+    /// Looks up a table snapshot by reference. Fails if the table is not in the catalog.
+    pub fn get_table(
+        &self,
+        table_ref: &TableReference,
+    ) -> Result<Arc<TableSnapshot>, TableNotFoundError> {
         self.catalog
             .table_snapshots()
             .iter()
             .find(|snapshot| snapshot.physical_table().table_ref() == *table_ref)
             .cloned()
-            .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
+            .ok_or_else(|| TableNotFoundError(table_ref.clone()))
     }
 
     /// Return the block ranges that are synced for all tables referenced by the given plan,
@@ -395,16 +169,23 @@ impl QueryContext {
     /// (maximum start block to minimum end block).
     ///
     /// Returns an empty Vec if any referenced table has no synced data.
-    #[instrument(skip_all, err)]
-    pub async fn common_ranges(&self, plan: &LogicalPlan) -> Result<Vec<BlockRange>, Error> {
+    #[tracing::instrument(skip_all, err)]
+    pub async fn common_ranges(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<Vec<BlockRange>, CommonRangesError> {
         let mut ranges_by_network: BTreeMap<NetworkId, BlockRange> = BTreeMap::new();
-        for df_table_ref in
-            extract_table_references_from_plan(plan).map_err(Error::ExtractTableReferences)?
+        for df_table_ref in extract_table_references_from_plan(plan)
+            .map_err(CommonRangesError::ExtractTableReferences)?
         {
             let table_ref: TableReference<String> = df_table_ref
                 .try_into()
-                .map_err(Error::TableReferenceConversion)?;
-            let Some(table_range) = self.get_table(&table_ref)?.synced_range() else {
+                .map_err(CommonRangesError::TableReferenceConversion)?;
+            let Some(table_range) = self
+                .get_table(&table_ref)
+                .map_err(CommonRangesError::TableNotFound)?
+                .synced_range()
+            else {
                 // If any table has no synced data, return empty ranges
                 return Ok(vec![]);
             };
@@ -431,11 +212,11 @@ impl QueryContext {
     /// for that network.
     ///
     /// Returns an empty map if any referenced table has no synced data.
-    #[instrument(skip_all, err)]
+    #[tracing::instrument(skip_all, err)]
     pub async fn max_end_blocks(
         &self,
         plan: &LogicalPlan,
-    ) -> Result<BTreeMap<NetworkId, BlockNum>, Error> {
+    ) -> Result<BTreeMap<NetworkId, BlockNum>, CommonRangesError> {
         Ok(self
             .common_ranges(plan)
             .await?
@@ -445,98 +226,227 @@ impl QueryContext {
     }
 }
 
-#[instrument(skip_all, err)]
-pub async fn sql_to_plan(
-    ctx: &SessionContext,
-    query: parser::Statement,
-) -> Result<LogicalPlan, Error> {
-    let plan = ctx
-        .state()
-        .statement_to_plan(query)
-        .await
-        .map_err(Error::PlanningError)?;
-    verify_plan(&plan)?;
-    Ok(plan)
+/// Failed to create a `QueryContext` from a catalog
+///
+/// This error covers failures during `QueryContext::for_catalog()`.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateContextError {
+    /// Failed to create a catalog snapshot from the physical catalog
+    ///
+    /// This occurs when creating snapshots of physical tables, typically
+    /// due to segment metadata fetch failures or canonical chain computation errors.
+    #[error("failed to create catalog snapshot")]
+    CatalogSnapshot(#[source] crate::catalog::physical::FromCatalogError),
 }
 
-pub fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
-    forbid_underscore_prefixed_aliases(plan).map_err(Error::InvalidPlan)?;
-    read_only_check(plan)
+/// Failed to plan a SQL query in the query context
+///
+/// This error covers failures during `QueryContext::plan_sql()`.
+#[derive(Debug, thiserror::Error)]
+pub enum PlanSqlError {
+    /// Failed to create a query session context
+    ///
+    /// This occurs when building a `SessionContext` for query execution fails,
+    /// typically due to a table registration error during context setup.
+    #[error("failed to create query session context")]
+    RegisterTable(#[source] RegisterTableError),
+
+    /// Failed to convert SQL to a logical plan
+    ///
+    /// This occurs during SQL-to-logical-plan conversion, including
+    /// statement parsing, alias validation, and read-only enforcement.
+    #[error("failed to convert SQL to logical plan: {0}")]
+    SqlToPlan(#[source] SqlToPlanError),
 }
 
-fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
-    SQLOptions::new()
-        .with_allow_ddl(false)
-        .with_allow_dml(false)
-        .with_allow_statements(false)
-        .verify_plan(plan)
-        .map_err(Error::InvalidPlan)
+/// Errors that occur during inner `execute_plan` function
+///
+/// This error covers failures in read-only check, optimization,
+/// physical plan creation, and stream execution.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecuteError {
+    /// Query plan violates read-only constraints
+    #[error("query plan violates read-only constraints")]
+    ReadOnlyCheck(#[source] ReadOnlyCheckError),
+
+    /// Failed to optimize the logical plan
+    #[error("failed to optimize logical plan")]
+    Optimize(#[source] DataFusionError),
+
+    /// Failed to create a physical execution plan
+    #[error("failed to create physical execution plan")]
+    CreatePhysicalPlan(#[source] DataFusionError),
+
+    /// Output schema contains duplicate field names
+    #[error("output schema contains duplicate field names")]
+    DuplicateFieldNames(#[source] DataFusionError),
+
+    /// Failed to start query execution stream
+    #[error("failed to start query execution stream")]
+    ExecuteStream(#[source] DataFusionError),
+
+    /// Failed to collect explain results
+    #[error("failed to collect explain results")]
+    CollectExplainResults(#[source] DataFusionError),
 }
 
-fn register_table(
-    ctx: &SessionContext,
-    table: Arc<TableSnapshot>,
-    store: &DataStore,
-) -> Result<(), DataFusionError> {
-    // The catalog schema needs to be explicitly created or table creation will fail.
-    create_catalog_schema(ctx, table.physical_table().sql_table_ref_schema());
+/// Failed to execute a plan via `QueryContext::execute_plan`
+///
+/// This error wraps session context creation and inner execution errors.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutePlanError {
+    /// Failed to create a query session context
+    #[error("failed to create query session context")]
+    RegisterTable(#[source] RegisterTableError),
 
-    let table_ref = table.physical_table().table_ref().clone();
-
-    // This may overwrite a previously registered store, but that should not make a difference.
-    // The only segment of the `table.url()` that matters here is the schema and bucket name.
-    ctx.register_object_store(
-        table.physical_table().url(),
-        store.as_datafusion_object_store().clone(),
-    );
-
-    ctx.register_table(table_ref, table)?;
-
-    Ok(())
+    /// Failed during plan execution
+    #[error("failed to execute plan")]
+    Execute(#[source] ExecuteError),
 }
 
-pub fn create_catalog_schema(ctx: &SessionContext, schema_name: &str) {
-    // We only have use catalog, the default one.
-    let catalog = ctx.catalog(&ctx.catalog_names()[0]).unwrap();
-    if catalog.schema(schema_name).is_none() {
-        let schema = Arc::new(MemorySchemaProvider::new());
-        catalog.register_schema(schema_name, schema).unwrap();
+/// Failed to execute a plan and concatenate results
+///
+/// This error covers `QueryContext::execute_and_concat()`.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecuteAndConcatError {
+    /// Failed to create a query session context
+    #[error("failed to create query session context")]
+    RegisterTable(#[source] RegisterTableError),
+
+    /// Failed during plan execution
+    #[error("failed to execute plan")]
+    Execute(#[source] ExecuteError),
+
+    /// Failed to collect result batches from the execution stream
+    ///
+    /// This occurs after planning completes successfully, during the actual
+    /// execution when materializing record batches from the result stream.
+    #[error("failed to collect query results")]
+    CollectResults(#[source] DataFusionError),
+}
+
+/// Referenced table does not exist in the catalog
+///
+/// This occurs when a query references a table that is not registered
+/// in the current query context's catalog.
+#[derive(Debug, thiserror::Error)]
+#[error("table not found: {0}")]
+pub struct TableNotFoundError(pub TableReference);
+
+/// Failed to compute common block ranges across referenced tables
+///
+/// This error is shared by `common_ranges` and `max_end_blocks` because
+/// `max_end_blocks` only delegates to `common_ranges`.
+#[derive(Debug, thiserror::Error)]
+pub enum CommonRangesError {
+    /// Failed to extract table references from the logical plan
+    #[error("failed to extract table references from plan")]
+    ExtractTableReferences(#[source] DataFusionError),
+
+    /// Failed to convert a DataFusion table reference to the project's format
+    #[error("failed to convert table reference")]
+    TableReferenceConversion(#[source] TableReferenceConversionError),
+
+    /// Referenced table does not exist in the catalog
+    #[error("table not found")]
+    TableNotFound(#[source] TableNotFoundError),
+}
+
+/// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
+/// sessions created by this function, and they will behave the same as if they had been run
+/// against a persistent `SessionContext`
+fn new_session_ctx(
+    config: SessionConfig,
+    tiered_memory_pool: &Arc<TieredMemoryPool>,
+    env: &QueryEnv,
+    catalog: &CatalogSnapshot,
+) -> Result<SessionContext, RegisterTableError> {
+    // Build per-query ctx
+    let ctx = {
+        let runtime_env = Arc::new(RuntimeEnv {
+            memory_pool: tiered_memory_pool.clone(),
+            disk_manager: env.disk_manager.clone(),
+            cache_manager: env.cache_manager.clone(),
+            object_store_registry: env.object_store_registry.clone(),
+        });
+
+        let state = SessionStateBuilder::new()
+            .with_config(config)
+            .with_runtime_env(runtime_env)
+            .with_default_features()
+            .with_physical_optimizer_rule(create_instrumentation_rule())
+            .build();
+
+        SessionContext::new_with_state(state)
+    };
+
+    // Register the builtin UDFs
+    for udf in builtin_udfs() {
+        ctx.register_udf(udf);
     }
+
+    // Register catalog tables and UDFs
+    for table in catalog.table_snapshots() {
+        // The catalog schema needs to be explicitly created or table creation will fail.
+        let schema_name = table.physical_table().sql_table_ref_schema();
+        if ctx
+            .catalog(&ctx.catalog_names()[0])
+            .unwrap()
+            .schema(schema_name)
+            .is_none()
+        {
+            let schema = Arc::new(MemorySchemaProvider::new());
+            ctx.catalog(&ctx.catalog_names()[0])
+                .unwrap()
+                .register_schema(schema_name, schema)
+                .unwrap();
+        }
+
+        let table_ref = table.physical_table().table_ref().clone();
+
+        // This may overwrite a previously registered store, but that should not make a difference.
+        // The only segment of the `table.url()` that matters here is the schema and bucket name.
+        ctx.register_object_store(
+            table.physical_table().url(),
+            env.store.as_datafusion_object_store().clone(),
+        );
+
+        ctx.register_table(table_ref, table.clone())
+            .map_err(RegisterTableError)?;
+    }
+    for udf in catalog.udfs() {
+        ctx.register_udf(udf.clone());
+    }
+
+    Ok(ctx)
 }
 
-pub fn udfs() -> Vec<ScalarUDF> {
-    vec![
-        EvmDecodeLog::new().into(),
-        EvmDecodeLog::new().with_deprecated_name().into(),
-        EvmTopic::new().into(),
-        EvmEncodeParams::new().into(),
-        EvmDecodeParams::new().into(),
-        EvmEncodeType::new().into(),
-        EvmDecodeType::new().into(),
-        EvmEncodeHex::new().into(),
-        EvmDecodeHex::new().into(),
-        ShiftUnits::new().into(),
-    ]
-}
-
-pub fn udafs() -> Vec<AggregateUDF> {
-    vec![]
-}
+/// Failed to register a dataset table with the query session context
+///
+/// This occurs when DataFusion rejects a table registration during query
+/// session creation, typically because a table with the same name already
+/// exists or the table metadata is invalid.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to register dataset table with query session context")]
+pub struct RegisterTableError(#[source] DataFusionError);
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.
-#[instrument(skip_all, err)]
+#[tracing::instrument(skip_all, err)]
 async fn execute_plan(
     ctx: &SessionContext,
     mut plan: LogicalPlan,
     logical_optimize: bool,
-) -> Result<SendableRecordBatchStream, Error> {
+) -> Result<SendableRecordBatchStream, ExecuteError> {
     use datafusion::physical_plan::execute_stream;
 
-    read_only_check(&plan)?;
+    read_only_check(&plan).map_err(ExecuteError::ReadOnlyCheck)?;
     tracing::debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
     if logical_optimize {
-        plan = ctx.state().optimize(&plan).map_err(Error::PlanningError)?;
+        plan = ctx
+            .state()
+            .optimize(&plan)
+            .map_err(ExecuteError::Optimize)?;
     }
 
     let is_explain = matches!(plan, LogicalPlan::Explain(_) | LogicalPlan::Analyze(_));
@@ -545,14 +455,15 @@ async fn execute_plan(
     let physical_plan = planner
         .create_physical_plan(&plan, &ctx.state())
         .await
-        .map_err(Error::PlanningError)?;
+        .map_err(ExecuteError::CreatePhysicalPlan)?;
 
-    forbid_duplicate_field_names(&physical_plan, &plan).map_err(Error::PlanningError)?;
+    forbid_duplicate_field_names(&physical_plan, &plan)
+        .map_err(ExecuteError::DuplicateFieldNames)?;
 
     tracing::debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     match is_explain {
-        false => execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError),
+        false => execute_stream(physical_plan, ctx.task_ctx()).map_err(ExecuteError::ExecuteStream),
         true => execute_explain(physical_plan, ctx).await,
     }
 }
@@ -561,13 +472,13 @@ async fn execute_plan(
 async fn execute_explain(
     physical_plan: Arc<dyn ExecutionPlan>,
     ctx: &SessionContext,
-) -> Result<SendableRecordBatchStream, Error> {
+) -> Result<SendableRecordBatchStream, ExecuteError> {
     use datafusion::physical_plan::execution_plan;
 
     let schema = physical_plan.schema().clone();
     let output = execution_plan::collect(physical_plan, ctx.task_ctx())
         .await
-        .map_err(Error::ExecutionError)?;
+        .map_err(ExecuteError::CollectExplainResults)?;
 
     let concatenated = concat_batches(&schema, &output).unwrap();
     let sanitized = sanitize_explain(&concatenated);

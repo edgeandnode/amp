@@ -1,29 +1,18 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use datafusion::{
-    arrow::datatypes::SchemaRef,
-    catalog::{Session, TableProvider},
-    common::{
-        DFSchemaRef,
-        tree_node::{Transformed, TreeNode, TreeNodeRecursion},
-    },
-    datasource::{DefaultTableSource, TableType},
+    catalog::MemorySchemaProvider,
+    common::DFSchemaRef,
     error::DataFusionError,
     execution::{SessionStateBuilder, config::SessionConfig, context::SessionContext},
-    logical_expr::{Expr, LogicalPlan, TableScan},
-    physical_plan::ExecutionPlan,
     sql::parser,
 };
-use tracing::instrument;
 
 use crate::{
-    LogicalCatalog,
-    catalog::logical::LogicalTable,
-    context::query::{Error, QueryContext, default_catalog_name},
-    incrementalizer::NonIncrementalQueryError,
-    plan_visitors::{is_incremental, propagate_block_num},
-    sql::TableReference,
+    catalog::logical::{LogicalCatalog, LogicalTable},
+    context::common::{SqlToPlanError, builtin_udfs, sql_to_plan},
+    detached_logical_plan::DetachedLogicalPlan,
+    planning_table::PlanningTable,
 };
 
 /// A context for planning SQL queries.
@@ -33,155 +22,165 @@ pub struct PlanningContext {
 }
 
 impl PlanningContext {
-    pub fn new(catalog: LogicalCatalog) -> Self {
-        let session_config = SessionConfig::from_env().unwrap().set(
-            "datafusion.catalog.default_catalog",
-            &default_catalog_name(),
-        );
-
+    /// Creates a planning context from a logical catalog.
+    pub fn new(session_config: SessionConfig, catalog: LogicalCatalog) -> Self {
         Self {
             session_config,
             catalog,
         }
     }
 
-    /// Infers the output schema of the query by planning it against empty tables.
-    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = crate::context::query::sql_to_plan(&ctx, query).await?;
-        Ok(plan.schema().clone())
-    }
-
-    fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let state = SessionStateBuilder::new()
-            .with_config(self.session_config.clone())
-            .with_runtime_env(Default::default())
-            .with_default_features()
-            .build();
-        let ctx = SessionContext::new_with_state(state);
-        for table in &self.catalog.tables {
-            // The catalog schema needs to be explicitly created or table creation will fail.
-            crate::context::query::create_catalog_schema(&ctx, table.sql_table_ref_schema());
-            let planning_table = PlanningTable(table.clone());
-            ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
-                .map_err(Error::DatasetError)?;
-        }
-        self.register_udfs(&ctx);
-        Ok(ctx)
-    }
-
-    fn register_udfs(&self, ctx: &SessionContext) {
-        for udf in crate::context::query::udfs() {
-            ctx.register_udf(udf);
-        }
-        for udaf in crate::context::query::udafs() {
-            ctx.register_udaf(udaf);
-        }
-        for udf in self.catalog.udfs.iter() {
-            ctx.register_udf(udf.clone());
-        }
-    }
-
-    pub fn catalog(&self) -> &[LogicalTable] {
+    /// Returns the logical tables registered in this planning context.
+    pub fn logical_tables(&self) -> &[LogicalTable] {
         &self.catalog.tables
     }
 
-    #[instrument(skip_all, err)]
+    /// Infers the output schema of the query by planning it against empty tables.
+    pub async fn sql_output_schema(
+        &self,
+        query: parser::Statement,
+    ) -> Result<DFSchemaRef, PlanSqlError> {
+        let ctx = new_session_ctx(self.session_config.clone(), &self.catalog)
+            .map_err(PlanSqlError::RegisterTable)?;
+        let plan = sql_to_plan(&ctx, query)
+            .await
+            .map_err(PlanSqlError::SqlToPlan)?;
+        Ok(plan.schema().clone())
+    }
+
+    /// Converts a parsed SQL statement into a detached logical plan.
+    pub async fn plan_sql(
+        &self,
+        query: parser::Statement,
+    ) -> Result<DetachedLogicalPlan, PlanSqlError> {
+        let ctx = new_session_ctx(self.session_config.clone(), &self.catalog)
+            .map_err(PlanSqlError::RegisterTable)?;
+        let plan = sql_to_plan(&ctx, query)
+            .await
+            .map_err(PlanSqlError::SqlToPlan)?;
+        Ok(DetachedLogicalPlan::new(plan))
+    }
+
+    /// Applies DataFusion logical optimizations to a detached plan.
+    #[tracing::instrument(skip_all, err)]
     pub async fn optimize_plan(
         &self,
         plan: &DetachedLogicalPlan,
-    ) -> Result<DetachedLogicalPlan, Error> {
-        self.datafusion_ctx()?
+    ) -> Result<DetachedLogicalPlan, OptimizePlanError> {
+        new_session_ctx(self.session_config.clone(), &self.catalog)
+            .map_err(OptimizePlanError::RegisterTable)?
             .state()
-            .optimize(&plan.0)
-            .map_err(Error::PlanningError)
-            .map(DetachedLogicalPlan)
-    }
-
-    pub async fn plan_sql(&self, query: parser::Statement) -> Result<DetachedLogicalPlan, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = crate::context::query::sql_to_plan(&ctx, query).await?;
-        Ok(DetachedLogicalPlan(plan))
+            .optimize(plan.as_ref())
+            .map_err(OptimizePlanError::Optimize)
+            .map(DetachedLogicalPlan::new)
     }
 }
 
-#[derive(Clone, Debug)]
-struct PlanningTable(LogicalTable);
+fn new_session_ctx(
+    config: SessionConfig,
+    catalog: &LogicalCatalog,
+) -> Result<SessionContext, RegisterTableError> {
+    let ctx = {
+        let state = SessionStateBuilder::new()
+            .with_config(config)
+            .with_runtime_env(Default::default())
+            .with_default_features()
+            .build();
 
-#[async_trait]
-impl TableProvider for PlanningTable {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+        SessionContext::new_with_state(state)
+    };
+
+    // Register the builtin UDFs
+    for udf in builtin_udfs() {
+        ctx.register_udf(udf);
     }
 
-    fn schema(&self) -> SchemaRef {
-        self.0.table().schema().clone()
+    // Register the catalog tables and UDFs
+    for table in &catalog.tables {
+        let schema_name = table.sql_table_ref_schema();
+
+        // The catalog schema needs to be explicitly created or table creation will fail.
+        if ctx
+            .catalog(&ctx.catalog_names()[0])
+            .unwrap()
+            .schema(schema_name)
+            .is_none()
+        {
+            let schema = Arc::new(MemorySchemaProvider::new());
+            ctx.catalog(&ctx.catalog_names()[0])
+                .unwrap()
+                .register_schema(schema_name, schema)
+                .unwrap();
+        }
+
+        // Register the table with a `PlanningTable` that will be used for planning
+        let planning_table = PlanningTable::new(table.clone());
+        ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
+            .map_err(RegisterTableError)?;
+    }
+    for udf in catalog.udfs.iter() {
+        ctx.register_udf(udf.clone());
     }
 
-    fn table_type(&self) -> TableType {
-        TableType::Base
-    }
+    Ok(ctx)
+}
 
-    async fn scan(
-        &self,
-        _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
-        _limit: Option<usize>,
-    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        unreachable!("PlanningTable should never be scanned")
+/// Failed to register a catalog table with the planning session context
+///
+/// This occurs when DataFusion rejects a table registration during planning
+/// session creation, typically because a table with the same name already
+/// exists or the table metadata is invalid.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to register catalog table with planning session context")]
+pub struct RegisterTableError(#[source] DataFusionError);
+
+/// Failed to plan a SQL query against the planning context
+///
+/// This error is shared by `plan_sql` and `sql_output_schema` because they
+/// produce the exact same error variants.
+#[derive(Debug, thiserror::Error)]
+pub enum PlanSqlError {
+    /// Failed to create a planning session context
+    ///
+    /// This occurs when building a `SessionContext` for SQL planning fails,
+    /// typically due to a table registration error during context setup.
+    #[error("failed to create planning session context")]
+    RegisterTable(#[source] RegisterTableError),
+
+    /// Failed to convert SQL to a logical plan
+    ///
+    /// This occurs during SQL-to-logical-plan conversion, including
+    /// statement parsing, alias validation, and read-only enforcement.
+    #[error("failed to convert SQL to logical plan: {0}")]
+    SqlToPlan(#[source] SqlToPlanError),
+}
+
+impl PlanSqlError {
+    /// Returns `true` if this error represents an invalid plan due to user input
+    /// (forbidden aliases or read-only violations) rather than an internal failure.
+    pub fn is_invalid_plan(&self) -> bool {
+        matches!(self, Self::SqlToPlan(e) if e.is_invalid_plan())
     }
 }
 
-/// A plan that has `PlanningTable` for its `TableProvider`s. It cannot be executed before being
-/// first "attached" to a `QueryContext`.
-#[derive(Debug, Clone)]
-pub struct DetachedLogicalPlan(LogicalPlan);
+/// Failed to optimize a logical plan
+///
+/// This error covers failures during the logical optimization phase.
+#[derive(Debug, thiserror::Error)]
+pub enum OptimizePlanError {
+    /// Failed to create a planning session context
+    ///
+    /// This occurs when building a `SessionContext` for optimization fails,
+    /// typically due to a table registration error during context setup.
+    #[error("failed to create planning session context")]
+    RegisterTable(#[source] RegisterTableError),
 
-impl DetachedLogicalPlan {
-    #[instrument(skip_all, err)]
-    pub fn attach_to(self, ctx: &QueryContext) -> Result<LogicalPlan, Error> {
-        Ok(self
-            .0
-            .transform_with_subqueries(|mut node| match &mut node {
-                // Insert the clauses in non-view table scans
-                LogicalPlan::TableScan(TableScan {
-                    table_name, source, ..
-                }) if source.table_type() == TableType::Base
-                    && source.get_logical_plan().is_none() =>
-                {
-                    let table_ref: TableReference<String> = table_name
-                        .clone()
-                        .try_into()
-                        .map_err(|e| DataFusionError::External(Box::new(e)))?;
-                    let provider = ctx
-                        .get_table(&table_ref)
-                        .map_err(|e| DataFusionError::External(e.into()))?;
-                    *source = Arc::new(DefaultTableSource::new(provider));
-                    Ok(Transformed::yes(node))
-                }
-                _ => Ok(Transformed::no(node)),
-            })
-            .map_err(Error::PlanningError)?
-            .data)
-    }
-
-    pub fn is_incremental(&self) -> Result<(), NonIncrementalQueryError> {
-        is_incremental(&self.0)
-    }
-
-    pub fn schema(&self) -> DFSchemaRef {
-        self.0.schema().clone()
-    }
-
-    pub fn propagate_block_num(self) -> Result<Self, DataFusionError> {
-        Ok(Self(propagate_block_num(self.0)?))
-    }
-
-    pub fn apply<F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
-    where
-        F: FnMut(&LogicalPlan) -> Result<TreeNodeRecursion, DataFusionError>,
-    {
-        self.0.apply(f)
-    }
+    /// DataFusion optimizer failed to process the plan
+    ///
+    /// Possible causes:
+    /// - Optimizer rule failure during logical optimization
+    /// - Type inference errors
+    /// - Schema inconsistencies
+    #[error("failed to optimize logical plan")]
+    Optimize(#[source] DataFusionError),
 }
