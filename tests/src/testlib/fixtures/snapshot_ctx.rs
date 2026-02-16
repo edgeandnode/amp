@@ -22,6 +22,7 @@ use common::{
     context::query::QueryContext,
 };
 use server::config::Config;
+
 /// Snapshot context fixture for comparing dataset snapshots in tests.
 ///
 /// This fixture wraps a QueryContext to provide snapshot comparison capabilities
@@ -53,8 +54,17 @@ impl SnapshotContext {
             .collect();
         let logical = LogicalCatalog::from_tables(resolved_tables.iter());
         let catalog = Catalog::new(tables, logical);
-        let query_ctx =
-            QueryContext::for_catalog(catalog, config.make_query_env()?, store, false).await?;
+        let query_ctx = QueryContext::for_catalog(
+            catalog,
+            common::query_env::create(
+                config.max_mem_mb,
+                config.query_max_mem_mb,
+                &config.spill_location,
+                store,
+            )?,
+            false,
+        )
+        .await?;
 
         Ok(Self { query_ctx })
     }

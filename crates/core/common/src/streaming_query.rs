@@ -39,12 +39,13 @@ use crate::{
     },
     context::{
         planning::{DetachedLogicalPlan, PlanningContext},
-        query::{QueryContext, QueryEnv},
+        query::QueryContext,
     },
     dataset_store::{DatasetStore, ResolveRevisionError},
     incrementalizer::incrementalize_plan,
     metadata::segments::{Segment, WatermarkNotFoundError},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
+    query_env::QueryEnv,
     sql_str::SqlStr,
 };
 
@@ -291,7 +292,6 @@ impl StreamingQueryHandle {
 /// stream.
 pub struct StreamingQuery {
     query_env: QueryEnv,
-    data_store: DataStore,
     catalog: Catalog,
     plan: DetachedLogicalPlan,
     start_block: BlockNum,
@@ -321,7 +321,6 @@ impl StreamingQuery {
         query_env: QueryEnv,
         catalog: Catalog,
         dataset_store: &DatasetStore,
-        data_store: DataStore,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
@@ -369,7 +368,7 @@ impl StreamingQuery {
 
         let blocks_table = resolve_blocks_table(
             dataset_store,
-            data_store.clone(),
+            query_env.store.clone(),
             unique_refs.into_iter(),
             network,
         )
@@ -383,7 +382,6 @@ impl StreamingQuery {
             .map_err(SpawnError::ConvertResumeWatermark)?;
         let streaming_query = Self {
             query_env,
-            data_store,
             catalog,
             plan,
             tx,
@@ -416,14 +414,10 @@ impl StreamingQuery {
             self.table_updates.changed().await;
 
             // The table snapshots to execute the microbatch against.
-            let ctx = QueryContext::for_catalog(
-                self.catalog.clone(),
-                self.query_env.clone(),
-                self.data_store.clone(),
-                false,
-            )
-            .await
-            .map_err(StreamingQueryExecutionError::QueryContext)?;
+            let ctx =
+                QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone(), false)
+                    .await
+                    .map_err(StreamingQueryExecutionError::QueryContext)?;
 
             // Get the next execution range
             let Some(MicrobatchRange { range, direction }) = self
@@ -525,14 +519,9 @@ impl StreamingQuery {
                 let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
                 Catalog::new(vec![self.blocks_table.clone()], logical)
             };
-            QueryContext::for_catalog(
-                catalog,
-                self.query_env.clone(),
-                self.data_store.clone(),
-                false,
-            )
-            .await
-            .map_err(NextMicrobatchRangeError::QueryContext)?
+            QueryContext::for_catalog(catalog, self.query_env.clone(), false)
+                .await
+                .map_err(NextMicrobatchRangeError::QueryContext)?
         };
 
         // The latest common watermark across the source tables.
@@ -698,7 +687,7 @@ impl StreamingQuery {
                 ctx.catalog().physical_tables().cloned().collect(),
                 ctx.catalog().logical().clone(),
             );
-            QueryContext::for_catalog(catalog, ctx.env.clone(), self.data_store.clone(), true)
+            QueryContext::for_catalog(catalog, ctx.env.clone(), true)
                 .await
                 .map_err(ReorgBaseError::QueryContext)?
         };

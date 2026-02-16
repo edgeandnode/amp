@@ -18,6 +18,7 @@ pub mod incrementalizer;
 pub mod memory_pool;
 pub mod metadata;
 pub mod plan_visitors;
+pub mod query_env;
 pub mod sql;
 pub mod stream_helpers;
 pub mod streaming_query;

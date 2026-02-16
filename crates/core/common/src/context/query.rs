@@ -1,6 +1,5 @@
 use std::{
     collections::BTreeMap,
-    path::PathBuf,
     sync::{Arc, LazyLock},
 };
 
@@ -15,9 +14,8 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
         config::SessionConfig,
         context::{SQLOptions, SessionContext},
-        disk_manager::{DiskManagerBuilder, DiskManagerMode},
         memory_pool::human_readable_size,
-        runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
+        runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF},
     physical_optimizer::PhysicalOptimizerRule,
@@ -31,7 +29,6 @@ use datafusion_tracing::{
 };
 use datasets_common::network_id::NetworkId;
 use futures::{TryStreamExt, stream};
-use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
 use thiserror::Error;
 use tracing::{field, instrument};
@@ -48,6 +45,7 @@ use crate::{
         extract_table_references_from_plan, forbid_duplicate_field_names,
         forbid_underscore_prefixed_aliases,
     },
+    query_env::QueryEnv,
     sql::{TableReference, TableReferenceConversionError},
 };
 
@@ -233,64 +231,6 @@ pub enum Error {
     TableNotFoundError(TableReference),
 }
 
-/// Handle to the environment resources used by the query engine.
-#[derive(Clone, Debug)]
-pub struct QueryEnv {
-    // Inline RuntimeEnv fields for per-query customization
-    pub global_memory_pool: Arc<dyn datafusion::execution::memory_pool::MemoryPool>,
-    pub disk_manager: Arc<datafusion::execution::disk_manager::DiskManager>,
-    pub cache_manager: Arc<datafusion::execution::cache::cache_manager::CacheManager>,
-    pub object_store_registry: Arc<dyn datafusion::execution::object_store::ObjectStoreRegistry>,
-
-    // Existing fields
-    pub isolate_pool: IsolatePool,
-
-    // Per-query memory limit configuration
-    pub query_max_mem_mb: usize,
-}
-
-/// Creates a QueryEnv with specified memory and cache configuration
-///
-/// Configures DataFusion runtime environment including memory pools, disk spilling,
-/// and parquet footer caching for query execution.
-pub fn create_query_env(
-    max_mem_mb: usize,
-    query_max_mem_mb: usize,
-    spill_location: &[PathBuf],
-) -> Result<QueryEnv, DataFusionError> {
-    let spill_allowed = !spill_location.is_empty();
-    let disk_manager_mode = if spill_allowed {
-        DiskManagerMode::Directories(spill_location.to_vec())
-    } else {
-        DiskManagerMode::Disabled
-    };
-
-    let disk_manager_builder = DiskManagerBuilder::default().with_mode(disk_manager_mode);
-
-    let memory_pool = {
-        let max_mem_bytes = max_mem_mb * 1024 * 1024;
-        make_memory_pool(MemoryPoolKind::Greedy, max_mem_bytes)
-    };
-
-    let mut runtime_config =
-        RuntimeEnvBuilder::new().with_disk_manager_builder(disk_manager_builder);
-
-    runtime_config = runtime_config.with_memory_pool(memory_pool);
-
-    // Build RuntimeEnv to extract components
-    let runtime_env = runtime_config.build()?;
-    let isolate_pool = IsolatePool::new();
-
-    Ok(QueryEnv {
-        global_memory_pool: runtime_env.memory_pool,
-        disk_manager: runtime_env.disk_manager,
-        cache_manager: runtime_env.cache_manager,
-        object_store_registry: runtime_env.object_store_registry,
-        isolate_pool,
-        query_max_mem_mb,
-    })
-}
-
 /// A context for executing queries against a catalog.
 #[derive(Clone)]
 pub struct QueryContext {
@@ -299,14 +239,12 @@ pub struct QueryContext {
     catalog: CatalogSnapshot,
     /// Per-query memory pool (if per-query limits are enabled)
     tiered_memory_pool: Arc<TieredMemoryPool>,
-    store: DataStore,
 }
 
 impl QueryContext {
     pub async fn for_catalog(
         catalog: Catalog,
         env: QueryEnv,
-        store: DataStore,
         ignore_canonical_segments: bool,
     ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
@@ -340,7 +278,7 @@ impl QueryContext {
 
         // Create a catalog snapshot with canonical chain locked in
         let catalog_snapshot =
-            CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments, store.clone())
+            CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments, env.store.clone())
                 .await
                 .map_err(Error::CatalogSnapshot)?;
 
@@ -359,7 +297,6 @@ impl QueryContext {
             session_config,
             catalog: catalog_snapshot,
             tiered_memory_pool,
-            store,
         })
     }
 
@@ -394,7 +331,7 @@ impl QueryContext {
         let ctx = SessionContext::new_with_state(state);
 
         for table in self.catalog.table_snapshots() {
-            register_table(&ctx, table.clone(), &self.store).map_err(Error::DatasetError)?;
+            register_table(&ctx, table.clone(), &self.env.store).map_err(Error::DatasetError)?;
         }
 
         self.register_udfs(&ctx);

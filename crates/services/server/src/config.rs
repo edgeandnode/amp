@@ -17,19 +17,3 @@ pub struct Config {
     /// Paths for DataFusion temporary files for spill-to-disk
     pub spill_location: Vec<PathBuf>,
 }
-
-impl Config {
-    /// Create QueryEnv for DataFusion query execution
-    ///
-    /// Builds the query environment with memory pools, disk manager,
-    /// and Parquet metadata cache based on the server configuration.
-    pub fn make_query_env(
-        &self,
-    ) -> Result<common::context::query::QueryEnv, datafusion::error::DataFusionError> {
-        common::context::query::create_query_env(
-            self.max_mem_mb,
-            self.query_max_mem_mb,
-            &self.spill_location,
-        )
-    }
-}
