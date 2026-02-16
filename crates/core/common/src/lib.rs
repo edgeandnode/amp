@@ -13,6 +13,7 @@ pub mod context;
 pub mod dataset_store;
 pub mod datasets_derived;
 pub mod evm;
+pub mod func_catalog;
 pub mod incrementalizer;
 pub mod memory_pool;
 pub mod metadata;
