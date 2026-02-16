@@ -37,6 +37,7 @@ use datasets_common::{
     hash_reference::HashReference, name::Name, namespace::Namespace,
 };
 use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
+use monitoring::logging;
 use rand::seq::IndexedRandom as _;
 use worker::{
     job::{Job, JobDescriptor, JobId, JobNotification, JobStatus},
@@ -140,20 +141,24 @@ impl Scheduler {
             dataset_kind,
         })
         .map_err(ScheduleJobError::SerializeJobDescriptor)?;
-        let job_id = metadata_db::jobs::register(&self.metadata_db, &node_id, &job_desc)
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(ScheduleJobError::BeginTransaction)?;
+
+        let job_id = metadata_db::jobs::register(&mut tx, &node_id, &job_desc)
             .await
             .map(Into::into)
             .map_err(ScheduleJobError::RegisterJob)?;
 
-        // Notify the worker about the new job
-        // TODO: Include notification in the transaction (requires refactoring to avoid circular dependency)
-        metadata_db::workers::send_job_notif(
-            &self.metadata_db,
-            node_id,
-            &JobNotification::start(job_id),
-        )
-        .await
-        .map_err(ScheduleJobError::NotifyWorker)?;
+        metadata_db::workers::send_job_notif(&mut tx, node_id, &JobNotification::start(job_id))
+            .await
+            .map_err(ScheduleJobError::NotifyWorker)?;
+
+        tx.commit()
+            .await
+            .map_err(ScheduleJobError::CommitTransaction)?;
 
         Ok(job_id)
     }
@@ -220,14 +225,16 @@ impl Scheduler {
     ///
     /// Jobs retry indefinitely with exponential backoff (2^next_retry_index seconds).
     /// Retry tracking is managed via the job_attempts table.
-    pub async fn reconcile_failed_jobs(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn reconcile_failed_jobs(&self) -> Result<(), ReconcileFailedJobsError> {
         // First, clean up any fatally failed jobs.
         metadata_db::jobs::delete_all_by_status(&self.metadata_db, [JobStatus::FailedFatal.into()])
-            .await?;
+            .await
+            .map_err(ReconcileFailedJobsError::DeleteFailedFatalJobs)?;
 
         // Then, reschedule failed (recoverable) jobs that are ready for retry.
-        let failed_jobs =
-            metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db).await?;
+        let failed_jobs = metadata_db::jobs::get_failed_jobs_ready_for_retry(&self.metadata_db)
+            .await
+            .map_err(ReconcileFailedJobsError::GetFailedJobsReadyForRetry)?;
 
         if failed_jobs.is_empty() {
             return Ok(());
@@ -238,43 +245,102 @@ impl Scheduler {
             let job_id: JobId = job.id.into();
             let retry_index = job_with_retry.next_retry_index;
 
-            if let Err(error) = metadata_db::jobs::reschedule(
-                &self.metadata_db,
-                job.id,
-                job.node_id.clone(),
-                retry_index,
-            )
-            .await
-            {
-                tracing::error!(
-                    %job_id,
-                    retry_index,
-                    %error,
-                    "Failed to reschedule failed job"
-                );
-                continue;
-            }
+            let result: Result<(), RescheduleJobError> = async {
+                let mut tx = self
+                    .metadata_db
+                    .begin_txn()
+                    .await
+                    .map_err(RescheduleJobError::BeginTransaction)?;
 
-            // Notify the worker about the retry
-            // TODO: Include notification in the transaction (requires refactoring to avoid circular dependency)
-            if let Err(error) = metadata_db::workers::send_job_notif(
-                &self.metadata_db,
-                job.node_id.clone(),
-                &JobNotification::start(job_id),
-            )
-            .await
-            {
-                tracing::warn!(
-                    %job_id,
-                    retry_index,
-                    %error,
-                    "Failed to notify worker about job retry"
+                metadata_db::jobs::reschedule(&mut tx, job.id, job.node_id.clone(), retry_index)
+                    .await
+                    .map_err(RescheduleJobError::RescheduleJob)?;
+
+                metadata_db::workers::send_job_notif(
+                    &mut tx,
+                    job.node_id.clone(),
+                    &JobNotification::start(job_id),
+                )
+                .await
+                .map_err(RescheduleJobError::SendJobNotification)?;
+
+                tx.commit()
+                    .await
+                    .map_err(RescheduleJobError::CommitTransaction)?;
+                Ok(())
+            }
+            .await;
+
+            if let Err(err) = result {
+                tracing::error!(
+                    job_id = %job_id,
+                    retry_index = retry_index,
+                    error = %err,
+                    error_source = logging::error_source(&err),
+                    "failed to reschedule and notify for failed job"
                 );
             }
         }
 
         Ok(())
     }
+}
+
+/// Errors that occur during failed job reconciliation [`Scheduler::reconcile_failed_jobs`]
+#[derive(Debug, thiserror::Error)]
+pub enum ReconcileFailedJobsError {
+    /// Failed to delete fatally failed jobs from the metadata database
+    ///
+    /// This occurs when the bulk deletion of jobs with `FailedFatal` status fails.
+    /// These jobs are not retryable and must be cleaned up before processing
+    /// recoverable failures.
+    #[error("failed to delete failed fatal jobs")]
+    DeleteFailedFatalJobs(#[source] metadata_db::Error),
+
+    /// Failed to query jobs that are ready for retry
+    ///
+    /// This occurs when the database query to retrieve recoverable failed jobs
+    /// (filtered by exponential backoff timing) fails. Without this list,
+    /// no retry scheduling can proceed.
+    #[error("failed to get failed jobs ready for retry")]
+    GetFailedJobsReadyForRetry(#[source] metadata_db::Error),
+}
+
+/// Errors that occur when rescheduling a single failed job for retry
+#[derive(Debug, thiserror::Error)]
+pub enum RescheduleJobError {
+    /// Failed to begin a database transaction for the reschedule operation
+    ///
+    /// The reschedule and notification are performed atomically within a
+    /// transaction. This error indicates the transaction could not be started.
+    #[error("failed to begin transaction")]
+    BeginTransaction(#[source] metadata_db::Error),
+
+    /// Failed to reschedule the job in the metadata database
+    ///
+    /// This occurs when updating the job's status and retry metadata fails.
+    /// The job remains in its previous failed state and will be retried
+    /// in the next reconciliation cycle.
+    #[error("failed to reschedule job")]
+    RescheduleJob(#[source] metadata_db::Error),
+
+    /// Failed to send a start notification to the assigned worker
+    ///
+    /// This occurs when inserting the job notification into the worker's
+    /// notification queue fails. Since this occurs within a transaction,
+    /// neither the reschedule nor the notification will be persisted. The
+    /// job remains in its previous failed state and will be retried in the
+    /// next reconciliation cycle.
+    #[error("failed to send job notification")]
+    SendJobNotification(#[source] metadata_db::Error),
+
+    /// Failed to commit the reschedule transaction
+    ///
+    /// This occurs when the atomic commit of the reschedule and notification
+    /// fails. Both operations are rolled back and the job will be retried
+    /// in the next reconciliation cycle.
+    #[error("failed to commit transaction")]
+    CommitTransaction(#[source] metadata_db::Error),
 }
 
 #[async_trait]
