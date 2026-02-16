@@ -50,11 +50,11 @@ jobs:
 
       - name: Unit tests
         run: just test-unit --verbose
+        env:
+          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
 
   integration-tests:
     name: Integration tests
-    # Run on push to main, and on PRs only if they're not from a fork
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
@@ -111,12 +111,6 @@ jobs:
           FIREHOSE_ETH_BASE_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }} # Token is the same for both networks
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
-          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
-
-      - name: Solana integration test
-        run: cargo nextest run --verbose --package solana-datasets -E 'test(extractor::tests::historical_to_json_rpc_transition)'
-        env:
-          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
 
   ampup-tests:
     name: Test ampup
