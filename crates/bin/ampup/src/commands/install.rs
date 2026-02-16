@@ -5,7 +5,7 @@ use crate::{
     github::GitHubClient,
     install::Installer,
     platform::{Architecture, Platform},
-    ui,
+    token, ui,
     version_manager::VersionManager,
 };
 
@@ -16,9 +16,15 @@ pub async fn run(
     version: Option<String>,
     arch_override: Option<String>,
     platform_override: Option<String>,
+    jobs: Option<usize>,
 ) -> Result<()> {
     let config = Config::new(install_dir)?;
-    let github = GitHubClient::new(repo, github_token)?;
+    let _max_concurrent = jobs.unwrap_or(4);
+
+    // Resolve token with fallback chain: explicit → gh auth token → unauthenticated
+    let resolved_token = token::resolve_github_token(github_token);
+
+    let github = GitHubClient::new(repo, resolved_token)?;
     let version_manager = VersionManager::new(config);
 
     // Determine version to install

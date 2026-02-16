@@ -5,6 +5,7 @@ pub mod github;
 pub mod install;
 pub mod platform;
 pub mod shell;
+pub mod token;
 pub mod updater;
 pub mod version_manager;
 

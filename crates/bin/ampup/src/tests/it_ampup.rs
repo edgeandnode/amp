@@ -180,6 +180,7 @@ async fn install_latest_version() -> Result<()> {
         None,
         None,
         None,
+        None,
     )
     .await?;
 
@@ -208,6 +209,7 @@ async fn install_specific_version() -> Result<()> {
         Some(version.to_string()),
         None,
         None,
+        None,
     )
     .await?;
 
@@ -234,6 +236,7 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
         Some(version.to_string()),
         None,
         None,
+        None,
     )
     .await?;
 
@@ -243,6 +246,7 @@ async fn install_already_installed_version_switches_to_it() -> Result<()> {
         DEFAULT_REPO.to_string(),
         None,
         Some(version.to_string()),
+        None,
         None,
         None,
     )

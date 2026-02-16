@@ -57,6 +57,10 @@ enum Commands {
         /// Override platform detection (linux, darwin)
         #[arg(long)]
         platform: Option<String>,
+
+        /// Number of concurrent downloads (default: 4)
+        #[arg(short = 'j', long = "jobs")]
+        jobs: Option<usize>,
     },
 
     /// List installed versions
@@ -142,6 +146,10 @@ enum Commands {
         /// Override platform detection (linux, darwin)
         #[arg(long)]
         platform: Option<String>,
+
+        /// Number of concurrent downloads (default: 4)
+        #[arg(short = 'j', long = "jobs")]
+        jobs: Option<usize>,
     },
 
     /// Manage the ampup executable
@@ -198,9 +206,18 @@ async fn run() -> anyhow::Result<()> {
             github_token,
             arch,
             platform,
+            jobs,
         }) => {
-            commands::install::run(install_dir, repo, github_token, version, arch, platform)
-                .await?;
+            commands::install::run(
+                install_dir,
+                repo,
+                github_token,
+                version,
+                arch,
+                platform,
+                jobs,
+            )
+            .await?;
         }
         Some(Commands::List { install_dir }) => {
             commands::list::run(install_dir)?;
@@ -235,9 +252,11 @@ async fn run() -> anyhow::Result<()> {
             github_token,
             arch,
             platform,
+            jobs,
         }) => {
             // Install latest version (same as default behavior)
-            commands::install::run(install_dir, repo, github_token, None, arch, platform).await?;
+            commands::install::run(install_dir, repo, github_token, None, arch, platform, jobs)
+                .await?;
         }
         Some(Commands::SelfCmd { command }) => match command {
             SelfCommands::Update { repo, github_token } => {
@@ -253,6 +272,7 @@ async fn run() -> anyhow::Result<()> {
                 std::env::var("AMP_DIR").ok().map(std::path::PathBuf::from),
                 DEFAULT_REPO.to_string(),
                 std::env::var("GITHUB_TOKEN").ok(),
+                None,
                 None,
                 None,
                 None,
