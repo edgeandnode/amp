@@ -23,6 +23,24 @@ fn revision_get_by_id(id: i64) -> String {
     format!("revisions/{id}")
 }
 
+/// Build URL path for listing all revisions.
+///
+/// GET `/revisions` with optional `?active=true|false` and `?limit=x` query parameters
+fn revisions_list(active: Option<bool>, limit: Option<i64>) -> String {
+    let mut params = Vec::new();
+    if let Some(v) = active {
+        params.push(format!("active={v}"));
+    }
+    if let Some(v) = limit {
+        params.push(format!("limit={v}"));
+    }
+    if params.is_empty() {
+        "revisions".to_owned()
+    } else {
+        format!("revisions?{}", params.join("&"))
+    }
+}
+
 /// Build URL path for deactivating table revisions.
 ///
 /// POST `/revisions/deactivate`
@@ -353,6 +371,99 @@ impl<'a> RevisionsClient<'a> {
             }
         }
     }
+
+    /// List all revisions, optionally filtered by active status.
+    ///
+    /// Sends GET to `/revisions` endpoint with optional `?active=true|false`
+    /// and `?limit=x` query parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ListError`] for network errors, API errors (400/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self))]
+    pub async fn list(
+        &self,
+        active: Option<bool>,
+        limit: Option<i64>,
+    ) -> Result<Vec<RevisionInfo>, ListError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&revisions_list(active, limit))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "Sending GET request to list revisions");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|err| ListError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 => {
+                let revisions =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| ListError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("Failed to parse response: {err}"),
+                        })?;
+                Ok(revisions)
+            }
+            400 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    ListError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse =
+                    serde_json::from_str(&text).map_err(|err| {
+                        tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                        ListError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: text.clone(),
+                        }
+                    })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_QUERY_PARAMETERS" => {
+                        Err(ListError::InvalidQueryParams(error_response.into()))
+                    }
+                    "LIST_ALL_TABLE_REVISIONS_ERROR" => {
+                        Err(ListError::ListAllTableRevisions(error_response.into()))
+                    }
+                    _ => Err(ListError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(ListError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Request payload for activating a table revision.
@@ -466,6 +577,30 @@ pub enum DeactivateError {
     /// Failed to resolve the dataset reference to a manifest hash.
     #[error("failed to resolve revision")]
     ResolveRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when listing revisions.
+#[derive(Debug, thiserror::Error)]
+pub enum ListError {
+    /// Invalid query parameters (400, INVALID_QUERY_PARAMETERS)
+    ///
+    /// The query string could not be parsed.
+    #[error("invalid query parameters")]
+    InvalidQueryParams(#[source] ApiError),
+
+    /// Failed to list table revisions (500, LIST_ALL_TABLE_REVISIONS_ERROR)
+    ///
+    /// An error occurred in the data store while listing table revisions.
+    #[error("failed to list table revisions")]
+    ListAllTableRevisions(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

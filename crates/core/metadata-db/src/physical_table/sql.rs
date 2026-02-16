@@ -448,6 +448,43 @@ where
         .await
 }
 
+/// List all physical table revisions with an optional active status filter
+///
+/// Returns all revisions ordered by ID in descending order (newest first).
+/// When `active` is `None`, all revisions are returned. When `Some(true)` or
+/// `Some(false)`, only revisions matching that active status are returned.
+pub async fn list_all<'c, E>(
+    exe: E,
+    active: Option<bool>,
+    limit: i64,
+) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            ptr.id,
+            ptr.path,
+            pt.active_revision_id IS NOT NULL AS active,
+            ptr.writer,
+            ptr.metadata
+        FROM physical_table_revisions AS ptr
+        LEFT JOIN physical_tables pt ON pt.active_revision_id = ptr.id
+        WHERE (
+            $1::boolean IS NULL
+            OR (pt.active_revision_id IS NOT NULL) = $1
+        )
+        ORDER BY ptr.id DESC
+        LIMIT $2
+    "#};
+
+    sqlx::query_as(query)
+        .bind(active)
+        .bind(limit)
+        .fetch_all(exe)
+        .await
+}
+
 /// Query active tables and their writer info for a dataset
 pub async fn get_active_tables_with_writer_info<'c, E>(
     exe: E,
