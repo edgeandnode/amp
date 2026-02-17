@@ -15,7 +15,7 @@ This hybrid approach ensures efficient historical backfills while maintaining lo
 
 ### Components
 
-- **`SolanaExtractor`**: Main extractor implementing the `BlockStreamer` trait
+- **`Client`**: Main client implementing the `BlockStreamer` trait
 - **`SolanaRpcClient`**: Handles HTTP requests to the Solana RPC endpoint, with optional rate limiting and metrics
 - **`of1_client`**: Manages Old Faithful CAR file downloads with resume support, retry logic, and lifecycle tracking
 
@@ -23,7 +23,7 @@ This hybrid approach ensures efficient historical backfills while maintaining lo
 
 ```
 Old Faithful Archive (CAR files) ──┐
-                                   ├──> SolanaExtractor ──> Block Processing ──> Parquet Tables
+                                   ├──> Client ──> Block Processing ──> Parquet Tables
 Solana JSON-RPC ───────────────────┘
 ```
 

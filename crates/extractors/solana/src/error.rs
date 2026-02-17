@@ -179,7 +179,7 @@ impl From<Of1StreamError> for BlockStreamError {
     }
 }
 
-/// Error during Solana extractor initialization or operation.
+/// Error during Solana client initialization or operation.
 #[derive(Debug, thiserror::Error)]
-#[error("Extractor error: {0}")]
-pub struct ExtractorError(pub String);
+#[error("Client error: {0}")]
+pub struct ClientError(pub String);

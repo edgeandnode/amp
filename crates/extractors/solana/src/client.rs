@@ -1,6 +1,6 @@
-//! Solana extractor that implements the [`BlockStreamer`] trait.
+//! Solana client that implements the [`BlockStreamer`] trait.
 //!
-//! The extractor is designed to work in two stages:
+//! The client is designed to work in two stages:
 //!     1. Download historical data from the Old Faithful archive
 //!     2. Stream new data using the Solana JSON-RPC subscription API (not implemented yet)
 //!
@@ -33,14 +33,14 @@ use url::Url;
 
 use crate::{metrics, of1_client, rpc_client, rpc_client::Auth, tables};
 
-/// Handles related to the OF1 CAR manager task, stored in the extractor for cleanup.
+/// Handles related to the OF1 CAR manager task, stored in the client for cleanup.
 struct Of1CarManagerHandles {
     tx: tokio::sync::mpsc::Sender<of1_client::CarManagerMessage>,
     jh: tokio::task::JoinHandle<()>,
 }
 
-/// A JSON-RPC based Solana extractor that implements the [`BlockStreamer`] trait.
-pub struct SolanaExtractor {
+/// A JSON-RPC based Solana client that implements the [`BlockStreamer`] trait.
+pub struct Client {
     of1_car_manager_handles: Arc<Mutex<Option<Of1CarManagerHandles>>>,
     rpc_client: Arc<rpc_client::SolanaRpcClient>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -50,7 +50,7 @@ pub struct SolanaExtractor {
     use_archive: UseArchive,
 }
 
-impl SolanaExtractor {
+impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         rpc_provider_url: Redacted<Url>,
@@ -196,11 +196,11 @@ impl SolanaExtractor {
     }
 }
 
-impl Clone for SolanaExtractor {
+impl Clone for Client {
     fn clone(&self) -> Self {
         assert!(
             self.of1_car_manager_handles.lock().unwrap().is_some(),
-            "cannot clone SolanaExtractor after cleanup"
+            "cannot clone Client after cleanup"
         );
 
         Self {
@@ -215,7 +215,7 @@ impl Clone for SolanaExtractor {
     }
 }
 
-impl BlockStreamer for SolanaExtractor {
+impl BlockStreamer for Client {
     async fn block_stream(
         self,
         start: BlockNum,
@@ -507,7 +507,7 @@ mod tests {
     use futures::StreamExt;
     use url::Url;
 
-    use super::SolanaExtractor;
+    use super::Client;
     use crate::{of1_client, rpc_client};
 
     #[tokio::test]
@@ -518,7 +518,7 @@ mod tests {
             .parse()
             .expect("Failed to parse provider name");
 
-        let extractor = SolanaExtractor::new(
+        let client = Client::new(
             Redacted::from(url),
             None,
             None,
@@ -540,12 +540,71 @@ mod tests {
             }
         };
 
-        let block_stream = extractor.block_stream_impl(
+        let block_stream = client.block_stream_impl(
             start,
             end,
             historical,
             rpc_client::rpc_config::RpcBlockConfig::default(),
         );
+
+        futures::pin_mut!(block_stream);
+
+        let mut expected_block = start;
+
+        while let Some(rows) = block_stream
+            .next()
+            .await
+            .transpose()
+            .expect("stream should not error")
+        {
+            assert_eq!(rows.block_num(), expected_block);
+            expected_block += 1;
+        }
+
+        assert_eq!(expected_block, end + 1);
+    }
+
+    #[tokio::test]
+    async fn historical_to_json_rpc_transition() {
+        let url_str = std::env::var("SOLANA_MAINNET_HTTP_URL")
+            .expect("Missing environment variable SOLANA_MAINNET_HTTP_URL");
+        let solana_rpc_provider_url = url_str.parse::<Url>().expect("Failed to parse URL");
+        let network = "mainnet".parse().expect("Failed to parse network id");
+        let provider_name = "test_provider"
+            .parse()
+            .expect("Failed to parse provider name");
+
+        let client = Client::new(
+            Redacted::from(solana_rpc_provider_url),
+            None,
+            None,
+            network,
+            provider_name,
+            PathBuf::new(),
+            false,
+            UseArchive::Auto,
+            None,
+        );
+
+        let start = 0;
+        let historical_end = 50;
+        let end = historical_end + 20;
+
+        // Stream part of the range as historical blocks.
+        let historical = async_stream::stream! {
+            for slot in start..=historical_end {
+                yield Ok(of1_client::DecodedSlot::dummy(slot));
+            }
+        };
+
+        let get_block_config = rpc_client::rpc_config::RpcBlockConfig {
+            encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
+            transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
+            max_supported_transaction_version: Some(0),
+            rewards: Some(true),
+            commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
+        };
+        let block_stream = client.block_stream_impl(start, end, historical, get_block_config);
 
         futures::pin_mut!(block_stream);
 

@@ -20,11 +20,11 @@ use datasets_common::{
     network_id::NetworkId,
 };
 
+mod client;
 mod dataset;
 mod dataset_kind;
 pub mod error;
-mod extractor;
-mod metrics;
+pub mod metrics;
 pub mod of1_client;
 pub mod rpc_client;
 pub mod tables;
@@ -32,11 +32,11 @@ pub mod tables;
 pub use amp_providers_solana::config::{SolanaProviderConfig, UseArchive};
 
 pub use self::{
+    client::{Client, non_empty_of1_slot, non_empty_rpc_slot},
     dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
-    extractor::{SolanaExtractor, non_empty_of1_slot, non_empty_rpc_slot},
 };
-use crate::error::ExtractorError;
+use crate::error::ClientError;
 
 /// Table definition for raw datasets.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -88,18 +88,18 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
     }
 }
 
-/// Create a Solana extractor based on the provided configuration.
-pub fn extractor(
+/// Create a Solana client based on the provided configuration.
+pub fn client(
     name: ProviderName,
     config: SolanaProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<SolanaExtractor, ExtractorError> {
+) -> Result<Client, ClientError> {
     if config.network != "mainnet" {
         let err = format!(
             "unsupported Solana network: {}. Only 'mainnet' is supported.",
             config.network
         );
-        return Err(ExtractorError(err));
+        return Err(ClientError(err));
     }
 
     // Resolve authentication configuration
@@ -112,7 +112,7 @@ pub fn extractor(
     });
 
     let client = match config.rpc_provider_url.scheme() {
-        "http" | "https" => SolanaExtractor::new(
+        "http" | "https" => Client::new(
             config.rpc_provider_url,
             auth,
             config.max_rpc_calls_per_second,
@@ -125,7 +125,7 @@ pub fn extractor(
         ),
         scheme => {
             let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
-            return Err(ExtractorError(err));
+            return Err(ClientError(err));
         }
     };
 
