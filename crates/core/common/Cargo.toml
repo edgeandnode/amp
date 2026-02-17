@@ -12,6 +12,7 @@ amp-providers-registry = { path = "../providers-registry" }
 async-trait.workspace = true
 bigdecimal = "0.4"
 bytes.workspace = true
+canton-scan-datasets = { path = "../../extractors/canton-scan" }
 chrono.workspace = true
 datafusion.workspace = true
 datafusion-datasource.workspace = true

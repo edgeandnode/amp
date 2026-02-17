@@ -1,0 +1,10 @@
+# Canton Scan provider configuration for testing
+# Uses local CSV data files for testing instead of a live Scan API
+name = "canton_csv"
+kind = "canton-scan"
+network = "canton-devnet"
+# For testing with CSV data, we use a placeholder URL
+# The actual data comes from pre-loaded snapshots
+scan_url = "http://localhost:8081"
+timeout_secs = 60
+page_size = 100

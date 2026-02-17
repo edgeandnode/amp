@@ -19,6 +19,7 @@ use datasets_common::{
     dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
     manifest::Manifest as CommonManifest, network_id::NetworkId, reference::Reference,
 };
+use canton_scan_datasets::{CantonScanDatasetKind, Manifest as CantonScanManifest};
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
 use datasets_raw::{
     client::{BlockStreamer, BlockStreamerExt as _},
@@ -469,6 +470,16 @@ fn create_dataset_from_manifest(
                     reference: reference.clone(),
                     source: Box::new(source),
                 })?
+        }
+        s if s == CantonScanDatasetKind => {
+            let manifest = manifest_content
+                .try_into_manifest::<CantonScanManifest>()
+                .map_err(|source| GetDatasetError::ParseManifest {
+                    reference: reference.clone(),
+                    kind: canton_scan_datasets::CantonScanDatasetKind.into(),
+                    source,
+                })?;
+            Arc::new(canton_scan_datasets::dataset(reference.clone(), manifest))
         }
         _ => {
             return Err(GetDatasetError::UnsupportedKind {

@@ -5,6 +5,7 @@ mod it_admin_api_datasets_stop_job;
 mod it_admin_api_jobs_progress;
 mod it_admin_api_schema;
 mod it_ampctl_gen_manifest;
+mod it_canton;
 mod it_client;
 mod it_dependencies;
 mod it_dump;

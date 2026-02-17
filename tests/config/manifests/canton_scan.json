@@ -1,0 +1,189 @@
+{
+  "kind": "canton-scan",
+  "network": "canton-devnet",
+  "start_block": 0,
+  "finalized_blocks_only": true,
+  "tables": {
+    "transactions": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "offset",
+              "type": "Int64",
+              "nullable": false
+            },
+            {
+              "name": "update_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "record_time",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "effective_at",
+              "type": "Utf8",
+              "nullable": true
+            },
+            {
+              "name": "synchronizer_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "event_count",
+              "type": "UInt32",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "canton-devnet"
+    },
+    "contracts_created": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "contract_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "template_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "package_name",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "signatories",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "observers",
+              "type": "Utf8",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "network": "canton-devnet"
+    },
+    "choices_exercised": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "event_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "contract_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "template_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "choice",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "consuming",
+              "type": "Boolean",
+              "nullable": false
+            },
+            {
+              "name": "acting_parties",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "effective_at",
+              "type": "Utf8",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "canton-devnet"
+    },
+    "mining_rounds": {
+      "schema": {
+        "arrow": {
+          "fields": [
+            {
+              "name": "_block_num",
+              "type": "UInt64",
+              "nullable": false
+            },
+            {
+              "name": "round_number",
+              "type": "Int64",
+              "nullable": false
+            },
+            {
+              "name": "contract_id",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "amulet_price",
+              "type": "Float64",
+              "nullable": false
+            },
+            {
+              "name": "opens_at",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "target_closes_at",
+              "type": "Utf8",
+              "nullable": false
+            },
+            {
+              "name": "tick_duration_us",
+              "type": "Int64",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "network": "canton-devnet"
+    }
+  }
+}

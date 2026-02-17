@@ -4,6 +4,7 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
+use canton_scan_datasets::{CantonScanDatasetKind, Manifest as CantonScanManifest};
 use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
@@ -66,6 +67,7 @@ use crate::{
 /// - **Derived dataset** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
 /// - **EVM-RPC dataset** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
 /// - **Firehose dataset** (kind="firehose"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol
+/// - **Canton-Scan dataset** (kind="canton-scan"): Registers a raw dataset that extracts Canton ledger data from Scan API or CSV files
 /// - **Legacy SQL datasets** are **not supported** and will return an error
 ///
 /// ## Registration Process
@@ -192,6 +194,11 @@ pub async fn handler(
                 .map_err(Error::from)?
             } else if manifest.kind == SolanaDatasetKind {
                 parse_and_canonicalize_raw_dataset_manifest::<SolanaManifest>(
+                    manifest_content.get(),
+                )
+                .map_err(Error::from)?
+            } else if manifest.kind == CantonScanDatasetKind {
+                parse_and_canonicalize_raw_dataset_manifest::<CantonScanManifest>(
                     manifest_content.get(),
                 )
                 .map_err(Error::from)?
@@ -452,7 +459,7 @@ pub enum Error {
     /// This occurs when:
     /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
     #[error(
-        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose'"
+        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose', 'canton-scan'"
     )]
     UnsupportedDatasetKind(String),
 

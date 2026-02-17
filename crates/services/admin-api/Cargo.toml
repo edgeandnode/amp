@@ -10,6 +10,7 @@ amp-datasets-registry = { path = "../../core/datasets-registry" }
 amp-providers-registry = { path = "../../core/providers-registry" }
 async-trait.workspace = true
 axum.workspace = true
+canton-scan-datasets = { path = "../../extractors/canton-scan" }
 common = { path = "../../core/common" }
 datafusion.workspace = true
 datasets-common = { path = "../../core/datasets-common" }

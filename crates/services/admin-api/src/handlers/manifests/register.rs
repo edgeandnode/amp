@@ -6,6 +6,7 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
+use canton_scan_datasets::{CantonScanDatasetKind, Manifest as CantonScanManifest};
 use datasets_common::{
     hash::{Hash, hash},
     manifest::Manifest as CommonManifest,
@@ -37,7 +38,7 @@ use crate::{
 /// The request body should contain a complete manifest JSON object. The manifest kind determines
 /// the validation rules:
 /// - `kind="manifest"` (Derived): Validates SQL dependencies
-/// - `kind="evm-rpc"`, `kind="firehose"`, `kind="solana"` (Raw): Validates structure only
+/// - `kind="evm-rpc"`, `kind="firehose"`, `kind="solana"`, `kind="canton-scan"` (Raw): Validates structure only
 ///
 /// ## Response
 /// - **201 Created**: Manifest successfully registered, returns the computed hash
@@ -116,6 +117,9 @@ pub async fn handler(
             .map_err(Error::from)?
     } else if manifest.kind == FirehoseDatasetKind {
         parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(&manifest_str)
+            .map_err(Error::from)?
+    } else if manifest.kind == CantonScanDatasetKind {
+        parse_and_canonicalize_raw_dataset_manifest::<CantonScanManifest>(&manifest_str)
             .map_err(Error::from)?
     } else {
         return Err(Error::UnsupportedDatasetKind(manifest.kind.to_string()).into());
@@ -196,10 +200,10 @@ pub enum Error {
     /// Unsupported dataset kind
     ///
     /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
+    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose, canton-scan)
     /// - The 'kind' field in the manifest contains an unrecognized value
     #[error(
-        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose'"
+        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose', 'canton-scan'"
     )]
     UnsupportedDatasetKind(String),
 
