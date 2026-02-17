@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use async_trait::async_trait;
 use datafusion::{
@@ -10,31 +10,29 @@ use datafusion::{
     physical_plan::ExecutionPlan,
 };
 
-use crate::catalog::logical::LogicalTable;
-
 /// A placeholder table provider used during SQL planning.
 ///
 /// Provides schema information for logical plan construction but cannot be scanned.
 /// Must be replaced with actual `TableSnapshot` providers via
 /// `DetachedLogicalPlan::attach_to` before execution.
 #[derive(Clone, Debug)]
-pub struct PlanningTable(LogicalTable);
+pub struct PlanningTable(SchemaRef);
 
 impl PlanningTable {
-    /// Wraps a logical table as a planning-only table provider.
-    pub(crate) fn new(table: LogicalTable) -> Self {
-        Self(table)
+    /// Creates a planning-only table provider from a schema.
+    pub(crate) fn new(schema: SchemaRef) -> Self {
+        Self(schema)
     }
 }
 
 #[async_trait]
 impl TableProvider for PlanningTable {
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn schema(&self) -> SchemaRef {
-        self.0.table().schema().clone()
+        self.0.clone()
     }
 
     fn table_type(&self) -> TableType {

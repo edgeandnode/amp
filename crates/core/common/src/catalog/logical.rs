@@ -22,11 +22,4 @@ impl LogicalCatalog {
             udfs: Vec::new(),
         }
     }
-
-    pub fn empty() -> Self {
-        Self {
-            tables: Vec::new(),
-            udfs: Vec::new(),
-        }
-    }
 }

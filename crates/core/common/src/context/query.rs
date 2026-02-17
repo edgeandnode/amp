@@ -15,7 +15,7 @@ use datafusion::{
     },
     logical_expr::LogicalPlan,
     physical_optimizer::PhysicalOptimizerRule,
-    physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
+    physical_plan::{ExecutionPlan, displayable, execute_stream, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::parser,
 };
@@ -91,9 +91,8 @@ impl QueryContext {
             self.session_config.clone(),
             &self.tiered_memory_pool,
             &self.env,
-            &self.catalog,
-        )
-        .map_err(PlanSqlError::RegisterTable)?;
+        );
+        register_catalog(&self.env, &ctx, &self.catalog).map_err(PlanSqlError::RegisterTable)?;
 
         let plan = sql_to_plan(&ctx, query)
             .await
@@ -111,9 +110,9 @@ impl QueryContext {
             self.session_config.clone(),
             &self.tiered_memory_pool,
             &self.env,
-            &self.catalog,
-        )
-        .map_err(ExecutePlanError::RegisterTable)?;
+        );
+        register_catalog(&self.env, &ctx, &self.catalog)
+            .map_err(ExecutePlanError::RegisterTable)?;
 
         let result = execute_plan(&ctx, plan, logical_optimize)
             .await
@@ -137,9 +136,9 @@ impl QueryContext {
             self.session_config.clone(),
             &self.tiered_memory_pool,
             &self.env,
-            &self.catalog,
-        )
-        .map_err(ExecuteAndConcatError::RegisterTable)?;
+        );
+        register_catalog(&self.env, &ctx, &self.catalog)
+            .map_err(ExecuteAndConcatError::RegisterTable)?;
 
         let batch_stream = execute_plan(&ctx, plan, true)
             .await
@@ -352,40 +351,46 @@ pub enum CommonRangesError {
     TableNotFound(#[source] TableNotFoundError),
 }
 
-/// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
-/// sessions created by this function, and they will behave the same as if they had been run
-/// against a persistent `SessionContext`
+/// Creates a bare DataFusion session context with the query runtime environment and builtin
+/// UDFs but no catalog tables.
+///
+/// Call [`register_catalog`] on the returned context to populate it with tables and UDFs
+/// from a [`CatalogSnapshot`].
 fn new_session_ctx(
     config: SessionConfig,
     tiered_memory_pool: &Arc<TieredMemoryPool>,
     env: &QueryEnv,
-    catalog: &CatalogSnapshot,
-) -> Result<SessionContext, RegisterTableError> {
-    // Build per-query ctx
-    let ctx = {
-        let runtime_env = Arc::new(RuntimeEnv {
-            memory_pool: tiered_memory_pool.clone(),
-            disk_manager: env.disk_manager.clone(),
-            cache_manager: env.cache_manager.clone(),
-            object_store_registry: env.object_store_registry.clone(),
-        });
+) -> SessionContext {
+    let runtime_env = Arc::new(RuntimeEnv {
+        memory_pool: tiered_memory_pool.clone(),
+        disk_manager: env.disk_manager.clone(),
+        cache_manager: env.cache_manager.clone(),
+        object_store_registry: env.object_store_registry.clone(),
+    });
 
-        let state = SessionStateBuilder::new()
-            .with_config(config)
-            .with_runtime_env(runtime_env)
-            .with_default_features()
-            .with_physical_optimizer_rule(create_instrumentation_rule())
-            .build();
+    let state = SessionStateBuilder::new()
+        .with_config(config)
+        .with_runtime_env(runtime_env)
+        .with_default_features()
+        .with_physical_optimizer_rule(create_instrumentation_rule())
+        .build();
 
-        SessionContext::new_with_state(state)
-    };
+    let ctx = SessionContext::new_with_state(state);
 
     // Register the builtin UDFs
     for udf in builtin_udfs() {
         ctx.register_udf(udf);
     }
 
-    // Register catalog tables and UDFs
+    ctx
+}
+
+/// Registers the tables and UDFs from a [`CatalogSnapshot`] into a [`SessionContext`].
+fn register_catalog(
+    env: &QueryEnv,
+    ctx: &SessionContext,
+    catalog: &CatalogSnapshot,
+) -> Result<(), RegisterTableError> {
     for table in catalog.table_snapshots() {
         // The catalog schema needs to be explicitly created or table creation will fail.
         let schema_name = table.physical_table().sql_table_ref_schema();
@@ -414,11 +419,13 @@ fn new_session_ctx(
         ctx.register_table(table_ref, table.clone())
             .map_err(RegisterTableError)?;
     }
+
+    // Register catalog UDFs
     for udf in catalog.udfs() {
         ctx.register_udf(udf.clone());
     }
 
-    Ok(ctx)
+    Ok(())
 }
 
 /// Failed to register a dataset table with the query session context
@@ -437,9 +444,8 @@ async fn execute_plan(
     mut plan: LogicalPlan,
     logical_optimize: bool,
 ) -> Result<SendableRecordBatchStream, ExecuteError> {
-    use datafusion::physical_plan::execute_stream;
-
     read_only_check(&plan).map_err(ExecuteError::ReadOnlyCheck)?;
+
     tracing::debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
     if logical_optimize {
