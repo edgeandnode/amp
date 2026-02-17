@@ -31,7 +31,7 @@ This document uses two key terms that describe different parts of the data pipel
 
 - **Provider**: An external service or endpoint that supplies blockchain data (e.g., a Firehose gRPC server, an EVM JSON-RPC node, a Solana RPC endpoint). The registry stores *configurations* for these external services.
 
-- **Client**: Internal code that connects to a provider and consumes its data. Clients are created by the registry from provider configurations. Examples include `BlockStreamClient` (for extracting blocks) and underlying protocol-specific clients like `JsonRpcClient` or `firehose_datasets::Client`.
+- **Client**: Internal code that connects to a provider and consumes its data. Clients are created by the registry from provider configurations. Examples include `BlockStreamClient` (for extracting blocks) and underlying protocol-specific clients like `evm_rpc_datasets::Client` or `firehose_datasets::Client`.
 
 > [!NOTE]
 > **EVM RPC Provider naming**: The `EvmRpcProvider` type follows [Alloy's naming convention](https://docs.rs/alloy-provider/latest/alloy_provider/) where "provider" refers to the RPC interface abstraction. In this codebase, it functions as a client that consumes data from an external EVM RPC endpoint.

@@ -61,8 +61,8 @@ pub trait BlockStreamer: Clone + 'static {
 **Error types** are all `Box<dyn std::error::Error + Sync + Send + 'static>`.
 
 **Implementations:**
-- `evm_rpc_datasets::JsonRpcClient`
-- `solana_datasets::SolanaExtractor`
+- `evm_rpc_datasets::Client`
+- `solana_datasets::Client`
 - `firehose_datasets::Client`
 
 ### Dataset Trait
@@ -191,20 +191,13 @@ pub struct ProviderConfig {
 Each extractor exposes a factory function that creates a client/extractor from config:
 
 ```rust
-// ✅ EVM-RPC pattern — async, returns client
+// ✅ Canonical pattern — all extractors follow this
 pub async fn client(
+    name: ProviderName,
     config: ProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<JsonRpcClient, ProviderError> {
+) -> Result<Client, error::ClientError> {
     // Validate config, select transport, create client
-}
-
-// ✅ Solana pattern — sync, returns extractor
-pub fn extractor(
-    config: ProviderConfig,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<SolanaExtractor, ExtractorError> {
-    // Validate network, create extractor
 }
 ```
 
@@ -344,10 +337,10 @@ impl MetricsRegistry {
 Extractors use `thiserror` with domain-specific error categories:
 
 ```rust
-// ✅ Transport/connection errors
+// ✅ Transport/connection errors (named ClientError in all extractors)
 #[derive(thiserror::Error, Debug)]
 #[error("provider error: {0}")]
-pub struct ProviderError(#[source] pub alloy::transports::TransportError);
+pub struct ClientError(#[source] pub alloy::transports::TransportError);
 
 // ✅ Data conversion errors
 #[derive(Debug, thiserror::Error)]

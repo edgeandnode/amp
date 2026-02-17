@@ -139,4 +139,4 @@ pub enum OverflowSource {
 /// invalid URLs, network connectivity issues, or authentication failures.
 #[derive(thiserror::Error, Debug)]
 #[error("provider error: {0}")]
-pub struct ProviderError(#[source] pub alloy::transports::TransportError);
+pub struct ClientError(#[source] pub alloy::transports::TransportError);
