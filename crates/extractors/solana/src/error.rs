@@ -131,9 +131,13 @@ pub enum Of1StreamError {
     /// extractor attempts both prost (protobuf) and bincode deserialization.
     /// This error occurs when both attempts fail, with error details from
     /// each attempt.
+    ///
+    /// This error variant also includes ZSTD decompressed data for debugging
+    /// (or other) purposes.
     #[error("failed to decode {field_name}: prost_err={prost_err}, bincode_err={bincode_err}")]
     DecodeField {
         field_name: &'static str,
+        decompressed_data: Vec<u8>,
         prost_err: String,
         bincode_err: String,
     },

@@ -224,6 +224,7 @@ impl TransactionStatusMeta {
         tx_index: u32,
         stored_tx_meta: solana_storage_proto::StoredTransactionStatusMeta,
     ) -> anyhow::Result<Self> {
+        // Convert to RPC format to reuse existing conversion logic for that type.
         let rpc_tx_meta = crate::rpc_client::TransactionStatusMeta::from(stored_tx_meta);
 
         let err = rpc_tx_meta
