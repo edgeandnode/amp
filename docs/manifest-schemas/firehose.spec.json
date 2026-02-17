@@ -87,15 +87,15 @@
       "minLength": 1
     },
     "Table": {
-      "description": "Table definition for raw datasets",
+      "description": "Table definition for raw datasets.",
       "type": "object",
       "properties": {
         "network": {
-          "description": "Network for this table",
+          "description": "Network for this table.",
           "$ref": "#/$defs/NetworkId"
         },
         "schema": {
-          "description": "Arrow schema for this table",
+          "description": "Arrow schema for this table.",
           "$ref": "#/$defs/TableSchema"
         }
       },
