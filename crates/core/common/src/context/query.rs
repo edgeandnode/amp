@@ -1,16 +1,18 @@
 use std::{
     collections::BTreeMap,
+    pin::Pin,
     sync::{Arc, LazyLock},
+    task::{Context, Poll},
 };
 
-use arrow::{array::ArrayRef, compute::concat_batches};
+use arrow::{array::ArrayRef, compute::concat_batches, datatypes::SchemaRef};
 use datafusion::{
     self,
     arrow::array::RecordBatch,
     catalog::MemorySchemaProvider,
     error::DataFusionError,
     execution::{
-        SendableRecordBatchStream, SessionStateBuilder, config::SessionConfig,
+        RecordBatchStream, SendableRecordBatchStream, SessionStateBuilder, config::SessionConfig,
         context::SessionContext, memory_pool::human_readable_size, runtime_env::RuntimeEnv,
     },
     logical_expr::LogicalPlan,
@@ -23,7 +25,7 @@ use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
 use datasets_common::network_id::NetworkId;
-use futures::{TryStreamExt, stream};
+use futures::{Stream, TryStreamExt, stream};
 use regex::Regex;
 use tracing::field;
 
@@ -118,12 +120,10 @@ impl QueryContext {
             .await
             .map_err(ExecutePlanError::Execute)?;
 
-        tracing::debug!(
-            peak_memory_mb = human_readable_size(self.tiered_memory_pool.peak_reserved()),
-            "Query memory usage"
-        );
-
-        Ok(result)
+        Ok(PeakMemoryStream::wrap(
+            result,
+            self.tiered_memory_pool.clone(),
+        ))
     }
 
     /// This will load the result set entirely in memory, so it should be used with caution.
@@ -533,6 +533,48 @@ fn print_physical_plan(plan: &dyn ExecutionPlan) -> String {
         .to_string()
         .replace('\n', "\\n");
     sanitize_parquet_paths(&plan_str)
+}
+
+/// A stream wrapper that logs peak memory usage when dropped.
+///
+/// Because `execute_plan` returns a lazy `SendableRecordBatchStream`, memory is only
+/// allocated when the stream is consumed. This wrapper defers the peak memory log to
+/// when the stream is dropped (i.e., after consumption or cancellation).
+struct PeakMemoryStream {
+    inner: SendableRecordBatchStream,
+    pool: Arc<TieredMemoryPool>,
+}
+
+impl PeakMemoryStream {
+    fn wrap(
+        inner: SendableRecordBatchStream,
+        pool: Arc<TieredMemoryPool>,
+    ) -> SendableRecordBatchStream {
+        Box::pin(Self { inner, pool })
+    }
+}
+
+impl Drop for PeakMemoryStream {
+    fn drop(&mut self) {
+        tracing::debug!(
+            peak_memory_mb = human_readable_size(self.pool.peak_reserved()),
+            "Query memory usage"
+        );
+    }
+}
+
+impl Stream for PeakMemoryStream {
+    type Item = Result<RecordBatch, DataFusionError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+impl RecordBatchStream for PeakMemoryStream {
+    fn schema(&self) -> SchemaRef {
+        self.inner.schema()
+    }
 }
 
 /// Creates an instrumentation rule that captures metrics and provides previews of data during execution.
