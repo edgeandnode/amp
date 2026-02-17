@@ -3,9 +3,6 @@ use object_store::path::Path;
 use url::Url;
 use uuid::Uuid;
 
-/// Path delimiter used in object store paths.
-const PATH_DELIMITER: char = '/';
-
 /// Physical table URL _new-type_ wrapper
 ///
 /// Represents a base directory URL in the object store containing all parquet files for a table.
@@ -162,6 +159,15 @@ impl PhyTableRevisionPath {
         )
     }
 
+    /// Constructs a `PhyTableRevisionPath` from a pre-validated object store path.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the path represents a valid revision path structure.
+    fn new_unchecked(path: object_store::path::Path) -> Self {
+        Self(path)
+    }
+
     /// Get a reference to the underlying [`Path`]
     pub fn as_object_store_path(&self) -> &Path {
         &self.0
@@ -174,33 +180,17 @@ impl PhyTableRevisionPath {
 }
 
 impl std::str::FromStr for PhyTableRevisionPath {
-    type Err = PhyTableRevisionPathError;
+    type Err = PhyTableRevisionPathParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.trim_end_matches(PATH_DELIMITER).split(PATH_DELIMITER);
+        if s.is_empty() {
+            return Err(PhyTableRevisionPathParseError::Empty);
+        }
+        let path =
+            object_store::path::Path::parse(s).map_err(PhyTableRevisionPathParseError::Invalid)?;
 
-        let revision_uuid: Uuid = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(0))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidRevisionUuid)?;
-
-        let table_name: TableName = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(1))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidTableName)?;
-
-        let dataset_name: Name = parts
-            .next_back()
-            .filter(|s| !s.is_empty())
-            .ok_or(PhyTableRevisionPathError::NotEnoughComponents(2))?
-            .parse()
-            .map_err(PhyTableRevisionPathError::InvalidDatasetName)?;
-
-        Ok(Self::new(dataset_name, table_name, revision_uuid))
+        // SAFETY: Path has been validated by object_store::Path::parse above
+        Ok(Self::new_unchecked(path))
     }
 }
 
@@ -218,20 +208,37 @@ impl std::ops::Deref for PhyTableRevisionPath {
     }
 }
 
+impl<'de> serde::Deserialize<'de> for PhyTableRevisionPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// Error when parsing a path into a [`PhyTableRevisionPath`]
 #[derive(Debug, thiserror::Error)]
-pub enum PhyTableRevisionPathError {
-    #[error("path must have at least 3 components, got {0}")]
-    NotEnoughComponents(usize),
+pub enum PhyTableRevisionPathParseError {
+    /// The provided path string is empty
+    ///
+    /// A physical table revision path must contain at least the path components
+    /// `dataset/table/revision_id`. An empty string cannot represent
+    /// a valid revision path.
+    #[error("physical table revision path cannot be empty")]
+    Empty,
 
-    #[error("invalid dataset name")]
-    InvalidDatasetName(#[source] datasets_common::name::NameError),
-
-    #[error("invalid table name")]
-    InvalidTableName(#[source] datasets_common::table_name::TableNameError),
-
-    #[error("invalid revision UUID")]
-    InvalidRevisionUuid(#[source] uuid::Error),
+    /// The path contains invalid characters or malformed segments
+    ///
+    /// This error occurs when the path string fails object store path validation.
+    ///
+    /// Common causes:
+    /// - Empty segments (consecutive slashes like `foo//bar`)
+    /// - Invalid characters in path segments
+    /// - Malformed path encoding
+    #[error("invalid physical table revision path: {0}")]
+    Invalid(#[source] object_store::path::Error),
 }
 
 /// Error type for PhyTableUrl parsing

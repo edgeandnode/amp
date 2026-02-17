@@ -3,11 +3,10 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DatasetName, DatasetNamespace,
+    DatasetName, DatasetNamespace, Error,
     db::Connection,
     manifests::ManifestHash,
-    physical_table,
-    physical_table::{LocationId, TableName, TablePath},
+    physical_table::{self, LocationId, TableName, TablePath},
 };
 
 #[tokio::test]
@@ -58,7 +57,7 @@ async fn list_locations_first_page_respects_limit() {
             i, i
         ));
         let location_id =
-            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path)
+            register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
                 .await
                 .expect("Failed to insert location");
         physical_table::mark_active_by_id(
@@ -133,7 +132,7 @@ async fn list_locations_next_page_uses_cursor() {
             i, i
         ));
         let location_id =
-            physical_table::register(&mut conn, &namespace, &name, &hash, &table_name, path)
+            register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
                 .await
                 .expect("Failed to insert location");
         all_location_ids.push(location_id);
@@ -194,4 +193,18 @@ async fn list_locations_next_page_uses_cursor() {
         cursor > second_page[0].id,
         "list should use cursor to exclude locations with ID >= cursor"
     );
+}
+
+async fn register_table_and_revision(
+    conn: &mut Connection,
+    namespace: &DatasetNamespace<'_>,
+    name: &DatasetName<'_>,
+    hash: &ManifestHash<'_>,
+    table_name: &TableName<'_>,
+    path: &TablePath<'_>,
+) -> Result<LocationId, Error> {
+    physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
+    let revision_id =
+        physical_table::register_revision(conn, namespace, name, hash, table_name, path).await?;
+    Ok(revision_id)
 }

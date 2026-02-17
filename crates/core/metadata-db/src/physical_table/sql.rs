@@ -21,50 +21,69 @@ use crate::{
     workers::WorkerNodeIdOwned,
 };
 
-/// Insert a physical table revision into the database and return its ID (idempotent operation)
+/// Idempotently upsert a physical table record and return its ID.
 ///
-/// This operation:
-/// 1. Upserts the physical_table (meta) record
-/// 2. Inserts the revision record
+/// Inserts into `physical_tables` only. On conflict (same namespace, name,
+/// manifest_hash, table_name), touches `updated_at` and returns the existing ID.
 pub async fn insert<'c, E>(
     exe: E,
     dataset_namespace: DatasetNamespace<'_>,
     dataset_name: DatasetName<'_>,
     manifest_hash: ManifestHash<'_>,
     table_name: Name<'_>,
+) -> Result<PhysicalTableId, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        INSERT INTO physical_tables (manifest_hash, table_name, dataset_namespace, dataset_name)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (dataset_namespace, dataset_name, manifest_hash, table_name) DO UPDATE SET updated_at = now()
+        RETURNING id
+    "};
+
+    let id: PhysicalTableId = sqlx::query_scalar(query)
+        .bind(manifest_hash)
+        .bind(table_name)
+        .bind(dataset_namespace)
+        .bind(dataset_name)
+        .fetch_one(exe)
+        .await?;
+    Ok(id)
+}
+
+/// Idempotently create a physical table revision record.
+///
+/// Uses `INSERT ... ON CONFLICT (path) DO NOTHING` with a CTE fallback
+/// to always return the `id` without performing any updates on conflict.
+pub async fn insert_revision<'c, E>(
+    exe: E,
     path: Path<'_>,
     metadata: JsonValue,
 ) -> Result<LocationId, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    // Upsert with RETURNING id - the no-op update ensures RETURNING works for both insert and conflict cases
     let query = indoc::indoc! {"
-        WITH pt AS (
-            INSERT INTO physical_tables (manifest_hash, table_name, dataset_namespace, dataset_name)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (dataset_namespace, dataset_name, manifest_hash, table_name) DO UPDATE SET updated_at = now()
+        WITH ins AS (
+            INSERT INTO physical_table_revisions (path, metadata)
+            VALUES ($1, $2)
+            ON CONFLICT (path) DO NOTHING
             RETURNING id
         )
-        INSERT INTO physical_table_revisions (path, metadata)
-        SELECT $5, $6
-        FROM pt
-        ON CONFLICT (path) DO UPDATE SET updated_at = now()
-        RETURNING id
+        SELECT COALESCE(
+            (SELECT id FROM ins),
+            (SELECT id FROM physical_table_revisions WHERE path = $1)
+        ) AS id
     "};
 
     let id: LocationId = sqlx::query_scalar(query)
-        .bind(manifest_hash)
-        .bind(table_name)
-        .bind(dataset_namespace)
-        .bind(dataset_name)
         .bind(path)
         .bind(metadata)
         .fetch_one(exe)
         .await?;
     Ok(id)
 }
-
 /// Get a physical table revision by its location ID
 ///
 /// Returns `None` if no revision exists with the given location ID.
