@@ -48,6 +48,8 @@ impl TableProvider for PlanningTable {
         _filters: &[Expr],
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        unreachable!("PlanningTable should never be scanned")
+        Err(DataFusionError::External(
+            "PlanningTable should never be scanned".into(),
+        ))
     }
 }
