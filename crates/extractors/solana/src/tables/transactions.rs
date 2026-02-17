@@ -268,21 +268,6 @@ impl TransactionStatusMeta {
             .rewards
             .map(|rewards| rewards.into_iter().map(Into::into).collect());
 
-        let loaded_addresses = LoadedAddresses {
-            writable: rpc_tx_meta
-                .loaded_addresses
-                .writable
-                .iter()
-                .map(|a| a.to_string())
-                .collect(),
-            readonly: rpc_tx_meta
-                .loaded_addresses
-                .readonly
-                .iter()
-                .map(|a| a.to_string())
-                .collect(),
-        };
-
         let return_data = rpc_tx_meta
             .return_data
             .map(|return_data| TransactionReturnData {
@@ -295,16 +280,21 @@ impl TransactionStatusMeta {
             fee: rpc_tx_meta.fee,
             pre_balances: rpc_tx_meta.pre_balances,
             post_balances: rpc_tx_meta.post_balances,
-            inner_instructions,
-            log_messages: rpc_tx_meta.log_messages,
-            loaded_addresses: Some(loaded_addresses),
             return_data,
             compute_units_consumed: rpc_tx_meta.compute_units_consumed,
             cost_units: rpc_tx_meta.cost_units,
-            // Use empty vectors if balances/rewards are missing to match JSON-RPC behavior.
+            // Use empty vectors if any of these are missing to match JSON-RPC behavior.
+            log_messages: Some(rpc_tx_meta.log_messages.unwrap_or_default()),
+            inner_instructions: Some(inner_instructions.unwrap_or_default()),
             pre_token_balances: Some(pre_token_balances.unwrap_or_default()),
             post_token_balances: Some(post_token_balances.unwrap_or_default()),
             rewards: Some(rewards.unwrap_or_default()),
+            // Stored transaction meta does not include loaded addresses. Format is done in a way
+            // that matches JSON-RPC behavior.
+            loaded_addresses: Some(LoadedAddresses {
+                writable: Vec::new(),
+                readonly: Vec::new(),
+            }),
         })
     }
 
