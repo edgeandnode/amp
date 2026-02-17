@@ -1,5 +1,6 @@
 use ampctl::client::revisions::{
-    ActivateError, DeactivateError, GetByIdError, ListError, RevisionInfo,
+    ActivateError, DeactivateError, GetByIdError, ListError, RegisterError, RegisterResponse,
+    RevisionInfo,
 };
 use datasets_common::reference::Reference;
 use monitoring::logging;
@@ -218,6 +219,66 @@ async fn get_revision_with_invalid_id_returns_400() {
 }
 
 #[tokio::test]
+async fn register_revision_for_non_registered_dataset_fails() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_minimal("register_revision_for_non_registered_dataset_fails").await;
+
+    //* When
+    let resp = ctx
+        .register_revision("_/nonexistent@0.0.0", "blocks", "some/path")
+        .await;
+
+    //* Then
+    assert!(
+        resp.is_err(),
+        "register revision for non-registered dataset should fail"
+    );
+    let err = resp.unwrap_err();
+    match err {
+        RegisterError::DatasetNotFound(api_err) => {
+            assert_eq!(
+                api_err.error_code, "DATASET_NOT_FOUND",
+                "Expected DATASET_NOT_FOUND error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected DatasetNotFound error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn register_revision_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("register_revision_succeeds").await;
+
+    // Create revisions for each table pointing to eth_rpc_custom paths
+    let path = "eth_rpc_custom/blocks";
+    let res = ctx
+        .register_revision("_/eth_rpc@0.0.0", "blocks", path)
+        .await
+        .expect("failed to register revision");
+
+    //* When
+    let restored_tables = ctx
+        .get_revision(res.location_id)
+        .await
+        .expect("failed to get revision");
+
+    //* Then
+    assert!(
+        restored_tables.is_some(),
+        "get revision should return some revision"
+    );
+    let revision = restored_tables.unwrap();
+    assert_eq!(revision.path, path, "revision path should match");
+    assert!(!revision.active, "revision should be inactive");
+}
+
+#[tokio::test]
 async fn deactivate_revision_for_active_table_succeeds() {
     logging::init();
 
@@ -404,6 +465,21 @@ impl TestCtx {
         }
     }
 
+    /// Setup with no manifests or snapshots — bare test environment.
+    async fn setup_minimal(test_name: &str) -> Self {
+        let ctx = TestCtxBuilder::new(test_name)
+            .build()
+            .await
+            .expect("failed to build test context");
+
+        let ampctl = ctx.new_ampctl();
+
+        Self {
+            ctx,
+            ampctl_client: ampctl,
+        }
+    }
+
     /// Restores the `eth_rpc` dataset and returns info about the restored tables.
     async fn restore_dataset(&self) -> Vec<ampctl::client::datasets::RestoredTableInfo> {
         let dataset_ref: Reference = "_/eth_rpc@0.0.0".parse().expect("valid reference");
@@ -472,6 +548,19 @@ impl TestCtx {
     /// Fetches a revision by its location ID, returning `None` if not found.
     async fn get_revision(&self, location_id: i64) -> Result<Option<RevisionInfo>, GetByIdError> {
         self.ampctl_client.revisions().get_by_id(location_id).await
+    }
+
+    /// Registers a table revision.
+    async fn register_revision(
+        &self,
+        dataset: &str,
+        table_name: &str,
+        path: &str,
+    ) -> Result<RegisterResponse, RegisterError> {
+        self.ampctl_client
+            .revisions()
+            .register(dataset, table_name, path)
+            .await
     }
 
     /// Executes a SQL query via the Flight client and returns the result with row count.

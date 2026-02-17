@@ -25,12 +25,43 @@ use crate::{
     manifests::ManifestHash,
 };
 
-/// Register a new physical table location in the database
+/// Idempotently upsert a physical table record in the database.
 ///
-/// This operation is idempotent - if a location with the same path already exists,
-/// its manifest_hash will be updated and the existing location ID will be returned.
+/// Inserts into `physical_tables` only. If a record with the same
+/// (namespace, name, manifest_hash, table_name) already exists, touches
+/// `updated_at` and returns the existing ID.
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
+    exe: E,
+    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug,
+    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+) -> Result<PhysicalTableId, Error>
+where
+    E: Executor<'c>,
+{
+    sql::insert(
+        exe,
+        dataset_namespace.into(),
+        dataset_name.into(),
+        manifest_hash.into(),
+        table_name.into(),
+    )
+    .await
+    .map_err(Error::Database)
+}
+
+/// Idempotently create a physical table revision record.
+///
+/// Inserts a new record into `physical_table_revisions` with the given path and metadata.
+/// If a revision with the same path already exists, returns its existing ID without
+/// performing any updates.
+///
+/// This is a low-level operation that only creates the revision record. It does NOT
+/// create or modify `physical_tables` entries, nor does it activate the revision.
+#[tracing::instrument(skip(exe), err)]
+pub async fn register_revision<'c, E>(
     exe: E,
     dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug + serde::Serialize,
     dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug + serde::Serialize,
@@ -47,17 +78,9 @@ where
         "manifest_hash": manifest_hash,
         "table_name": table_name,
     });
-    sql::insert(
-        exe,
-        dataset_namespace.into(),
-        dataset_name.into(),
-        manifest_hash.into(),
-        table_name.into(),
-        path.into(),
-        metadata,
-    )
-    .await
-    .map_err(Error::Database)
+    sql::insert_revision(exe, path.into(), metadata)
+        .await
+        .map_err(Error::Database)
 }
 
 /// Get a physical table revision by its location ID

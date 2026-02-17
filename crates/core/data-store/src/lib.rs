@@ -111,23 +111,23 @@ impl DataStore {
 
 /// Physical table revision management
 impl DataStore {
-    /// Registers a new physical table revision and marks it as active.
+    /// Creates and activates a new physical table revision.
     ///
     /// This atomically registers the revision location in the metadata database
     /// and marks it as active while deactivating all other revisions for this table.
-    pub async fn register_table_revision(
+    pub async fn create_and_activate_table_revision(
         &self,
         dataset: &HashReference,
         table_name: &TableName,
         path: &PhyTableRevisionPath,
-    ) -> Result<LocationId, RegisterTableRevisionError> {
+    ) -> Result<LocationId, CreateAndActivateTableRevisionError> {
         let mut tx = self
             .metadata_db
             .begin_txn()
             .await
-            .map_err(RegisterTableRevisionError::TransactionBegin)?;
+            .map_err(CreateAndActivateTableRevisionError::TransactionBegin)?;
 
-        let location_id = metadata_db::physical_table::register(
+        let location_id = metadata_db::physical_table::register_revision(
             &mut tx,
             dataset.namespace(),
             dataset.name(),
@@ -136,7 +136,17 @@ impl DataStore {
             path,
         )
         .await
-        .map_err(RegisterTableRevisionError::RegisterPhysicalTable)?;
+        .map_err(CreateAndActivateTableRevisionError::RegisterPhysicalTable)?;
+
+        metadata_db::physical_table::register(
+            &mut tx,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(CreateAndActivateTableRevisionError::RegisterPhysicalTable)?;
 
         metadata_db::physical_table::mark_inactive_by_table_name(
             &mut tx,
@@ -146,7 +156,7 @@ impl DataStore {
             table_name,
         )
         .await
-        .map_err(RegisterTableRevisionError::MarkInactive)?;
+        .map_err(CreateAndActivateTableRevisionError::MarkInactive)?;
 
         metadata_db::physical_table::mark_active_by_id(
             &mut tx,
@@ -157,11 +167,11 @@ impl DataStore {
             table_name,
         )
         .await
-        .map_err(RegisterTableRevisionError::MarkActive)?;
+        .map_err(CreateAndActivateTableRevisionError::MarkActive)?;
 
         tx.commit()
             .await
-            .map_err(RegisterTableRevisionError::TransactionCommit)?;
+            .map_err(CreateAndActivateTableRevisionError::TransactionCommit)?;
 
         Ok(location_id)
     }
@@ -182,7 +192,7 @@ impl DataStore {
         let url = PhyTableUrl::new(self.url(), &path);
 
         let location_id = self
-            .register_table_revision(dataset, table_name, &path)
+            .create_and_activate_table_revision(dataset, table_name, &path)
             .await
             .map_err(CreateNewTableRevisionError)?;
 
@@ -191,6 +201,29 @@ impl DataStore {
             path,
             url,
         })
+    }
+
+    /// Registers a physical table revision from an existing path.
+    ///
+    /// This is a low-level, idempotent operation that only inserts a record into
+    /// `physical_table_revisions`. It does NOT create `physical_tables` entries,
+    /// nor does it activate the revision.
+    pub async fn register_table_revision(
+        &self,
+        dataset: &HashReference,
+        table_name: &TableName,
+        path: &PhyTableRevisionPath,
+    ) -> Result<LocationId, RegisterTableRevisionError> {
+        metadata_db::physical_table::register_revision(
+            &self.metadata_db,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+            path,
+        )
+        .await
+        .map_err(RegisterTableRevisionError)
     }
 
     /// Locks table revisions for a writer job.
@@ -235,7 +268,7 @@ impl DataStore {
         let url = PhyTableUrl::new(self.url(), &path);
 
         let location_id = self
-            .register_table_revision(dataset, table_name, &path)
+            .create_and_activate_table_revision(dataset, table_name, &path)
             .await
             .map_err(RestoreLatestTableRevisionError::RegisterRevision)?;
 
@@ -306,7 +339,7 @@ impl DataStore {
     /// This atomically deactivates all existing revisions for the table and then
     /// marks the specified revision as active within a single transaction.
     ///
-    /// Unlike [`register_table_revision`](Self::register_table_revision), this does not
+    /// Unlike [`create_and_activate_table_revision`](Self::create_and_activate_table_revision), this does not
     /// create a new revision — it activates an already-registered one.
     pub async fn activate_table_revision(
         &self,
@@ -725,9 +758,9 @@ pub struct PhyTableRevisionFileMetadata {
 
 /// Errors that occur when registering and activating a physical table revision
 ///
-/// This error type is used by `Store::register_table_revision()`.
+/// This error type is used by [`DataStore::create_and_activate_table_revision()`].
 #[derive(Debug, thiserror::Error)]
-pub enum RegisterTableRevisionError {
+pub enum CreateAndActivateTableRevisionError {
     /// Failed to begin transaction
     ///
     /// This error occurs when the database connection fails to start a transaction,
@@ -935,7 +968,19 @@ pub struct FindLatestTableRevisionInObjectStoreError(#[source] pub object_store:
 /// - Permission denied for database operations
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to create new table revision")]
-pub struct CreateNewTableRevisionError(#[source] pub RegisterTableRevisionError);
+pub struct CreateNewTableRevisionError(#[source] pub CreateAndActivateTableRevisionError);
+
+/// Failed to register a physical table revision
+///
+/// This error occurs when inserting a revision record into the metadata database fails.
+///
+/// Common causes:
+/// - Database connection issues
+/// - Database constraint violations
+/// - Permission denied for database operations
+#[derive(Debug, thiserror::Error)]
+#[error("failed to register table revision")]
+pub struct RegisterTableRevisionError(#[source] pub metadata_db::Error);
 
 /// Failed to lock revisions for writer job
 ///
@@ -980,7 +1025,7 @@ pub enum RestoreLatestTableRevisionError {
     /// - Transaction commit failures
     /// - Permission denied for database operations
     #[error("Failed to register revision in metadata database")]
-    RegisterRevision(#[source] RegisterTableRevisionError),
+    RegisterRevision(#[source] CreateAndActivateTableRevisionError),
 }
 
 /// Errors that occur when listing all table revisions
