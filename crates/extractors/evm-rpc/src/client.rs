@@ -260,7 +260,7 @@ impl JsonRpcClient {
 
                 if block.transactions.is_empty() {
                     // Avoid sending an RPC request just to get an empty vector.
-                    yield rpc_to_rows(block, Vec::new(), &self.network).fatal();
+                    yield rpc_to_rows(block, Vec::new(), &self.network).recoverable();
                     continue;
                 }
 
@@ -313,7 +313,7 @@ impl JsonRpcClient {
                     }
                 };
 
-                yield rpc_to_rows(block, receipts, &self.network).fatal();
+                yield rpc_to_rows(block, receipts, &self.network).recoverable();
             }
         }
     }
@@ -361,7 +361,7 @@ impl JsonRpcClient {
                     // No transactions in any block, just yield the block rows
                     for block in blocks.into_iter() {
                         blocks_completed += 1;
-                        yield rpc_to_rows(block, Vec::new(), &self.network).fatal();
+                        yield rpc_to_rows(block, Vec::new(), &self.network).recoverable();
                     }
                 } else {
                     let all_receipts_result: Result<Vec<_>, BatchingError> = if self.fetch_receipts_per_tx {
