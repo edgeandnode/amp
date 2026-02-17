@@ -3,6 +3,7 @@
 pub mod activate;
 pub mod deactivate;
 pub mod get;
+pub mod list;
 
 /// Revision management subcommands.
 #[derive(Debug, clap::Subcommand)]
@@ -18,6 +19,11 @@ pub enum Commands {
     /// Get a revision by location ID
     #[command(after_help = include_str!("table/get__after_help.md"))]
     Get(get::Args),
+
+    /// List all table revisions
+    #[command(alias = "ls")]
+    #[command(after_help = include_str!("table/list__after_help.md"))]
+    List(list::Args),
 }
 
 /// Execute the revision command with the given subcommand.
@@ -26,6 +32,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Activate(args) => activate::run(args).await?,
         Commands::Deactivate(args) => deactivate::run(args).await?,
         Commands::Get(args) => get::run(args).await?,
+        Commands::List(args) => list::run(args).await?,
     }
     Ok(())
 }
