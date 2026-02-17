@@ -406,6 +406,7 @@ pub mod legacy {
     pub struct StoredExtendedReward {
         pub pubkey: String,
         pub lamports: i64,
+        // These fields are not present in legacy bincode serialized data.
         #[serde(skip)]
         pub post_balance: u64,
         #[serde(skip)]
@@ -496,6 +497,7 @@ pub mod legacy {
     #[derive(Serialize, Deserialize)]
     pub struct StoredInnerInstruction {
         pub instruction: solana_message::compiled_instruction::CompiledInstruction,
+        // This field is not present in legacy bincode serialized data.
         #[serde(skip)]
         pub stack_height: Option<u32>,
     }
@@ -569,6 +571,7 @@ pub mod legacy {
         pub account_index: u8,
         pub mint: String,
         pub ui_token_amount: StoredTokenAmount,
+        // These fields are not present in legacy bincode serialized data.
         #[serde(skip)]
         pub owner: String,
         #[serde(skip)]
@@ -629,6 +632,7 @@ pub mod legacy {
         pub post_token_balances: Option<Vec<StoredTransactionTokenBalance>>,
         #[serde(deserialize_with = "default_on_eof")]
         pub rewards: Option<Vec<StoredExtendedReward>>,
+        // These fields are not present in legacy bincode serialized data.
         #[serde(skip)]
         pub return_data: Option<TransactionReturnData>,
         #[serde(skip)]
