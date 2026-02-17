@@ -22,7 +22,11 @@ use foyer::Cache;
 // Re-export foyer::Cache for use by downstream crates
 pub use foyer::Cache as FoyerCache;
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream::BoxStream};
-use metadata_db::{LocationId, MetadataDb, files::FileId, physical_table::PhysicalTableRevision};
+use metadata_db::{
+    MetadataDb,
+    files::FileId,
+    physical_table_revision::{LocationId, PhysicalTableRevision},
+};
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
 use url::Url;
 use uuid::Uuid;
@@ -127,7 +131,7 @@ impl DataStore {
             .await
             .map_err(CreateAndActivateTableRevisionError::TransactionBegin)?;
 
-        let location_id = metadata_db::physical_table::register_revision(
+        let location_id = metadata_db::physical_table_revision::register(
             &mut tx,
             dataset.namespace(),
             dataset.name(),
@@ -214,7 +218,7 @@ impl DataStore {
         table_name: &TableName,
         path: &PhyTableRevisionPath,
     ) -> Result<LocationId, RegisterTableRevisionError> {
-        metadata_db::physical_table::register_revision(
+        metadata_db::physical_table_revision::register(
             &self.metadata_db,
             dataset.namespace(),
             dataset.name(),
@@ -236,9 +240,13 @@ impl DataStore {
         writer: impl Into<metadata_db::JobId> + std::fmt::Debug,
     ) -> Result<(), LockRevisionsForWriterError> {
         let location_ids: Vec<_> = revisions.into_iter().map(|r| r.location_id).collect();
-        metadata_db::physical_table::assign_job_writer(&self.metadata_db, &location_ids, writer)
-            .await
-            .map_err(LockRevisionsForWriterError)
+        metadata_db::physical_table_revision::assign_job_writer(
+            &self.metadata_db,
+            &location_ids,
+            writer,
+        )
+        .await
+        .map_err(LockRevisionsForWriterError)
     }
 
     /// Restores the latest table revision from object storage.
@@ -286,7 +294,7 @@ impl DataStore {
         &self,
         location_id: LocationId,
     ) -> Result<Option<PhysicalTableRevision>, GetRevisionByLocationIdError> {
-        metadata_db::physical_table::get_by_location_id(&self.metadata_db, location_id)
+        metadata_db::physical_table_revision::get_by_location_id(&self.metadata_db, location_id)
             .await
             .map_err(GetRevisionByLocationIdError)
     }
@@ -300,7 +308,7 @@ impl DataStore {
         active: Option<bool>,
         limit: i64,
     ) -> Result<Vec<PhysicalTableRevision>, ListAllTableRevisionsError> {
-        metadata_db::physical_table::list_all(&self.metadata_db, active, limit)
+        metadata_db::physical_table_revision::list_all(&self.metadata_db, active, limit)
             .await
             .map_err(ListAllTableRevisionsError)
     }
@@ -313,7 +321,7 @@ impl DataStore {
         dataset_ref: &HashReference,
         table_name: &TableName,
     ) -> Result<Option<PhyTableRevision>, GetTableActiveRevisionError> {
-        let Some(row) = metadata_db::physical_table::get_active(
+        let Some(row) = metadata_db::physical_table_revision::get_active(
             &self.metadata_db,
             dataset_ref.hash(),
             table_name,

@@ -6,7 +6,7 @@
 use futures::stream::{Stream, StreamExt};
 use url::Url;
 
-use crate::{Error, Executor, physical_table::LocationId};
+use crate::{Error, Executor, physical_table_revision::LocationId};
 
 mod file_id;
 mod name;

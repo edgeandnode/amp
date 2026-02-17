@@ -113,7 +113,7 @@ use common::{
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
 use futures::TryStreamExt as _;
-use metadata_db::{LocationId, MetadataDb, NotificationMultiplexerHandle};
+use metadata_db::{MetadataDb, NotificationMultiplexerHandle, physical_table_revision::LocationId};
 use monitoring::logging;
 use tokio::task::JoinHandle;
 use tracing::{Instrument, instrument};

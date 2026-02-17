@@ -24,7 +24,7 @@ use datasets_common::{
     dataset::Table, hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
 };
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
-use metadata_db::LocationId;
+use metadata_db::physical_table_revision::LocationId;
 use url::Url;
 
 use crate::{

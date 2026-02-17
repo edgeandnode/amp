@@ -4,7 +4,10 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use metadata_db::{JobId, LocationId, physical_table::PhysicalTableRevision};
+use metadata_db::{
+    JobId,
+    physical_table_revision::{LocationId, PhysicalTableRevision},
+};
 use monitoring::logging;
 
 use crate::{

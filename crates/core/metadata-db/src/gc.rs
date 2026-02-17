@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use futures::stream::{BoxStream, StreamExt};
 
-use crate::{Error, Executor, files::FileId, physical_table::LocationId};
+use crate::{Error, Executor, files::FileId, physical_table_revision::LocationId};
 
 pub(crate) mod sql;
 

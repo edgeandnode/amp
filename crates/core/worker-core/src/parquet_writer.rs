@@ -18,8 +18,9 @@ use common::{
     },
 };
 use metadata_db::{
-    LocationId, MetadataDb,
+    MetadataDb,
     files::{FileId, FooterBytes},
+    physical_table_revision::LocationId,
 };
 use object_store::{ObjectMeta, buffered::BufWriter};
 use url::Url;

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use amp_data_store::{DataStore, file_name::FileName};
 use common::catalog::physical::{GetFilesError, PhysicalTable};
-use metadata_db::LocationId;
+use metadata_db::physical_table_revision::LocationId;
 use object_store::ObjectMeta;
 
 /// Validates consistency between metadata database and object store for a table

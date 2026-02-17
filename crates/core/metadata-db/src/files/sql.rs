@@ -13,7 +13,7 @@ use super::{
     file_id::FileId,
     name::{Name, NameOwned},
 };
-use crate::physical_table::LocationId;
+use crate::physical_table_revision::LocationId;
 
 /// Lightweight file metadata for listing and pagination operations
 ///

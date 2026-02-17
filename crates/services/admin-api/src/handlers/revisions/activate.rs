@@ -7,7 +7,7 @@ use axum::{
 };
 use common::dataset_store::GetDatasetError;
 use datasets_common::{reference::Reference, table_name::TableName};
-use metadata_db::LocationId;
+use metadata_db::physical_table_revision::LocationId;
 use monitoring::logging;
 
 use crate::{

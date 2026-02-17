@@ -6,7 +6,8 @@ use crate::{
     DatasetName, DatasetNamespace, Error,
     db::Connection,
     manifests::ManifestHash,
-    physical_table::{self, LocationId, TableName, TablePath},
+    physical_table::{self, TableName},
+    physical_table_revision::{self, LocationId, TablePath},
 };
 
 #[tokio::test]
@@ -21,7 +22,7 @@ async fn list_locations_first_page_when_empty() {
         .expect("Failed to run migrations");
 
     //* When
-    let locations = physical_table::list(&mut conn, 10, None as Option<LocationId>)
+    let locations = physical_table_revision::list(&mut conn, 10, None as Option<LocationId>)
         .await
         .expect("Failed to list locations");
 
@@ -76,7 +77,7 @@ async fn list_locations_first_page_respects_limit() {
     }
 
     //* When
-    let locations = physical_table::list(&mut conn, 3, None as Option<LocationId>)
+    let locations = physical_table_revision::list(&mut conn, 3, None as Option<LocationId>)
         .await
         .expect("Failed to list locations");
 
@@ -152,7 +153,7 @@ async fn list_locations_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = physical_table::list(&mut conn, 3, None as Option<LocationId>)
+    let first_page = physical_table_revision::list(&mut conn, 3, None as Option<LocationId>)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -161,7 +162,7 @@ async fn list_locations_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = physical_table::list(&mut conn, 3, Some(cursor))
+    let second_page = physical_table_revision::list(&mut conn, 3, Some(cursor))
         .await
         .expect("Failed to list second page");
 
@@ -205,6 +206,6 @@ async fn register_table_and_revision(
 ) -> Result<LocationId, Error> {
     physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
     let revision_id =
-        physical_table::register_revision(conn, namespace, name, hash, table_name, path).await?;
+        physical_table_revision::register(conn, namespace, name, hash, table_name, path).await?;
     Ok(revision_id)
 }
