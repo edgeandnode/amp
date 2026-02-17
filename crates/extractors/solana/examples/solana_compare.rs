@@ -14,6 +14,10 @@ use solana_datasets::{
 
 const SLOT_MISMATCH_LIMIT: u8 = 10;
 
+// TODO(known-mismatch): There is a known delta seconds between OF1 and JSON-RPC
+// blocktimes for some slots.
+const KNOWN_BLOCKTIME_DELTA: i64 = 120;
+
 #[derive(Parser)]
 #[command(name = "solana-compare")]
 struct Cli {
@@ -275,7 +279,7 @@ fn slots_match(
         // TODO(known-mismatch): OF1 blocktimes for early epochs are `0` while
         // JSON-RPC blocktimes for the same epochs are non-zero.
         (Some(0), Some(rpc_time)) if rpc_time != 0 => {}
-        (Some(of1_time), Some(rpc_time)) if of1_time != rpc_time => {
+        (Some(of1_time), Some(rpc_time)) if (of1_time - rpc_time).abs() > KNOWN_BLOCKTIME_DELTA => {
             tracing::warn!(
                 slot = %slot_num,
                 of1_blocktime = %of1_time,
@@ -299,28 +303,39 @@ fn slots_match(
 
     for (tx_index, (of1_tx, rpc_tx)) in of1_slot
         .transactions
-        .iter()
-        .zip(rpc_slot.transactions.iter())
+        .iter_mut()
+        .zip(rpc_slot.transactions.iter_mut())
         .enumerate()
     {
-        match (
-            of1_tx.transaction_status_meta.as_ref(),
-            rpc_tx.transaction_status_meta.as_ref(),
+        if let (Some(of1_tx_meta), Some(rpc_tx_meta)) = (
+            of1_tx.transaction_status_meta.as_mut(),
+            rpc_tx.transaction_status_meta.as_mut(),
         ) {
-            // TODO(known-mismatch): Some OF1 transactions have the following error:
-            //
-            // `TransactionError::Instruction(_, InstructionError::Custom(0))`
-            //
-            // while the same JSON-RPC transactions show no error.
-            (Some(of1_tx_meta), Some(rpc_tx_meta)) if of1_tx_meta.err != rpc_tx_meta.err => {
+            if of1_tx_meta.err != rpc_tx_meta.err {
+                // TODO(known-mismatch): Some OF1 transactions have the following error:
+                //
+                // `TransactionError::Instruction(_, InstructionError::Custom(0))`
+                //
+                // while the same JSON-RPC transactions show no error.
                 continue;
+            } else {
+                // We're about to compare the rewards for the transaction, which are not sorted
+                // by default and could lead to false positives, so we sort them beforehand.
+                if let Some(rewards) = of1_tx_meta.rewards.as_mut() {
+                    rewards.sort();
+                }
+                if let Some(rewards) = rpc_tx_meta.rewards.as_mut() {
+                    rewards.sort();
+                }
             }
-            _ => {}
         }
 
         if of1_tx != rpc_tx {
             // TODO(known-mismatch)
             let known_mismatch = known_tx_reward_mismatch(
+                of1_tx.transaction_status_meta.as_ref(),
+                rpc_tx.transaction_status_meta.as_ref(),
+            ) || known_log_message_mismatch(
                 of1_tx.transaction_status_meta.as_ref(),
                 rpc_tx.transaction_status_meta.as_ref(),
             );
@@ -412,14 +427,29 @@ fn known_tx_reward_mismatch(
     of1_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
     rpc_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
 ) -> bool {
-    let (Some(of1_tx_meta), Some(rpc_tx_meta)) = (of1_tx_meta, rpc_tx_meta) else {
+    let (Some(of1_rewards), Some(rpc_rewards)) = (
+        of1_tx_meta.and_then(|meta| meta.rewards.as_ref()),
+        rpc_tx_meta.and_then(|meta| meta.rewards.as_ref()),
+    ) else {
         return false;
     };
 
-    let (Some(of1_rewards), Some(rpc_rewards)) =
-        (of1_tx_meta.rewards.as_ref(), rpc_tx_meta.rewards.as_ref())
-    else {
+    rpc_rewards.is_empty() && !of1_rewards.is_empty()
+}
+
+/// Checks for a known mismatch where OF1 has no log messages for a transaction but
+/// RPC shows log messages for the same transaction (because some OF1 versions have
+/// missing log messages for older transactions).
+fn known_log_message_mismatch(
+    of1_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
+    rpc_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
+) -> bool {
+    let (Some(of1_log_messages), Some(rpc_log_messages)) = (
+        of1_tx_meta.and_then(|meta| meta.log_messages.as_ref()),
+        rpc_tx_meta.and_then(|meta| meta.log_messages.as_ref()),
+    ) else {
         return false;
     };
-    rpc_rewards.is_empty() && !of1_rewards.is_empty()
+
+    of1_log_messages.is_empty() && !rpc_log_messages.is_empty()
 }
