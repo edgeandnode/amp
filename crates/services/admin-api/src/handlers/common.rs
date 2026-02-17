@@ -9,8 +9,9 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
-    context::{planning::PlanningContext, query::Error as QueryContextErr},
+    context::planning::{PlanSqlError as PlanningPlanSqlError, PlanningContext},
     dataset_store::{DatasetStore, GetDatasetError},
+    query_env::default_session_config,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
@@ -325,6 +326,8 @@ pub async fn validate_derived_manifest(
     // - Bare function references can be created as UDFs or are assumed to be built-ins
     // - Table references use valid dataset aliases from dependencies
     // - Schema compatibility across dependencies
+    let session_config =
+        default_session_config().map_err(ManifestValidationError::SessionConfig)?;
     let planning_ctx = catalog::create(
         store,
         IsolatePool::dummy(), // For manifest validation only (no JS execution)
@@ -333,7 +336,7 @@ pub async fn validate_derived_manifest(
         references,
     )
     .await
-    .map(PlanningContext::new)
+    .map(|catalog| PlanningContext::new(session_config, catalog))
     .map_err(|err| match &err {
         CreateLogicalCatalogError::ResolveTables(resolve_error) => match resolve_error {
             ResolveTablesError::UnqualifiedTable { .. } => {
@@ -577,8 +580,12 @@ pub enum ManifestValidationError {
         /// The table whose SQL query failed to plan
         table_name: TableName,
         #[source]
-        source: QueryContextErr,
+        source: PlanningPlanSqlError,
     },
+
+    /// Failed to create DataFusion session configuration
+    #[error("failed to create session config")]
+    SessionConfig(#[source] datafusion::error::DataFusionError),
 
     /// Start block before dependencies
     ///

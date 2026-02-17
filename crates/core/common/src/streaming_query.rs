@@ -37,11 +37,9 @@ use crate::{
         logical::LogicalTable,
         physical::{CanonicalChainError, Catalog, PhysicalTable},
     },
-    context::{
-        planning::{DetachedLogicalPlan, PlanningContext},
-        query::QueryContext,
-    },
+    context::{planning::PlanningContext, query::QueryContext},
     dataset_store::{DatasetStore, ResolveRevisionError},
+    detached_logical_plan::DetachedLogicalPlan,
     incrementalizer::incrementalize_plan,
     metadata::segments::{Segment, WatermarkNotFoundError},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
@@ -88,7 +86,7 @@ pub enum SpawnError {
     /// Optimization failures prevent the streaming query from starting with an
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
-    OptimizePlan(#[source] crate::context::query::Error),
+    OptimizePlan(#[source] crate::context::planning::OptimizePlanError),
 
     /// Query references tables from multiple blockchain networks
     ///
@@ -348,7 +346,8 @@ impl StreamingQuery {
                 .propagate_block_num()
                 .map_err(SpawnError::PropagateBlockNum)?;
 
-            let ctx = PlanningContext::new(catalog.logical().clone());
+            let ctx =
+                PlanningContext::new(query_env.session_config.clone(), catalog.logical().clone());
             ctx.optimize_plan(&plan)
                 .await
                 .map_err(SpawnError::OptimizePlan)?
@@ -415,9 +414,9 @@ impl StreamingQuery {
 
             // The table snapshots to execute the microbatch against.
             let ctx =
-                QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone(), false)
+                QueryContext::for_catalog(self.query_env.clone(), self.catalog.clone(), false)
                     .await
-                    .map_err(StreamingQueryExecutionError::QueryContext)?;
+                    .map_err(StreamingQueryExecutionError::CreateQueryContext)?;
 
             // Get the next execution range
             let Some(MicrobatchRange { range, direction }) = self
@@ -436,7 +435,7 @@ impl StreamingQuery {
                     .plan
                     .clone()
                     .attach_to(&ctx)
-                    .map_err(StreamingQueryExecutionError::AttachToPlan)?;
+                    .map_err(StreamingQueryExecutionError::AttachPlan)?;
                 let mut plan = incrementalize_plan(plan, range.start(), range.end())
                     .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
 
@@ -519,9 +518,9 @@ impl StreamingQuery {
                 let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
                 Catalog::new(vec![self.blocks_table.clone()], logical)
             };
-            QueryContext::for_catalog(catalog, self.query_env.clone(), false)
+            QueryContext::for_catalog(self.query_env.clone(), catalog, false)
                 .await
-                .map_err(NextMicrobatchRangeError::QueryContext)?
+                .map_err(NextMicrobatchRangeError::CreateQueryContext)?
         };
 
         // The latest common watermark across the source tables.
@@ -687,9 +686,9 @@ impl StreamingQuery {
                 ctx.catalog().physical_tables().cloned().collect(),
                 ctx.catalog().logical().clone(),
             );
-            QueryContext::for_catalog(catalog, ctx.env.clone(), true)
+            QueryContext::for_catalog(ctx.env.clone(), catalog, true)
                 .await
-                .map_err(ReorgBaseError::QueryContext)?
+                .map_err(ReorgBaseError::CreateQueryContext)?
         };
 
         let mut min_fork_block_num = prev_watermark.number;
@@ -832,9 +831,8 @@ impl StreamingQuery {
             .map(|dt| dt.and_utc().timestamp() as u64);
         Ok(Some(BlockRow {
             number,
-            hash: get_hash_value("hash").map_err(BlocksTableFetchError::GetHashValue)?,
-            prev_hash: get_hash_value("parent_hash")
-                .map_err(BlocksTableFetchError::GetHashValue)?,
+            hash: get_hash_value("hash").map_err(BlocksTableFetchError::ExtractHash)?,
+            prev_hash: get_hash_value("parent_hash").map_err(BlocksTableFetchError::ExtractHash)?,
             timestamp,
         }))
     }
@@ -864,7 +862,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] crate::context::query::Error),
+    CreateQueryContext(#[source] crate::context::query::CreateContextError),
 
     /// Failed to get the next microbatch range
     ///
@@ -876,7 +874,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be attached to the query context.
     #[error("failed to attach the plan to the query context: {0}")]
-    AttachToPlan(#[source] crate::context::query::Error),
+    AttachPlan(#[source] crate::detached_logical_plan::AttachPlanError),
 
     /// Failed to incrementalize the plan
     ///
@@ -894,7 +892,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be executed.
     #[error("failed to execute the plan: {0}")]
-    ExecutePlan(#[source] crate::context::query::Error),
+    ExecutePlan(#[source] crate::context::query::ExecutePlanError),
 
     /// Failed to stream item
     ///
@@ -912,7 +910,7 @@ pub enum NextMicrobatchRangeError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] crate::context::query::Error),
+    CreateQueryContext(#[source] crate::context::query::CreateContextError),
 
     /// Failed to get the latest source watermark
     ///
@@ -981,7 +979,7 @@ pub enum ReorgBaseError {
     ///
     /// This occurs when the query context cannot be created.
     #[error("failed to create query context: {0}")]
-    QueryContext(#[source] crate::context::query::Error),
+    CreateQueryContext(#[source] crate::context::query::CreateContextError),
 
     /// Failed to fetch the blocks table
     ///
@@ -1024,19 +1022,19 @@ pub enum BlocksTableFetchError {
     ///
     /// This occurs when the SQL cannot be planned.
     #[error("failed to plan the SQL: {0}")]
-    PlanSql(#[source] crate::context::query::Error),
+    PlanSql(#[source] crate::context::query::PlanSqlError),
 
     /// Failed to execute the SQL
     ///
     /// This occurs when the SQL cannot be executed.
     #[error("failed to execute the SQL: {0}")]
-    ExecuteSql(#[source] crate::context::query::Error),
+    ExecuteSql(#[source] crate::context::query::ExecuteAndConcatError),
 
-    /// Failed to get the hash value
+    /// Failed to extract a hash value from query results
     ///
     /// This occurs when the hash value cannot be found.
-    #[error("failed to get the hash value: {0}")]
-    GetHashValue(#[source] GetHashValueError),
+    #[error("failed to extract hash value: {0}")]
+    ExtractHash(#[source] GetHashValueError),
 }
 
 /// Errors that occur when extracting hash values from block query results
@@ -1155,7 +1153,7 @@ async fn resolve_blocks_table(
     let revision = data_store
         .get_table_active_revision(dataset.reference(), table.name())
         .await
-        .map_err(ResolveBlocksTableError::GetActivePhysicalTable)?
+        .map_err(ResolveBlocksTableError::GetActiveRevision)?
         .ok_or_else(|| {
             ResolveBlocksTableError::TableNotSynced(
                 dataset.reference().to_string(),
@@ -1191,11 +1189,11 @@ pub enum ResolveBlocksTableError {
     #[error("'blocks' table not found in dataset '{0}'")]
     BlocksTableNotFound(String),
 
-    /// Failed to get active physical table revision
+    /// Failed to get active table revision
     ///
     /// This occurs when querying for an active physical table revision fails.
-    #[error("Failed to get active physical table revision")]
-    GetActivePhysicalTable(#[source] amp_data_store::GetTableActiveRevisionError),
+    #[error("Failed to get active table revision")]
+    GetActiveRevision(#[source] amp_data_store::GetTableActiveRevisionError),
 
     /// Table not synced
     ///

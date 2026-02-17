@@ -10,10 +10,11 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
-    context::{planning::PlanningContext, query::Error as QueryContextError},
+    context::planning::{PlanSqlError as PlanningPlanSqlError, PlanningContext},
     dataset_store::GetDatasetError,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
+    query_env::default_session_config,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
@@ -299,7 +300,8 @@ pub async fn handler(
     })?;
 
     // Create planning context from catalog
-    let planning_ctx = PlanningContext::new(catalog);
+    let session_config = default_session_config().map_err(Error::SessionConfig)?;
+    let planning_ctx = PlanningContext::new(session_config, catalog);
 
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
@@ -333,7 +335,7 @@ pub async fn handler(
 
         // Extract networks from all tables in the catalog
         let mut networks: Vec<NetworkId> = planning_ctx
-            .catalog()
+            .logical_tables()
             .iter()
             .map(|t| t.table().network().clone())
             .collect();
@@ -645,6 +647,10 @@ enum Error {
     #[error(transparent)]
     DependencyAliasNotFound(CreateLogicalCatalogError),
 
+    /// Failed to create DataFusion session configuration
+    #[error("failed to create session config")]
+    SessionConfig(#[source] datafusion::error::DataFusionError),
+
     /// Failed to infer schema for table
     ///
     /// This occurs when:
@@ -657,7 +663,7 @@ enum Error {
         table_name: TableName,
         /// The underlying query context error
         #[source]
-        source: QueryContextError,
+        source: PlanningPlanSqlError,
     },
 }
 
@@ -710,6 +716,7 @@ impl IntoErrorResponse for Error {
             Error::FunctionNotFoundInDataset(_) => "FUNCTION_NOT_FOUND_IN_DATASET",
             Error::EthCallNotAvailable(_) => "ETH_CALL_NOT_AVAILABLE",
             Error::DependencyAliasNotFound(_) => "DEPENDENCY_ALIAS_NOT_FOUND",
+            Error::SessionConfig(_) => "SESSION_CONFIG_ERROR",
             Error::SchemaInference { .. } => "SCHEMA_INFERENCE",
         }
     }
@@ -738,6 +745,7 @@ impl IntoErrorResponse for Error {
             Error::FunctionNotFoundInDataset(_) => StatusCode::NOT_FOUND,
             Error::EthCallNotAvailable(_) => StatusCode::NOT_FOUND,
             Error::DependencyAliasNotFound(_) => StatusCode::BAD_REQUEST,
+            Error::SessionConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SchemaInference { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

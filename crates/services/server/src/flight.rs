@@ -42,10 +42,11 @@ use common::{
         },
     },
     context::{
-        planning::{DetachedLogicalPlan, PlanningContext},
-        query::{Error as CoreError, QueryContext},
+        planning::{self, PlanningContext},
+        query::{self, QueryContext},
     },
     dataset_store::{DatasetStore, GetDatasetError},
+    detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
     query_env::QueryEnv,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
@@ -124,8 +125,7 @@ impl Service {
         is_streaming: Option<bool>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
-        let query = common::sql::parse(sql.as_ref())
-            .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
+        let query = common::sql::parse(sql.as_ref()).map_err(Error::SqlParse)?;
         let catalog = {
             let table_refs = resolve_table_references::<PartialReference>(&query)
                 .map_err(Error::TableReferenceResolution)?;
@@ -143,11 +143,11 @@ impl Service {
                 .map_err(Error::PhysicalCatalogError)
         }?;
 
-        let ctx = PlanningContext::new(catalog.logical().clone());
+        let ctx = PlanningContext::new(self.env.session_config.clone(), catalog.logical().clone());
         let plan = ctx
             .plan_sql(query.clone())
             .await
-            .map_err(Error::CoreError)?;
+            .map_err(Error::PlanningPlanSql)?;
 
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
@@ -194,12 +194,15 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false)
+            let ctx = QueryContext::for_catalog(self.env.clone(), catalog, false)
                 .await
-                .map_err(Error::CoreError)?;
-            let plan = plan.attach_to(&ctx).map_err(Error::CoreError)?;
+                .map_err(Error::CreateQueryContext)?;
+            let plan = plan.attach_to(&ctx).map_err(Error::AttachPlan)?;
 
-            let block_ranges = ctx.common_ranges(&plan).await.map_err(Error::CoreError)?;
+            let block_ranges = ctx
+                .common_ranges(&plan)
+                .await
+                .map_err(Error::QueryCommonRanges)?;
 
             for range in &block_ranges {
                 tracing::debug!(
@@ -213,7 +216,7 @@ impl Service {
             let record_batches = ctx
                 .execute_plan(plan, true)
                 .await
-                .map_err(Error::CoreError)?;
+                .map_err(Error::QueryExecutePlan)?;
             let stream = QueryResultStream::NonIncremental {
                 stream: NonEmptyRecordBatchStream::new(record_batches).boxed(),
                 schema,
@@ -315,30 +318,29 @@ impl Service {
                         .parse::<SqlStr>()
                         .map_err(|err| Error::InvalidQuery(err.to_string()))?;
 
-                    let query = common::sql::parse(&sql_str)
-                        .map_err(|err| Error::CoreError(CoreError::SqlParseError(err)))?;
+                    let query = common::sql::parse(&sql_str).map_err(Error::SqlParse)?;
                     let plan_ctx = {
                         let table_refs = resolve_table_references::<PartialReference>(&query)
                             .map_err(Error::TableReferenceResolution)?;
                         let func_refs = resolve_function_references::<PartialReference>(&query)
                             .map_err(Error::FunctionReferenceResolution)?;
 
-                        create_logical_catalog(
+                        let catalog = create_logical_catalog(
                             &self.dataset_store,
                             &IsolatePool::dummy(),
                             (table_refs, func_refs),
                         )
                         .await
-                        .map(PlanningContext::new)
-                        .map_err(Error::CreateLogicalCatalogError)
-                    }?;
+                        .map_err(Error::CreateLogicalCatalogError)?;
+                        PlanningContext::new(self.env.session_config.clone(), catalog)
+                    };
 
                     let is_streaming = streaming_override
                         .unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
                     let schema = plan_ctx
                         .sql_output_schema(query)
                         .await
-                        .map_err(Error::CoreError)?;
+                        .map_err(Error::PlanningPlanSql)?;
                     let ticket = AmpTicket {
                         query: sql_query.query,
                         is_streaming,
@@ -970,8 +972,23 @@ pub enum Error {
     #[error("Failed to resolve function references from SQL")]
     FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<PartialReferenceError>),
 
-    #[error(transparent)]
-    CoreError(CoreError),
+    #[error("SQL parse error")]
+    SqlParse(#[source] common::sql::ParseSqlError),
+
+    #[error("failed to plan SQL query")]
+    PlanningPlanSql(#[source] planning::PlanSqlError),
+
+    #[error("failed to create query context")]
+    CreateQueryContext(#[source] query::CreateContextError),
+
+    #[error("failed to attach plan to query context")]
+    AttachPlan(#[source] AttachPlanError),
+
+    #[error("failed to compute common ranges")]
+    QueryCommonRanges(#[source] query::CommonRangesError),
+
+    #[error("failed to execute plan")]
+    QueryExecutePlan(#[source] query::ExecutePlanError),
 
     #[error("invalid query: {0}")]
     InvalidQuery(String),
@@ -998,21 +1015,26 @@ impl Error {
             Error::PhysicalCatalogError(_) => "PHYSICAL_CATALOG_ERROR",
             Error::TableReferenceResolution(_) => "TABLE_REFERENCE_RESOLUTION",
             Error::FunctionReferenceResolution(_) => "FUNCTION_REFERENCE_RESOLUTION",
-            Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
-            Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
-            Error::CoreError(CoreError::DatasetError(_)) => "DATASET_ERROR",
-            Error::CoreError(CoreError::CatalogSnapshot(_)) => "CATALOG_SNAPSHOT_ERROR",
-            Error::CoreError(CoreError::ConfigError(_)) => "CONFIG_ERROR",
-            Error::CoreError(CoreError::PlanningError(_)) => "PLANNING_ERROR",
-            Error::CoreError(CoreError::ExecutionError(_)) => "CORE_EXECUTION_ERROR",
-            Error::CoreError(CoreError::MetaTableError(_)) => "META_TABLE_ERROR",
-            Error::CoreError(CoreError::TableNotFoundError(_)) => "TABLE_NOT_FOUND_ERROR",
-            Error::CoreError(CoreError::ExtractTableReferences(_)) => {
+            Error::SqlParse(_) => "SQL_PARSE_ERROR",
+            Error::PlanningPlanSql(e) if e.is_invalid_plan() => "INVALID_PLAN",
+            Error::PlanningPlanSql(_) => "PLANNING_ERROR",
+            Error::CreateQueryContext(query::CreateContextError::CatalogSnapshot(_)) => {
+                "CATALOG_SNAPSHOT_ERROR"
+            }
+            Error::AttachPlan(_) => "PLANNING_ERROR",
+            Error::QueryCommonRanges(query::CommonRangesError::TableNotFound(_)) => {
+                "TABLE_NOT_FOUND_ERROR"
+            }
+            Error::QueryCommonRanges(query::CommonRangesError::ExtractTableReferences(_)) => {
                 "EXTRACT_TABLE_REFERENCES_ERROR"
             }
-            Error::CoreError(CoreError::TableReferenceConversion(_)) => {
+            Error::QueryCommonRanges(query::CommonRangesError::TableReferenceConversion(_)) => {
                 "TABLE_REFERENCE_CONVERSION_ERROR"
             }
+            Error::QueryExecutePlan(query::ExecutePlanError::RegisterTable(_)) => {
+                "REGISTER_TABLE_ERROR"
+            }
+            Error::QueryExecutePlan(query::ExecutePlanError::Execute(_)) => "CORE_EXECUTION_ERROR",
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
             Error::TicketEncodingError(_) => "TICKET_ENCODING_ERROR",
@@ -1036,21 +1058,17 @@ fn datafusion_error_to_status(e: &DataFusionError, message: String) -> Status {
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        let status_code = match self {
-            Error::CoreError(CoreError::InvalidPlan(_) | CoreError::SqlParseError(_)) => {
-                StatusCode::BAD_REQUEST
+        let status_code = match &self {
+            Error::SqlParse(_) => StatusCode::BAD_REQUEST,
+            Error::PlanningPlanSql(e) if e.is_invalid_plan() => StatusCode::BAD_REQUEST,
+            Error::PlanningPlanSql(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CreateQueryContext(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::AttachPlan(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::QueryCommonRanges(query::CommonRangesError::TableNotFound(_)) => {
+                StatusCode::NOT_FOUND
             }
-            Error::CoreError(
-                CoreError::DatasetError(_)
-                | CoreError::CatalogSnapshot(_)
-                | CoreError::ConfigError(_)
-                | CoreError::PlanningError(_)
-                | CoreError::ExecutionError(_)
-                | CoreError::MetaTableError(_)
-                | CoreError::ExtractTableReferences(_)
-                | CoreError::TableReferenceConversion(_),
-            ) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::CoreError(CoreError::TableNotFoundError(_)) => StatusCode::NOT_FOUND,
+            Error::QueryCommonRanges(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::QueryExecutePlan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -1085,22 +1103,16 @@ impl From<Error> for Status {
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(message),
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(message),
             Error::DatasetStoreError(_) => Status::internal(message),
-
-            Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(message),
-            Error::CoreError(CoreError::SqlParseError(_)) => Status::invalid_argument(message),
-            Error::CoreError(CoreError::DatasetError(_)) => Status::internal(message),
-            Error::CoreError(CoreError::CatalogSnapshot(_)) => Status::internal(message),
-            Error::CoreError(CoreError::ConfigError(_)) => Status::internal(message),
-            Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(message),
-            Error::CoreError(CoreError::ExtractTableReferences(_)) => Status::internal(message),
-            Error::CoreError(CoreError::TableReferenceConversion(_)) => Status::internal(message),
-
-            Error::CoreError(
-                CoreError::PlanningError(df)
-                | CoreError::ExecutionError(df)
-                | CoreError::MetaTableError(df),
-            ) => datafusion_error_to_status(df, message),
-
+            Error::SqlParse(_) => Status::invalid_argument(message),
+            Error::PlanningPlanSql(e) if e.is_invalid_plan() => Status::invalid_argument(message),
+            Error::PlanningPlanSql(_) => Status::internal(message),
+            Error::CreateQueryContext(_) => Status::internal(message),
+            Error::AttachPlan(_) => Status::internal(message),
+            Error::QueryCommonRanges(query::CommonRangesError::TableNotFound(_)) => {
+                Status::not_found(message)
+            }
+            Error::QueryCommonRanges(_) => Status::internal(message),
+            Error::QueryExecutePlan(_) => Status::internal(message),
             Error::ExecutionError(df) => datafusion_error_to_status(df, message),
             Error::StreamingExecutionError(_) => Status::internal(message),
             Error::CreateLogicalCatalogError(_) => Status::internal(message),

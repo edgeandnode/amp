@@ -121,11 +121,9 @@ use common::{
             for_dump as physical_catalog,
         },
     },
-    context::{
-        planning::{DetachedLogicalPlan, PlanningContext},
-        query::QueryContext,
-    },
+    context::{planning::PlanningContext, query::QueryContext},
     dataset_store::ResolveRevisionError,
+    detached_logical_plan::DetachedLogicalPlan,
     metadata::Generation,
     parquet::errors::ParquetError,
     query_env::QueryEnv,
@@ -506,7 +504,7 @@ async fn dump_table(
             .await
             .map_err(DumpTableError::CreatePhysicalCatalog)?
     };
-    let planning_ctx = PlanningContext::new(catalog.logical().clone());
+    let planning_ctx = PlanningContext::new(env.session_config.clone(), catalog.logical().clone());
     let manifest_start_block = manifest.start_block;
 
     join_set.spawn(
@@ -545,7 +543,7 @@ async fn dump_table(
 
             let resolved = resolve_end_block(&end, start, async {
                 let query_ctx =
-                    QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
+                    QueryContext::for_catalog(env.clone(), catalog.clone(), false).await?;
                 let max_end_blocks = query_ctx
                     .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
                     .await?;
@@ -733,7 +731,7 @@ pub enum DumpTableSpawnError {
     /// This occurs when DataFusion cannot create an execution plan
     /// from the parsed SQL query.
     #[error("failed to plan SQL query: {0}")]
-    PlanSql(#[source] common::context::query::Error),
+    PlanSql(#[source] common::context::planning::PlanSqlError),
 
     /// The query is not incremental and cannot be synced
     ///
