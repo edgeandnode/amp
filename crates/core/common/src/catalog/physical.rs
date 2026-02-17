@@ -1,8 +1,7 @@
 use std::{ops::RangeInclusive, pin::pin, sync::Arc};
 
 use amp_data_store::{
-    DataStore, GetCachedMetadataError, PhyTableRevision,
-    physical_table::{PhyTablePath, PhyTableRevisionPath},
+    DataStore, GetCachedMetadataError, PhyTableRevision, physical_table::PhyTableRevisionPath,
 };
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -26,7 +25,6 @@ use datasets_common::{
 };
 use futures::{Stream, StreamExt as _, TryStreamExt as _, stream};
 use metadata_db::LocationId;
-use object_store::ObjectStore;
 use url::Url;
 
 use crate::{
@@ -50,23 +48,12 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    pub fn empty() -> Self {
-        Catalog {
-            tables: vec![],
-            logical: LogicalCatalog::empty(),
-        }
-    }
-
     pub fn new(tables: Vec<Arc<PhysicalTable>>, logical: LogicalCatalog) -> Self {
         Catalog { tables, logical }
     }
 
     pub fn tables(&self) -> &[Arc<PhysicalTable>] {
         &self.tables
-    }
-
-    pub fn udfs(&self) -> &[ScalarUDF] {
-        &self.logical.udfs
     }
 
     pub fn logical(&self) -> &LogicalCatalog {
@@ -214,10 +201,6 @@ impl PhysicalTable {
 impl PhysicalTable {
     pub fn dataset_reference(&self) -> &HashReference {
         &self.dataset_reference
-    }
-
-    pub fn dataset_start_block(&self) -> Option<BlockNum> {
-        self.dataset_start_block
     }
 
     pub fn table_name(&self) -> &TableName {
@@ -630,43 +613,6 @@ impl TableProvider for TableSnapshot {
         Ok(Arc::new(DataSourceExec::new(data_source)))
     }
 }
-
-/// Lists all table revision paths found in object storage.
-///
-/// The `store` parameter must be a prefixed object store pointing to the data directory root,
-/// as this function uses relative paths like `dataset/table/revision_id`.
-///
-/// This function performs a `list_with_delimiter` query on the provided table path,
-/// iterates through the returned subdirectories, and parses each as a `PhyTableRevisionPath`.
-/// All valid revision paths are collected and returned in no particular order.
-/// If no revisions exist, an empty vector is returned.
-pub async fn list_table_revisions<S>(
-    store: &S,
-    path: &PhyTablePath,
-) -> Result<Vec<PhyTableRevisionPath>, ListRevisionsError>
-where
-    S: ObjectStore + ?Sized,
-{
-    let list_result = store
-        .list_with_delimiter(Some(path))
-        .await
-        .map_err(ListRevisionsError)?;
-
-    let revisions = list_result
-        .common_prefixes
-        .into_iter()
-        .filter_map(|path| path.as_ref().parse::<PhyTableRevisionPath>().ok())
-        .collect();
-
-    Ok(revisions)
-}
-
-/// Error when listing revisions from object store
-///
-/// This error type is used by `list_table_revisions()`.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to list revisions from object store")]
-pub struct ListRevisionsError(#[source] pub object_store::Error);
 
 /// Finds the latest table revision by lexicographic comparison of revision IDs.
 ///

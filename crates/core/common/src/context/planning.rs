@@ -40,8 +40,8 @@ impl PlanningContext {
         &self,
         query: parser::Statement,
     ) -> Result<DFSchemaRef, PlanSqlError> {
-        let ctx = new_session_ctx(self.session_config.clone(), &self.catalog)
-            .map_err(PlanSqlError::RegisterTable)?;
+        let ctx = new_session_ctx(self.session_config.clone());
+        register_catalog(&ctx, &self.catalog).map_err(PlanSqlError::RegisterTable)?;
         let plan = sql_to_plan(&ctx, query)
             .await
             .map_err(PlanSqlError::SqlToPlan)?;
@@ -53,8 +53,8 @@ impl PlanningContext {
         &self,
         query: parser::Statement,
     ) -> Result<DetachedLogicalPlan, PlanSqlError> {
-        let ctx = new_session_ctx(self.session_config.clone(), &self.catalog)
-            .map_err(PlanSqlError::RegisterTable)?;
+        let ctx = new_session_ctx(self.session_config.clone());
+        register_catalog(&ctx, &self.catalog).map_err(PlanSqlError::RegisterTable)?;
         let plan = sql_to_plan(&ctx, query)
             .await
             .map_err(PlanSqlError::SqlToPlan)?;
@@ -67,26 +67,26 @@ impl PlanningContext {
         &self,
         plan: &DetachedLogicalPlan,
     ) -> Result<DetachedLogicalPlan, OptimizePlanError> {
-        new_session_ctx(self.session_config.clone(), &self.catalog)
-            .map_err(OptimizePlanError::RegisterTable)?
-            .state()
-            .optimize(plan.as_ref())
+        let ctx = new_session_ctx(self.session_config.clone());
+        register_catalog(&ctx, &self.catalog).map_err(OptimizePlanError::RegisterTable)?;
+        ctx.state()
+            .optimize(plan)
             .map_err(OptimizePlanError::Optimize)
             .map(DetachedLogicalPlan::new)
     }
 }
 
-fn new_session_ctx(
-    config: SessionConfig,
-    catalog: &LogicalCatalog,
-) -> Result<SessionContext, RegisterTableError> {
+/// Creates a bare DataFusion session context with builtin UDFs but no catalog tables.
+///
+/// Call [`register_catalog`] on the returned context to populate it with tables and UDFs
+/// from a [`LogicalCatalog`].
+fn new_session_ctx(config: SessionConfig) -> SessionContext {
     let ctx = {
         let state = SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(Default::default())
             .with_default_features()
             .build();
-
         SessionContext::new_with_state(state)
     };
 
@@ -95,8 +95,16 @@ fn new_session_ctx(
         ctx.register_udf(udf);
     }
 
-    // Register the catalog tables and UDFs
-    for table in &catalog.tables {
+    ctx
+}
+
+/// Registers the tables and UDFs from a [`LogicalCatalog`] into a [`SessionContext`].
+fn register_catalog(
+    ctx: &SessionContext,
+    catalog: &LogicalCatalog,
+) -> Result<(), RegisterTableError> {
+    // Register tables first to ensure schemas are created before UDF registration
+    for table in catalog.tables.iter() {
         let schema_name = table.sql_table_ref_schema();
 
         // The catalog schema needs to be explicitly created or table creation will fail.
@@ -113,16 +121,21 @@ fn new_session_ctx(
                 .unwrap();
         }
 
-        // Register the table with a `PlanningTable` that will be used for planning
-        let planning_table = PlanningTable::new(table.clone());
-        ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
-            .map_err(RegisterTableError)?;
+        // Register the table with a planning-only provider that exposes the schema but cannot be scanned.
+        let table_schema = table.schema().clone();
+        ctx.register_table(
+            table.table_ref().clone(),
+            Arc::new(PlanningTable::new(table_schema)),
+        )
+        .map_err(RegisterTableError)?;
     }
+
+    // Register UDFs after tables to ensure any schema dependencies are resolved
     for udf in catalog.udfs.iter() {
         ctx.register_udf(udf.clone());
     }
 
-    Ok(ctx)
+    Ok(())
 }
 
 /// Failed to register a catalog table with the planning session context
@@ -159,7 +172,7 @@ impl PlanSqlError {
     /// Returns `true` if this error represents an invalid plan due to user input
     /// (forbidden aliases or read-only violations) rather than an internal failure.
     pub fn is_invalid_plan(&self) -> bool {
-        matches!(self, Self::SqlToPlan(e) if e.is_invalid_plan())
+        matches!(self, Self::SqlToPlan(err) if err.is_invalid_plan())
     }
 }
 

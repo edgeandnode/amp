@@ -1,5 +1,6 @@
 use std::fmt;
 
+use arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use datasets_common::{dataset::Table, hash_reference::HashReference, table_name::TableName};
 
 use crate::sql::TableReference;
@@ -32,6 +33,11 @@ impl LogicalTable {
 
     pub fn table(&self) -> &Table {
         &self.table
+    }
+
+    /// Returns the schema of the table.
+    pub fn schema(&self) -> &ArrowSchemaRef {
+        self.table.schema()
     }
 
     pub fn table_ref(&self) -> TableReference {

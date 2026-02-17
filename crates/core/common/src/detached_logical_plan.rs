@@ -81,8 +81,10 @@ impl DetachedLogicalPlan {
     }
 }
 
-impl AsRef<LogicalPlan> for DetachedLogicalPlan {
-    fn as_ref(&self) -> &LogicalPlan {
+impl std::ops::Deref for DetachedLogicalPlan {
+    type Target = LogicalPlan;
+
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
