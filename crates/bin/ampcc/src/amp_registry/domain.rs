@@ -182,7 +182,7 @@ pub enum DerivedManifest {
     /// The Dataset is an evm-rpc Dataset kind
     EvmRpc(amp_datasets_evmrpc::Manifest),
     /// The Dataset is a firehose Dataset kind
-    Firehose(amp_datasets_firehose::dataset::Manifest),
+    Firehose(amp_datasets_firehose::Manifest),
 }
 
 /// Status of the DatasetVersion

@@ -15,11 +15,11 @@ use datasets_raw::{
     rows::{Rows, TableRowError},
 };
 
-use super::{
-    pbethereum,
-    tables::{calls::Call, transactions::Transaction},
+use super::pbethereum;
+use crate::tables::{
+    calls::{Call, CallRowsBuilder},
+    transactions::{Transaction, TransactionRowsBuilder},
 };
-use crate::evm::tables::{calls::CallRowsBuilder, transactions::TransactionRowsBuilder};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProtobufToRowError {

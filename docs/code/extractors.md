@@ -364,7 +364,7 @@ pub enum RpcToRowsError {
 
 // ✅ Protocol-level errors (firehose)
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum ClientError {
     #[error("HTTP/2 connection error")]
     Connection(#[source] tonic::transport::Error),
 

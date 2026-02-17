@@ -26,7 +26,7 @@ use tonic::{
 use tracing::instrument;
 
 use crate::{
-    Error,
+    error::ClientError,
     evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,
 };
@@ -47,18 +47,18 @@ impl Client {
         name: ProviderName,
         config: FirehoseProviderConfig,
         meter: Option<&telemetry::metrics::Meter>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, ClientError> {
         let metrics = meter.map(crate::metrics::MetricsRegistry::new);
 
         let url = config.url.into_inner();
         let token = config.token.map(|t| t.into_inner());
 
         let client = {
-            let uri = Uri::from_str(url.as_str()).map_err(Error::UriParse)?;
+            let uri = Uri::from_str(url.as_str()).map_err(ClientError::UriParse)?;
             let mut endpoint = Endpoint::from(uri);
             endpoint = endpoint
                 .tls_config(ClientTlsConfig::new().with_native_roots())
-                .map_err(Error::Connection)?;
+                .map_err(ClientError::Connection)?;
             let auth = AuthInterceptor::new(token)?;
             Client {
                 endpoint,
@@ -85,9 +85,15 @@ impl Client {
 
     async fn connect(
         &self,
-    ) -> Result<StreamClient<InterceptedService<tonic::transport::Channel, AuthInterceptor>>, Error>
-    {
-        let channel = self.endpoint.connect().await.map_err(Error::Connection)?;
+    ) -> Result<
+        StreamClient<InterceptedService<tonic::transport::Channel, AuthInterceptor>>,
+        ClientError,
+    > {
+        let channel = self
+            .endpoint
+            .connect()
+            .await
+            .map_err(ClientError::Connection)?;
         Ok(StreamClient::with_interceptor(channel, self.auth.clone())
             .accept_compressed(CompressionEncoding::Gzip)
             .send_compressed(CompressionEncoding::Gzip)
@@ -101,7 +107,8 @@ impl Client {
         start: i64,
         stop: BlockNum,
         final_blocks_only: bool,
-    ) -> Result<impl Stream<Item = Result<pbethereum::Block, Error>> + use<>, Error> {
+    ) -> Result<impl Stream<Item = Result<pbethereum::Block, ClientError>> + use<>, ClientError>
+    {
         let request = tonic::Request::new(pbfirehose::Request {
             start_block_num: start,
             stop_block_num: stop,
@@ -116,10 +123,10 @@ impl Client {
         let raw_stream = client
             .blocks(request)
             .await
-            .map_err(Error::Call)?
+            .map_err(ClientError::Call)?
             .into_inner();
         let block_stream = raw_stream
-            .map_err(Error::Call)
+            .map_err(ClientError::Call)
             .and_then(|response| async move {
                 let StreamResponse {
                     block,
@@ -127,11 +134,11 @@ impl Client {
                     cursor: _,
                 } = response;
                 let Some(block) = block else {
-                    return Err(Error::AssertFail("Expected block, found none".into()));
+                    return Err(ClientError::AssertFail("Expected block, found none".into()));
                 };
 
                 let ethereum_block = pbethereum::Block::decode(block.value.as_ref())
-                    .map_err(Error::PbDecodeError)?;
+                    .map_err(ClientError::PbDecodeError)?;
                 Ok(ethereum_block)
             });
 
@@ -145,14 +152,14 @@ pub struct AuthInterceptor {
 }
 
 impl AuthInterceptor {
-    pub fn new(token: Option<String>) -> Result<Self, Error> {
+    pub fn new(token: Option<String>) -> Result<Self, ClientError> {
         Ok(AuthInterceptor {
             token: token
                 .map_or(Ok(None), |token| {
                     let bearer_token = format!("bearer {}", token);
                     bearer_token.parse::<MetadataValue<Ascii>>().map(Some)
                 })
-                .map_err(Error::Utf8)?,
+                .map_err(ClientError::Utf8)?,
         })
     }
 }

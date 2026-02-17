@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "cargo:warning=Config 'gen_schema_manifest' enabled: Running JSON schema generation"
         );
         let out_dir = std::env::var("OUT_DIR")?;
-        let manifest_schema = schemars::schema_for!(firehose_datasets::dataset::Manifest);
+        let manifest_schema = schemars::schema_for!(firehose_datasets::Manifest);
         let manifest_schema_json = serde_json::to_string_pretty(&manifest_schema)?;
         let manifest_schema_path = format!("{out_dir}/schema.json");
         std::fs::write(&manifest_schema_path, manifest_schema_json)?;
@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rt = tokio::runtime::Runtime::new()?;
         let network: datasets_common::network_id::NetworkId = "test_network".parse().unwrap();
         let markdown = rt.block_on(async {
-            datasets_raw::schema::to_markdown(firehose_datasets::evm::tables::all(&network)).await
+            datasets_raw::schema::to_markdown(firehose_datasets::tables::all(&network)).await
         });
         let out_dir = std::env::var("OUT_DIR")?;
         let tables_schema_path = format!("{out_dir}/tables.md");
