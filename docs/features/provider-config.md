@@ -69,7 +69,7 @@ kind = "evm-rpc"
 network = "mainnet"
 
 # Provider-specific fields
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
 concurrent_request_limit = 1024
 ```
 
@@ -79,7 +79,7 @@ Provider configurations support `${VAR_NAME}` syntax for secrets:
 
 ```toml
 # These are replaced at runtime with environment variable values
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
 token = "${API_TOKEN}"
 ```
 
@@ -113,7 +113,7 @@ Providers are stored as TOML files in the configured directory:
 # File: /etc/amp/providers/my-mainnet-rpc.toml
 kind = "evm-rpc"
 network = "mainnet"
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
 concurrent_request_limit = 1024
 ```
 
@@ -123,10 +123,10 @@ Configure secrets via environment variables:
 
 ```bash
 # Set environment variable
-export RPC_ETH_MAINNET_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+export ETH_MAINNET_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
 
 # Provider config references it
-# url = "${RPC_ETH_MAINNET_URL}"
+# url = "${ETH_MAINNET_RPC_URL}"
 # Resolved at runtime to: https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
 ```
 

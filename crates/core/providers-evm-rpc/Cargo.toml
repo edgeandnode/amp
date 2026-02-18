@@ -11,7 +11,9 @@ schemars = ["dep:schemars", "amp-providers-common/schemars", "dep:serde_json"]
 [dependencies]
 alloy.workspace = true
 amp-providers-common = { path = "../providers-common" }
+headers.workspace = true
 governor.workspace = true
+tracing.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }

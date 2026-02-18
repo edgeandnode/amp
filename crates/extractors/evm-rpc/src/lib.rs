@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use amp_providers_common::provider_name::ProviderName;
-use amp_providers_evm_rpc::config::EvmRpcProviderConfig;
+use amp_providers_evm_rpc::{config::EvmRpcProviderConfig, provider::Auth};
 use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
 
 mod client;
@@ -9,7 +9,6 @@ mod dataset;
 mod dataset_kind;
 pub mod error;
 pub mod metrics;
-pub mod provider;
 pub mod tables;
 
 // Reuse types from datasets-common for consistency
@@ -80,6 +79,13 @@ pub async fn client(
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<JsonRpcClient, ProviderError> {
     let url = config.url.into_inner();
+    let auth = config.auth_token.map(|token| match config.auth_header {
+        Some(header) => Auth::CustomHeader {
+            name: header,
+            value: token,
+        },
+        None => Auth::Bearer(token),
+    });
 
     let request_limit = u16::max(1, config.concurrent_request_limit.unwrap_or(1024));
     let client = match url.scheme() {
@@ -106,6 +112,7 @@ pub async fn client(
                 config.rpc_batch_size,
                 config.rate_limit_per_minute,
                 config.fetch_receipts_per_tx,
+                auth,
                 meter,
             )
             .await?
@@ -118,6 +125,7 @@ pub async fn client(
             config.rpc_batch_size,
             config.rate_limit_per_minute,
             config.fetch_receipts_per_tx,
+            auth,
             meter,
         )?,
     };

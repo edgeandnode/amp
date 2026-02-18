@@ -1,4 +1,6 @@
 kind = "evm-rpc"
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
+auth_header = "${ETH_MAINNET_RPC_AUTH_HEADER}"
+auth_token = "${ETH_MAINNET_RPC_AUTH_TOKEN}"
 network = "mainnet"
 fetch_receipts_per_tx = true

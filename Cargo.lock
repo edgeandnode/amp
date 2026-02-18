@@ -1051,11 +1051,13 @@ dependencies = [
  "alloy",
  "amp-providers-common",
  "governor 0.10.4",
+ "headers",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tower",
+ "tracing",
  "url",
 ]
 
@@ -1093,7 +1095,6 @@ dependencies = [
 name = "amp-providers-registry"
 version = "0.1.0"
 dependencies = [
- "alloy",
  "amp-providers-common",
  "amp-providers-evm-rpc",
  "amp-providers-firehose",
@@ -1114,7 +1115,6 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -4901,14 +4901,12 @@ dependencies = [
  "datasets-common",
  "datasets-raw",
  "futures",
- "governor 0.10.4",
  "monitoring",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tower",
  "tracing",
  "url",
 ]

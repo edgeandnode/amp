@@ -4,6 +4,20 @@
   "description": "EVM RPC provider configuration for parsing TOML config.\n\nThis struct contains only the fields needed for provider construction.\nThe `kind` field validates that the config belongs to an `evm-rpc` provider\nat deserialization time.",
   "type": "object",
   "properties": {
+    "auth_header": {
+      "description": "Custom header name for authentication.\n\nWhen set alongside `auth_token`, sends `<auth_header>: <auth_token>` as a raw header\ninstead of the default `Authorization: Bearer <auth_token>`.\nIgnored if `auth_token` is not set.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "auth_token": {
+      "description": "Authentication token for RPC requests.\n\nDefault: sent as `Authorization: Bearer <token>`.\nWith `auth_header`: sent as `<auth_header>: <token>`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "concurrent_request_limit": {
       "description": "Optional limit on the number of concurrent requests.",
       "type": [
