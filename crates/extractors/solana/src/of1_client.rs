@@ -69,11 +69,11 @@ pub struct DecodedSlot {
 }
 
 impl DecodedSlot {
-    /// Create a dummy `DecodedSlot` with the given slot number and default values for all 
-    /// other fields. This can be used for testing or as a placeholder when only the slot 
+    /// Create a dummy `DecodedSlot` with the given slot number and default values for all
+    /// other fields. This can be used for testing or as a placeholder when only the slot
     /// number is relevant.
     ///
-    /// NOTE: The reason this is marked as `pub` is because it is used in integration tests 
+    /// NOTE: The reason this is marked as `pub` is because it is used in integration tests
     /// in the `tests` crate.
     pub fn dummy(slot: Slot) -> Self {
         Self {
