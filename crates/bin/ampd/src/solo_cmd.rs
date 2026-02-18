@@ -58,8 +58,11 @@ pub async fn run(
         };
 
         let metadata_db = metadata_db::connect_pool_with_config(
-            config.url,
+            &config.url,
             config.pool_size,
+            config.effective_min_connections(),
+            config.max_lifetime_secs,
+            config.idle_timeout_secs,
             config.auto_migrate,
         )
         .await

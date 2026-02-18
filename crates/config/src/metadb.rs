@@ -17,14 +17,39 @@ pub struct MetadataDbConfig {
     /// Size of the connection pool (default: 10)
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+    /// Minimum number of connections to maintain in the pool (default: 25% of pool_size)
+    #[serde(default)]
+    pub min_connections: Option<u32>,
+    /// Maximum lifetime of a connection in seconds (default: 1800)
+    #[serde(default = "default_max_lifetime_secs")]
+    pub max_lifetime_secs: u64,
+    /// Idle timeout for connections in seconds (default: 600)
+    #[serde(default = "default_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
     /// Automatically run database migrations on startup (default: true)
     #[serde(default = "default_auto_migrate")]
     pub auto_migrate: bool,
 }
 
+impl MetadataDbConfig {
+    /// Returns the effective min_connections value, defaulting to 25% of pool_size.
+    pub fn effective_min_connections(&self) -> u32 {
+        self.min_connections
+            .unwrap_or_else(|| self.pool_size.div_ceil(4).max(1))
+    }
+}
+
 /// Serde default for [`MetadataDbConfig::pool_size`]. Returns [`DEFAULT_POOL_SIZE`].
 fn default_pool_size() -> u32 {
     DEFAULT_METADB_CONN_POOL_SIZE
+}
+
+fn default_max_lifetime_secs() -> u64 {
+    1800
+}
+
+fn default_idle_timeout_secs() -> u64 {
+    600
 }
 
 /// Serde default for [`MetadataDbConfig::auto_migrate`]. Returns `true`.

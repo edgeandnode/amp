@@ -19,6 +19,9 @@ pub async fn run(
     let metadata_db = metadata_db::connect_pool_with_config(
         &metadata_db_config.url,
         metadata_db_config.pool_size,
+        metadata_db_config.effective_min_connections(),
+        metadata_db_config.max_lifetime_secs,
+        metadata_db_config.idle_timeout_secs,
         metadata_db_config.auto_migrate,
     )
     .await

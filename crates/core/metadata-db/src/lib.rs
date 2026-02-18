@@ -63,7 +63,8 @@ pub async fn connect_with_retry(url: &str) -> Result<SingleConnMetadataDb, Error
 /// Automatically runs migrations to ensure the database schema is up-to-date.
 #[instrument(skip_all, err)]
 pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
-    connect_pool_with_config(url, size, true).await
+    let min_connections = size.div_ceil(4).max(1);
+    connect_pool_with_config(url, size, min_connections, 1800, 600, true).await
 }
 
 /// Connects to the metadata database with connection pooling and configurable migrations.
@@ -72,10 +73,15 @@ pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
 pub async fn connect_pool_with_config(
     url: impl AsRef<str>,
     size: u32,
+    min_connections: u32,
+    max_lifetime_secs: u64,
+    idle_timeout_secs: u64,
     auto_migrate: bool,
 ) -> Result<MetadataDb, Error> {
     let url = url.as_ref();
-    let pool = db::ConnPool::connect(url, size).await?;
+    let pool =
+        db::ConnPool::connect(url, size, min_connections, max_lifetime_secs, idle_timeout_secs)
+            .await?;
     if auto_migrate {
         pool.run_migrations().await?;
     }
@@ -113,7 +119,8 @@ pub async fn connect_pool_with_retry(url: &str, size: u32) -> Result<MetadataDb,
         );
     }
 
-    let pool = (|| db::ConnPool::connect(url, size))
+    let min_connections = size.div_ceil(4).max(1);
+    let pool = (|| db::ConnPool::connect(url, size, min_connections, 1800, 600))
         .retry(retry_policy)
         .when(is_db_starting_up)
         .notify(notify_retry)
