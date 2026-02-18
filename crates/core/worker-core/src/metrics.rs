@@ -202,7 +202,10 @@ impl MetricsRegistry {
             ),
             telemetry::metrics::KeyValue::new(
                 "manifest_hash",
-                self.dataset_reference.hash().as_str().to_string(),
+                self.dataset_reference
+                    .hash()
+                    .as_short_hash_str()
+                    .to_string(),
             ),
         ]
     }
