@@ -102,6 +102,7 @@ impl SolanaExtractor {
     ///
     /// NOTE: The reason this is marked as `pub` is because it is used in integration tests
     /// in the `tests` crate.
+    #[doc(hidden)]
     pub fn block_stream_impl<T>(
         self,
         start: BlockNum,

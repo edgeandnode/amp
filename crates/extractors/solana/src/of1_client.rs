@@ -75,6 +75,7 @@ impl DecodedSlot {
     ///
     /// NOTE: The reason this is marked as `pub` is because it is used in integration tests
     /// in the `tests` crate.
+    #[doc(hidden)]
     pub fn dummy(slot: Slot) -> Self {
         Self {
             slot,
