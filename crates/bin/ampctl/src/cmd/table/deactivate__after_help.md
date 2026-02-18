@@ -1,10 +1,10 @@
 ## Examples
 
 Deactivate all revisions for a table:
-  $ ampctl table deactivate shiyasmohd/mainnet@0.0.1 blocks
+  $ ampctl table deactivate edgeandnode/ethereum_mainnet@0.0.1 blocks
 
 With custom admin URL:
-  $ ampctl table deactivate shiyasmohd/mainnet@0.0.1 blocks --admin-url http://prod-server:1610
+  $ ampctl table deactivate edgeandnode/ethereum_mainnet@0.0.1 blocks --admin-url http://prod-server:1610
 
 ## Notes
 

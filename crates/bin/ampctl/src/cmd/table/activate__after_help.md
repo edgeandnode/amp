@@ -1,10 +1,10 @@
 ## Examples
 
 Activate a table revision:
-  $ ampctl table activate shiyasmohd/mainnet@0.0.1 blocks --location-id 1
+  $ ampctl table activate edgeandnode/ethereum_mainnet@0.0.1 blocks --location-id 1
 
 With custom admin URL:
-  $ ampctl table activate shiyasmohd/mainnet@0.0.1 blocks --location-id 1 --admin-url http://prod-server:1610
+  $ ampctl table activate edgeandnode/ethereum_mainnet@0.0.1 blocks --location-id 1 --admin-url http://prod-server:1610
 
 ## Notes
 
