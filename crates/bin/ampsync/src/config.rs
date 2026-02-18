@@ -65,6 +65,18 @@ pub struct SyncConfig {
     #[arg(long, env = "AMP_FLIGHT_ADDR", default_value = "http://localhost:1602")]
     pub amp_flight_addr: String,
 
+    /// Max gRPC decode size in MiB for Arrow Flight responses (default: 32, valid range: 1-512)
+    ///
+    /// Increase this when syncing high-volume tables that emit larger frames.
+    /// Can also be set via AMPSYNC_GRPC_MAX_DECODE_MB environment variable.
+    #[arg(
+        long,
+        env = "AMPSYNC_GRPC_MAX_DECODE_MB",
+        default_value_t = 32,
+        value_parser = clap::value_parser!(u32).range(1..=512)
+    )]
+    pub grpc_max_decode_mb: u32,
+
     /// Maximum database connections (default: 10, valid range: 1-1000)
     ///
     /// Can also be set via MAX_DB_CONNECTIONS environment variable
