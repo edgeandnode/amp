@@ -42,7 +42,7 @@ pub(super) fn new(
     let metrics = job_ctx
         .meter
         .as_ref()
-        .map(|m| Arc::new(MetricsRegistry::new(m, reference.clone())));
+        .map(|m| Arc::new(MetricsRegistry::new(m, reference.clone(), *job_id)));
 
     // Create progress reporter for event streaming
     // Always create the reporter - NoOpEmitter will discard events if not needed

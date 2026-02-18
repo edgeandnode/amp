@@ -383,8 +383,7 @@ pub async fn dump(
     if let Some(ref metrics) = metrics {
         for (table, _compactor) in &tables {
             let table_name = table.table_name().to_string();
-            let job_id = table_name.clone();
-            metrics.record_dump_duration(duration_millis as f64, table_name, job_id);
+            metrics.record_dump_duration(duration_millis as f64, table_name);
         }
     }
 
