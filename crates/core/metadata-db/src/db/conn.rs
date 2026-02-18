@@ -97,26 +97,15 @@ impl std::ops::DerefMut for Connection {
 pub struct ConnPool(Pool<Postgres>);
 
 impl ConnPool {
-    /// Creates a connection pool with the specified size and 5-second acquire timeout.
-    ///
-    /// Pool lifecycle settings prevent bulk connection recycling:
-    /// - `min_connections`: maintains a baseline of ready connections
-    /// - `max_lifetime`: staggers connection recycling to avoid thundering herd
-    /// - `idle_timeout`: keeps idle connections alive longer to reduce churn
+    /// Creates a connection pool using the given [`PoolConfig`](crate::PoolConfig).
     #[tracing::instrument(skip_all, err)]
-    pub async fn connect(
-        url: &str,
-        pool_size: u32,
-        min_connections: u32,
-        max_lifetime_secs: u64,
-        idle_timeout_secs: u64,
-    ) -> Result<Self, ConnError> {
+    pub async fn connect(url: &str, config: &crate::PoolConfig) -> Result<Self, ConnError> {
         PgPoolOptions::new()
-            .max_connections(pool_size)
-            .min_connections(min_connections)
-            .acquire_timeout(Duration::from_secs(5))
-            .max_lifetime(Duration::from_secs(max_lifetime_secs))
-            .idle_timeout(Duration::from_secs(idle_timeout_secs))
+            .max_connections(config.max_connections)
+            .min_connections(config.min_connections)
+            .acquire_timeout(config.acquire_timeout)
+            .max_lifetime(config.max_lifetime)
+            .idle_timeout(config.idle_timeout)
             .connect(url)
             .await
             .map(Self)

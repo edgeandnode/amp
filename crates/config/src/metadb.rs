@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use figment::{
     Figment,
@@ -32,10 +32,15 @@ pub struct MetadataDbConfig {
 }
 
 impl MetadataDbConfig {
-    /// Returns the effective min_connections value, defaulting to 25% of pool_size.
-    pub fn effective_min_connections(&self) -> u32 {
-        self.min_connections
-            .unwrap_or_else(|| self.pool_size.div_ceil(4).max(1))
+    /// Builds a [`metadata_db::PoolConfig`] from this configuration.
+    pub fn pool_config(&self) -> metadata_db::PoolConfig {
+        let mut config = metadata_db::PoolConfig::with_size(self.pool_size);
+        if let Some(min) = self.min_connections {
+            config.min_connections = min;
+        }
+        config.max_lifetime = Duration::from_secs(self.max_lifetime_secs);
+        config.idle_timeout = Duration::from_secs(self.idle_timeout_secs);
+        config
     }
 }
 
@@ -45,11 +50,11 @@ fn default_pool_size() -> u32 {
 }
 
 fn default_max_lifetime_secs() -> u64 {
-    1800
+    metadata_db::DEFAULT_MAX_LIFETIME.as_secs()
 }
 
 fn default_idle_timeout_secs() -> u64 {
-    600
+    metadata_db::DEFAULT_IDLE_TIMEOUT.as_secs()
 }
 
 /// Serde default for [`MetadataDbConfig::auto_migrate`]. Returns `true`.
