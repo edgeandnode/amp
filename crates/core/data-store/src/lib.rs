@@ -188,7 +188,8 @@ impl DataStore {
         table_name: &TableName,
     ) -> Result<PhyTableRevision, CreateNewTableRevisionError> {
         let revision_id = Uuid::now_v7();
-        let path = PhyTableRevisionPath::new(dataset.name(), table_name, revision_id);
+        let path =
+            PhyTableRevisionPath::new(dataset.namespace(), dataset.name(), table_name, revision_id);
         let url = PhyTableUrl::new(self.url(), &path);
 
         let location_id = self
@@ -255,14 +256,28 @@ impl DataStore {
         dataset: &HashReference,
         table_name: &TableName,
     ) -> Result<Option<PhyTableRevision>, RestoreLatestTableRevisionError> {
-        let table_path = PhyTablePath::new(dataset.name(), table_name);
+        let table_path = PhyTablePath::new(dataset.namespace(), dataset.name(), table_name);
 
-        let Some(path) = self
+        let path = match self
             .find_latest_table_revision_in_object_store(&table_path)
             .await
             .map_err(RestoreLatestTableRevisionError::FindLatestRevision)?
-        else {
-            return Ok(None);
+        {
+            Some(path) => path,
+            None => {
+                // Check for legacy path (without namespace)
+                let legacy_path = PhyTablePath::from_legacy(dataset.name(), table_name);
+
+                let Some(path) = self
+                    .find_latest_table_revision_in_object_store(&legacy_path)
+                    .await
+                    .map_err(RestoreLatestTableRevisionError::FindLatestRevision)?
+                else {
+                    return Ok(None);
+                };
+
+                path
+            }
         };
 
         let url = PhyTableUrl::new(self.url(), &path);
@@ -303,6 +318,35 @@ impl DataStore {
         metadata_db::physical_table::list_all(&self.metadata_db, active, limit)
             .await
             .map_err(ListAllTableRevisionsError)
+    }
+
+    /// Gets a table revision by matching JSONB metadata fields (manifest_hash, table_name).
+    ///
+    /// Returns the matching revision if one exists, or None if not found.
+    pub async fn get_table_revision(
+        &self,
+        dataset_ref: &HashReference,
+        table_name: &TableName,
+    ) -> Result<Option<PhyTableRevision>, GetTableRevisionError> {
+        let Some(row) = metadata_db::physical_table::get_revision(
+            &self.metadata_db,
+            dataset_ref.hash(),
+            table_name,
+        )
+        .await
+        .map_err(GetTableRevisionError)?
+        else {
+            return Ok(None);
+        };
+
+        let path: PhyTableRevisionPath = row.path.into();
+        let url = PhyTableUrl::new(self.url(), &path);
+
+        Ok(Some(PhyTableRevision {
+            location_id: row.id,
+            path,
+            url,
+        }))
     }
 
     /// Gets the active revision of a table from the metadata database.
@@ -835,6 +879,20 @@ pub enum CreateAndActivateTableRevisionError {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to get revision by location ID from metadata database")]
 pub struct GetRevisionByLocationIdError(#[source] metadata_db::Error);
+
+/// Failed to retrieve physical table revision from metadata database
+///
+/// This error occurs when querying the metadata database for the physical table revision
+/// by matching JSONB metadata fields (manifest_hash, table_name).
+///
+/// Common causes:
+/// - Database connection lost during query
+/// - Database server unreachable
+/// - Network connectivity issues
+/// - Invalid manifest hash or table name format
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to get revision from metadata database")]
+pub struct GetTableRevisionError(#[source] metadata_db::Error);
 
 /// Failed to retrieve active physical table revision from metadata database
 ///

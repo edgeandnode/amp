@@ -177,6 +177,24 @@ where
         .map_err(Error::Database)
 }
 
+/// Get a physical table revision by matching JSONB metadata fields.
+///
+/// Queries the `physical_table_revisions` table by `manifest_hash` and `table_name`
+/// stored in the JSONB `metadata` column. Returns the most recent matching revision.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_revision<'c, E>(
+    exe: E,
+    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    table_name: impl Into<TableName<'_>> + std::fmt::Debug,
+) -> Result<Option<PhysicalTableRevision>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_revision(exe, manifest_hash.into(), table_name.into())
+        .await
+        .map_err(Error::Database)
+}
+
 /// Mark all active locations for a table as inactive
 ///
 /// This is typically used before marking a new location as active, ensuring
