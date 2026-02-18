@@ -1,3 +1,4 @@
+use datasets_common::hash_reference::HashReference;
 use monitoring::telemetry;
 
 #[derive(Debug, Clone)]
@@ -133,12 +134,9 @@ impl MetricsRegistry {
         duration_millis: f64,
         rows_returned: u64,
         bytes_egress: u64,
-        dataset: &str,
+        dataset: &HashReference,
     ) {
-        let labels = [telemetry::metrics::KeyValue::new(
-            "dataset",
-            dataset.to_string(),
-        )];
+        let labels = dataset_kvs(dataset);
         self.query_count.inc_with_kvs(&labels);
         self.query_duration
             .record_with_kvs(duration_millis, &labels);
@@ -149,11 +147,12 @@ impl MetricsRegistry {
     }
 
     /// Record query error
-    pub fn record_query_error(&self, error_code: &str, dataset: &str) {
-        let labels = [
-            telemetry::metrics::KeyValue::new("error_code", error_code.to_string()),
-            telemetry::metrics::KeyValue::new("dataset", dataset.to_string()),
-        ];
+    pub fn record_query_error(&self, error_code: &str, dataset: &HashReference) {
+        let mut labels = dataset_kvs(dataset).to_vec();
+        labels.push(telemetry::metrics::KeyValue::new(
+            "error_code",
+            error_code.to_string(),
+        ));
         self.query_errors.inc_with_kvs(&labels);
     }
 
@@ -163,11 +162,13 @@ impl MetricsRegistry {
     }
 
     /// Record streaming microbatch size and throughput
-    pub fn record_streaming_batch(&self, batch_rows: u64, batch_bytes: u64, dataset: &str) {
-        let labels = [telemetry::metrics::KeyValue::new(
-            "dataset",
-            dataset.to_string(),
-        )];
+    pub fn record_streaming_batch(
+        &self,
+        batch_rows: u64,
+        batch_bytes: u64,
+        dataset: &HashReference,
+    ) {
+        let labels = dataset_kvs(dataset);
         self.streaming_microbatch_rows
             .record_with_kvs(batch_rows, &labels);
         self.streaming_rows_sent
@@ -177,22 +178,32 @@ impl MetricsRegistry {
     }
 
     /// Record streaming microbatch duration
-    pub fn record_streaming_microbatch_duration(&self, duration_millis: f64, dataset: &str) {
-        let labels = [telemetry::metrics::KeyValue::new(
-            "dataset",
-            dataset.to_string(),
-        )];
+    pub fn record_streaming_microbatch_duration(
+        &self,
+        duration_millis: f64,
+        dataset: &HashReference,
+    ) {
+        let labels = dataset_kvs(dataset);
         self.streaming_microbatch_duration
             .record_with_kvs(duration_millis, &labels);
     }
 
     /// Record streaming query lifetime
-    pub fn record_streaming_lifetime(&self, duration_millis: f64, dataset: &str) {
-        let labels = [telemetry::metrics::KeyValue::new(
-            "dataset",
-            dataset.to_string(),
-        )];
+    pub fn record_streaming_lifetime(&self, duration_millis: f64, dataset: &HashReference) {
+        let labels = dataset_kvs(dataset);
         self.streaming_query_lifetime
             .record_with_kvs(duration_millis, &labels);
     }
+}
+
+/// Build the two standard dataset labels from a `HashReference`:
+/// `dataset` = `namespace/name`, `dataset_name` = just the name.
+fn dataset_kvs(dataset: &HashReference) -> [telemetry::metrics::KeyValue; 2] {
+    [
+        telemetry::metrics::KeyValue::new(
+            "dataset",
+            format!("{}/{}", dataset.namespace(), dataset.name()),
+        ),
+        telemetry::metrics::KeyValue::new("dataset_name", dataset.name().as_str().to_string()),
+    ]
 }
