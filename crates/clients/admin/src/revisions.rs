@@ -471,7 +471,13 @@ impl<'a> RevisionsClient<'a> {
                     "DATASET_NOT_FOUND" => {
                         Err(ActivateError::DatasetNotFound(error_response.into()))
                     }
-                    "TABLE_NOT_FOUND" => Err(ActivateError::TableNotFound(error_response.into())),
+                    "TABLE_NOT_IN_MANIFEST" => {
+                        Err(ActivateError::TableNotInManifest(error_response.into()))
+                    }
+                    "TABLE_NOT_REGISTERED" => {
+                        Err(ActivateError::TableNotRegistered(error_response.into()))
+                    }
+                    "GET_DATASET_ERROR" => Err(ActivateError::GetDataset(error_response.into())),
                     "ACTIVATE_TABLE_REVISION_ERROR" => {
                         Err(ActivateError::ActivateRevision(error_response.into()))
                     }
@@ -636,11 +642,23 @@ pub enum ActivateError {
     #[error("dataset not found")]
     DatasetNotFound(#[source] ApiError),
 
-    /// Table not found (404, TABLE_NOT_FOUND)
+    /// Table not found in manifest (404, TABLE_NOT_IN_MANIFEST)
     ///
-    /// No physical table exists for the given dataset and table name.
-    #[error("table not found")]
-    TableNotFound(#[source] ApiError),
+    /// The table name does not exist in the dataset manifest.
+    #[error("table not found in manifest")]
+    TableNotInManifest(#[source] ApiError),
+
+    /// Table not registered in data store (404, TABLE_NOT_REGISTERED)
+    ///
+    /// No physical table is registered for the given dataset and table name.
+    #[error("table not registered")]
+    TableNotRegistered(#[source] ApiError),
+
+    /// Failed to load dataset (500, GET_DATASET_ERROR)
+    ///
+    /// Failed to load the dataset from its manifest.
+    #[error("failed to load dataset")]
+    GetDataset(#[source] ApiError),
 
     /// Failed to activate table revision (500, ACTIVATE_TABLE_REVISION_ERROR)
     ///

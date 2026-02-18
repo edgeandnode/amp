@@ -5,6 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
+use common::dataset_store::GetDatasetError;
 use datasets_common::{reference::Reference, table_name::TableName};
 use metadata_db::LocationId;
 use monitoring::logging;
@@ -30,14 +31,16 @@ use crate::{
 ///
 /// ## Error Codes
 /// - `DATASET_NOT_FOUND`: The specified dataset or revision does not exist
-/// - `TABLE_NOT_FOUND`: No physical table exists for the dataset and table name
+/// - `TABLE_NOT_IN_MANIFEST`: The table name does not exist in the dataset manifest
+/// - `TABLE_NOT_REGISTERED`: The table is not registered in the data store
+/// - `GET_DATASET_ERROR`: Failed to load the dataset from its manifest
 /// - `ACTIVATE_TABLE_REVISION_ERROR`: Failed to activate the table revision
 /// - `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash
 ///
 /// ## Behavior
-/// This endpoint resolves the dataset reference to a manifest hash, then atomically
-/// deactivates all existing revisions for the table and marks the specified revision
-/// as active.
+/// This endpoint resolves the dataset reference to a manifest hash, validates that
+/// the table name exists in the dataset manifest, then atomically deactivates all
+/// existing revisions for the table and marks the specified revision as active.
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -88,13 +91,44 @@ pub async fn handler(
             }
         })?;
 
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(&reference)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                dataset_reference = %payload.dataset,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to load dataset"
+            );
+            Error::GetDataset(err)
+        })?;
+
+    if !dataset
+        .tables()
+        .iter()
+        .any(|t| t.name() == &payload.table_name)
+    {
+        tracing::debug!(
+            table_name = %payload.table_name,
+            dataset_reference = %payload.dataset,
+            "table not found in dataset manifest"
+        );
+        return Err(Error::TableNotInManifest {
+            table_name: payload.table_name.clone(),
+            dataset: payload.dataset.clone(),
+        }
+        .into());
+    }
+
     ctx.data_store
         .activate_table_revision(&reference, &payload.table_name, location_id)
         .await
         .map_err(|err| match err {
             ActivateTableRevisionError::TableNotFound => {
-                tracing::debug!(table_name = %payload.table_name, "table not found");
-                Error::TableNotFound {
+                tracing::debug!(table_name = %payload.table_name, "table not registered in data store");
+                Error::TableNotRegistered {
                     table_name: payload.table_name.clone(),
                     dataset: payload.dataset,
                 }
@@ -140,15 +174,33 @@ pub enum Error {
     /// - The revision resolves to a manifest that doesn't exist
     #[error("Dataset '{dataset}' not found")]
     NotFound { dataset: Reference },
-    /// No physical table found for the given dataset and table name
+    /// Table name not found in dataset manifest
     ///
     /// This occurs when:
-    /// - The table name does not exist in the dataset
-    #[error("Table '{table_name}' not found for dataset '{dataset}'")]
-    TableNotFound {
+    /// - The table name does not exist in the dataset manifest definition
+    #[error("Table '{table_name}' not found in manifest for dataset '{dataset}'")]
+    TableNotInManifest {
         table_name: TableName,
         dataset: Reference,
     },
+    /// No physical table found for the given dataset and table name
+    ///
+    /// This occurs when:
+    /// - The table is not registered in the data store
+    #[error("Table '{table_name}' not registered for dataset '{dataset}'")]
+    TableNotRegistered {
+        table_name: TableName,
+        dataset: Reference,
+    },
+    /// Failed to load dataset from manifest
+    ///
+    /// This occurs when:
+    /// - The manifest content could not be retrieved from object store
+    /// - The manifest could not be parsed for the dataset kind
+    /// - The dataset kind is unsupported
+    #[error("Failed to load dataset: {0}")]
+    GetDataset(#[source] GetDatasetError),
+
     /// Failed to activate table revision
     ///
     /// This occurs when:
@@ -172,7 +224,9 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidPath(_) => "INVALID_PATH_PARAMETERS",
             Error::NotFound { .. } => "DATASET_NOT_FOUND",
-            Error::TableNotFound { .. } => "TABLE_NOT_FOUND",
+            Error::TableNotInManifest { .. } => "TABLE_NOT_IN_MANIFEST",
+            Error::TableNotRegistered { .. } => "TABLE_NOT_REGISTERED",
+            Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::ActivateTableRevision(_) => "ACTIVATE_TABLE_REVISION_ERROR",
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
         }
@@ -182,7 +236,9 @@ impl IntoErrorResponse for Error {
         match self {
             Error::InvalidPath(_) => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
-            Error::TableNotFound { .. } => StatusCode::NOT_FOUND,
+            Error::TableNotInManifest { .. } => StatusCode::NOT_FOUND,
+            Error::TableNotRegistered { .. } => StatusCode::NOT_FOUND,
+            Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ActivateTableRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

@@ -46,7 +46,7 @@ use crate::{
         request_body = CreatePayload,
         responses(
             (status = 200, description = "Successfully created the table revision", body = CreateRevisionResponse),
-            (status = 404, description = "Dataset or revision not found", body = ErrorResponse),
+            (status = 404, description = "Dataset, revision, or table not found", body = ErrorResponse),
             (status = 500, description = "Internal server error", body = ErrorResponse)
         )
     )

@@ -60,8 +60,14 @@ pub async fn run(
                         dataset: dataset.clone(),
                     }
                 }
-                crate::client::revisions::ActivateError::TableNotFound(_) => {
-                    Error::TableNotFound {
+                crate::client::revisions::ActivateError::TableNotInManifest(_) => {
+                    Error::TableNotInManifest {
+                        table_name: table_name.clone(),
+                        dataset: dataset.clone(),
+                    }
+                }
+                crate::client::revisions::ActivateError::TableNotRegistered(_) => {
+                    Error::TableNotRegistered {
                         table_name: table_name.clone(),
                         dataset: dataset.clone(),
                     }
@@ -115,12 +121,19 @@ pub enum Error {
     #[error("dataset not found: {dataset}")]
     DatasetNotFound { dataset: String },
 
-    /// Table not found
+    /// Table not found in manifest
     ///
     /// This occurs when the table name does not exist
-    /// for the given dataset.
-    #[error("table '{table_name}' not found for dataset '{dataset}'")]
-    TableNotFound { table_name: String, dataset: String },
+    /// in the dataset manifest definition.
+    #[error("table '{table_name}' not found in manifest for dataset '{dataset}'")]
+    TableNotInManifest { table_name: String, dataset: String },
+
+    /// Table not registered in data store
+    ///
+    /// This occurs when no physical table is registered
+    /// for the given dataset and table name.
+    #[error("table '{table_name}' not registered for dataset '{dataset}'")]
+    TableNotRegistered { table_name: String, dataset: String },
 
     /// Error activating revision via admin API
     ///

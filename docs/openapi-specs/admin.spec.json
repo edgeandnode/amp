@@ -1644,7 +1644,7 @@
             }
           },
           "404": {
-            "description": "Dataset or revision not found",
+            "description": "Dataset, revision, or table not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1771,7 +1771,7 @@
           "revisions"
         ],
         "summary": "Handler for the `POST /revisions/activate` endpoint",
-        "description": "Activates a specific table revision by location ID.\n\n## Request Body\n- `dataset`: Dataset reference (namespace/name or with revision)\n- `table_name`: Name of the table whose revision to activate\n- `location_id`: Location ID of the revision to activate\n\n## Response\n- **200 OK**: Successfully activated the table revision\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database error during activation\n\n## Error Codes\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `TABLE_NOT_FOUND`: No physical table exists for the dataset and table name\n- `ACTIVATE_TABLE_REVISION_ERROR`: Failed to activate the table revision\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n\n## Behavior\nThis endpoint resolves the dataset reference to a manifest hash, then atomically\ndeactivates all existing revisions for the table and marks the specified revision\nas active.",
+        "description": "Activates a specific table revision by location ID.\n\n## Request Body\n- `dataset`: Dataset reference (namespace/name or with revision)\n- `table_name`: Name of the table whose revision to activate\n- `location_id`: Location ID of the revision to activate\n\n## Response\n- **200 OK**: Successfully activated the table revision\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database error during activation\n\n## Error Codes\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `TABLE_NOT_IN_MANIFEST`: The table name does not exist in the dataset manifest\n- `TABLE_NOT_REGISTERED`: The table is not registered in the data store\n- `GET_DATASET_ERROR`: Failed to load the dataset from its manifest\n- `ACTIVATE_TABLE_REVISION_ERROR`: Failed to activate the table revision\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n\n## Behavior\nThis endpoint resolves the dataset reference to a manifest hash, validates that\nthe table name exists in the dataset manifest, then atomically deactivates all\nexisting revisions for the table and marks the specified revision as active.",
         "operationId": "activate_table_revision",
         "parameters": [
           {
