@@ -133,42 +133,66 @@ impl MetricsRegistry {
         duration_millis: f64,
         rows_returned: u64,
         bytes_egress: u64,
+        dataset: &str,
     ) {
-        self.query_count.inc();
-        self.query_duration.record(duration_millis);
-        self.query_rows_returned.inc_by(rows_returned);
-        self.query_bytes_egress.inc_by(bytes_egress);
+        let labels = [telemetry::metrics::KeyValue::new(
+            "dataset",
+            dataset.to_string(),
+        )];
+        self.query_count.inc_with_kvs(&labels);
+        self.query_duration
+            .record_with_kvs(duration_millis, &labels);
+        self.query_rows_returned
+            .inc_by_with_kvs(rows_returned, &labels);
+        self.query_bytes_egress
+            .inc_by_with_kvs(bytes_egress, &labels);
     }
 
     /// Record query error
-    pub fn record_query_error(&self, error_code: &str) {
-        let labels = [telemetry::metrics::KeyValue::new(
-            "error_code",
-            error_code.to_string(),
-        )];
-
+    pub fn record_query_error(&self, error_code: &str, dataset: &str) {
+        let labels = [
+            telemetry::metrics::KeyValue::new("error_code", error_code.to_string()),
+            telemetry::metrics::KeyValue::new("dataset", dataset.to_string()),
+        ];
         self.query_errors.inc_with_kvs(&labels);
-    }
-
-    /// Record streaming microbatch size and throughput
-    pub fn record_streaming_batch(&self, batch_rows: u64, batch_bytes: u64) {
-        self.streaming_microbatch_rows.record(batch_rows);
-        self.streaming_rows_sent.inc_by(batch_rows);
-        self.streaming_bytes_sent.inc_by(batch_bytes);
-    }
-
-    /// Record streaming microbatch duration
-    pub fn record_streaming_microbatch_duration(&self, duration_millis: f64) {
-        self.streaming_microbatch_duration.record(duration_millis);
-    }
-
-    /// Record streaming query lifetime
-    pub fn record_streaming_lifetime(&self, duration_millis: f64) {
-        self.streaming_query_lifetime.record(duration_millis);
     }
 
     /// Record query memory usage
     pub fn record_query_memory(&self, peak_bytes: u64) {
         self.query_memory_peak_bytes.record(peak_bytes);
+    }
+
+    /// Record streaming microbatch size and throughput
+    pub fn record_streaming_batch(&self, batch_rows: u64, batch_bytes: u64, dataset: &str) {
+        let labels = [telemetry::metrics::KeyValue::new(
+            "dataset",
+            dataset.to_string(),
+        )];
+        self.streaming_microbatch_rows
+            .record_with_kvs(batch_rows, &labels);
+        self.streaming_rows_sent
+            .inc_by_with_kvs(batch_rows, &labels);
+        self.streaming_bytes_sent
+            .inc_by_with_kvs(batch_bytes, &labels);
+    }
+
+    /// Record streaming microbatch duration
+    pub fn record_streaming_microbatch_duration(&self, duration_millis: f64, dataset: &str) {
+        let labels = [telemetry::metrics::KeyValue::new(
+            "dataset",
+            dataset.to_string(),
+        )];
+        self.streaming_microbatch_duration
+            .record_with_kvs(duration_millis, &labels);
+    }
+
+    /// Record streaming query lifetime
+    pub fn record_streaming_lifetime(&self, duration_millis: f64, dataset: &str) {
+        let labels = [telemetry::metrics::KeyValue::new(
+            "dataset",
+            dataset.to_string(),
+        )];
+        self.streaming_query_lifetime
+            .record_with_kvs(duration_millis, &labels);
     }
 }
