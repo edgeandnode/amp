@@ -290,8 +290,7 @@ impl AmpClient {
 
         let channel = endpoint.connect().await.map_err(Error::Transport)?;
         let client = FlightSqlServiceClient::new_from_inner(
-            FlightServiceClient::new(channel)
-                .max_decoding_message_size(max_decoding_message_size),
+            FlightServiceClient::new(channel).max_decoding_message_size(max_decoding_message_size),
         );
         Ok(Self { client })
     }

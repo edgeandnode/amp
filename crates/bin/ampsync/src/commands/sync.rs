@@ -44,8 +44,8 @@ pub async fn run(config: SyncConfig) -> Result<()> {
         &config.amp_flight_addr,
         grpc_max_decode_bytes,
     )
-        .await
-        .context("Failed to create amp-client")?;
+    .await
+    .context("Failed to create amp-client")?;
 
     // Apply authentication if provided
     if let Some(token) = &config.auth_token {
