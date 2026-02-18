@@ -22,6 +22,7 @@ Options:
   -t, --tables <TABLES>                        Tables to sync, comma-separated (required)
       --database-url <URL>                     PostgreSQL connection URL (required)
       --amp-flight-addr <ADDR>                 Amp Flight server (default: http://localhost:1602)
+      --grpc-max-decode-mb <MB>                Max gRPC decode size in MiB (default: 32, range: 1-512)
       --max-db-connections <N>                 Max connections (default: 10, range: 1-1000)
       --retention-blocks <N>                   Retention blocks (default: 128, min: 64)
       --auth-token <TOKEN>                     Authentication token for Arrow Flight
@@ -50,6 +51,7 @@ All CLI arguments can also be set via environment variables:
   Format: `postgresql://[user]:[password]@[host]:[port]/[database]`
   Example: `postgresql://user:pass@localhost:5432/amp`
 - **`AMP_FLIGHT_ADDR`** (default: `http://localhost:1602`): Amp Arrow Flight server
+- **`AMPSYNC_GRPC_MAX_DECODE_MB`** (default: `32`): Max gRPC decode size in MiB for Arrow Flight responses (valid range: 1-512)
 - **`MAX_DB_CONNECTIONS`** (default: `10`): Database connection pool size (valid range: 1-1000)
 - **`RETENTION_BLOCKS`** (default: `128`): Watermark retention window (must be >= 64)
 - **`AMP_AUTH_TOKEN`** (optional): Bearer token for authenticating requests to the Arrow Flight server
@@ -139,5 +141,6 @@ For many tables, consider:
 - Increasing `MAX_DB_CONNECTIONS` (default: 10, max: 1000)
   - Higher values don't always improve performance
   - Consider running multiple instances for horizontal scaling
+- Increasing `AMPSYNC_GRPC_MAX_DECODE_MB` if Arrow Flight responses include large frames
 - Running multiple ampsync instances for different datasets
 - Monitoring PostgreSQL connection usage
