@@ -96,7 +96,13 @@ impl SolanaExtractor {
         }
     }
 
-    fn block_stream_impl<T>(
+    /// Core implementation of the block streaming logic, parameterized over the historical block stream source.
+    /// For production use-cases the historical block stream will come from the Old Faithful archive (using the
+    /// [`of1_client`] module) and for testing we can provide a custom stream of decoded slots directly.
+    ///
+    /// NOTE: The reason this is marked as `pub` is because it is used in integration tests
+    /// in the `tests` crate.
+    pub fn block_stream_impl<T>(
         self,
         start: BlockNum,
         end: BlockNum,
@@ -493,27 +499,10 @@ mod tests {
 
     use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
-    use solana_clock::Slot;
     use url::Url;
 
     use super::SolanaExtractor;
     use crate::{of1_client, rpc_client};
-
-    impl of1_client::DecodedSlot {
-        fn dummy(slot: Slot) -> Self {
-            Self {
-                slot,
-                parent_slot: slot.saturating_sub(1),
-                blockhash: [0; 32],
-                prev_blockhash: [0; 32],
-                block_height: None,
-                blocktime: 0,
-                transactions: Vec::new(),
-                transaction_metas: Vec::new(),
-                block_rewards: None,
-            }
-        }
-    }
 
     #[tokio::test]
     async fn historical_blocks_only() {
@@ -550,64 +539,6 @@ mod tests {
             historical,
             rpc_client::rpc_config::RpcBlockConfig::default(),
         );
-
-        futures::pin_mut!(block_stream);
-
-        let mut expected_block = start;
-
-        while let Some(rows) = block_stream
-            .next()
-            .await
-            .transpose()
-            .expect("stream should not error")
-        {
-            assert_eq!(rows.block_num(), expected_block);
-            expected_block += 1;
-        }
-
-        assert_eq!(expected_block, end + 1);
-    }
-
-    #[tokio::test]
-    async fn historical_to_json_rpc_transition() {
-        let url_str = std::env::var("SOLANA_MAINNET_HTTP_URL")
-            .expect("Missing environment variable SOLANA_MAINNET_HTTP_URL");
-        let solana_rpc_provider_url = url_str.parse::<Url>().expect("Failed to parse URL");
-        let network = "mainnet".parse().expect("Failed to parse network id");
-        let provider_name = "test_provider"
-            .parse()
-            .expect("Failed to parse provider name");
-
-        let extractor = SolanaExtractor::new(
-            solana_rpc_provider_url,
-            None,
-            network,
-            provider_name,
-            PathBuf::new(),
-            false,
-            UseArchive::Auto,
-            None,
-        );
-
-        let start = 0;
-        let historical_end = 50;
-        let end = historical_end + 20;
-
-        // Stream part of the range as historical blocks.
-        let historical = async_stream::stream! {
-            for slot in start..=historical_end {
-                yield Ok(of1_client::DecodedSlot::dummy(slot));
-            }
-        };
-
-        let get_block_config = rpc_client::rpc_config::RpcBlockConfig {
-            encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
-            transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
-            max_supported_transaction_version: Some(0),
-            rewards: Some(true),
-            commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
-        };
-        let block_stream = extractor.block_stream_impl(start, end, historical, get_block_config);
 
         futures::pin_mut!(block_stream);
 

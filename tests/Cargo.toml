@@ -23,6 +23,7 @@ amp-worker-core = { path = "../crates/core/worker-core" }
 ampctl = { path = "../crates/bin/ampctl" }
 anyhow.workspace = true
 arrow-flight.workspace = true
+async-stream.workspace = true
 async-trait.workspace = true
 backon.workspace = true
 clap.workspace = true
