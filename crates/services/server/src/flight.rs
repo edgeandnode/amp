@@ -47,6 +47,7 @@ use common::{
     },
     dataset_store::{DatasetStore, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
+    memory_pool::TieredMemoryPool,
     query_env::QueryEnv,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
@@ -213,6 +214,7 @@ impl Service {
                 );
             }
 
+            let memory_pool = ctx.memory_pool().clone();
             let record_batches = ctx
                 .execute_plan(plan, true)
                 .await
@@ -224,7 +226,12 @@ impl Service {
             };
 
             if let Some(metrics) = &self.metrics {
-                Ok(track_query_metrics(stream, metrics, query_start_time))
+                Ok(track_query_metrics(
+                    stream,
+                    metrics,
+                    query_start_time,
+                    Some(memory_pool),
+                ))
             } else {
                 Ok(stream)
             }
@@ -278,7 +285,7 @@ impl Service {
             };
 
             if let Some(metrics) = &self.metrics {
-                Ok(track_query_metrics(stream, metrics, query_start_time))
+                Ok(track_query_metrics(stream, metrics, query_start_time, None))
             } else {
                 Ok(stream)
             }
@@ -617,6 +624,7 @@ fn track_query_metrics(
     stream: QueryResultStream,
     metrics: &Arc<MetricsRegistry>,
     start_time: std::time::Instant,
+    memory_pool: Option<Arc<TieredMemoryPool>>,
 ) -> QueryResultStream {
     let metrics = metrics.clone();
 
@@ -647,7 +655,7 @@ fn track_query_metrics(
                             let duration = start_time.elapsed().as_millis() as f64;
                             let err_msg = e.to_string();
                             metrics.record_query_error(&err_msg);
-                            metrics.record_query_execution(duration, total_rows, total_bytes);
+                            metrics.record_query_execution(duration, total_rows, total_bytes, memory_pool.as_ref());
 
                             yield Err(e);
                             return;
@@ -657,7 +665,7 @@ fn track_query_metrics(
 
                 // Stream completed successfully, record metrics
                 let duration = start_time.elapsed().as_millis() as f64;
-                metrics.record_query_execution(duration, total_rows, total_bytes);
+                metrics.record_query_execution(duration, total_rows, total_bytes, memory_pool.as_ref());
             };
 
             QueryResultStream::NonIncremental {
