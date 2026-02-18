@@ -63,6 +63,7 @@ use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,
 };
 use datasets_common::{
+    hash_reference::HashReference,
     network_id::NetworkId,
     partial_reference::{PartialReference, PartialReferenceError},
 };
@@ -630,16 +631,13 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     bytes.into_inner().into()
 }
 
-/// Returns a deduplicated sorted list of unique `namespace/name` values for all
-/// datasets referenced by the catalog. Used as per-dataset `dataset` labels on query metrics.
-fn catalog_dataset_labels(catalog: &Catalog) -> Vec<String> {
-    let datasets: BTreeSet<String> = catalog
+/// Returns a deduplicated sorted list of dataset references for all datasets referenced
+/// by the catalog. Used as per-dataset labels on query metrics.
+fn catalog_dataset_labels(catalog: &Catalog) -> Vec<HashReference> {
+    let datasets: BTreeSet<HashReference> = catalog
         .tables()
         .iter()
-        .map(|t| {
-            let r = t.dataset_reference();
-            format!("{}/{}", r.namespace(), r.name())
-        })
+        .map(|t| t.dataset_reference().clone())
         .collect();
     datasets.into_iter().collect()
 }
@@ -649,7 +647,7 @@ fn track_query_metrics(
     stream: QueryResultStream,
     metrics: &Arc<MetricsRegistry>,
     start_time: std::time::Instant,
-    dataset_labels: Vec<String>,
+    dataset_labels: Vec<HashReference>,
 ) -> QueryResultStream {
     let metrics = metrics.clone();
 
@@ -709,7 +707,13 @@ fn track_query_metrics(
         } => {
             // Increment active streaming query counters, once per dataset
             for dataset in &dataset_labels {
-                let kv = [KeyValue::new("dataset", dataset.clone())];
+                let kv = [
+                    KeyValue::new(
+                        "dataset",
+                        format!("{}/{}", dataset.namespace(), dataset.name()),
+                    ),
+                    KeyValue::new("dataset_name", dataset.name().as_str().to_string()),
+                ];
                 metrics.streaming_queries_active.inc_with_kvs(&kv);
                 metrics.streaming_queries_started.inc_with_kvs(&kv);
             }
@@ -749,7 +753,10 @@ fn track_query_metrics(
                             let duration = start_time.elapsed().as_millis() as f64;
                             for dataset in &dataset_labels {
                                 metrics.record_streaming_lifetime(duration, dataset);
-                                let kv = [KeyValue::new("dataset", dataset.clone())];
+                                let kv = [
+                    KeyValue::new("dataset", format!("{}/{}", dataset.namespace(), dataset.name())),
+                    KeyValue::new("dataset_name", dataset.name().as_str().to_string()),
+                ];
                                 metrics.streaming_queries_completed.inc_with_kvs(&kv);
                                 metrics.streaming_queries_active.dec_with_kvs(&kv);
                             }
@@ -764,7 +771,10 @@ fn track_query_metrics(
                 let duration = start_time.elapsed().as_millis() as f64;
                 for dataset in &dataset_labels {
                     metrics.record_streaming_lifetime(duration, dataset);
-                    let kv = [KeyValue::new("dataset", dataset.clone())];
+                    let kv = [
+                    KeyValue::new("dataset", format!("{}/{}", dataset.namespace(), dataset.name())),
+                    KeyValue::new("dataset_name", dataset.name().as_str().to_string()),
+                ];
                     metrics.streaming_queries_completed.inc_with_kvs(&kv);
                     metrics.streaming_queries_active.dec_with_kvs(&kv);
                 }
