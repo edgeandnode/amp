@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use common::memory_pool::TieredMemoryPool;
+use datafusion::execution::memory_pool::human_readable_size;
 use monitoring::telemetry;
 
 #[derive(Debug, Clone)]
@@ -133,11 +137,20 @@ impl MetricsRegistry {
         duration_millis: f64,
         rows_returned: u64,
         bytes_egress: u64,
+        memory_pool: Option<&Arc<TieredMemoryPool>>,
     ) {
         self.query_count.inc();
         self.query_duration.record(duration_millis);
         self.query_rows_returned.inc_by(rows_returned);
         self.query_bytes_egress.inc_by(bytes_egress);
+        if let Some(pool) = memory_pool {
+            let peak = pool.peak_reserved() as u64;
+            self.query_memory_peak_bytes.record(peak);
+            tracing::debug!(
+                peak_memory = human_readable_size(peak as usize),
+                "Query memory usage"
+            );
+        }
     }
 
     /// Record query error
@@ -165,10 +178,5 @@ impl MetricsRegistry {
     /// Record streaming query lifetime
     pub fn record_streaming_lifetime(&self, duration_millis: f64) {
         self.streaming_query_lifetime.record(duration_millis);
-    }
-
-    /// Record query memory usage
-    pub fn record_query_memory(&self, peak_bytes: u64) {
-        self.query_memory_peak_bytes.record(peak_bytes);
     }
 }
