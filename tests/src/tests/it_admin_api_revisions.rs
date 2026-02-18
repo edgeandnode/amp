@@ -353,20 +353,20 @@ async fn activate_revision_with_nonexistent_table_name_returns_404() {
     );
     let err = resp.unwrap_err();
     match err {
-        ActivateError::TableNotFound(api_err) => {
+        ActivateError::TableNotInManifest(api_err) => {
             assert_eq!(
-                api_err.error_code, "TABLE_NOT_FOUND",
-                "Expected TABLE_NOT_FOUND error code, got: {}",
+                api_err.error_code, "TABLE_NOT_IN_MANIFEST",
+                "Expected TABLE_NOT_IN_MANIFEST error code, got: {}",
                 api_err.error_code
             );
             assert_eq!(
                 api_err.error_message,
-                "Table 'nonexistent_table' not found for dataset '_/eth_rpc@0.0.0'",
+                "Table 'nonexistent_table' not found in manifest for dataset '_/eth_rpc@0.0.0'",
                 "Expected error message, got: {}",
                 api_err.error_message
             );
         }
-        _ => panic!("Expected TableNotFound error, got: {:?}", err),
+        _ => panic!("Expected TableNotInManifest error, got: {:?}", err),
     }
 }
 
