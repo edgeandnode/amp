@@ -301,6 +301,41 @@ where
         .await
 }
 
+/// Get a physical table revision by JSONB metadata fields (manifest_hash, table_name).
+///
+/// Returns the most recent matching revision, or `None` if no match exists.
+pub async fn get_revision<'c, E>(
+    exe: E,
+    manifest_hash: ManifestHash<'_>,
+    table_name: Name<'_>,
+) -> Result<Option<PhysicalTableRevision>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        SELECT
+            ptr.id,
+            ptr.path,
+            EXISTS (
+                SELECT 1
+                FROM physical_tables
+                WHERE active_revision_id = ptr.id
+            ) AS active,
+            ptr.writer,
+            ptr.metadata
+        FROM physical_table_revisions ptr
+        WHERE ptr.metadata->>'manifest_hash' = $1 AND ptr.metadata->>'table_name' = $2
+        ORDER BY ptr.id DESC
+        LIMIT 1
+    "};
+
+    sqlx::query_as(query)
+        .bind(manifest_hash)
+        .bind(table_name)
+        .fetch_optional(exe)
+        .await
+}
+
 /// Deactivate all revisions for a specific table (set active_revision_id to NULL)
 pub async fn mark_inactive_by_table_name<'c, E>(
     exe: E,
