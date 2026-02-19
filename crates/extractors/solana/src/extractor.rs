@@ -15,7 +15,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
+use amp_providers_common::{
+    network_id::NetworkId, provider_name::ProviderName, redacted::Redacted,
+};
 use amp_providers_solana::config::UseArchive;
 use anyhow::Context;
 use datasets_common::block_num::BlockNum;
@@ -29,7 +31,7 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use solana_clock::Slot;
 use url::Url;
 
-use crate::{metrics, of1_client, rpc_client, tables};
+use crate::{metrics, of1_client, rpc_client, rpc_client::Auth, tables};
 
 /// Handles related to the OF1 CAR manager task, stored in the extractor for cleanup.
 struct Of1CarManagerHandles {
@@ -51,7 +53,8 @@ pub struct SolanaExtractor {
 impl SolanaExtractor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        rpc_provider_url: Url,
+        rpc_provider_url: Redacted<Url>,
+        auth: impl Into<Option<Auth>>,
         max_rpc_calls_per_second: Option<NonZeroU32>,
         network: NetworkId,
         provider_name: ProviderName,
@@ -66,6 +69,7 @@ impl SolanaExtractor {
 
         let rpc_client = rpc_client::SolanaRpcClient::new(
             rpc_provider_url,
+            auth.into(),
             max_rpc_calls_per_second,
             provider_name.to_string(),
             network.clone(),
@@ -498,6 +502,7 @@ fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
 mod tests {
     use std::path::PathBuf;
 
+    use amp_providers_common::redacted::Redacted;
     use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
     use url::Url;
@@ -514,7 +519,8 @@ mod tests {
             .expect("Failed to parse provider name");
 
         let extractor = SolanaExtractor::new(
-            url,
+            Redacted::from(url),
+            None,
             None,
             network,
             provider_name,

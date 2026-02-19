@@ -115,7 +115,10 @@ jobs:
           ETH_BASE_RPC_URL: ${{ secrets.ETH_BASE_RPC_URL }}
           ETH_BASE_RPC_AUTH_HEADER: ${{ secrets.ETH_BASE_RPC_AUTH_HEADER }}
           ETH_BASE_RPC_AUTH_TOKEN: ${{ secrets.ETH_BASE_RPC_AUTH_TOKEN }}
-          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
+          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }} # TODO: Remove
+          SOLANA_MAINNET_RPC_URL: ${{ secrets.SOLANA_MAINNET_RPC_URL }}
+          SOLANA_MAINNET_RPC_AUTH_HEADER: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_HEADER }}
+          SOLANA_MAINNET_RPC_AUTH_TOKEN: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_TOKEN }}
 
   ampup-tests:
     name: Test ampup

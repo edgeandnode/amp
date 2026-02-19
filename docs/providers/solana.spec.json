@@ -4,6 +4,20 @@
   "description": "Solana provider configuration for parsing TOML config.\n\nThis structure defines the parameters required to connect to a Solana\nRPC endpoint for blockchain data extraction. The `kind` field validates\nthat the config belongs to a `solana` provider at deserialization time.",
   "type": "object",
   "properties": {
+    "auth_header": {
+      "description": "Custom header name for authentication.\n\nWhen set alongside `auth_token`, sends `<auth_header>: <auth_token>` as a raw header\ninstead of the default `Authorization: Bearer <auth_token>`.\nIgnored if `auth_token` is not set.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "auth_token": {
+      "description": "Authentication token for RPC requests.\n\nDefault: sent as `Authorization: Bearer <token>`.\nWith `auth_header`: sent as `<auth_header>: <token>`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "keep_of1_car_files": {
       "description": "Whether to keep downloaded CAR files after processing.",
       "type": "boolean",

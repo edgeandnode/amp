@@ -94,8 +94,6 @@ pub fn extractor(
     config: SolanaProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<SolanaExtractor, ExtractorError> {
-    let rpc_provider_url = config.rpc_provider_url.into_inner();
-
     if config.network != "mainnet" {
         let err = format!(
             "unsupported Solana network: {}. Only 'mainnet' is supported.",
@@ -104,9 +102,19 @@ pub fn extractor(
         return Err(ExtractorError(err));
     }
 
-    let client = match rpc_provider_url.scheme() {
+    // Resolve authentication configuration
+    let auth = config.auth_token.map(|token| match config.auth_header {
+        Some(header) => rpc_client::Auth::CustomHeader {
+            name: header.into_inner(),
+            value: token.into_inner(),
+        },
+        None => rpc_client::Auth::Bearer(token.into_inner()),
+    });
+
+    let client = match config.rpc_provider_url.scheme() {
         "http" | "https" => SolanaExtractor::new(
-            rpc_provider_url,
+            config.rpc_provider_url,
+            auth,
             config.max_rpc_calls_per_second,
             config.network,
             name,

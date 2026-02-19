@@ -1122,6 +1122,7 @@ name = "amp-providers-solana"
 version = "0.1.0"
 dependencies = [
  "amp-providers-common",
+ "headers",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -10376,6 +10377,7 @@ dependencies = [
  "fs-err",
  "futures",
  "governor 0.10.4",
+ "headers",
  "memmap2",
  "monitoring",
  "pretty_assertions",
@@ -10387,6 +10389,7 @@ dependencies = [
  "solana-client",
  "solana-clock",
  "solana-reward-info",
+ "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-storage-proto",

@@ -63,7 +63,8 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
-        provider_cfg.rpc_provider_url.into_inner(),
+        provider_cfg.rpc_provider_url,
+        None,
         provider_cfg.max_rpc_calls_per_second,
         cli.provider_name,
         provider_cfg.network.clone(),

@@ -81,7 +81,6 @@ alloy = { version = "1.4", default-features = false, features = [
     "signers",
 ] }
 anyhow = "1.0.80"
-headers = "0.4"
 async-stream = "0.3.6"
 async-trait = "0.1.80"
 axum = { version = "0.8.0", default-features = false, features = [
@@ -104,6 +103,7 @@ figment = { version = "0.10.19", features = ["toml", "env", "json"] }
 fs-err = "3.0.0"
 futures = "0.3"
 governor = "0.10.0"
+headers = "0.4"
 hex = "0.4.3"
 indicatif = "0.18"
 indoc = "2.0.6"

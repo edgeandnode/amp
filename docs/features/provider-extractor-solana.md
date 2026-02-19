@@ -45,7 +45,7 @@ The Solana provider enables data extraction from the Solana blockchain using a t
 ```toml
 kind = "solana"
 network = "mainnet"
-rpc_provider_url = "${SOLANA_MAINNET_HTTP_URL}"
+rpc_provider_url = "${SOLANA_MAINNET_RPC_URL}"
 of1_car_directory = "${SOLANA_OF1_CAR_DIRECTORY}"
 
 # Archive mode: "always" (default), "auto", or "never"
@@ -92,7 +92,7 @@ Old Faithful Archive → CAR files → RPC endpoint
 ### Required Environment Variables
 
 ```bash
-export SOLANA_MAINNET_HTTP_URL="https://api.mainnet-beta.solana.com"
+export SOLANA_MAINNET_RPC_URL="https://api.mainnet-beta.solana.com"
 export SOLANA_OF1_CAR_DIRECTORY="/data/solana/car"
 ```
 
