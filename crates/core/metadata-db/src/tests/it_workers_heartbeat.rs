@@ -4,16 +4,17 @@ use std::time::Duration;
 
 use pgtemp::PgTempDB;
 
-use crate::{DEFAULT_POOL_SIZE, WorkerInfo, WorkerNodeId, workers};
+use crate::{DEFAULT_POOL_MAX_CONNECTIONS, WorkerInfo, WorkerNodeId, workers};
 
 #[tokio::test]
 async fn register_worker() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     let worker_info = WorkerInfo::default(); // {}
@@ -41,7 +42,7 @@ async fn detect_inactive_worker() {
 
     let temp_db = PgTempDB::new();
 
-    let conn = crate::connect_pool(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
+    let conn = crate::connect_pool(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
         .await
         .expect("Failed to connect to metadata db");
 

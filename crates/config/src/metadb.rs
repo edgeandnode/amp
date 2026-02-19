@@ -4,7 +4,7 @@ use figment::{
     Figment,
     providers::{Env, Format as _, Serialized, Toml},
 };
-pub use metadata_db::DEFAULT_POOL_SIZE as DEFAULT_METADB_CONN_POOL_SIZE;
+pub use metadata_db::DEFAULT_POOL_MAX_CONNECTIONS as DEFAULT_METADB_CONN_POOL_SIZE;
 
 /// Default metadata database directory name (inside `.amp/`) - stores PostgreSQL data
 pub const DEFAULT_METADB_DIRNAME: &str = "metadb";
@@ -31,20 +31,19 @@ pub struct MetadataDbConfig {
     pub auto_migrate: bool,
 }
 
-impl MetadataDbConfig {
-    /// Builds a [`metadata_db::PoolConfig`] from this configuration.
-    pub fn pool_config(&self) -> metadata_db::PoolConfig {
-        let mut config = metadata_db::PoolConfig::with_size(self.pool_size);
-        if let Some(min) = self.min_connections {
-            config.min_connections = min;
+impl From<MetadataDbConfig> for metadata_db::PoolConfig {
+    fn from(config: MetadataDbConfig) -> Self {
+        let mut pool_config = metadata_db::PoolConfig::with_size(config.pool_size);
+        if let Some(min) = config.min_connections {
+            pool_config.min_connections = min;
         }
-        config.max_lifetime = Duration::from_secs(self.max_lifetime_secs);
-        config.idle_timeout = Duration::from_secs(self.idle_timeout_secs);
-        config
+        pool_config.max_lifetime = Duration::from_secs(config.max_lifetime_secs);
+        pool_config.idle_timeout = Duration::from_secs(config.idle_timeout_secs);
+        pool_config
     }
 }
 
-/// Serde default for [`MetadataDbConfig::pool_size`]. Returns [`DEFAULT_POOL_SIZE`].
+/// Serde default for [`MetadataDbConfig::pool_size`]. Returns [`DEFAULT_METADB_CONN_POOL_SIZE`].
 fn default_pool_size() -> u32 {
     DEFAULT_METADB_CONN_POOL_SIZE
 }

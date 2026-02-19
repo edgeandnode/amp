@@ -99,7 +99,11 @@ pub struct ConnPool(Pool<Postgres>);
 impl ConnPool {
     /// Creates a connection pool using the given [`PoolConfig`](crate::PoolConfig).
     #[tracing::instrument(skip_all, err)]
-    pub async fn connect(url: &str, config: &crate::PoolConfig) -> Result<Self, ConnError> {
+    pub async fn connect(
+        url: &str,
+        config: impl Into<crate::PoolConfig>,
+    ) -> Result<Self, ConnError> {
+        let config = config.into();
         PgPoolOptions::new()
             .max_connections(config.max_connections)
             .min_connections(config.min_connections)

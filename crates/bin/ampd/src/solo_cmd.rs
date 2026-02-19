@@ -57,13 +57,10 @@ pub async fn run(
             }
         };
 
-        let metadata_db = metadata_db::connect_pool_with_config(
-            &config.url,
-            &config.pool_config(),
-            config.auto_migrate,
-        )
-        .await
-        .map_err(Error::MetadataDbConnection)?;
+        let metadata_db =
+            metadata_db::connect_pool_with_config(&config.url, config.clone(), config.auto_migrate)
+                .await
+                .map_err(Error::MetadataDbConnection)?;
 
         (metadata_db, pg_handle, pg_fut)
     };

@@ -3,7 +3,7 @@
 use futures::StreamExt;
 use pgtemp::PgTempDB;
 
-use crate::{DEFAULT_POOL_SIZE, JobId, JobStatus, WorkerInfo, WorkerNodeId, workers};
+use crate::{DEFAULT_POOL_MAX_CONNECTIONS, JobId, JobStatus, WorkerInfo, WorkerNodeId, workers};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct JobNotification {
@@ -16,9 +16,10 @@ async fn schedule_job_and_receive_notification() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-events");
