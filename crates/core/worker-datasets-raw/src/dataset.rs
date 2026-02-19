@@ -903,12 +903,20 @@ impl<S: BlockStreamer> DumpPartition<S> {
         .map_err(RunRangeError::CreateWriter)?;
 
         let mut stream = std::pin::pin!(stream);
-        let mut last_block_num: BlockNum = *range.start();
+        let mut prev_block_num = None;
         while let Some(dataset_rows) = stream.try_next().await.map_err(RunRangeError::ReadStream)? {
-            for table_rows in dataset_rows {
-                let block_num = table_rows.block_num();
-                last_block_num = block_num;
+            let cur_block_num = dataset_rows.block_num();
+            if let Some(prev) = prev_block_num
+                && cur_block_num <= prev
+            {
+                return Err(RunRangeError::NonIncreasingBlockNum {
+                    previous: prev,
+                    current: cur_block_num,
+                });
+            }
+            prev_block_num = Some(cur_block_num);
 
+            for table_rows in dataset_rows {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
                     let table_name = table_rows.table.name();
@@ -922,7 +930,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
                     // Record rows only (bytes tracked separately in writer)
                     metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
                     // Update latest block gauge
-                    metrics.set_latest_block(block_num, table_name.to_string(), location_id);
+                    metrics.set_latest_block(cur_block_num, table_name.to_string(), location_id);
                 }
 
                 writer
@@ -931,7 +939,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
                     .map_err(RunRangeError::Write)?;
             }
 
-            self.progress_tracker.block_covered(last_block_num);
+            self.progress_tracker.block_covered(cur_block_num);
         }
 
         // Close the last part file for each table, checking for any errors.
@@ -969,6 +977,21 @@ pub enum RunRangeError {
     /// - Provider returned malformed data
     #[error("Failed to read stream")]
     ReadStream(#[source] BlockStreamError),
+
+    /// Block numbers between two consecutive stream items were not in strictly increasing order.
+    ///
+    /// This indicates a bug in the block streamer implementation, as it should guarantee that blocks
+    /// are returned in strictly increasing order.
+    ///
+    /// NOTE: The two block numbers do not need to be consecutive (e.g. Solana skipped slots), but
+    /// they must be strictly increasing.
+    #[error(
+        "Non-increasing block numbers detected in stream: previous block was {previous}, current block is {current}"
+    )]
+    NonIncreasingBlockNum {
+        previous: BlockNum,
+        current: BlockNum,
+    },
 
     /// Failed to write block data to parquet files
     ///

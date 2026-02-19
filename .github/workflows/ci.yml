@@ -113,11 +113,6 @@ jobs:
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
           SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
 
-      - name: Solana integration test
-        run: cargo nextest run --verbose --package solana-datasets -E 'test(extractor::tests::historical_to_json_rpc_transition)'
-        env:
-          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }}
-
   ampup-tests:
     name: Test ampup
     runs-on: ubuntu-latest

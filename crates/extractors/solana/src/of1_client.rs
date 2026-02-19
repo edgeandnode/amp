@@ -55,6 +55,7 @@ pub enum DecodedField<P, B> {
     Bincode(B),
 }
 
+#[derive(Default)]
 pub struct DecodedSlot {
     pub slot: Slot,
     pub parent_slot: Slot,
@@ -65,6 +66,23 @@ pub struct DecodedSlot {
     pub transactions: Vec<solana_sdk::transaction::VersionedTransaction>,
     pub transaction_metas: Vec<Option<DecodedTransactionStatusMeta>>,
     pub block_rewards: Option<DecodedBlockRewards>,
+}
+
+impl DecodedSlot {
+    /// Create a dummy `DecodedSlot` with the given slot number and default values for all
+    /// other fields. This can be used for testing or as a placeholder when only the slot
+    /// number is relevant.
+    ///
+    /// NOTE: The reason this is marked as `pub` is because it is used in integration tests
+    /// in the `tests` crate.
+    #[doc(hidden)]
+    pub fn dummy(slot: Slot) -> Self {
+        Self {
+            slot,
+            parent_slot: slot.saturating_sub(1),
+            ..Default::default()
+        }
+    }
 }
 
 pub async fn car_file_manager(

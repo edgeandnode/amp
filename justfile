@@ -126,8 +126,7 @@ test-unit *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features \
-            -E 'not test(extractor::tests::historical_to_json_rpc_transition)'
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features
     else
         >&2 echo "================================================================="
         >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"

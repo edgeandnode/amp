@@ -12508,6 +12508,7 @@ dependencies = [
  "ampctl",
  "anyhow",
  "arrow-flight",
+ "async-stream",
  "async-trait",
  "backon",
  "clap",
