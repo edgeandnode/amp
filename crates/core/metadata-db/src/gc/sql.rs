@@ -9,7 +9,7 @@ use std::time::Duration;
 use futures::stream::BoxStream;
 use sqlx::{Executor, Postgres, postgres::types::PgInterval, types::chrono::NaiveDateTime};
 
-use crate::{files::FileId, physical_table::LocationId};
+use crate::{files::FileId, physical_table_revision::LocationId};
 
 /// Upsert GC manifest entries
 ///

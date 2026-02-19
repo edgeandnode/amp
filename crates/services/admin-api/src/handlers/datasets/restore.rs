@@ -17,7 +17,7 @@ use futures::{
     StreamExt as _,
     stream::{self, FuturesUnordered},
 };
-use metadata_db::LocationId;
+use metadata_db::physical_table_revision::LocationId;
 use monitoring::logging;
 use tokio::task::JoinHandle;
 

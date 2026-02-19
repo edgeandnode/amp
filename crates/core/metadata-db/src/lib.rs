@@ -14,6 +14,7 @@ pub mod jobs;
 pub mod manifests;
 pub mod notification_multiplexer;
 pub mod physical_table;
+pub mod physical_table_revision;
 pub mod workers;
 
 pub use self::{
@@ -27,8 +28,7 @@ pub use self::{
     manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
     physical_table::{
-        GetActiveByLocationIdError, LocationId, LocationIdFromStrError, LocationIdI64ConvError,
-        LocationIdU64Error, LocationWithDetails, PhysicalTable, TableWriterInfo, WriterTableInfo,
+        GetActiveByLocationIdError, PhysicalTable, TableWriterInfo, WriterTableInfo,
         events::{
             LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
             LocationNotification,

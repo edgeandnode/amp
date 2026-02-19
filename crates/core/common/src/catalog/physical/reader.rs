@@ -18,7 +18,7 @@ use datafusion::{
 };
 use datafusion_datasource::PartitionedFile;
 use futures::future::BoxFuture;
-use metadata_db::{LocationId, files::FileId};
+use metadata_db::{files::FileId, physical_table_revision::LocationId};
 
 #[derive(Debug, Clone)]
 pub struct AmpReaderFactory {

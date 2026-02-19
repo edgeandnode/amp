@@ -1,4 +1,5 @@
 use datasets_common::{name::Name, table_name::TableName};
+use metadata_db::physical_table_revision;
 use object_store::path::Path;
 use url::Url;
 use uuid::Uuid;
@@ -250,20 +251,20 @@ pub struct PhyTableUrlParseError {
     source: url::ParseError,
 }
 
-impl From<PhyTableRevisionPath> for metadata_db::physical_table::TablePathOwned {
+impl From<PhyTableRevisionPath> for physical_table_revision::TablePathOwned {
     fn from(value: PhyTableRevisionPath) -> Self {
-        metadata_db::physical_table::TablePath::from_owned_unchecked(value.as_str().to_owned())
+        physical_table_revision::TablePath::from_owned_unchecked(value.as_str().to_owned())
     }
 }
 
-impl<'a> From<&'a PhyTableRevisionPath> for metadata_db::physical_table::TablePath<'a> {
+impl<'a> From<&'a PhyTableRevisionPath> for physical_table_revision::TablePath<'a> {
     fn from(value: &'a PhyTableRevisionPath) -> Self {
-        metadata_db::physical_table::TablePath::from_ref_unchecked(value.as_str())
+        physical_table_revision::TablePath::from_ref_unchecked(value.as_str())
     }
 }
 
-impl From<metadata_db::physical_table::TablePathOwned> for PhyTableRevisionPath {
-    fn from(value: metadata_db::physical_table::TablePathOwned) -> Self {
+impl From<physical_table_revision::TablePathOwned> for PhyTableRevisionPath {
+    fn from(value: physical_table_revision::TablePathOwned) -> Self {
         value
             .as_str()
             .parse()

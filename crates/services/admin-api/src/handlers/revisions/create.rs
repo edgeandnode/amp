@@ -2,7 +2,7 @@ use amp_data_store::{RegisterTableRevisionError, physical_table::PhyTableRevisio
 use amp_datasets_registry::error::ResolveRevisionError;
 use axum::{Json, extract::State, http::StatusCode};
 use datasets_common::{reference::Reference, table_name::TableName};
-use metadata_db::LocationId;
+use metadata_db::physical_table_revision::LocationId;
 use monitoring::logging;
 
 use crate::{

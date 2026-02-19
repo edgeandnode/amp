@@ -4,7 +4,10 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use metadata_db::{JobId, LocationId, physical_table::PhysicalTableRevision};
+use metadata_db::{
+    JobId,
+    physical_table_revision::{LocationId, PhysicalTableRevision},
+};
 use monitoring::logging;
 
 use crate::{
@@ -100,33 +103,39 @@ pub struct RevisionInfo {
     pub metadata: RevisionMetadataInfo,
 }
 
-/// Revision metadata returned by the API                                                                                                                             
-#[derive(Debug, serde::Serialize)]
+/// Revision metadata returned by the API
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RevisionMetadataInfo {
-    /// Dataset namespace                                                                                                                                             
+    /// Dataset namespace
+    #[serde(default)]
     pub dataset_namespace: String,
-    /// Dataset name                                                                                                                                                  
+    /// Dataset name
+    #[serde(default)]
     pub dataset_name: String,
-    /// Manifest hash                                                                                                                                                 
+    /// Manifest hash
+    #[serde(default)]
     pub manifest_hash: String,
-    /// Table name                                                                                                                                                    
+    /// Table name
+    #[serde(default)]
     pub table_name: String,
 }
 
 impl From<PhysicalTableRevision> for RevisionInfo {
     fn from(value: PhysicalTableRevision) -> Self {
+        let metadata: RevisionMetadataInfo = match serde_json::from_str(value.metadata.as_str()) {
+            Ok(m) => m,
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to deserialize revision metadata, using defaults");
+                RevisionMetadataInfo::default()
+            }
+        };
         Self {
             id: value.id,
             path: value.path.into_inner(),
             active: value.active,
             writer: value.writer,
-            metadata: RevisionMetadataInfo {
-                dataset_namespace: value.metadata.dataset_namespace.clone(),
-                dataset_name: value.metadata.dataset_name.clone(),
-                manifest_hash: value.metadata.manifest_hash.clone(),
-                table_name: value.metadata.table_name.clone(),
-            },
+            metadata,
         }
     }
 }

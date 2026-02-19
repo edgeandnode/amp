@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use metadata_db::{LocationId, files::FileId};
+use metadata_db::{files::FileId, physical_table_revision::LocationId};
 use monitoring::logging;
 
 use crate::{

@@ -7,8 +7,8 @@ use datafusion::parquet::{
     file::metadata::{ParquetMetaData, ParquetMetaDataWriter},
 };
 use metadata_db::{
-    LocationId,
     files::{FileId, FileMetadataWithDetails as FileMetadataRow, FooterBytes},
+    physical_table_revision::LocationId,
 };
 use object_store::{ObjectMeta, path::Path};
 use tracing::instrument;

@@ -16,7 +16,7 @@ use datasets_common::{
 use datasets_derived::dataset::Dataset as DerivedDataset;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
-use metadata_db::{LocationId, NotificationMultiplexerHandle};
+use metadata_db::{NotificationMultiplexerHandle, physical_table_revision::LocationId};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinError,
