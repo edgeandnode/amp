@@ -35,9 +35,17 @@ pub async fn run(config: SyncConfig) -> Result<()> {
     info!("Dataset: {}", dataset);
 
     // Create streaming client
-    let mut client = AmpClient::from_endpoint(&config.amp_flight_addr)
-        .await
-        .context("Failed to create amp-client")?;
+    let grpc_max_decode_bytes = config.grpc_max_decode_mb as usize * 1024 * 1024;
+    info!(
+        grpc_max_decode_mb = config.grpc_max_decode_mb,
+        "Configuring Arrow Flight gRPC decode limit"
+    );
+    let mut client = AmpClient::from_endpoint_with_max_decoding_message_size(
+        &config.amp_flight_addr,
+        grpc_max_decode_bytes,
+    )
+    .await
+    .context("Failed to create amp-client")?;
 
     // Apply authentication if provided
     if let Some(token) = &config.auth_token {

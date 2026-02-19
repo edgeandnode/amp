@@ -10,7 +10,9 @@ use std::{
 
 use alloy::primitives::BlockNumber;
 use arrow::{array::RecordBatch, datatypes::SchemaRef};
-use arrow_flight::sql::client::FlightSqlServiceClient;
+use arrow_flight::{
+    flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
+};
 use async_stream::try_stream;
 use futures::{Stream as FuturesStream, StreamExt, stream::BoxStream};
 use serde::Deserialize;
@@ -25,6 +27,8 @@ use crate::{
     transactional::TransactionalStreamBuilder,
     validation::{validate_consecutiveness, validate_networks, validate_prev_hash},
 };
+
+const DEFAULT_GRPC_MAX_DECODING_MESSAGE_SIZE_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
 
 /// Trait for types that expose an Arrow schema.
 ///
@@ -261,6 +265,21 @@ impl AmpClient {
     ///
     /// TLS is automatically enabled for HTTPS URLs using native root certificates.
     pub async fn from_endpoint(endpoint: &str) -> Result<Self, Error> {
+        Self::from_endpoint_with_max_decoding_message_size(
+            endpoint,
+            DEFAULT_GRPC_MAX_DECODING_MESSAGE_SIZE_BYTES,
+        )
+        .await
+    }
+
+    /// Create a new AmpClient by connecting to the given endpoint with a custom
+    /// gRPC max decoding message size in bytes.
+    ///
+    /// Use this when you need to handle large Arrow Flight payloads.
+    pub async fn from_endpoint_with_max_decoding_message_size(
+        endpoint: &str,
+        max_decoding_message_size: usize,
+    ) -> Result<Self, Error> {
         let mut endpoint: Endpoint = endpoint.parse().map_err(Error::Transport)?;
 
         if endpoint.uri().scheme_str() == Some("https") {
@@ -270,7 +289,9 @@ impl AmpClient {
         }
 
         let channel = endpoint.connect().await.map_err(Error::Transport)?;
-        let client = FlightSqlServiceClient::new(channel);
+        let client = FlightSqlServiceClient::new_from_inner(
+            FlightServiceClient::new(channel).max_decoding_message_size(max_decoding_message_size),
+        );
         Ok(Self { client })
     }
 
