@@ -1,7 +1,9 @@
 ---
 name: "admin-jobs-progress"
 description: "Job progress API for monitoring sync state, block ranges, and table health. Load when asking about job status, sync progress, or the /jobs/{id}/progress endpoint"
-components: "crate:amp-data-store,crate:admin-api,crate:metadata-db"
+type: feature
+status: stable
+components: "crate:amp-data-store,service:admin-api,crate:metadata-db"
 ---
 
 # Job Progress API
@@ -118,30 +120,22 @@ The table keys are the table names. Since a job writes to exactly one dataset, t
 View sync progress for all tables written by a job, including current block and file statistics.
 
 ```bash
-# First, list jobs for a dataset to get the job ID
-ampctl dataset jobs ethereum/mainnet@0.0.0
+# First, list jobs to get the job ID
+ampctl job list
 
-# Example output:
-# ID    Status    Created              Tables
-# 42    RUNNING   2024-01-15 10:30:00  blocks, transactions, logs
+
+# Via API
+curl http://localhost:1610/jobs/42/progress
+```
+
+**Typical workflow — find a job, then check progress:**
+
+```bash
+# First, list jobs to get the job ID
+ampctl job list
 
 # Then get progress for that job
-curl http://localhost:1610/jobs/42/progress
-
-# Example response:
-# {
-#   "job_id": 42,
-#   "job_status": "RUNNING",
-#   "tables": {
-#     "blocks": {
-#       "current_block": 21500000,
-#       "start_block": 0,
-#       "files_count": 1247,
-#       "total_size_bytes": 137970286592
-#     },
-#     ...
-#   }
-# }
+ampctl job progress 42
 ```
 
 **JSON output for scripting:**
@@ -177,6 +171,4 @@ This approach provides a reliable "ground truth" for sync progress, unaffected b
 
 - [admin](admin.md) - Base: Administration overview
 - [app-ampctl](app-ampctl.md) - Related: CLI tool
-- [admin-datasets](admin-datasets.md) - Related: Dataset management
-- [admin-jobs](admin-jobs.md) - Related: Job management
 - [app-ampd-worker-events](app-ampd-worker-events.md) - Related: Push Model (Kafka) for real-time progress
