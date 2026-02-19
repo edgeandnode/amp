@@ -525,6 +525,107 @@
         }
       }
     },
+    "/datasets/{namespace}/{name}/versions/{revision}/redump": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/redump` endpoint",
+        "description": "Creates a redump request to re-extract blocks in the given range.\nIf no active dump job exists for the dataset, one is auto-started.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Revision (version, hash, \"latest\", or \"dev\")\n\n## Request Body\n- `start_block`: First block of the range to re-extract (inclusive)\n- `end_block`: Last block of the range to re-extract (inclusive)\n\n## Response\n- **202 Accepted**: Redump request created\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset or revision not found\n- **409 Conflict**: A redump request for this range already exists\n- **500 Internal Server Error**: Database or scheduler error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)\n- `INVALID_BODY`: Invalid request body (malformed JSON or missing required fields)\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `DUPLICATE_REQUEST`: A redump request for this range already exists\n- `LIST_JOBS_ERROR`: Failed to list jobs for dataset\n- `SCHEDULER_ERROR`: Failed to schedule extraction job\n- `DATABASE_ERROR`: Failed to insert redump request\n\n## Behavior\n1. Resolves the revision to find the corresponding dataset\n2. Checks if an active dump job exists for the dataset\n3. Inserts the redump request into the database\n4. If no active job, schedules a new dump job for the dataset\n5. Returns the request ID and job ID (if a new job was started)",
+        "operationId": "redump_dataset",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedumpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Redump request created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedumpResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (invalid parameters)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset or revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate redump request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{namespace}/{name}/versions/{revision}/restore": {
       "post": {
         "tags": [
@@ -2500,6 +2601,50 @@
             "type": "integer",
             "description": "Number of orphaned manifests successfully deleted",
             "minimum": 0
+          }
+        }
+      },
+      "RedumpRequest": {
+        "type": "object",
+        "description": "Request body for redump operation",
+        "required": [
+          "start_block",
+          "end_block"
+        ],
+        "properties": {
+          "end_block": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Last block of the range to re-extract (inclusive)",
+            "minimum": 0
+          },
+          "start_block": {
+            "type": "integer",
+            "format": "int64",
+            "description": "First block of the range to re-extract (inclusive)",
+            "minimum": 0
+          }
+        }
+      },
+      "RedumpResponse": {
+        "type": "object",
+        "description": "Response for redump operation",
+        "required": [
+          "request_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The ID of the scheduled dump job, if a new job was started.\n`null` if an active job already exists for this dataset."
+          },
+          "request_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The ID of the created redump request"
           }
         }
       },
