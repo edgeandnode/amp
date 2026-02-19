@@ -3,11 +3,11 @@
 
 # Unit tests: #[cfg(test)] tests in lib and bin targets (excluding it_* modules)
 [profile.unit]
-default-filter = '(kind(lib) + kind(bin)) - test(/::it_/) - package(tests) - package(ampup)'
+default-filter = '(kind(lib) + kind(bin)) - test(/::it_/) - package(tests)'
 
 # Integration tests: <crate>/tests/ directories and it_* modules in lib/bin sources
 [profile.integration]
-default-filter = '(kind(test) + test(/::it_/)) - package(tests) - package(ampup)'
+default-filter = '(kind(test) + test(/::it_/)) - package(tests)'
 retries = 1
 
 # E2E tests: top-level tests/ package
@@ -15,14 +15,10 @@ retries = 1
 default-filter = 'package(tests)'
 retries = 1
 
-[profile.ampup]
-default-filter = 'package(ampup)'
-
 [profile.local]
-# Local development: all tests except ampup, external deps, and flaky tests
+# Local development: all tests except external deps, and flaky tests
 default-filter = '''
   all()
-  - package(ampup)
   - test(tests::it_admin_api_datasets_stop_job::stop_already_stopped_job_is_idempotent)
   - test(tests::it_admin_api_datasets_stop_job::stop_completed_job_is_idempotent)
   - test(tests::it_admin_api_datasets_stop_job::stop_running_job_succeeds)

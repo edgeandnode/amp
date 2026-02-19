@@ -197,24 +197,6 @@ test-local *EXTRA_FLAGS:
         exit 1
     fi
 
-# Run ampup tests (profile: ampup)
-[group: 'test']
-test-ampup *EXTRA_FLAGS:
-    #!/usr/bin/env bash
-    set -e # Exit on error
-
-    if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run --profile ampup {{EXTRA_FLAGS}} --workspace --all-features
-    else
-        >&2 echo "================================================="
-        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
-        >&2 echo ""
-        >&2 echo "Please install cargo-nextest to use this command:"
-        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
-        >&2 echo "================================================="
-        exit 1
-    fi
-
 
 ## Codegen
 
