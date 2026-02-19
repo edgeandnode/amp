@@ -1,6 +1,6 @@
 "use client"
 
-import { Accordion } from "@base-ui-components/react/accordion"
+import { Accordion } from "@base-ui/react/accordion"
 import { Model } from "@edgeandnode/amp"
 import { Button } from "@graphprotocol/gds-react"
 import { PlusIcon, TableIcon } from "@graphprotocol/gds-react/icons"
