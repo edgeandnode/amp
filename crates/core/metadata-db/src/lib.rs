@@ -15,6 +15,7 @@ pub mod manifests;
 pub mod notification_multiplexer;
 pub mod physical_table;
 pub mod physical_table_revision;
+pub mod redump_requests;
 pub mod workers;
 
 pub use self::{
@@ -34,6 +35,7 @@ pub use self::{
             LocationNotification,
         },
     },
+    redump_requests::{RedumpRequest, RequestId as RedumpRequestId},
     workers::{
         Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
         events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
