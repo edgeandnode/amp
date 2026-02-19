@@ -1,19 +1,14 @@
-import { FileSystem, Path } from "@effect/platform"
-import { NodeContext } from "@effect/platform-node"
-import { Effect } from "effect"
+import { cpSync, mkdirSync } from "node:fs"
+import { resolve } from "node:path"
 
-const program = Effect.gen(function*() {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
+function copyStudioDist() {
+  const src = resolve("../", "studio", "dist")
+  const dest = resolve("./", "dist", "studio", "dist")
 
-  const src = path.resolve("../", "studio", "dist")
-  const dest = path.resolve("./", "dist", "studio", "dist")
+  mkdirSync(dest, { recursive: true })
+  cpSync(src, dest, { recursive: true, force: true })
 
-  yield* fs
-    .makeDirectory(dest, { recursive: true })
-    .pipe(Effect.andThen(() => fs.copy(src, dest, { overwrite: true })))
+  console.info("[Build] Copied studio/dist to dist/studio/dist")
+}
 
-  return yield* Effect.logInfo("[Build] Copied studio/dist to dist/studio/dist")
-}).pipe(Effect.provide(NodeContext.layer))
-
-Effect.runPromise(program).catch(console.error)
+copyStudioDist()

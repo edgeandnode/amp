@@ -19,6 +19,18 @@ import * as Model from "./Model.ts"
 
 export const AUTH_PLATFORM_URL = new URL("https://auth.amp.thegraph.com/")
 
+const AMP_JWKS = jose.createLocalJWKSet({
+  "keys": [{
+    "kty": "RSA",
+    "kid": "amp-admin",
+    "use": "sig",
+    "alg": "RS256",
+    "n":
+      "vU5q9tF95v_SPjfYmEBRVnKDSvYUHyMzzxghtUbi-X03pKQHPTEAGC6vwvlnp8iOFpoqhRVL6BNTwMbIMJZwFMke_tkJ3_6Uyc-8n9MksJDulN6L6pKzSUVGEg7zF4UQOzH62IQs5DiRMsMmtODyKEhThLE3z2BRl9HA9g66CbYxibB-Lx6DLP18Mkrr4adx48ck0P5V-Ol8_GG9eruNLj1ftahUZIR8VDX1FSS4_RGcponWQdrtcCiqVjA84RALXyQZnunyLxfh_WD2cI6rGG8tJEo0_E84em2wCayr_IeGpPU0Xpbwc_ypv-ZKH2D1FKzkj1vht4C_x7z9_-sOmQ",
+    "e": "AQAB",
+  }],
+})
+
 // =============================================================================
 // Access Tokens
 // =============================================================================
@@ -113,6 +125,13 @@ export class AuthStorageSchema extends Schema.Class<AuthStorageSchema>("Amp/mode
   expiry: Schema.Int.pipe(Schema.positive(), Schema.optional),
 }) {}
 
+export class JWKSVerifiedAuthClaims
+  extends Schema.Class<JWKSVerifiedAuthClaims>("Amp/models/auth/JWKSVerifiedAuthClaims")({
+    accessToken: Model.AccessToken,
+    subject: Schema.String,
+  })
+{}
+
 // =============================================================================
 // Errors
 // =============================================================================
@@ -135,6 +154,10 @@ export class AuthUserMismatchError extends Data.TaggedError("Amp/errors/auth/Aut
 }> {}
 
 export class VerifySignedAccessTokenError extends Data.TaggedError("Amp/errors/auth/VerifySignedAccessTokenError")<{
+  readonly cause: unknown
+}> {}
+
+export class VerifyTokenAgainstJWKSError extends Data.TaggedError("Amp/errors/auth/VerifyTokenAgainstJWKSError")<{
   readonly cause: unknown
 }> {}
 
@@ -326,13 +349,37 @@ export class AuthService extends Effect.Service<AuthService>()("Amp/AuthService"
       ),
     )
 
+    // ------------------------------------------------------------------------
+    // Local JWKS operations
+    // ------------------------------------------------------------------------
+
+    const verifyTokenWithJWKS = (token: string) =>
+      Effect.tryPromise({
+        async try() {
+          const payload = await jose.jwtVerify(token, AMP_JWKS).then((result) => result.payload)
+          if (!payload.sub) {
+            throw new VerifyTokenAgainstJWKSError({ cause: "Payload missing required sub" })
+          }
+          return JWKSVerifiedAuthClaims.make({
+            accessToken: Model.AccessToken.make(token),
+            subject: payload.sub,
+          })
+        },
+        catch(error) {
+          return new VerifyTokenAgainstJWKSError({ cause: error })
+        },
+      })
+
     return {
       generateAccessToken,
       refreshAccessToken,
       verifySignedAccessToken,
+
       getCache,
       setCache,
       clearCache,
+
+      verifyTokenWithJWKS,
     } as const
   }),
 }) {}

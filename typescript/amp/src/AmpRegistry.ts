@@ -76,11 +76,11 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
     const getRequest = <A, I>(
       url: string,
       responseSchema: Schema.Schema<A, I, never>,
-      auth?: Auth.AuthStorageSchema,
+      accessToken?: Model.AccessToken,
     ): Effect.Effect<Option.Option<A>, RegistryApiError, never> => {
       const request = HttpClientRequest.get(url, { acceptJson: true })
-      const authenticatedRequest = auth
-        ? request.pipe(HttpClientRequest.bearerToken(auth.accessToken))
+      const authenticatedRequest = accessToken != null
+        ? request.pipe(HttpClientRequest.bearerToken(accessToken))
         : request
 
       return authenticatedRequest.pipe(
@@ -89,7 +89,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
         Effect.flatMap(
           HttpClientResponse.matchStatus({
             404: () => Effect.succeed(Option.none<A>()),
-            ...(auth ? { 401: (response) => parseRegistryError(response) } : {}),
+            ...(accessToken != null ? { 401: (response) => parseRegistryError(response) } : {}),
             "2xx": (response) =>
               HttpClientResponse.schemaBodyJson(responseSchema)(response).pipe(
                 Effect.map(Option.some),
@@ -111,7 +111,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
     const makeAuthenticatedRequest = <A, AE, I, IE>(
       method: "POST" | "PUT",
       url: string,
-      auth: Auth.AuthStorageSchema,
+      accessToken: Model.AccessToken,
       bodySchema: Schema.Schema<I, IE, never>,
       body: I,
       responseSchema: Schema.Schema<A, AE, never>,
@@ -138,7 +138,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
           })
 
         return yield* request.pipe(
-          HttpClientRequest.bearerToken(auth.accessToken),
+          HttpClientRequest.bearerToken(accessToken),
           HttpClientRequest.setBody(encodedBody),
           client.execute,
           handleHttpClientErrors,
@@ -174,27 +174,27 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
 
     /**
      * Get a dataset owned by the authenticated user (including private datasets)
-     * @param auth - Authenticated user's auth storage
+     * @param accessToken - Authenticated user's access token
      * @param namespace - Dataset namespace
      * @param name - Dataset name
      * @returns Option.some(dataset) if found, Option.none() if not found
      */
     const getOwnedDataset = (
-      auth: Auth.AuthStorageSchema,
+      accessToken: Model.AccessToken,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
     ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
-      getRequest(buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}`), AmpRegistryDatasetDto, auth)
+      getRequest(buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}`), AmpRegistryDatasetDto, accessToken)
 
     /**
      * Get dataset by trying public endpoint first, then owned endpoint as fallback
-     * @param auth - Auth for owned dataset lookup
+     * @param accessToken - Authenticated user's access token
      * @param namespace - Dataset namespace
      * @param name - Dataset name
      * @returns Option of dataset from either endpoint
      */
     const getDatasetWithFallback = (
-      auth: Auth.AuthStorageSchema,
+      accessToken: Model.AccessToken,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
     ): Effect.Effect<Option.Option<AmpRegistryDatasetDto>, RegistryApiError, never> =>
@@ -202,25 +202,25 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
         Effect.flatMap((publicResult) =>
           Option.match(publicResult, {
             onSome: (dataset) => Effect.succeed(Option.some(dataset)),
-            onNone: () => getOwnedDataset(auth, namespace, name),
+            onNone: () => getOwnedDataset(accessToken, namespace, name),
           })
         ),
       )
 
     /**
      * Publish a new dataset
-     * @param auth - Authenticated user's auth storage
+     * @param accessToken - Authenticated user's access token
      * @param dto - Dataset data to publish
      * @returns Created dataset
      */
     const publishDataset = (
-      auth: Auth.AuthStorageSchema,
+      accessToken: Model.AccessToken,
       dto: AmpRegistryInsertDatasetDto,
     ): Effect.Effect<AmpRegistryDatasetDto, RegistryApiError, never> =>
       makeAuthenticatedRequest(
         "POST",
         buildUrl("api/v1/owners/@me/datasets/publish"),
-        auth,
+        accessToken,
         AmpRegistryInsertDatasetDto,
         dto,
         AmpRegistryDatasetDto,
@@ -228,14 +228,14 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
 
     /**
      * Publish a new version to an existing dataset
-     * @param auth - Authenticated user's auth storage
+     * @param accessToken - Authenticated user's access token
      * @param namespace - Dataset namespace
      * @param name - Dataset name
      * @param dto - Version data to publish
      * @returns Created version
      */
     const publishVersion = (
-      auth: Auth.AuthStorageSchema,
+      accessToken: Model.AccessToken,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
       dto: AmpRegistryInsertDatasetVersionDto,
@@ -243,7 +243,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       makeAuthenticatedRequest(
         "POST",
         buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}/versions/publish`),
-        auth,
+        accessToken,
         AmpRegistryInsertDatasetVersionDto,
         dto,
         AmpRegistryDatasetVersionDto,
@@ -251,14 +251,14 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
 
     /**
      * Update mutable metadata fields on an existing dataset
-     * @param auth - Authenticated user's auth storage
+     * @param accessToken - Authenticated user's access token
      * @param namespace - Dataset namespace
      * @param name - Dataset name
      * @param dto - Metadata update data
      * @returns Updated dataset
      */
     const updateDatasetMetadata = (
-      auth: Auth.AuthStorageSchema,
+      accessToken: Model.AccessToken,
       namespace: Model.DatasetNamespace,
       name: Model.DatasetName,
       dto: AmpRegistryUpdateDatasetMetadataDto,
@@ -266,7 +266,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       makeAuthenticatedRequest(
         "PUT",
         buildUrl(`api/v1/owners/@me/datasets/${namespace}/${name}`),
-        auth,
+        accessToken,
         AmpRegistryUpdateDatasetMetadataDto,
         dto,
         AmpRegistryDatasetDto,
@@ -340,7 +340,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
      */
     const publishFlow = Effect.fn("DatasetPublishFlow")(function*(
       args: Readonly<{
-        auth: Auth.AuthStorageSchema
+        auth: Auth.AuthStorageSchema | Auth.JWKSVerifiedAuthClaims
         context: ManifestContext.DatasetContext
         versionTag: Model.DatasetRevision
         changelog?: string | undefined
@@ -357,15 +357,16 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
       const indexingChains = [...new Set(Object.values(manifest.tables).map((table) => table.network))]
 
       // Check if dataset exists (try public first, then owned/private)
-      const maybeDataset = yield* getDatasetWithFallback(auth, namespace, name)
+      const maybeDataset = yield* getDatasetWithFallback(auth.accessToken, namespace, name)
+
+      const owner = auth instanceof Auth.AuthStorageSchema ? (auth.accounts ?? []) : [auth.subject]
 
       return yield* Option.match(maybeDataset, {
         // Dataset exists - validate ownership and publish new version
         onSome: (dataset) =>
           Effect.gen(function*() {
             // Validate ownership
-            const accounts = auth.accounts ?? []
-            const isOwner = accounts.some((account) => account.toLowerCase() === dataset.owner.toLowerCase())
+            const isOwner = owner.some((account) => account.toLowerCase() === dataset.owner.toLowerCase())
 
             if (!isOwner) {
               return yield* Effect.fail(
@@ -373,7 +374,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
                   namespace,
                   name,
                   actualOwner: dataset.owner,
-                  userAddresses: accounts,
+                  userAddresses: owner,
                 }),
               )
             }
@@ -393,7 +394,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
 
             // Publish new version
             yield* publishVersion(
-              auth,
+              auth.accessToken,
               namespace,
               name,
               AmpRegistryInsertDatasetVersionDto.make({
@@ -410,7 +411,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
             const metadataChanged = hasMetadataChanged(dataset, metadata, indexingChains)
             if (metadataChanged) {
               yield* updateDatasetMetadata(
-                auth,
+                auth.accessToken,
                 namespace,
                 name,
                 AmpRegistryUpdateDatasetMetadataDto.make({
@@ -431,7 +432,7 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
         // Dataset doesn't exist - publish new dataset with initial version
         onNone: () =>
           publishDataset(
-            auth,
+            auth.accessToken,
             AmpRegistryInsertDatasetDto.make({
               namespace,
               name,
