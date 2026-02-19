@@ -61,21 +61,22 @@ async fn get_by_location_id_with_details_returns_existing_location() {
         inserted_id,
         "get_by_location_id_with_details should return location matching ID"
     );
+    let meta: serde_json::Value = serde_json::from_str(location.revision.metadata.as_str())
+        .expect("metadata should be valid JSON");
     assert_eq!(
-        location.revision.metadata.dataset_name, "test-dataset",
+        meta["dataset_name"], "test-dataset",
         "get_by_location_id_with_details should return location with persisted dataset_name"
     );
     assert_eq!(
-        location.revision.metadata.table_name, "test_table",
+        meta["table_name"], "test_table",
         "get_by_location_id_with_details should return location with persisted table_name"
     );
     assert_eq!(
-        location.revision.metadata.dataset_namespace, "test-namespace",
+        meta["dataset_namespace"], "test-namespace",
         "get_by_location_id_with_details should return location with persisted dataset_namespace"
     );
     assert_eq!(
-        location.revision.metadata.manifest_hash,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        meta["manifest_hash"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "get_by_location_id_with_details should return location with persisted manifest_hash"
     );
     assert_eq!(
@@ -473,8 +474,16 @@ async fn register_table_and_revision(
     path: &TablePath<'_>,
 ) -> Result<LocationId, Error> {
     physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
-    let revision_id =
-        physical_table_revision::register(conn, namespace, name, hash, table_name, path).await?;
+    let metadata_json = serde_json::json!({
+        "dataset_namespace": namespace,
+        "dataset_name": name,
+        "manifest_hash": hash,
+        "table_name": table_name,
+    });
+    let raw =
+        serde_json::value::to_raw_value(&metadata_json).expect("test metadata should serialize");
+    let metadata = physical_table_revision::RevisionMetadata::from_owned_unchecked(raw);
+    let revision_id = physical_table_revision::register(conn, path, metadata).await?;
     Ok(revision_id)
 }
 

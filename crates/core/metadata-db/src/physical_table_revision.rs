@@ -5,15 +5,16 @@
 //! dataset table, with optional writer job tracking and active/inactive status.
 
 pub mod location_id;
+mod metadata;
 pub(crate) mod path;
 pub(crate) mod sql;
 
 pub use self::{
     location_id::LocationId,
+    metadata::{RevisionMetadata, RevisionMetadataOwned},
     path::{Path as TablePath, PathOwned as TablePathOwned},
 };
 use crate::{
-    DatasetName, DatasetNamespace,
     db::Executor,
     error::Error,
     jobs::{Job, JobId},
@@ -32,22 +33,13 @@ use crate::{
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
-    dataset_namespace: impl Into<DatasetNamespace<'_>> + std::fmt::Debug + serde::Serialize,
-    dataset_name: impl Into<DatasetName<'_>> + std::fmt::Debug + serde::Serialize,
-    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug + serde::Serialize,
-    table_name: impl Into<TableName<'_>> + std::fmt::Debug + serde::Serialize,
     path: impl Into<TablePath<'_>> + std::fmt::Debug,
+    metadata: impl Into<RevisionMetadata<'_>> + std::fmt::Debug,
 ) -> Result<LocationId, Error>
 where
     E: Executor<'c>,
 {
-    let metadata = serde_json::json!({
-        "dataset_namespace": dataset_namespace,
-        "dataset_name": dataset_name,
-        "manifest_hash": manifest_hash,
-        "table_name": table_name,
-    });
-    sql::insert(exe, path.into(), metadata)
+    sql::insert(exe, path.into(), metadata.into())
         .await
         .map_err(Error::Database)
 }
@@ -209,24 +201,7 @@ pub struct PhysicalTableRevision {
     /// Writer job responsible for populating this revision, if one exists
     pub writer: Option<JobId>,
     /// Metadata about the revision
-    pub metadata: sqlx::types::Json<RevisionMetadata>,
-}
-
-/// Metadata stored as JSONB on each physical table revision.
-///
-/// Captures the dataset context under which the revision was created,
-/// enabling lookups without joining back to `physical_tables`.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct RevisionMetadata {
-    /// Dataset namespace
-    pub dataset_namespace: String,
-    /// Dataset name
-    pub dataset_name: String,
-    /// Manifest hash
-    pub manifest_hash: String,
-    /// Table name
-    #[serde(default)] // TODO: remove this once all revisions have a table_name
-    pub table_name: String,
+    pub metadata: RevisionMetadataOwned,
 }
 
 /// A physical table combined with its active revision and writer job details

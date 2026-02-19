@@ -418,7 +418,15 @@ async fn register_table_and_revision(
     path: &TablePath<'_>,
 ) -> Result<LocationId, Error> {
     physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
-    let revision_id =
-        physical_table_revision::register(conn, namespace, name, hash, table_name, path).await?;
+    let metadata_json = serde_json::json!({
+        "dataset_namespace": namespace,
+        "dataset_name": name,
+        "manifest_hash": hash,
+        "table_name": table_name,
+    });
+    let raw =
+        serde_json::value::to_raw_value(&metadata_json).expect("test metadata should serialize");
+    let metadata = physical_table_revision::RevisionMetadata::from_owned_unchecked(raw);
+    let revision_id = physical_table_revision::register(conn, path, metadata).await?;
     Ok(revision_id)
 }

@@ -2615,12 +2615,6 @@
       "RevisionMetadataInfo": {
         "type": "object",
         "description": "Revision metadata returned by the API",
-        "required": [
-          "dataset_namespace",
-          "dataset_name",
-          "manifest_hash",
-          "table_name"
-        ],
         "properties": {
           "dataset_name": {
             "type": "string",

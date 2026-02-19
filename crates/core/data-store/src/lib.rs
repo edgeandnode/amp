@@ -25,7 +25,7 @@ use futures::{Stream, StreamExt as _, TryStreamExt as _, stream::BoxStream};
 use metadata_db::{
     MetadataDb,
     files::FileId,
-    physical_table_revision::{LocationId, PhysicalTableRevision},
+    physical_table_revision::{LocationId, PhysicalTableRevision, RevisionMetadataOwned},
 };
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
 use url::Url;
@@ -131,16 +131,10 @@ impl DataStore {
             .await
             .map_err(CreateAndActivateTableRevisionError::TransactionBegin)?;
 
-        let location_id = metadata_db::physical_table_revision::register(
-            &mut tx,
-            dataset.namespace(),
-            dataset.name(),
-            dataset.hash(),
-            table_name,
-            path,
-        )
-        .await
-        .map_err(CreateAndActivateTableRevisionError::RegisterPhysicalTable)?;
+        let metadata = build_revision_metadata(dataset, table_name);
+        let location_id = metadata_db::physical_table_revision::register(&mut tx, path, metadata)
+            .await
+            .map_err(CreateAndActivateTableRevisionError::RegisterPhysicalTable)?;
 
         metadata_db::physical_table::register(
             &mut tx,
@@ -218,16 +212,10 @@ impl DataStore {
         table_name: &TableName,
         path: &PhyTableRevisionPath,
     ) -> Result<LocationId, RegisterTableRevisionError> {
-        metadata_db::physical_table_revision::register(
-            &self.metadata_db,
-            dataset.namespace(),
-            dataset.name(),
-            dataset.hash(),
-            table_name,
-            path,
-        )
-        .await
-        .map_err(RegisterTableRevisionError)
+        let metadata = build_revision_metadata(dataset, table_name);
+        metadata_db::physical_table_revision::register(&self.metadata_db, path, metadata)
+            .await
+            .map_err(RegisterTableRevisionError)
     }
 
     /// Locks table revisions for a writer job.
@@ -762,6 +750,29 @@ pub struct PhyTableRevisionFileMetadata {
     pub object_meta: ObjectMeta,
     /// Parquet metadata including block ranges and other Amp-specific information.
     pub parquet_meta_json: serde_json::Value,
+}
+
+/// Construct opaque revision metadata from dataset context.
+///
+/// # Panics
+///
+/// Panics if the metadata JSON fails to serialize to a `RawValue`. This cannot happen in
+/// practice because the input is constructed from `serde_json::json!()` which always
+/// produces a valid `serde_json::Value`.
+fn build_revision_metadata(
+    dataset: &HashReference,
+    table_name: &TableName,
+) -> RevisionMetadataOwned {
+    let json = serde_json::json!({
+        "dataset_namespace": dataset.namespace(),
+        "dataset_name": dataset.name(),
+        "manifest_hash": dataset.hash(),
+        "table_name": table_name,
+    });
+    // SAFETY: `to_raw_value` cannot fail on a `serde_json::Value` produced by the `json!` macro.
+    let raw = serde_json::value::to_raw_value(&json)
+        .expect("revision metadata should serialize to RawValue");
+    metadata_db::physical_table_revision::RevisionMetadata::from_owned_unchecked(raw)
 }
 
 /// Errors that occur when registering and activating a physical table revision

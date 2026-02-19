@@ -6,7 +6,7 @@
 use sqlx::{Executor, Postgres, types::JsonValue};
 
 use super::{
-    LocationWithDetails, PhysicalTableRevision,
+    LocationWithDetails, PhysicalTableRevision, RevisionMetadata, RevisionMetadataOwned,
     location_id::LocationId,
     path::{Path, PathOwned},
 };
@@ -25,7 +25,7 @@ use crate::{
 pub async fn insert<'c, E>(
     exe: E,
     path: Path<'_>,
-    metadata: JsonValue,
+    metadata: RevisionMetadata<'_>,
 ) -> Result<LocationId, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -154,7 +154,7 @@ where
     struct Row {
         id: LocationId,
         active: bool,
-        metadata: JsonValue,
+        metadata: RevisionMetadataOwned,
         path: PathOwned,
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeIdOwned>,
@@ -199,12 +199,7 @@ where
         path: row.path,
         active: row.active,
         writer: writer.as_ref().map(|j| j.id),
-        metadata: sqlx::types::Json(serde_json::from_value(row.metadata).map_err(|err| {
-            sqlx::Error::ColumnDecode {
-                index: "metadata".into(),
-                source: Box::new(err),
-            }
-        })?),
+        metadata: row.metadata,
     };
 
     Ok(Some(LocationWithDetails { revision, writer }))
