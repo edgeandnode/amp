@@ -32,7 +32,11 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_HASH`: Invalid hash format
 /// - `MANIFEST_LINKED`: Manifest is linked to datasets and cannot be deleted
-/// - `MANIFEST_DELETE_ERROR`: Failed to delete manifest
+/// - `MANIFEST_DELETE_TRANSACTION_BEGIN_ERROR`: Failed to begin deletion transaction
+/// - `MANIFEST_DELETE_CHECK_LINKS_ERROR`: Failed to check if manifest is linked
+/// - `MANIFEST_DELETE_METADATA_DB_ERROR`: Failed to delete manifest from metadata database
+/// - `MANIFEST_DELETE_OBJECT_STORE_ERROR`: Failed to delete manifest from object store
+/// - `MANIFEST_DELETE_TRANSACTION_COMMIT_ERROR`: Failed to commit deletion transaction
 ///
 /// ## Deletion Flow
 /// This handler:

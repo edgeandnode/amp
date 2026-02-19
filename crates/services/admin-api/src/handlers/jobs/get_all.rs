@@ -37,49 +37,6 @@ pub struct QueryParams {
     status: StatusFilter,
 }
 
-fn default_limit() -> usize {
-    DEFAULT_PAGE_LIMIT
-}
-
-fn default_status_filter() -> StatusFilter {
-    StatusFilter::Active
-}
-
-/// Status filter for job listing
-#[derive(Debug, Clone)]
-pub enum StatusFilter {
-    /// Show only active (non-terminal) jobs (default)
-    Active,
-    /// Show all jobs regardless of status
-    All,
-    /// Show jobs with specific statuses
-    Specific(Vec<worker::job::JobStatus>),
-}
-
-impl<'de> Deserialize<'de> for StatusFilter {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        if s.eq_ignore_ascii_case("active") {
-            Ok(StatusFilter::Active)
-        } else if s.eq_ignore_ascii_case("all") {
-            Ok(StatusFilter::All)
-        } else {
-            let statuses = s
-                .split(',')
-                .map(|s| s.trim())
-                .map(|s| {
-                    s.parse::<worker::job::JobStatus>()
-                        .map_err(|e| serde::de::Error::custom(format!("invalid status: {}", e)))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(StatusFilter::Specific(statuses))
-        }
-    }
-}
-
 /// Handler for the `GET /jobs` endpoint
 ///
 /// Retrieves and returns a paginated list of jobs from the metadata database.
@@ -178,6 +135,49 @@ pub async fn handler(
         .collect::<Vec<_>>();
 
     Ok(Json(JobsResponse { jobs, next_cursor }))
+}
+
+fn default_limit() -> usize {
+    DEFAULT_PAGE_LIMIT
+}
+
+fn default_status_filter() -> StatusFilter {
+    StatusFilter::Active
+}
+
+/// Status filter for job listing
+#[derive(Debug, Clone)]
+pub enum StatusFilter {
+    /// Show only active (non-terminal) jobs (default)
+    Active,
+    /// Show all jobs regardless of status
+    All,
+    /// Show jobs with specific statuses
+    Specific(Vec<worker::job::JobStatus>),
+}
+
+impl<'de> Deserialize<'de> for StatusFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.eq_ignore_ascii_case("active") {
+            Ok(StatusFilter::Active)
+        } else if s.eq_ignore_ascii_case("all") {
+            Ok(StatusFilter::All)
+        } else {
+            let statuses = s
+                .split(',')
+                .map(|s| s.trim())
+                .map(|s| {
+                    s.parse::<worker::job::JobStatus>()
+                        .map_err(|e| serde::de::Error::custom(format!("invalid status: {}", e)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(StatusFilter::Specific(statuses))
+        }
+    }
 }
 
 /// API response containing job information

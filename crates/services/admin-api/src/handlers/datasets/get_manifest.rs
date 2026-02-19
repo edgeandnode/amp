@@ -20,6 +20,11 @@ use crate::{
 ///
 /// Retrieves the raw manifest JSON for the specified dataset revision.
 ///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+/// - `revision`: Revision (version, hash, "latest", or "dev")
+///
 /// ## Response
 /// - **200 OK**: Successfully retrieved manifest
 /// - **404 Not Found**: Dataset, revision, or manifest not found

@@ -37,7 +37,9 @@ use crate::{
 /// - `JOB_NOT_FOUND`: No job exists with the given ID
 /// - `GET_JOB_ERROR`: Failed to retrieve job from scheduler
 /// - `GET_TABLES_ERROR`: Failed to get tables written by this job
-/// - `PHYSICAL_TABLE_ERROR`: Failed to access physical table metadata
+/// - `GET_DATASET_ERROR`: Failed to get dataset definition
+/// - `GET_ACTIVE_REVISION_ERROR`: Failed to get active physical table revision
+/// - `SNAPSHOT_TABLE_ERROR`: Failed to snapshot physical table
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",

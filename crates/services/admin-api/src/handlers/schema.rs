@@ -62,10 +62,12 @@ use crate::{
 /// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or missing required fields
 /// - `EMPTY_TABLES_AND_FUNCTIONS`: No tables or functions provided (at least one is required)
 /// - `INVALID_TABLE_SQL`: SQL syntax error in table definition
+/// - `NON_INCREMENTAL_QUERY`: SQL query is non-incremental
 /// - `TABLE_REFERENCE_RESOLUTION`: Failed to extract table references from SQL
 /// - `FUNCTION_REFERENCE_RESOLUTION`: Failed to extract function references from SQL
 /// - `DEPENDENCY_NOT_FOUND`: Referenced dependency does not exist
-/// - `DEPENDENCY_RESOLUTION`: Failed to resolve dependency
+/// - `DEPENDENCY_MANIFEST_LINK_CHECK`: Failed to verify manifest link for dependency
+/// - `DEPENDENCY_VERSION_RESOLUTION`: Failed to resolve version for dependency
 /// - `CATALOG_QUALIFIED_TABLE`: Table uses unsupported catalog qualification
 /// - `UNQUALIFIED_TABLE`: Table missing required dataset qualification
 /// - `INVALID_TABLE_NAME`: Table name violates SQL identifier rules
@@ -79,6 +81,7 @@ use crate::{
 /// - `TABLE_NOT_FOUND_IN_DATASET`: Table not found in referenced dataset
 /// - `FUNCTION_NOT_FOUND_IN_DATASET`: Function not found in referenced dataset
 /// - `ETH_CALL_NOT_AVAILABLE`: eth_call function not available for dataset
+/// - `SESSION_CONFIG_ERROR`: Failed to create DataFusion session configuration
 /// - `SCHEMA_INFERENCE`: Failed to infer output schema from query
 ///
 /// ## Schema Analysis Process

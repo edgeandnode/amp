@@ -16,6 +16,10 @@ use crate::{
 ///
 /// Removes all manifest links and version tags for a dataset.
 ///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+///
 /// ## Response
 /// - **204 No Content**: Dataset successfully deleted (or didn't exist)
 /// - **400 Bad Request**: Invalid path parameters

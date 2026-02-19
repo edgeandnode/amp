@@ -44,9 +44,12 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_PATH`: Invalid path parameters (namespace, name, or revision)
 /// - `DATASET_NOT_FOUND`: The specified dataset or revision does not exist
+/// - `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash
 /// - `GET_DATASET_ERROR`: Failed to load dataset from store
-/// - `RESTORE_TABLE_ERROR`: Failed to restore a table from storage
+/// - `RESTORE_TABLE_REVISION_ERROR`: Failed to restore a table from storage
+/// - `REGISTER_FILES_ERROR`: Failed to register files for a table
 /// - `TABLE_NOT_FOUND`: Table data not found in object storage
+/// - `TASK_JOIN_ERROR`: Failed to join a restoration task
 ///
 /// ## Behavior
 /// This endpoint restores dataset physical tables from object storage:

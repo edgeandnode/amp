@@ -16,6 +16,10 @@ use crate::{
 ///
 /// Returns all versions for a dataset with their metadata.
 ///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+///
 /// ## Response
 /// - **200 OK**: Successfully retrieved version list
 /// - **400 Bad Request**: Invalid path parameters

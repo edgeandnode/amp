@@ -31,7 +31,8 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_HASH`: The provided hash is not valid (invalid hash format or parsing error)
 /// - `MANIFEST_NOT_FOUND`: No manifest exists with the given hash
-/// - `MANIFEST_RETRIEVAL_ERROR`: Failed to retrieve manifest from the dataset manifests store
+/// - `MANIFEST_METADATA_DB_ERROR`: Failed to query manifest path from metadata database
+/// - `MANIFEST_OBJECT_STORE_ERROR`: Failed to retrieve manifest from object store
 ///
 /// ## Retrieval Process
 /// This handler retrieves manifests from content-addressable storage:

@@ -15,21 +15,25 @@ use crate::{
     handlers::error::{ErrorResponse, IntoErrorResponse},
 };
 
-/// Handler for the `POST /revisions/activate` endpoint
+/// Handler for the `POST /revisions/{id}/activate` endpoint
 ///
 /// Activates a specific table revision by location ID.
+///
+/// ## Path Parameters
+/// - `id`: Location ID of the revision to activate
 ///
 /// ## Request Body
 /// - `dataset`: Dataset reference (namespace/name or with revision)
 /// - `table_name`: Name of the table whose revision to activate
-/// - `location_id`: Location ID of the revision to activate
 ///
 /// ## Response
 /// - **200 OK**: Successfully activated the table revision
+/// - **400 Bad Request**: Invalid path parameters
 /// - **404 Not Found**: Dataset or revision not found
 /// - **500 Internal Server Error**: Database error during activation
 ///
 /// ## Error Codes
+/// - `INVALID_PATH_PARAMETERS`: Invalid location ID in URL path
 /// - `DATASET_NOT_FOUND`: The specified dataset or revision does not exist
 /// - `TABLE_NOT_IN_MANIFEST`: The table name does not exist in the dataset manifest
 /// - `TABLE_NOT_REGISTERED`: The table is not registered in the data store
@@ -55,6 +59,7 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Successfully activated the table revision"),
+            (status = 400, description = "Invalid path parameters", body = ErrorResponse),
             (status = 404, description = "Dataset or revision not found", body = ErrorResponse),
             (status = 500, description = "Internal server error", body = ErrorResponse)
         )
