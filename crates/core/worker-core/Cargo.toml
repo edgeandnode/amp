@@ -25,6 +25,3 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
-
-[dev-dependencies]
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
