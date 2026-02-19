@@ -49,6 +49,7 @@ use crate::{
         ),
         responses(
             (status = 200, description = "Successfully retrieved revision", body = RevisionInfo),
+            (status = 400, description = "Invalid path parameters", body = ErrorResponse),
             (status = 404, description = "Revision not found", body = ErrorResponse),
             (status = 500, description = "Internal server error", body = ErrorResponse)
         )

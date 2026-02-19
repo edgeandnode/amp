@@ -32,10 +32,12 @@ use crate::{
 /// - **200 OK**: Returns the provider metadata as JSON
 /// - **400 Bad Request**: Invalid provider name format
 /// - **404 Not Found**: Provider with the given name does not exist
+/// - **500 Internal Server Error**: Failed to convert provider configuration
 ///
 /// ## Error Codes
 /// - `INVALID_PROVIDER_NAME`: The provided name is invalid or malformed
 /// - `PROVIDER_NOT_FOUND`: No provider exists with the given name
+/// - `PROVIDER_CONVERSION_ERROR`: Failed to convert provider configuration to response format
 ///
 /// This handler:
 /// - Validates and extracts the provider name from the URL path

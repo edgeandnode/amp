@@ -15,6 +15,11 @@ use crate::{
 ///
 /// Removes a semantic version tag from a dataset.
 ///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+/// - `version`: Semantic version to delete (e.g., "1.2.3")
+///
 /// ## Response
 /// - **204 No Content**: Version successfully deleted (or didn't exist)
 /// - **400 Bad Request**: Invalid path parameters or attempting to delete the "latest" version

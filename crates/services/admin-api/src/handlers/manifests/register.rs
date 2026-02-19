@@ -47,9 +47,10 @@ use crate::{
 /// ## Error Codes
 /// - `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
-/// - `DEPENDENCY_VALIDATION_ERROR`: SQL dependency validation failed (derived datasets only)
+/// - `MANIFEST_VALIDATION_ERROR`: Manifest validation failed (derived datasets only)
 /// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported
-/// - `MANIFEST_STORE_ERROR`: Failed to store manifest in object store or metadata database
+/// - `MANIFEST_STORAGE_ERROR`: Failed to store manifest in object store
+/// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in metadata database
 ///
 /// ## Registration Process
 /// Unlike `POST /datasets`, this endpoint performs minimal registration:

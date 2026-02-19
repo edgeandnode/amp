@@ -24,6 +24,16 @@ use crate::{
 ///
 /// Schedules a data extraction job for the specified dataset revision.
 ///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+/// - `revision`: Revision (version, hash, "latest", or "dev")
+///
+/// ## Request Body
+/// - `end_block`: End block configuration (null for continuous, "latest", number, or negative offset)
+/// - `parallelism`: Number of parallel workers (default: 1, only for raw datasets)
+/// - `worker_id`: Optional worker selector (exact ID or glob pattern)
+///
 /// ## Response
 /// - **202 Accepted**: Job successfully scheduled
 /// - **400 Bad Request**: Invalid path parameters or request body

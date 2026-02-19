@@ -19,6 +19,11 @@ use crate::{
 ///
 /// Returns detailed dataset information for the specified revision.
 ///
+/// ## Path Parameters
+/// - `namespace`: Dataset namespace
+/// - `name`: Dataset name
+/// - `revision`: Revision (version, hash, "latest", or "dev")
+///
 /// ## Response
 /// - **200 OK**: Successfully retrieved dataset information
 /// - **400 Bad Request**: Invalid path parameters
