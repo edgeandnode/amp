@@ -126,7 +126,7 @@ test-unit *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --all-features
     else
         >&2 echo "================================================================="
         >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
@@ -135,7 +135,7 @@ test-unit *EXTRA_FLAGS:
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
         >&2 echo "================================================================="
         sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features -- --nocapture
+        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests --all-features -- --nocapture
     fi
 
 # Run integration tests
@@ -173,25 +173,6 @@ test-local *EXTRA_FLAGS:
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
         >&2 echo "================================================="
         exit 1
-    fi
-
-# Run ampup tests
-[group: 'test']
-test-ampup *EXTRA_FLAGS:
-    #!/usr/bin/env bash
-    set -e # Exit on error
-
-    if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --package ampup
-    else
-        >&2 echo "================================================================="
-        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
-        >&2 echo ""
-        >&2 echo "For faster test execution, consider installing cargo-nextest:"
-        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
-        >&2 echo "================================================================="
-        sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --package ampup --test it_ampup -- --nocapture
     fi
 
 

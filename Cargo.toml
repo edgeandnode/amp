@@ -7,7 +7,6 @@ members = [
     "crates/bin/ampcc",
     "crates/bin/ampd",
     "crates/bin/ampsync",
-    "crates/bin/ampup",
     "crates/clients/flight",
     "crates/config",
     "crates/config/gen",

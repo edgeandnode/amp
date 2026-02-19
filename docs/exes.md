@@ -6,60 +6,10 @@ This document provides an overview of the executables available in the Amp proje
 
 Amp provides several executables designed for different use cases and user personas:
 
-- **`ampup`** - Toolchain distribution and version management
 - **`ampd`** - The Amp daemon (extraction, query serving, job orchestration)
 - **`ampctl`** - Administration and control CLI for operators
 - **`amp`** - Developer toolkit CLI for dataset development
 - **`ampsync`** - PostgreSQL synchronization utility
-
-## `ampup` - Toolchain Distribution and Management
-
-**Purpose**: `ampup` is the official installer and version manager for the Amp toolchain. It handles downloading, installing, and switching between different versions of `ampd` and related binaries.
-
-**Installation**: Get started with Amp by running the installation script from [ampup.sh](http://ampup.sh):
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
-```
-
-This script downloads and runs `ampup init`, which:
-
-- Sets up the Amp installation directory (`$AMP_DIR` or `~/.amp`)
-- Configures your shell's PATH
-- Installs the latest version of `ampd` by default
-
-**Key Features**:
-
-- **Version management**: Install, list, switch between, and uninstall versions
-- **Binary distribution**: Downloads pre-built binaries from GitHub releases
-- **Build from source**: Can build and install from local or remote Git repositories
-- **Cross-platform**: Supports Linux and macOS (x86_64 and aarch64)
-
-**When to Use**:
-
-- **Initial setup**: Setting up Amp on a new system
-- **Version management**: Upgrading or downgrading Amp versions
-- **Testing**: Managing multiple Amp versions for testing or compatibility
-- **Production deployments**: Installing specific versions for production environments
-
-**Common Commands**:
-
-```bash
-# Install latest version
-ampup install
-
-# Install specific version
-ampup install v0.5.0
-
-# List installed versions
-ampup list
-
-# Switch to a different version
-ampup use v0.4.0
-
-# Build from source
-ampup build --path /path/to/amp-repo
-```
 
 ## Main Executables
 

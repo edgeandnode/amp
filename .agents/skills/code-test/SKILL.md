@@ -62,7 +62,7 @@ Examples:
 ```bash
 just test-unit [EXTRA_FLAGS]
 ```
-Runs only unit tests, excluding integration tests and ampup package. Uses `cargo nextest run --workspace --exclude tests --exclude ampup`.
+Runs only unit tests, excluding integration tests. Uses `cargo nextest run --workspace --exclude tests`.
 
 **⚠️ WARNING**: Some unit tests may require external dependencies (e.g., PostgreSQL for metadata-db tests).
 
@@ -85,17 +85,6 @@ Runs integration tests from the `tests` package. Uses `cargo nextest run --packa
 Examples:
 - `just test-it` - run all integration tests
 - `just test-it test_name` - run specific integration test
-
-### Run Ampup Tests (REQUIRES EXTERNAL DEPENDENCIES)
-```bash
-just test-ampup [EXTRA_FLAGS]
-```
-Runs tests for the ampup package. Uses `cargo nextest run --package ampup`.
-
-**⚠️ WARNING**: May require external dependencies.
-
-Examples:
-- `just test-ampup` - run ampup tests
 
 ## Important Guidelines
 
@@ -120,7 +109,7 @@ This test command is pre-approved and can be run without user permission:
 1. **During local development**: Prefer targeted tests first; use `just test-local` only for broader confidence
 2. **Before commits (local)**: Run the smallest relevant test scope; broaden only if the change is risky or cross-cutting
 3. **In CI environments**: The CI system will run `just test` or other commands
-4. **Local development**: Never run `just test`, `just test-unit`, `just test-it`, or `just test-ampup` locally. Those are for CI
+4. **Local development**: Never run `just test`, `just test-unit`, or `just test-it` locally. Those are for CI
 5. **Codex sandbox**: Run tests only when warranted; prefer targeted scope. If running `just test-local`, request escalation (outside the sandbox)
 
 ### External Dependencies Required by Non-Local Tests
