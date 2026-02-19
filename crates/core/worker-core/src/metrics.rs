@@ -13,6 +13,9 @@ pub struct MetricsRegistry {
     // The telemetry meter used to create metrics
     pub meter: telemetry::metrics::Meter,
 
+    /// The job ID for this metrics registry
+    pub job_id: i64,
+
     /// Total rows ingested across all dataset types
     pub rows_ingested: telemetry::metrics::Counter,
 
@@ -69,9 +72,14 @@ pub struct MetricsRegistry {
 }
 
 impl MetricsRegistry {
-    pub fn new(meter: &telemetry::metrics::Meter, dataset_reference: HashReference) -> Self {
+    pub fn new(
+        meter: &telemetry::metrics::Meter,
+        dataset_reference: HashReference,
+        job_id: i64,
+    ) -> Self {
         Self {
             meter: meter.clone(),
+            job_id,
             dataset_reference,
             rows_ingested: telemetry::metrics::Counter::new(
                 meter,
@@ -204,6 +212,7 @@ impl MetricsRegistry {
                 "manifest_hash",
                 self.dataset_reference.hash().as_str().to_string(),
             ),
+            telemetry::metrics::KeyValue::new("job_id", self.job_id.to_string()),
         ]
     }
     /// Record rows ingested
@@ -270,12 +279,9 @@ impl MetricsRegistry {
     }
 
     /// Record duration of a dump operation
-    pub fn record_dump_duration(&self, duration_millis: f64, table: String, job_id: String) {
+    pub fn record_dump_duration(&self, duration_millis: f64, table: String) {
         let mut kv_pairs = self.base_kvs();
-        kv_pairs.extend_from_slice(&[
-            telemetry::metrics::KeyValue::new("table", table),
-            telemetry::metrics::KeyValue::new("job_id", job_id),
-        ]);
+        kv_pairs.extend_from_slice(&[telemetry::metrics::KeyValue::new("table", table)]);
         self.dump_duration
             .record_with_kvs(duration_millis, &kv_pairs);
     }

@@ -644,8 +644,7 @@ async fn dump_table(
     // Record dump duration on successful completion
     if let Some(ref metrics) = metrics_for_after {
         let duration_millis = dump_start_time.elapsed().as_millis() as f64;
-        let job_id = table_name_for_metrics.clone();
-        metrics.record_dump_duration(duration_millis, table_name_for_metrics.to_string(), job_id);
+        metrics.record_dump_duration(duration_millis, table_name_for_metrics.to_string());
     }
 
     Ok(())
