@@ -1843,6 +1843,70 @@
         }
       }
     },
+    "/revisions/{id}/restore": {
+      "post": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `POST /revisions/{id}/restore` endpoint",
+        "description": "Restores a revision by re-registering its files from object storage.\n\n## Path Parameters\n- `id`: The unique identifier of the revision (must be a valid LocationId)\n\n## Response\n- **200 OK**: Revision restored successfully\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Revision not found\n- **500 Internal Server Error**: Database or file registration error\n\n## Error Codes\n- `INVALID_PATH_PARAMETERS`: Invalid path parameters\n- `REVISION_NOT_FOUND`: No revision exists with the specified location ID\n- `GET_REVISION_BY_LOCATION_ID_ERROR`: Failed to retrieve revision from database\n- `REGISTER_FILES_ERROR`: Failed to register revision files from object storage\n\n## Behavior\nThis endpoint looks up the physical table revision by its location ID, then\nlists all files in the revision's object storage directory. For each file,\nit reads Amp-specific Parquet metadata and registers it in the metadata database.",
+        "operationId": "restore_revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revision restored successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/schema": {
       "post": {
         "tags": [
@@ -2559,15 +2623,13 @@
         "type": "object",
         "description": "Response for restore operation",
         "required": [
-          "tables"
+          "total_files"
         ],
         "properties": {
-          "tables": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RestoredTableInfo"
-            },
-            "description": "List of restored physical tables"
+          "total_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Total number of files restored"
           }
         }
       },

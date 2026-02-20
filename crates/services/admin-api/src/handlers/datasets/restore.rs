@@ -1,29 +1,25 @@
-use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::{
-    catalog::physical::PhysicalTable,
-    metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
-};
+use common::catalog::physical::PhysicalTable;
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
     table_name::TableName,
 };
-use futures::{
-    StreamExt as _,
-    stream::{self, FuturesUnordered},
-};
+use futures::{StreamExt as _, stream::FuturesUnordered};
 use metadata_db::physical_table_revision::LocationId;
 use monitoring::logging;
 use tokio::task::JoinHandle;
 
 use crate::{
     ctx::Ctx,
-    handlers::error::{ErrorResponse, IntoErrorResponse},
+    handlers::{
+        common::{RegisterRevisionFilesError, register_revision_files},
+        error::{ErrorResponse, IntoErrorResponse},
+    },
 };
 
 /// Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/restore` endpoint
@@ -361,106 +357,4 @@ impl IntoErrorResponse for Error {
             Error::TaskJoin { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-}
-
-/// Registers all files in a revision with their Amp-specific metadata.
-///
-/// Lists all files in the revision directory in object storage, extracts
-/// Parquet metadata including Amp-specific block range information, and
-/// registers each file in the metadata database.
-///
-/// Files are processed concurrently (up to 16 at a time).
-#[tracing::instrument(skip_all, err)]
-async fn register_revision_files(
-    store: &DataStore,
-    revision: &PhyTableRevision,
-) -> Result<(), RegisterRevisionFilesError> {
-    let files = store
-        .list_revision_files_in_object_store(revision)
-        .await
-        .map_err(RegisterRevisionFilesError::ListFiles)?;
-
-    // Process files in parallel using buffered stream
-    const CONCURRENT_METADATA_FETCHES: usize = 16;
-
-    let object_store = store.clone();
-    let mut file_stream = stream::iter(files.into_iter())
-        .map(|object_meta| {
-            let store = object_store.clone();
-            async move {
-                let (file_name, amp_meta, footer) =
-                    amp_metadata_from_parquet_file(&store, &object_meta)
-                        .await
-                        .map_err(RegisterRevisionFilesError::ReadParquetMetadata)?;
-
-                let parquet_meta_json = serde_json::to_value(amp_meta)
-                    .map_err(RegisterRevisionFilesError::SerializeMetadata)?;
-
-                let object_size = object_meta.size;
-                let object_e_tag = object_meta.e_tag;
-                let object_version = object_meta.version;
-
-                Ok((
-                    file_name,
-                    object_size,
-                    object_e_tag,
-                    object_version,
-                    parquet_meta_json,
-                    footer,
-                ))
-            }
-        })
-        .buffered(CONCURRENT_METADATA_FETCHES);
-
-    // Register all files in the metadata database as they complete
-    while let Some(result) = file_stream.next().await {
-        let (file_name, object_size, object_e_tag, object_version, parquet_meta_json, footer) =
-            result?;
-        store
-            .register_revision_file(
-                revision,
-                &file_name,
-                object_size,
-                object_e_tag,
-                object_version,
-                parquet_meta_json,
-                &footer,
-            )
-            .await
-            .map_err(RegisterRevisionFilesError::RegisterFile)?;
-    }
-
-    Ok(())
-}
-
-/// Errors that occur when registering revision files
-///
-/// This error type is used by [`register_revision_files`].
-#[derive(Debug, thiserror::Error)]
-pub enum RegisterRevisionFilesError {
-    /// Failed to list files in the revision directory
-    #[error("Failed to list files in revision")]
-    ListFiles(#[source] amp_data_store::ListRevisionFilesInObjectStoreError),
-
-    /// Failed to read Amp metadata from parquet file
-    ///
-    /// This occurs when extracting Amp-specific metadata from a Parquet file fails.
-    /// Common causes include:
-    /// - Corrupted or invalid Parquet file structure
-    /// - Missing required metadata keys in the file
-    /// - Incompatible metadata schema version
-    /// - I/O errors reading from object store
-    /// - JSON parsing failures in metadata values
-    ///
-    /// See `AmpMetadataFromParquetError` for specific error details.
-    #[error("Failed to read Amp metadata from parquet file")]
-    ReadParquetMetadata(#[source] AmpMetadataFromParquetError),
-
-    /// Failed to serialize parquet metadata to JSON
-    #[error("Failed to serialize parquet metadata to JSON")]
-    SerializeMetadata(#[source] serde_json::Error),
-
-    /// Failed to register file in metadata database
-    #[error("Failed to register file in metadata database")]
-    RegisterFile(#[source] amp_data_store::RegisterFileError),
 }
