@@ -1,8 +1,10 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use amp_providers_common::network_id::NetworkId;
+use amp_providers_common::{network_id::NetworkId, redacted::Redacted};
+use headers::{Authorization, HeaderMap, HeaderMapExt as _, HeaderValue};
 pub use solana_client::rpc_config;
 use solana_clock::Slot;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 pub use solana_rpc_client_api::client_error;
 pub use solana_transaction_status_client_types::{
     EncodedTransaction, EncodedTransactionWithStatusMeta, Reward, TransactionStatusMeta,
@@ -26,12 +28,44 @@ pub struct SolanaRpcClient {
 
 impl SolanaRpcClient {
     pub fn new(
-        url: Url,
+        url: Redacted<Url>,
+        auth: Option<Auth>,
         max_calls_per_second: Option<NonZeroU32>,
         provider: String,
         network: NetworkId,
     ) -> Self {
-        let inner = solana_client::nonblocking::rpc_client::RpcClient::new(url.to_string());
+        let inner = if let Some(auth) = auth {
+            // Build a reqwest 0.12 client (the version used by solana-rpc-client) with
+            // auth in default_headers so credentials are never embedded in URLs.
+            let mut headers = HeaderMap::new();
+            match auth {
+                Auth::Bearer(token) => {
+                    headers.typed_insert(
+                        Authorization::bearer(&token).expect("validated at config parse time"),
+                    );
+                }
+                Auth::CustomHeader { name, value: token } => {
+                    let name = client_error::reqwest::header::HeaderName::try_from(name)
+                        .expect("validated at config parse time");
+                    let mut value =
+                        HeaderValue::try_from(token).expect("validated at config parse time");
+                    value.set_sensitive(true);
+                    headers.insert(name, value);
+                }
+            }
+
+            let http_client = client_error::reqwest::Client::builder()
+                .default_headers(headers)
+                .build()
+                .expect("http client with auth header");
+            let sender = solana_rpc_client::http_sender::HttpSender::new_with_client(
+                url.to_string(),
+                http_client,
+            );
+            RpcClient::new_sender(sender, Default::default())
+        } else {
+            RpcClient::new(url.to_string())
+        };
         let rate_limiter = max_calls_per_second.map(|max| {
             let quota = governor::Quota::per_second(max);
             governor::RateLimiter::direct(quota)
@@ -117,6 +151,19 @@ impl SolanaRpcClient {
 
         resp
     }
+}
+
+/// Authentication configuration for Solana RPC requests.
+pub enum Auth {
+    /// Standard `Authorization: Bearer <token>` header.
+    Bearer(String),
+    /// Custom header: `<name>: <value>` (e.g. `X-Api-Key: <token>`).
+    CustomHeader {
+        /// Header name (e.g. `X-Api-Key`).
+        name: String,
+        /// Header value (raw token, no `Bearer` prefix).
+        value: String,
+    },
 }
 
 /// Returns `true` if the given error indicates that the block is missing for the requested slot.

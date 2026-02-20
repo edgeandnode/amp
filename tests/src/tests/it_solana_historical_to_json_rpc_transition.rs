@@ -5,16 +5,19 @@ use url::Url;
 /// Test the transition from historical blocks to JSON-RPC blocks in the Solana extractor.
 #[tokio::test]
 async fn historical_to_json_rpc_transition() {
-    let url_str = std::env::var("SOLANA_MAINNET_HTTP_URL")
-        .expect("Missing environment variable SOLANA_MAINNET_HTTP_URL");
-    let solana_rpc_provider_url = url_str.parse::<Url>().expect("Failed to parse URL");
-    let network = "mainnet".parse().expect("Failed to parse network id");
     let provider_name = "test_provider"
         .parse()
         .expect("Failed to parse provider name");
+    let url = std::env::var("SOLANA_MAINNET_HTTP_URL")
+        .expect("Missing environment variable SOLANA_MAINNET_HTTP_URL")
+        .parse::<Url>()
+        .map(Into::into)
+        .expect("Failed to parse URL");
+    let network = "mainnet".parse().expect("Failed to parse network id");
 
     let extractor = SolanaExtractor::new(
-        solana_rpc_provider_url,
+        url,
+        None, // Auth
         None, // Rate limit
         network,
         provider_name,

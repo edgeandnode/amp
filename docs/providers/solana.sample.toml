@@ -21,6 +21,17 @@ of1_car_directory = "/data/solana/car"
 # Optional Fields
 # ============================
 
+# Authentication token for RPC requests (optional)
+# Default: sent as `Authorization: Bearer <token>`.
+# With `auth_header`: sent as `<auth_header>: <token>`.
+# auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"
+
+# Custom header name for authentication (optional)
+# When set alongside `auth_token`, sends `<auth_header>: <auth_token>` instead of
+# the default `Authorization: Bearer <auth_token>`.
+# Ignored if `auth_token` is not set.
+# auth_header = "X-Api-Key"
+
 # Controls when to use the Solana archive for historical data (optional)
 # - "auto": Automatically determine based on block age
 # - "always": Always use the archive, even for recent blocks
