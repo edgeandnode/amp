@@ -48,6 +48,13 @@ fn revision_deactivate() -> &'static str {
     "revisions/deactivate"
 }
 
+/// Build URL path for restoring a revision.
+///
+/// POST `/revisions/{id}/restore`
+fn revision_restore(id: i64) -> String {
+    format!("revisions/{id}/restore")
+}
+
 /// Build URL path for creating a table revision.
 ///
 /// POST `/revisions`
@@ -388,6 +395,116 @@ impl<'a> RevisionsClient<'a> {
                     .await
                     .unwrap_or_else(|_| String::from("Failed to read response body"));
                 Err(RegisterError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
+    /// Restore a revision by re-registering its files from object storage.
+    ///
+    /// POSTs to `/revisions/{id}/restore` endpoint.
+    ///
+    /// Looks up the revision by location ID, lists all files in its object
+    /// storage directory, reads Parquet metadata, and registers each file in
+    /// the metadata database.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RestoreError`] for network errors, API errors (400/404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(location_id = %location_id))]
+    pub async fn restore(&self, location_id: i64) -> Result<RestoreResponse, RestoreError> {
+        // SAFETY: `revision_restore()` returns a well-formed relative path segment,
+        // joining it to a valid base URL cannot fail.
+        let url = self
+            .client
+            .base_url()
+            .join(&revision_restore(location_id))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "sending POST request to restore revision");
+
+        let response = self
+            .client
+            .http()
+            .post(url.as_str())
+            .send()
+            .await
+            .map_err(|err| RestoreError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            200 => {
+                let restore_response =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| RestoreError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("failed to parse response: {err}"),
+                        })?;
+                tracing::debug!("revision restored");
+                Ok(restore_response)
+            }
+            400 | 404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH_PARAMETERS" => {
+                        Err(RestoreError::InvalidPath(error_response.into()))
+                    }
+                    "REVISION_NOT_FOUND" => {
+                        Err(RestoreError::RevisionNotFound(error_response.into()))
+                    }
+                    "GET_REVISION_BY_LOCATION_ID_ERROR" => {
+                        Err(RestoreError::GetRevision(error_response.into()))
+                    }
+                    "REGISTER_FILES_ERROR" => {
+                        Err(RestoreError::RegisterFiles(error_response.into()))
+                    }
+                    _ => Err(RestoreError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(RestoreError::UnexpectedResponse {
                     status: status.as_u16(),
                     message: text,
                 })
@@ -814,6 +931,49 @@ pub enum RegisterError {
     /// The database operation to register the table revision failed.
     #[error("failed to register table revision")]
     RegisterTableRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Response from a successful revision restore operation.
+#[derive(Debug, serde::Deserialize)]
+pub struct RestoreResponse {
+    /// Total number of files restored
+    pub total_files: i32,
+}
+
+/// Errors that can occur when restoring a revision.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    /// Invalid path parameters (400, INVALID_PATH_PARAMETERS)
+    ///
+    /// The location ID in the URL path is invalid.
+    #[error("invalid path parameters")]
+    InvalidPath(#[source] ApiError),
+
+    /// Revision not found (404, REVISION_NOT_FOUND)
+    ///
+    /// No revision exists with the specified location ID.
+    #[error("revision not found")]
+    RevisionNotFound(#[source] ApiError),
+
+    /// Failed to get revision (500, GET_REVISION_BY_LOCATION_ID_ERROR)
+    ///
+    /// The database query to get the revision failed.
+    #[error("failed to get revision")]
+    GetRevision(#[source] ApiError),
+
+    /// Failed to register files (500, REGISTER_FILES_ERROR)
+    ///
+    /// Re-registering the revision's files from object storage failed.
+    #[error("failed to register revision files")]
+    RegisterFiles(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

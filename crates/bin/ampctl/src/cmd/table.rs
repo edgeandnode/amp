@@ -5,6 +5,7 @@ pub mod deactivate;
 pub mod get;
 pub mod list;
 pub mod register;
+pub mod restore;
 
 /// Revision management subcommands.
 #[derive(Debug, clap::Subcommand)]
@@ -29,6 +30,10 @@ pub enum Commands {
     /// Register an inactive table revision from a given path
     #[command(after_help = include_str!("table/register__after_help.md"))]
     Register(register::Args),
+
+    /// Restore a revision by re-registering its files from object storage
+    #[command(after_help = include_str!("table/restore__after_help.md"))]
+    Restore(restore::Args),
 }
 
 /// Execute the revision command with the given subcommand.
@@ -39,6 +44,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Get(args) => get::run(args).await?,
         Commands::List(args) => list::run(args).await?,
         Commands::Register(args) => register::run(args).await?,
+        Commands::Restore(args) => restore::run(args).await?,
     }
     Ok(())
 }

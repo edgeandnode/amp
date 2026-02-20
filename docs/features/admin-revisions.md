@@ -29,6 +29,7 @@ The Table Revision Management API provides endpoints to register, list, retrieve
 - **Activation**: Atomically switch which revision is queryable by deactivating all revisions and activating the specified one within a transaction
 - **Registration**: Creates an inactive, unassigned physical table revision record. Revisions must be registered before they can be activated. Registration is idempotent by path — registering the same path twice returns the existing location ID
 - **Deactivation**: Mark all revisions for a table as inactive so the table is no longer queryable
+- **Restoration**: Re-reads files from a revision's object storage path and registers their metadata in the database
 
 ## Architecture
 
@@ -64,6 +65,7 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 | `/revisions`                  | POST   | Register a new inactive table revision             |
 | `/revisions/{id}`             | GET    | Retrieve a specific revision by location ID       |
 | `/revisions/{id}/activate`    | POST   | Activate a specific table revision by location ID |
+| `/revisions/{id}/restore`     | POST   | Restore revision files from object storage        |
 | `/revisions/deactivate`       | POST   | Deactivate all revisions for a table              |
 
 ### Request & Response Schemas
@@ -137,6 +139,18 @@ curl -X POST http://localhost:1610/revisions/deactivate \
   -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks"}'
 ```
 
+**Restore a revision's file metadata:**
+
+Lists files in object storage under the revision's path and registers their Parquet metadata into the database
+
+```bash
+# Via ampctl
+ampctl table restore 42
+
+# Via API
+curl -X POST http://localhost:1610/revisions/42/restore
+```
+
 ## Implementation
 
 ### Source Files
@@ -146,6 +160,7 @@ curl -X POST http://localhost:1610/revisions/deactivate \
 - `crates/services/admin-api/src/handlers/revisions/get_by_id.rs` - Get by ID endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/activate.rs` - Activate endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/deactivate.rs` - Deactivate endpoint handler and error types
+- `crates/services/admin-api/src/handlers/revisions/restore.rs` - Restore endpoint handler and error types
 - `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), and `deactivate_table_revision` methods
 - `crates/core/metadata-db/src/physical_table.rs` - `mark_inactive_by_table_name` and `mark_active_by_id` SQL operations on `physical_tables`
 - `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list_all`, and `get_by_location_id` SQL operations on `physical_table_revisions`

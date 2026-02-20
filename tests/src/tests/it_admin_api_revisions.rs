@@ -1,6 +1,6 @@
 use ampctl::client::revisions::{
     ActivateError, DeactivateError, GetByIdError, ListError, RegisterError, RegisterResponse,
-    RevisionInfo,
+    RestoreError, RestoreResponse, RevisionInfo,
 };
 use datasets_common::reference::Reference;
 use monitoring::logging;
@@ -443,6 +443,84 @@ async fn activate_fails_with_negative_location_id() {
     }
 }
 
+#[tokio::test]
+async fn restore_revision_with_registered_revision_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_with_custom_snapshots("restore_revision_succeeds").await;
+    let dataset = ctx
+        .register_revision("_/eth_rpc@0.0.0", "blocks", "eth_rpc_custom/blocks")
+        .await
+        .expect("failed to register revision");
+    let location_id = dataset.location_id;
+
+    //* When
+    let resp = ctx.restore_revision(location_id).await;
+
+    //* Then
+    let restore_response = resp.expect("restore revision should succeed");
+    assert!(
+        restore_response.total_files > 0,
+        "total_files should be greater than 0 after restore"
+    );
+}
+
+#[tokio::test]
+async fn restore_revision_with_nonexistent_id_returns_404() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("restore_revision_with_nonexistent_id_returns_404").await;
+    ctx.restore_dataset().await;
+
+    //* When
+    let resp = ctx.restore_revision(999999).await;
+
+    //* Then
+    assert!(
+        resp.is_err(),
+        "restore with nonexistent id should return error"
+    );
+    let err = resp.expect_err("restore with nonexistent id should return error");
+    match err {
+        RestoreError::RevisionNotFound(api_err) => {
+            assert_eq!(
+                api_err.error_code, "REVISION_NOT_FOUND",
+                "Expected REVISION_NOT_FOUND error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected RevisionNotFound error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn restore_revision_with_invalid_id_returns_400() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("restore_revision_with_invalid_id_returns_400").await;
+    ctx.restore_dataset().await;
+
+    //* When
+    let resp = ctx.restore_revision(-1).await;
+
+    //* Then
+    assert!(resp.is_err(), "restore with invalid id should return error");
+    let err = resp.expect_err("restore with invalid id should return error");
+    match err {
+        RestoreError::InvalidPath(api_err) => {
+            assert_eq!(
+                api_err.error_code, "INVALID_PATH_PARAMETERS",
+                "Expected INVALID_PATH_PARAMETERS error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected InvalidPath error, got: {:?}", err),
+    }
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: Ampctl,
@@ -468,6 +546,22 @@ impl TestCtx {
     /// Setup with no manifests or snapshots — bare test environment.
     async fn setup_minimal(test_name: &str) -> Self {
         let ctx = TestCtxBuilder::new(test_name)
+            .build()
+            .await
+            .expect("failed to build test context");
+
+        let ampctl = ctx.new_ampctl();
+
+        Self {
+            ctx,
+            ampctl_client: ampctl,
+        }
+    }
+
+    async fn setup_with_custom_snapshots(test_name: &str) -> Self {
+        let ctx = TestCtxBuilder::new(test_name)
+            .with_dataset_manifests(["eth_rpc"])
+            .with_dataset_snapshots(["eth_rpc_custom"])
             .build()
             .await
             .expect("failed to build test context");
@@ -548,6 +642,11 @@ impl TestCtx {
     /// Fetches a revision by its location ID, returning `None` if not found.
     async fn get_revision(&self, location_id: i64) -> Result<Option<RevisionInfo>, GetByIdError> {
         self.ampctl_client.revisions().get_by_id(location_id).await
+    }
+
+    /// Restores a revision by re-registering its files from object storage.
+    async fn restore_revision(&self, location_id: i64) -> Result<RestoreResponse, RestoreError> {
+        self.ampctl_client.revisions().restore(location_id).await
     }
 
     /// Registers a table revision.
