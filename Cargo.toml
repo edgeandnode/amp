@@ -149,7 +149,7 @@ http = "1.3"
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.32", features = ["default"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-typed-arrow = { git = "https://github.com/tonbo-io/typed-arrow", rev = "9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc", default-features = false, features = ["derive", "views", "arrow-57"] }
+typed-arrow = { git = "https://github.com/tonbo-io/typed-arrow", rev = "bb351a14915641d96d1888f5d8e946ed2bcca5ef", default-features = false, features = ["derive", "views", "arrow-57"] }
 url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.11.0", features = ["v7"] }
 nix = { version = "0.30.1", default-features = false, features = ["signal"] }
