@@ -16,13 +16,11 @@ async-stream.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-raw = { path = "../../core/datasets-raw" }
 futures.workspace = true
-governor.workspace = true
 monitoring = { path = "../../core/monitoring" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
-tower.workspace = true
 tracing.workspace = true
 url.workspace = true

@@ -13,7 +13,18 @@ network = "mainnet"
 # - http:// or https:// for HTTP connections
 # - ws:// or wss:// for WebSocket connections
 # - ipc:// for IPC socket connections
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
+
+# Authentication token for RPC requests (optional)
+# Default: sent as "Authorization: Bearer <token>" HTTP/WebSocket header.
+# With auth_header: sent as "<auth_header>: <token>".
+# Use this instead of embedding credentials in the URL to prevent
+# credential leakage in error logs and tracing output.
+# auth_token = "${ETH_MAINNET_RPC_AUTH_TOKEN}"
+
+# Custom auth header name (optional, default: "Authorization" with Bearer scheme)
+# Use for providers that require a custom header, e.g. dRPC's "Drpc-Key"
+# auth_header = "Drpc-Key"
 
 # ============================
 # Query Engine Fields

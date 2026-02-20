@@ -81,6 +81,7 @@ alloy = { version = "1.4", default-features = false, features = [
     "signers",
 ] }
 anyhow = "1.0.80"
+headers = "0.4"
 async-stream = "0.3.6"
 async-trait = "0.1.80"
 axum = { version = "0.8.0", default-features = false, features = [

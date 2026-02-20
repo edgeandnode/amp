@@ -20,7 +20,7 @@ use amp_providers_common::{
     },
     provider_name::ProviderName,
 };
-use amp_providers_evm_rpc::kind::EvmRpcProviderKind;
+use amp_providers_evm_rpc::{kind::EvmRpcProviderKind, provider as evm_rpc_provider};
 use datasets_common::network_id::NetworkId;
 use monitoring::{logging, telemetry::metrics::Meter};
 use object_store::ObjectStore;
@@ -29,11 +29,12 @@ use rand::seq::SliceRandom as _;
 mod client;
 mod store;
 
+pub use amp_providers_evm_rpc::provider::{
+    CreateEvmRpcClientError, EvmRpcAlloyProvider as EvmRpcProvider,
+};
+
 pub use self::{
-    client::{
-        block_stream::{BlockStreamClient, CreateClientError},
-        evm_rpc::{CreateEvmRpcClientError, EvmRpcProvider},
-    },
+    client::block_stream::{BlockStreamClient, CreateClientError},
     store::{ConfigDeleteError, ConfigStoreError, ProviderConfigsStore},
 };
 
@@ -214,7 +215,9 @@ where
             return Ok(None);
         };
 
-        client::evm_rpc::create(name, config).await.map(Some)
+        evm_rpc_provider::create(name.to_string(), config)
+            .await
+            .map(Some)
     }
 }
 

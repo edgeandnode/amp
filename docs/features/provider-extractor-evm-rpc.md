@@ -74,7 +74,7 @@ Dataset Job → Provider Resolution → JSON-RPC Client → RPC Endpoint
 ```toml
 kind = "evm-rpc"
 network = "mainnet"
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
 ```
 
 ### Full Configuration
@@ -82,7 +82,7 @@ url = "${RPC_ETH_MAINNET_URL}"
 ```toml
 kind = "evm-rpc"
 network = "mainnet"
-url = "${RPC_ETH_MAINNET_URL}"
+url = "${ETH_MAINNET_RPC_URL}"
 concurrent_request_limit = 512
 rpc_batch_size = 100
 rate_limit_per_minute = 1000

@@ -52,7 +52,7 @@ Add a new blockchain data source to enable dataset extraction.
 ampctl provider register my-mainnet-rpc \
   --kind evm-rpc \
   --network mainnet \
-  --url '${RPC_ETH_MAINNET_URL}'
+  --url '${ETH_MAINNET_RPC_URL}'
 
 # Firehose provider
 ampctl provider register my-firehose \

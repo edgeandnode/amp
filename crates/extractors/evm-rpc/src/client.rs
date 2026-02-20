@@ -22,6 +22,7 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
+use amp_providers_evm_rpc::provider::Auth;
 use anyhow::Context;
 use async_stream::stream;
 use datasets_common::{
@@ -130,10 +131,11 @@ impl JsonRpcClient {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
+        auth: Option<Auth>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
-        let client = crate::provider::new(url, rate_limit);
+        let client = amp_providers_evm_rpc::provider::new_http(url, auth, rate_limit);
         let client =
             RootProviderWithMetrics::new(client, meter, provider_name.to_string(), network.clone());
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
@@ -159,9 +161,12 @@ impl JsonRpcClient {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
-        let client = crate::provider::new_ipc(path, rate_limit).await.map(|c| {
-            RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
-        })?;
+        let client = amp_providers_evm_rpc::provider::new_ipc(path, rate_limit)
+            .await
+            .map_err(ProviderError)
+            .map(|c| {
+                RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
+            })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -182,12 +187,16 @@ impl JsonRpcClient {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
+        auth: Option<Auth>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ProviderError> {
         assert!(request_limit >= 1);
-        let client = crate::provider::new_ws(url, rate_limit).await.map(|c| {
-            RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
-        })?;
+        let client = amp_providers_evm_rpc::provider::new_ws(url, auth, rate_limit)
+            .await
+            .map_err(ProviderError)
+            .map(|c| {
+                RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
+            })?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
