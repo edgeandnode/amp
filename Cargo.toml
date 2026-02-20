@@ -152,7 +152,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 typed-arrow = { git = "https://github.com/tonbo-io/typed-arrow", rev = "9bd27d68bd2d654d21dfeddaf8e1c949d5ca16dc", default-features = false, features = ["derive", "views", "arrow-57"] }
 url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.11.0", features = ["v7"] }
-nix = { version = "0.30.1", default-features = false, features = ["signal"] }
+nix = { version = "0.31.0", default-features = false, features = ["signal"] }
 percent-encoding = "2.3"
 webpki-roots = "0.26"
 which = "8.0.0"
