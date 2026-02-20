@@ -1,8 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use common::catalog::physical::PhysicalTable;
 use datasets_common::reference::Reference;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 
 use crate::testlib::{self, ctx::TestCtxBuilder, helpers as test_helpers};
 
@@ -33,7 +34,7 @@ async fn evm_rpc_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -70,7 +71,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -107,7 +108,7 @@ async fn evm_rpc_base_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -144,7 +145,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -181,7 +182,7 @@ async fn eth_firehose_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -218,7 +219,7 @@ async fn base_firehose_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -357,5 +358,79 @@ impl TestCtx {
             .await
             .expect("failed to create flight client");
         client.run_query(query, None).await
+    }
+}
+
+/// Compare two JSON arrays row-by-row, ignoring fields where either side is null.
+///
+/// External data sources (e.g., RPC providers) may intermittently omit nullable fields
+/// such as `total_difficulty` (deprecated post-EIP-3675). This comparison skips any field
+/// where either the reference or dumped value is null, while still catching mismatches
+/// on fields where both sides have non-null values.
+fn assert_json_eq_ignoring_nulls(reference: &Value, dumped: &Value) {
+    match (reference, dumped) {
+        (Value::Array(ref_arr), Value::Array(dump_arr)) => {
+            assert_eq!(ref_arr.len(), dump_arr.len(), "row count mismatch");
+            for (i, (ref_row, dump_row)) in ref_arr.iter().zip(dump_arr.iter()).enumerate() {
+                assert_row_eq_ignoring_nulls(ref_row, dump_row, i);
+            }
+        }
+        _ => {
+            assert_eq!(reference, dumped, "expected JSON arrays at top level");
+        }
+    }
+}
+
+fn assert_row_eq_ignoring_nulls(reference: &Value, dumped: &Value, row_idx: usize) {
+    match (reference, dumped) {
+        (Value::Object(ref_map), Value::Object(dump_map)) => {
+            let all_keys: BTreeSet<_> = ref_map.keys().chain(dump_map.keys()).collect();
+            for key in all_keys {
+                let ref_val = ref_map.get(key).unwrap_or(&Value::Null);
+                let dump_val = dump_map.get(key).unwrap_or(&Value::Null);
+                if ref_val.is_null() || dump_val.is_null() {
+                    continue;
+                }
+                assert_eq!(
+                    ref_val, dump_val,
+                    "mismatch at row {row_idx}, field \"{key}\""
+                );
+            }
+        }
+        _ => {
+            assert_eq!(reference, dumped, "expected JSON objects at row {row_idx}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn assert_json_eq_ignoring_nulls_with_null_field_on_either_side_succeeds() {
+        let with_value = serde_json::json!([
+            {"block_num": 15000000, "hash": "0xabc", "total_difficulty": "0x3b01"}
+        ]);
+        let with_null = serde_json::json!([
+            {"block_num": 15000000, "hash": "0xabc", "total_difficulty": null}
+        ]);
+
+        assert_json_eq_ignoring_nulls(&with_value, &with_null);
+        assert_json_eq_ignoring_nulls(&with_null, &with_value);
+    }
+
+    /// Ensures null-skipping doesn't suppress real mismatches between non-null values.
+    #[test]
+    #[should_panic(expected = "mismatch at row 0")]
+    fn assert_json_eq_ignoring_nulls_with_mismatched_non_null_values_panics() {
+        let reference = serde_json::json!([
+            {"block_num": 15000000, "hash": "0xabc"}
+        ]);
+        let dumped = serde_json::json!([
+            {"block_num": 15000000, "hash": "0xdef"}
+        ]);
+
+        assert_json_eq_ignoring_nulls(&reference, &dumped);
     }
 }
