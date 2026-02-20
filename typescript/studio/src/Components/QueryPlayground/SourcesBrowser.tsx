@@ -1,6 +1,6 @@
 "use client"
 
-import { Accordion } from "@base-ui-components/react/accordion"
+import { Accordion } from "@base-ui/react/accordion"
 import type { StudioModel } from "@edgeandnode/amp"
 import { Button, Divider } from "@graphprotocol/gds-react"
 import { FolderIcon, FolderOpenIcon, PlusIcon } from "@graphprotocol/gds-react/icons"

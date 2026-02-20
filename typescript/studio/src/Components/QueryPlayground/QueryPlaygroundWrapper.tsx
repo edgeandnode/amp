@@ -1,6 +1,6 @@
 "use client"
 
-import { Toast } from "@base-ui-components/react/toast"
+import { Toast } from "@base-ui/react/toast"
 import { Button, ButtonGroup, CopyButton, Keyboard, TabSet, ToggleButton } from "@graphprotocol/gds-react"
 import {
   CheckCircleIcon,
@@ -164,7 +164,6 @@ export function QueryPlaygroundWrapper() {
           {(queryField) => (
             <TabSet
               className="flex size-full min-h-screen flex-col"
-              divider={false}
               value={activeTab}
               onChange={(idx: number) => form.setFieldValue("activeTab", idx)}
             >
@@ -224,7 +223,7 @@ export function QueryPlaygroundWrapper() {
                 <div
                   className={classNames("flex flex-col", navbarOpen ? "md:col-span-3 2xl:col-span-3" : "col-span-1")}
                 >
-                  <TabSet.Panels className="h-[400px] w-full overflow-visible">
+                  <TabSet.Panels className="h-100 w-full overflow-visible">
                     {queryField.state.value.map((_, idx) => (
                       <TabSet.Panel key={`queries[${idx}].editor_panel`} className="w-full overflow-visible p-4">
                         <form.AppField name={`queries[${idx}].query` as const}>
@@ -250,12 +249,7 @@ export function QueryPlaygroundWrapper() {
                     <ButtonGroup className="prop-full-width-true prop-variant-tertiary sm:prop-full-width-false">
                       <CopyButton
                         variant="tertiary"
-                        onClick={async () => {
-                          if (!activeTabQuery?.query) {
-                            return
-                          }
-                          await navigator.clipboard.writeText(activeTabQuery.query)
-                        }}
+                        value={activeTabQuery?.query || ""}
                       >
                         Copy SQL
                       </CopyButton>
