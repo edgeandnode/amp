@@ -47,7 +47,7 @@ use tracing::{instrument, warn};
 
 use crate::{
     error::{
-        BatchRequestError, BatchingError, OverflowSource, ProviderError, RpcToRowsError, ToRowError,
+        BatchRequestError, BatchingError, ClientError, OverflowSource, RpcToRowsError, ToRowError,
     },
     tables::transactions::{Transaction, TransactionRowsBuilder},
 };
@@ -112,7 +112,7 @@ impl BatchingRpcWrapper {
 }
 
 #[derive(Clone)]
-pub struct JsonRpcClient {
+pub struct Client {
     client: RootProviderWithMetrics,
     network: NetworkId,
     provider_name: ProviderName,
@@ -121,7 +121,7 @@ pub struct JsonRpcClient {
     fetch_receipts_per_tx: bool,
 }
 
-impl JsonRpcClient {
+impl Client {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         url: Url,
@@ -133,7 +133,7 @@ impl JsonRpcClient {
         fetch_receipts_per_tx: bool,
         auth: Option<Auth>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Self, ProviderError> {
+    ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
         let client = amp_providers_evm_rpc::provider::new_http(url, auth, rate_limit);
         let client =
@@ -159,11 +159,11 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Self, ProviderError> {
+    ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
         let client = amp_providers_evm_rpc::provider::new_ipc(path, rate_limit)
             .await
-            .map_err(ProviderError)
+            .map_err(ClientError)
             .map(|c| {
                 RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
             })?;
@@ -189,11 +189,11 @@ impl JsonRpcClient {
         fetch_receipts_per_tx: bool,
         auth: Option<Auth>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
-    ) -> Result<Self, ProviderError> {
+    ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
         let client = amp_providers_evm_rpc::provider::new_ws(url, auth, rate_limit)
             .await
-            .map_err(ProviderError)
+            .map_err(ClientError)
             .map(|c| {
                 RootProviderWithMetrics::new(c, meter, provider_name.to_string(), network.clone())
             })?;
@@ -448,13 +448,13 @@ impl JsonRpcClient {
     }
 }
 
-impl AsRef<alloy::providers::RootProvider<AnyNetwork>> for JsonRpcClient {
+impl AsRef<alloy::providers::RootProvider<AnyNetwork>> for Client {
     fn as_ref(&self) -> &alloy::providers::RootProvider<AnyNetwork> {
         &self.client.inner
     }
 }
 
-impl BlockStreamer for JsonRpcClient {
+impl BlockStreamer for Client {
     async fn block_stream(
         self,
         start: BlockNum,

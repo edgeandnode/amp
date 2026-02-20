@@ -85,7 +85,7 @@ pub async fn create(
 /// Unified client type for all raw data providers.
 #[derive(Clone)]
 pub enum BlockStreamClient {
-    EvmRpc(evm_rpc_datasets::JsonRpcClient),
+    EvmRpc(evm_rpc_datasets::Client),
     Solana(solana_datasets::Client),
     Firehose(Box<firehose_datasets::Client>),
 }
@@ -202,7 +202,7 @@ pub enum ProviderClientError {
     /// This occurs during initialization of the EVM RPC client, which may fail due to
     /// invalid RPC URLs, connection issues, or authentication failures.
     #[error("failed to create EVM RPC client")]
-    EvmRpc(#[source] evm_rpc_datasets::error::ProviderError),
+    EvmRpc(#[source] evm_rpc_datasets::error::ClientError),
 
     /// Failed to create Solana extractor.
     ///

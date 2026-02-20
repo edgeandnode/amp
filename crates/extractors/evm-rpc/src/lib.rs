@@ -15,11 +15,11 @@ pub mod tables;
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
 
 pub use self::{
-    client::JsonRpcClient,
+    client::Client,
     dataset::Dataset,
     dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
 };
-use crate::error::ProviderError;
+use crate::error::ClientError;
 
 /// Table definition for raw datasets
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -77,7 +77,7 @@ pub async fn client(
     name: ProviderName,
     config: EvmRpcProviderConfig,
     meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<JsonRpcClient, ProviderError> {
+) -> Result<Client, ClientError> {
     let url = config.url.into_inner();
     let auth = config.auth_token.map(|token| match config.auth_header {
         Some(header) => Auth::CustomHeader {
@@ -91,7 +91,7 @@ pub async fn client(
     let client = match url.scheme() {
         "ipc" => {
             let path = url.path();
-            JsonRpcClient::new_ipc(
+            Client::new_ipc(
                 PathBuf::from(path),
                 config.network,
                 name,
@@ -104,7 +104,7 @@ pub async fn client(
             .await?
         }
         "ws" | "wss" => {
-            JsonRpcClient::new_ws(
+            Client::new_ws(
                 url,
                 config.network,
                 name,
@@ -117,7 +117,7 @@ pub async fn client(
             )
             .await?
         }
-        _ => JsonRpcClient::new(
+        _ => Client::new(
             url,
             config.network,
             name,

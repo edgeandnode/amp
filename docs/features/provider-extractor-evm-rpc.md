@@ -155,7 +155,7 @@ rpc_batch_size = 100
 ### Source Files
 
 - `crates/extractors/evm-rpc/src/lib.rs` - ProviderConfig and client factory
-- `crates/extractors/evm-rpc/src/client.rs` - JsonRpcClient with streaming
+- `crates/extractors/evm-rpc/src/client.rs` - Client with streaming
 - `crates/core/common/src/evm/provider.rs` - Low-level provider construction
 
 ### Sample Configuration File
