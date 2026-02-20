@@ -4,6 +4,7 @@ pub mod deploy;
 pub mod inspect;
 pub mod list;
 pub mod manifest;
+pub mod redump;
 pub mod register;
 pub mod restore;
 pub mod versions;
@@ -54,6 +55,13 @@ pub enum Commands {
     /// restoration.
     #[command(after_help = include_str!("dataset/restore__after_help.md"))]
     Restore(restore::Args),
+
+    /// Re-extract blocks in a given range for a dataset
+    ///
+    /// Submits a redump request to re-extract blockchain data for the specified block range.
+    /// Use this when `ampctl verify` identifies corrupted data. If no active dump job exists for
+    /// the dataset, one is automatically started.
+    Redump(redump::Args),
 }
 
 /// Execute the dataset command with the given subcommand.
@@ -66,6 +74,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Versions(args) => versions::run(args).await?,
         Commands::Manifest(args) => manifest::run(args).await?,
         Commands::Restore(args) => restore::run(args).await?,
+        Commands::Redump(args) => redump::run(args).await?,
     }
     Ok(())
 }

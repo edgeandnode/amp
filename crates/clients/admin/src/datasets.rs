@@ -105,6 +105,13 @@ fn dataset_list_jobs(reference: &Reference) -> String {
     )
 }
 
+/// Build URL path for submitting a redump request for a dataset version.
+///
+/// POST `/datasets/{namespace}/{name}/versions/{version}/redump`
+fn dataset_redump(namespace: &Namespace, name: &Name, version: &Revision) -> String {
+    format!("datasets/{namespace}/{name}/versions/{version}/redump")
+}
+
 /// Client for dataset-related API operations.
 ///
 /// Created via [`Client::datasets`](crate::client::Client::datasets).
@@ -430,6 +437,114 @@ impl<'a> DatasetsClient<'a> {
                     .await
                     .unwrap_or_else(|_| String::from("Failed to read response body"));
                 Err(RestoreError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
+    /// Submit a redump request for a dataset version.
+    ///
+    /// POSTs to `/datasets/{namespace}/{name}/versions/{version}/redump` endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedumpError`] for network errors, API errors (400/404/409/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(dataset_ref = %dataset_ref))]
+    pub async fn redump(
+        &self,
+        dataset_ref: &Reference,
+        start_block: u64,
+        end_block: u64,
+    ) -> Result<RedumpResponse, RedumpError> {
+        let namespace = dataset_ref.namespace();
+        let name = dataset_ref.name();
+        let version = dataset_ref.revision();
+
+        let url = self
+            .client
+            .base_url()
+            .join(&dataset_redump(namespace, name, version))
+            .expect("valid URL");
+
+        tracing::debug!("Sending dataset redump request");
+
+        let body = serde_json::json!({
+            "start_block": start_block,
+            "end_block": end_block,
+        });
+
+        let response = self
+            .client
+            .http()
+            .post(url.as_str())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| RedumpError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "Received API response");
+
+        match status.as_u16() {
+            200 | 202 => {
+                let redump_response =
+                    response.json::<RedumpResponse>().await.map_err(|err| {
+                        tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse success response");
+                        RedumpError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: format!("Failed to parse response: {}", err),
+                        }
+                    })?;
+
+                tracing::debug!(
+                    request_id = redump_response.request_id,
+                    job_id = ?redump_response.job_id,
+                    "Redump request created successfully"
+                );
+                Ok(redump_response)
+            }
+            400 | 404 | 409 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    RedumpError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    RedumpError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH" => Err(RedumpError::InvalidPath(error_response.into())),
+                    "INVALID_BODY" => Err(RedumpError::InvalidBody(error_response.into())),
+                    "DATASET_NOT_FOUND" => Err(RedumpError::DatasetNotFound(error_response.into())),
+                    "DUPLICATE_REQUEST" => {
+                        Err(RedumpError::DuplicateRequest(error_response.into()))
+                    }
+                    _ => Err(RedumpError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(RedumpError::UnexpectedResponse {
                     status: status.as_u16(),
                     message: text,
                 })
@@ -1891,4 +2006,57 @@ pub enum NodeSelectorParseError {
     /// fails node ID validation rules.
     #[error("invalid glob pattern")]
     InvalidGlob(#[source] InvalidGlobError),
+}
+
+/// Response from redump operation.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct RedumpResponse {
+    /// The ID of the created redump request
+    pub request_id: i64,
+    /// The ID of the scheduled dump job, if a new job was started.
+    /// `null` if an active job already exists for this dataset.
+    pub job_id: Option<i64>,
+}
+
+/// Errors that can occur when creating a redump request.
+#[derive(Debug, thiserror::Error)]
+pub enum RedumpError {
+    /// Invalid path parameters (400, INVALID_PATH)
+    ///
+    /// This occurs when:
+    /// - The namespace, name, or revision in the URL path is invalid
+    /// - Path parameter parsing fails
+    #[error("invalid path")]
+    InvalidPath(#[source] ApiError),
+
+    /// Invalid request body (400, INVALID_BODY)
+    ///
+    /// This occurs when:
+    /// - The request body is not valid JSON
+    /// - Required fields are missing or have invalid types
+    #[error("invalid body")]
+    InvalidBody(#[source] ApiError),
+
+    /// Dataset or revision not found (404, DATASET_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - The specified dataset name doesn't exist in the namespace
+    /// - The specified revision doesn't exist for this dataset
+    #[error("dataset not found")]
+    DatasetNotFound(#[source] ApiError),
+
+    /// A redump request for this block range already exists (409, DUPLICATE_REQUEST)
+    ///
+    /// This occurs when:
+    /// - A pending redump request already exists for the same dataset and block range
+    #[error("duplicate redump request")]
+    DuplicateRequest(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
 }

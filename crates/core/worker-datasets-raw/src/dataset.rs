@@ -105,15 +105,17 @@ use common::{
     BlockNum, LogicalCatalog,
     catalog::{
         logical::LogicalTable,
-        physical::{Catalog, MissingRangesError, PhysicalTable},
+        physical::{CanonicalChainError, Catalog, MissingRangesError, PhysicalTable},
     },
-    metadata::segments::merge_ranges,
+    metadata::segments::{expand_to_segment_boundaries, merge_ranges},
     parquet::errors::ParquetError,
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
 use futures::TryStreamExt as _;
-use metadata_db::{MetadataDb, NotificationMultiplexerHandle, physical_table_revision::LocationId};
+use metadata_db::{
+    MetadataDb, NotificationMultiplexerHandle, physical_table_revision::LocationId, redump_requests,
+};
 use monitoring::logging;
 use tokio::task::JoinHandle;
 use tracing::{Instrument, instrument};
@@ -317,6 +319,64 @@ pub async fn dump(
                 compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
             }
 
+            // Check for pending redump requests and merge their ranges into the work set.
+            // Redump ranges are added to all tables regardless of existing coverage, forcing
+            // re-extraction of already-covered blocks.
+            let pending_redumps = redump_requests::get_pending_for_dataset(
+                &ctx.metadata_db,
+                dataset_reference.namespace(),
+                dataset_reference.name(),
+                dataset_reference.hash(),
+            )
+            .await
+            .map_err(Error::GetRedumpRequests)?;
+
+            let pending_redump_ids: Vec<metadata_db::RedumpRequestId> =
+                pending_redumps.iter().map(|r| r.id).collect();
+
+            if !pending_redumps.is_empty() {
+                tracing::info!(
+                    count = pending_redumps.len(),
+                    "found pending redump requests, merging ranges"
+                );
+
+                // For each table, expand the redump ranges to that table's segment boundaries
+                // and merge them into the table's missing ranges. Each table has its own
+                // segment layout, so the expansion must be done per-table.
+                for (table, _) in &tables {
+                    let table_name = table.table_name();
+                    let canonical_segments: Vec<_> = table
+                        .canonical_chain()
+                        .await
+                        .map_err(Error::CanonicalChain)?
+                        .map(|chain| chain.0)
+                        .unwrap_or_default();
+
+                    let ranges = missing_ranges_by_table
+                        .get_mut(table_name)
+                        .expect("table name present in missing_ranges_by_table");
+
+                    for redump in &pending_redumps {
+                        let raw_range =
+                            (redump.start_block as BlockNum)..=(redump.end_block as BlockNum);
+                        // Expand the requested range to the table's segment boundaries so
+                        // that we re-extract complete segments rather than partial ranges.
+                        let expanded_range =
+                            expand_to_segment_boundaries(&canonical_segments, raw_range);
+                        // Merge the expanded range with existing missing ranges so that
+                        // even already-covered blocks are re-extracted.
+                        let merged = merge_ranges(
+                            ranges
+                                .iter()
+                                .cloned()
+                                .chain(std::iter::once(expanded_range))
+                                .collect(),
+                        );
+                        *ranges = merged;
+                    }
+                }
+            }
+
             // Use the union of missing table block ranges.
             let missing_dataset_ranges = {
                 let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
@@ -358,6 +418,24 @@ pub async fn dump(
                 progress_reporter.clone(),
             )
             .await?;
+
+            // After a successful dump, delete any redump requests that were processed.
+            if !pending_redump_ids.is_empty() {
+                match redump_requests::delete_batch(&ctx.metadata_db, &pending_redump_ids).await {
+                    Ok(deleted) => {
+                        tracing::info!(deleted, "deleted processed redump requests");
+                    }
+                    Err(err) => {
+                        // Log and continue - the redump request will be processed again next
+                        // iteration, which is safe (idempotent re-extraction).
+                        tracing::warn!(
+                            error = %err,
+                            error_source = logging::error_source(&err),
+                            "failed to delete processed redump requests; will retry next iteration"
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -509,6 +587,27 @@ pub enum Error {
     /// - Database query timeout
     #[error("Failed to get missing block ranges for table")]
     MissingRanges(#[source] MissingRangesError),
+
+    /// Failed to get pending redump requests
+    ///
+    /// This occurs when querying the metadata database for pending redump requests fails.
+    ///
+    /// Common causes:
+    /// - Metadata database connectivity issues
+    /// - Database query timeout
+    #[error("Failed to get pending redump requests")]
+    GetRedumpRequests(#[source] metadata_db::Error),
+
+    /// Failed to get canonical chain for expanding redump ranges to segment boundaries
+    ///
+    /// This occurs when fetching the canonical chain for a table fails during
+    /// a redump operation.
+    ///
+    /// Common causes:
+    /// - Metadata database connectivity issues
+    /// - Corrupted file metadata
+    #[error("Failed to get canonical chain for redump range expansion")]
+    CanonicalChain(#[source] CanonicalChainError),
 
     /// A partition task execution failed
     ///

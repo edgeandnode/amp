@@ -9,5 +9,6 @@ pub mod get_manifest;
 pub mod list_all;
 pub mod list_jobs;
 pub mod list_versions;
+pub mod redump;
 pub mod register;
 pub mod restore;

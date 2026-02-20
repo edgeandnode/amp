@@ -311,6 +311,62 @@ pub fn missing_ranges(
     merge_ranges(missing)
 }
 
+/// Expands a block range to include full segment boundaries.
+///
+/// Given a desired range and existing segments, returns the smallest range that:
+/// 1. Contains all blocks in the desired range
+/// 2. Is aligned to segment boundaries (includes full segments that overlap)
+///
+/// This is used for redump operations to ensure we re-extract complete segments
+/// rather than partial ranges, maintaining segment integrity.
+///
+/// This function is designed for single-network segments (raw datasets). All segments must
+/// have exactly one network range.
+///
+/// ```text
+///                ┌───────────────────────────────────────────────┐
+///   segments:    │ 00-99 │ 100-199 │ 200-299 │ 300-399 │ 400-499 │
+///                └───────────────────────────────────────────────┘
+///                                      ┌───────────┐
+///   desired:                           │  250-350  │
+///                                      └───────────┘
+///                                 ┌────────────────────┐
+///   result:                       │       200-399      │
+///                                 └────────────────────┘
+/// ```
+///
+/// The desired range 250-350 overlaps with segments 200-299 and 300-399,
+/// so the expanded range is 200-399.
+///
+/// # Panics
+///
+/// Panics if any segment has more than one block range (i.e., not a single-network raw dataset
+/// segment).
+pub fn expand_to_segment_boundaries(
+    segments: &[Segment],
+    desired: RangeInclusive<BlockNum>,
+) -> RangeInclusive<BlockNum> {
+    // Invariant: this function only works for single-network segments (raw datasets)
+    if let Some(first_segment) = segments.first() {
+        assert_eq!(first_segment.ranges.len(), 1);
+    }
+
+    let mut start = *desired.start();
+    let mut end = *desired.end();
+
+    for segment in segments {
+        assert_eq!(segment.ranges.len(), 1);
+        let seg_range = &segment.ranges[0].numbers;
+        // If segment overlaps with desired range, expand to include it
+        if seg_range.end() >= desired.start() && seg_range.start() <= desired.end() {
+            start = start.min(*seg_range.start());
+            end = end.max(*seg_range.end());
+        }
+    }
+
+    start..=end
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct Chains {
     /// See `canonical_segments`.
@@ -978,5 +1034,53 @@ mod test {
             super::merge_ranges(vec![1..=5, 7..=10]),
             vec![1..=5, 7..=10]
         );
+    }
+
+    #[test]
+    fn expand_to_segment_boundaries() {
+        fn expand(
+            ranges: &[RangeInclusive<BlockNum>],
+            desired: RangeInclusive<BlockNum>,
+        ) -> RangeInclusive<BlockNum> {
+            let segments = ranges
+                .iter()
+                .enumerate()
+                .map(|(i, range)| test_segment(range.clone(), (i as u8, i as u8), 0))
+                .collect::<Vec<_>>();
+            super::expand_to_segment_boundaries(&segments, desired)
+        }
+
+        // empty segments - return desired as-is
+        assert_eq!(expand(&[], 10..=20), 10..=20);
+
+        // single segment fully containing desired
+        assert_eq!(expand(&[0..=100], 10..=20), 0..=100);
+
+        // single segment overlapping start
+        assert_eq!(expand(&[0..=15], 10..=20), 0..=20);
+
+        // single segment overlapping end
+        assert_eq!(expand(&[15..=30], 10..=20), 10..=30);
+
+        // multiple segments spanning desired range
+        assert_eq!(expand(&[0..=99, 100..=199, 200..=299], 50..=150), 0..=199);
+
+        // non-overlapping segment should not expand
+        assert_eq!(expand(&[0..=50, 200..=300], 100..=150), 100..=150);
+
+        // partial overlap on both ends
+        assert_eq!(
+            expand(&[0..=99, 100..=199, 200..=299, 300..=399], 150..=350),
+            100..=399
+        );
+
+        // exact match
+        assert_eq!(expand(&[100..=200], 100..=200), 100..=200);
+
+        // desired fully outside any segment
+        assert_eq!(expand(&[0..=50, 100..=150], 60..=90), 60..=90);
+
+        // adjacent segment boundary (no overlap)
+        assert_eq!(expand(&[0..=99, 100..=199], 100..=150), 100..=199);
     }
 }
