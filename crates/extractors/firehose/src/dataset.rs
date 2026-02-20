@@ -1,50 +1,9 @@
-use std::collections::BTreeMap;
-
-// Reuse types from datasets-common for consistency
-pub use datasets_common::manifest::TableSchema;
 use datasets_common::{
     block_num::BlockNum, dataset::Table as DatasetTable, dataset_kind_str::DatasetKindStr,
-    hash_reference::HashReference, network_id::NetworkId,
+    hash_reference::HashReference,
 };
 
 use crate::dataset_kind::FirehoseDatasetKind;
-
-/// Table definition for raw datasets
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Table {
-    /// Arrow schema for this table
-    pub schema: TableSchema,
-    /// Network for this table
-    pub network: NetworkId,
-}
-
-impl Table {
-    /// Create a new table with the given schema and network
-    pub fn new(schema: TableSchema, network: NetworkId) -> Self {
-        Self { schema, network }
-    }
-}
-
-/// Firehose dataset manifest.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Manifest {
-    /// Dataset kind, must be `firehose`.
-    pub kind: FirehoseDatasetKind,
-
-    /// Network name, e.g., `mainnet`.
-    pub network: NetworkId,
-    /// Dataset start block.
-    #[serde(default)]
-    pub start_block: BlockNum,
-    /// Only include finalized block data.
-    #[serde(default)]
-    pub finalized_blocks_only: bool,
-
-    /// Dataset tables. Maps table names to their definitions.
-    pub tables: BTreeMap<String, Table>,
-}
 
 pub struct Dataset {
     pub(crate) tables: Vec<DatasetTable>,

@@ -25,7 +25,7 @@ use datasets_raw::{
     manifest::RawDatasetManifest,
 };
 use evm_rpc_datasets::{Dataset as EvmRpcDataset, EvmRpcDatasetKind, Manifest as EvmRpcManifest};
-use firehose_datasets::{FirehoseDatasetKind, dataset::Manifest as FirehoseManifest};
+use firehose_datasets::{FirehoseDatasetKind, Manifest as FirehoseManifest};
 use monitoring::telemetry::metrics::Meter;
 use parking_lot::RwLock;
 use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
@@ -453,7 +453,7 @@ fn create_dataset_from_manifest(
                     kind: firehose_datasets::FirehoseDatasetKind.into(),
                     source,
                 })?;
-            Arc::new(firehose_datasets::evm::dataset(reference.clone(), manifest))
+            Arc::new(firehose_datasets::dataset(reference.clone(), manifest))
         }
         s if s == DerivedDatasetKind => {
             let manifest = manifest_content

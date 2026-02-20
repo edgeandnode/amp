@@ -104,7 +104,7 @@ async fn gen_manifest_cmd_run_with_firehose_kind_generates_valid_manifest() {
         result.is_ok(),
         "manifest generation should succeed with valid Firehose parameters"
     );
-    let manifest: firehose_datasets::dataset::Manifest =
+    let manifest: firehose_datasets::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
     assert_eq!(
@@ -196,7 +196,7 @@ async fn gen_manifest_cmd_run_without_start_block_defaults_to_zero() {
         result.is_ok(),
         "manifest generation should succeed without start_block parameter"
     );
-    let manifest: firehose_datasets::dataset::Manifest =
+    let manifest: firehose_datasets::Manifest =
         serde_json::from_slice(&out).expect("generated manifest should be valid JSON");
 
     assert_eq!(

@@ -12,7 +12,7 @@ use datasets_common::{
 };
 use datasets_derived::DerivedDatasetKind;
 use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
-use firehose_datasets::{FirehoseDatasetKind, dataset::Manifest as FirehoseManifest};
+use firehose_datasets::{FirehoseDatasetKind, Manifest as FirehoseManifest};
 use monitoring::logging;
 use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
 

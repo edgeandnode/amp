@@ -68,7 +68,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        firehose_datasets::Client::new(name.clone(), typed_config, meter)
+        firehose_datasets::client(name.clone(), typed_config, meter)
             .await
             .map(|c| BlockStreamClient::Firehose(Box::new(c)))
             .map_err(|err| CreateClientError::ProviderClient {
@@ -216,5 +216,5 @@ pub enum ProviderClientError {
     /// This occurs during initialization of the Firehose client, which may fail due to
     /// invalid gRPC endpoints, connection issues, or authentication failures.
     #[error("failed to create Firehose client")]
-    Firehose(#[source] firehose_datasets::Error),
+    Firehose(#[source] firehose_datasets::error::ClientError),
 }

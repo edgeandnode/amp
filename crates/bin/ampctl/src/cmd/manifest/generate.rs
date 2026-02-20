@@ -214,16 +214,16 @@ fn generate_firehose_manifest(
     start_block: u64,
     finalized_blocks_only: bool,
 ) -> Result<Vec<u8>, Error> {
-    let tables = firehose_datasets::evm::tables::all(&network)
+    let tables = firehose_datasets::tables::all(&network)
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table = firehose_datasets::dataset::Table::new(schema, network.clone());
+            let manifest_table = firehose_datasets::Table::new(schema, network.clone());
             (table.name().to_string(), manifest_table)
         })
         .collect();
 
-    let manifest = firehose_datasets::dataset::Manifest {
+    let manifest = firehose_datasets::Manifest {
         kind: FirehoseDatasetKind,
         network,
         start_block,
