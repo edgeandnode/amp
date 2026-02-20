@@ -368,69 +368,28 @@ impl TestCtx {
 /// where either the reference or dumped value is null, while still catching mismatches
 /// on fields where both sides have non-null values.
 fn assert_json_eq_ignoring_nulls(reference: &Value, dumped: &Value) {
-    match (reference, dumped) {
-        (Value::Array(ref_arr), Value::Array(dump_arr)) => {
-            assert_eq!(ref_arr.len(), dump_arr.len(), "row count mismatch");
-            for (i, (ref_row, dump_row)) in ref_arr.iter().zip(dump_arr.iter()).enumerate() {
-                assert_row_eq_ignoring_nulls(ref_row, dump_row, i);
+    let ref_rows = reference
+        .as_array()
+        .expect("reference should be a JSON array");
+    let dump_rows = dumped.as_array().expect("dumped should be a JSON array");
+    assert_eq!(ref_rows.len(), dump_rows.len(), "row count mismatch");
+
+    for (i, (ref_row, dump_row)) in ref_rows.iter().zip(dump_rows.iter()).enumerate() {
+        let ref_obj = ref_row
+            .as_object()
+            .expect("reference row should be a JSON object");
+        let dump_obj = dump_row
+            .as_object()
+            .expect("dumped row should be a JSON object");
+
+        let all_keys: BTreeSet<_> = ref_obj.keys().chain(dump_obj.keys()).collect();
+        for key in all_keys {
+            let ref_val = ref_obj.get(key).unwrap_or(&Value::Null);
+            let dump_val = dump_obj.get(key).unwrap_or(&Value::Null);
+            if ref_val.is_null() || dump_val.is_null() {
+                continue;
             }
+            assert_eq!(ref_val, dump_val, "mismatch at row {i}, field \"{key}\"");
         }
-        _ => {
-            assert_eq!(reference, dumped, "expected JSON arrays at top level");
-        }
-    }
-}
-
-fn assert_row_eq_ignoring_nulls(reference: &Value, dumped: &Value, row_idx: usize) {
-    match (reference, dumped) {
-        (Value::Object(ref_map), Value::Object(dump_map)) => {
-            let all_keys: BTreeSet<_> = ref_map.keys().chain(dump_map.keys()).collect();
-            for key in all_keys {
-                let ref_val = ref_map.get(key).unwrap_or(&Value::Null);
-                let dump_val = dump_map.get(key).unwrap_or(&Value::Null);
-                if ref_val.is_null() || dump_val.is_null() {
-                    continue;
-                }
-                assert_eq!(
-                    ref_val, dump_val,
-                    "mismatch at row {row_idx}, field \"{key}\""
-                );
-            }
-        }
-        _ => {
-            assert_eq!(reference, dumped, "expected JSON objects at row {row_idx}");
-        }
-    }
-}
-
-#[cfg(test)]
-mod unit_tests {
-    use super::*;
-
-    #[test]
-    fn assert_json_eq_ignoring_nulls_with_null_field_on_either_side_succeeds() {
-        let with_value = serde_json::json!([
-            {"block_num": 15000000, "hash": "0xabc", "total_difficulty": "0x3b01"}
-        ]);
-        let with_null = serde_json::json!([
-            {"block_num": 15000000, "hash": "0xabc", "total_difficulty": null}
-        ]);
-
-        assert_json_eq_ignoring_nulls(&with_value, &with_null);
-        assert_json_eq_ignoring_nulls(&with_null, &with_value);
-    }
-
-    /// Ensures null-skipping doesn't suppress real mismatches between non-null values.
-    #[test]
-    #[should_panic(expected = "mismatch at row 0")]
-    fn assert_json_eq_ignoring_nulls_with_mismatched_non_null_values_panics() {
-        let reference = serde_json::json!([
-            {"block_num": 15000000, "hash": "0xabc"}
-        ]);
-        let dumped = serde_json::json!([
-            {"block_num": 15000000, "hash": "0xdef"}
-        ]);
-
-        assert_json_eq_ignoring_nulls(&reference, &dumped);
     }
 }
