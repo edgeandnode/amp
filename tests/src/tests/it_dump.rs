@@ -1,8 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use common::catalog::physical::PhysicalTable;
 use datasets_common::reference::Reference;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 
 use crate::testlib::{self, ctx::TestCtxBuilder, helpers as test_helpers};
 
@@ -33,7 +34,7 @@ async fn evm_rpc_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -70,7 +71,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -107,7 +108,7 @@ async fn evm_rpc_base_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -144,7 +145,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -181,7 +182,7 @@ async fn eth_firehose_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -218,7 +219,7 @@ async fn base_firehose_single_dump() {
         "table count mismatch"
     );
     for (reference, dumped) in reference_dataset.iter().zip(dumped_dataset.iter()) {
-        assert_eq!(reference.0, dumped.0);
+        assert_json_eq_ignoring_nulls(&reference.0, &dumped.0);
         assert_eq!(reference.1, dumped.1);
     }
 }
@@ -357,5 +358,38 @@ impl TestCtx {
             .await
             .expect("failed to create flight client");
         client.run_query(query, None).await
+    }
+}
+
+/// Compare two JSON arrays row-by-row, ignoring fields where either side is null.
+///
+/// External data sources (e.g., RPC providers) may intermittently omit nullable fields
+/// such as `total_difficulty` (deprecated post-EIP-3675). This comparison skips any field
+/// where either the reference or dumped value is null, while still catching mismatches
+/// on fields where both sides have non-null values.
+fn assert_json_eq_ignoring_nulls(reference: &Value, dumped: &Value) {
+    let ref_rows = reference
+        .as_array()
+        .expect("reference should be a JSON array");
+    let dump_rows = dumped.as_array().expect("dumped should be a JSON array");
+    assert_eq!(ref_rows.len(), dump_rows.len(), "row count mismatch");
+
+    for (i, (ref_row, dump_row)) in ref_rows.iter().zip(dump_rows.iter()).enumerate() {
+        let ref_obj = ref_row
+            .as_object()
+            .expect("reference row should be a JSON object");
+        let dump_obj = dump_row
+            .as_object()
+            .expect("dumped row should be a JSON object");
+
+        let all_keys: BTreeSet<_> = ref_obj.keys().chain(dump_obj.keys()).collect();
+        for key in all_keys {
+            let ref_val = ref_obj.get(key).unwrap_or(&Value::Null);
+            let dump_val = dump_obj.get(key).unwrap_or(&Value::Null);
+            if ref_val.is_null() || dump_val.is_null() {
+                continue;
+            }
+            assert_eq!(ref_val, dump_val, "mismatch at row {i}, field \"{key}\"");
+        }
     }
 }
