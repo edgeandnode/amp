@@ -2,16 +2,17 @@
 
 use pgtemp::PgTempDB;
 
-use crate::{DEFAULT_POOL_SIZE, JobStatus, WorkerInfo, WorkerNodeId, jobs, workers};
+use crate::{DEFAULT_POOL_MAX_CONNECTIONS, JobStatus, WorkerInfo, WorkerNodeId, jobs, workers};
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
@@ -52,9 +53,10 @@ async fn schedule_and_retrieve_job() {
 async fn pagination_traverses_all_jobs_ordered() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let total_jobs = 7;
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-traverse");

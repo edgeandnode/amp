@@ -3,7 +3,7 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DEFAULT_POOL_SIZE, WorkerInfo, WorkerNodeId, job_attempts,
+    DEFAULT_POOL_MAX_CONNECTIONS, WorkerInfo, WorkerNodeId, job_attempts,
     jobs::{self, JobStatus},
     workers,
 };
@@ -12,9 +12,10 @@ use crate::{
 async fn register_job_creates_with_scheduled_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
     let worker_info = WorkerInfo::default(); // {}
@@ -50,9 +51,10 @@ async fn register_job_creates_with_scheduled_status() {
 async fn get_jobs_for_node_filters_by_node_id() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id_main = WorkerNodeId::from_ref_unchecked("test-worker-main");
     let worker_info = WorkerInfo::default(); // {}
@@ -133,9 +135,10 @@ async fn get_jobs_for_node_filters_by_status() {
     let temp_db = PgTempDB::new();
 
     // Connect to the DB
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-active-ids");
     let worker_info = WorkerInfo::default(); // {}
@@ -230,9 +233,10 @@ async fn get_jobs_for_node_filters_by_status() {
 async fn get_job_by_id_returns_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-get");
     let worker_info = WorkerInfo::default(); // {}
@@ -268,9 +272,10 @@ async fn get_job_by_id_returns_job() {
 async fn get_job_includes_timestamps() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-details");
     let worker_info = WorkerInfo::default(); // {}
@@ -306,9 +311,10 @@ async fn get_job_includes_timestamps() {
 async fn list_jobs_first_page_when_empty() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     //* When
     let jobs = jobs::sql::list_first_page(&conn, 10, None)
@@ -323,9 +329,10 @@ async fn list_jobs_first_page_when_empty() {
 async fn list_jobs_first_page_respects_limit() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Create workers and jobs
     let mut job_ids = Vec::new();
@@ -370,9 +377,10 @@ async fn list_jobs_first_page_respects_limit() {
 async fn list_jobs_next_page_uses_cursor() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Create 10 jobs
     let mut all_job_ids = Vec::new();
@@ -430,9 +438,10 @@ async fn list_jobs_next_page_uses_cursor() {
 async fn delete_by_id_and_statuses_deletes_matching_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-delete");
     let worker_info = WorkerInfo::default(); // {}
@@ -465,9 +474,10 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
 async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-no-delete");
     let worker_info = WorkerInfo::default(); // {}
@@ -501,9 +511,10 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
 async fn delete_by_status_deletes_all_matching_jobs() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-bulk-delete");
     let worker_info = WorkerInfo::default(); // {}
@@ -569,9 +580,10 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-multi-delete");
     let worker_info = WorkerInfo::default(); // {}
@@ -653,9 +665,10 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-retry-query");
     let worker_info = WorkerInfo::default();
@@ -694,9 +707,10 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
 async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-not-ready");
     let worker_info = WorkerInfo::default();
@@ -730,9 +744,10 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
 async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-calc");
     let worker_info = WorkerInfo::default();
@@ -782,9 +797,10 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
 async fn get_failed_jobs_handles_missing_attempts() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-missing");
     let worker_info = WorkerInfo::default();
@@ -830,9 +846,10 @@ async fn get_failed_jobs_handles_missing_attempts() {
 async fn reschedule_updates_status_and_worker() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id1 = WorkerNodeId::from_ref_unchecked("test-worker-original");
     let worker_id2 = WorkerNodeId::from_ref_unchecked("test-worker-new");

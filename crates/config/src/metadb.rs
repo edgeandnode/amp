@@ -1,10 +1,10 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use figment::{
     Figment,
     providers::{Env, Format as _, Serialized, Toml},
 };
-pub use metadata_db::DEFAULT_POOL_SIZE as DEFAULT_METADB_CONN_POOL_SIZE;
+pub use metadata_db::DEFAULT_POOL_MAX_CONNECTIONS as DEFAULT_METADB_CONN_POOL_SIZE;
 
 /// Default metadata database directory name (inside `.amp/`) - stores PostgreSQL data
 pub const DEFAULT_METADB_DIRNAME: &str = "metadb";
@@ -17,14 +17,43 @@ pub struct MetadataDbConfig {
     /// Size of the connection pool (default: 10)
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+    /// Minimum number of connections to maintain in the pool (default: 25% of pool_size)
+    #[serde(default)]
+    pub min_connections: Option<u32>,
+    /// Maximum lifetime of a connection in seconds (default: 1800)
+    #[serde(default = "default_max_lifetime_secs")]
+    pub max_lifetime_secs: u64,
+    /// Idle timeout for connections in seconds (default: 600)
+    #[serde(default = "default_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
     /// Automatically run database migrations on startup (default: true)
     #[serde(default = "default_auto_migrate")]
     pub auto_migrate: bool,
 }
 
-/// Serde default for [`MetadataDbConfig::pool_size`]. Returns [`DEFAULT_POOL_SIZE`].
+impl From<MetadataDbConfig> for metadata_db::PoolConfig {
+    fn from(config: MetadataDbConfig) -> Self {
+        let mut pool_config = metadata_db::PoolConfig::with_size(config.pool_size);
+        if let Some(min) = config.min_connections {
+            pool_config.min_connections = min;
+        }
+        pool_config.max_lifetime = Duration::from_secs(config.max_lifetime_secs);
+        pool_config.idle_timeout = Duration::from_secs(config.idle_timeout_secs);
+        pool_config
+    }
+}
+
+/// Serde default for [`MetadataDbConfig::pool_size`]. Returns [`DEFAULT_METADB_CONN_POOL_SIZE`].
 fn default_pool_size() -> u32 {
     DEFAULT_METADB_CONN_POOL_SIZE
+}
+
+fn default_max_lifetime_secs() -> u64 {
+    metadata_db::DEFAULT_MAX_LIFETIME.as_secs()
+}
+
+fn default_idle_timeout_secs() -> u64 {
+    metadata_db::DEFAULT_IDLE_TIMEOUT.as_secs()
 }
 
 /// Serde default for [`MetadataDbConfig::auto_migrate`]. Returns `true`.

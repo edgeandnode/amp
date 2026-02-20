@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use metadata_db::{DEFAULT_POOL_SIZE, MetadataDb as MetadataDbConnPool};
+use metadata_db::{DEFAULT_POOL_MAX_CONNECTIONS, MetadataDb as MetadataDbConnPool};
 use metadata_db_postgres::{PostgresBuilder, SharedBuffers, service::Handle};
 use tokio::task::JoinHandle;
 
@@ -28,7 +28,7 @@ impl MetadataDb {
     /// The database will be automatically shut down when the fixture is dropped.
     /// Uses a unique temporary directory for each test to ensure isolation.
     pub async fn new() -> Self {
-        Self::with_pool_size(DEFAULT_POOL_SIZE).await
+        Self::with_pool_size(DEFAULT_POOL_MAX_CONNECTIONS).await
     }
 
     /// Create and start a new temporary metadata database with custom pool size.
@@ -51,7 +51,7 @@ impl MetadataDb {
     /// Useful for testing persistence or sharing databases between tests.
     /// Uses the default connection pool size.
     pub async fn with_data_dir(data_dir: PathBuf) -> Self {
-        Self::with_data_dir_and_pool_size(data_dir, DEFAULT_POOL_SIZE).await
+        Self::with_data_dir_and_pool_size(data_dir, DEFAULT_POOL_MAX_CONNECTIONS).await
     }
 
     /// Create and start a new temporary metadata database with a specific data directory

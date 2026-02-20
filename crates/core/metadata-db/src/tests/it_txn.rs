@@ -3,17 +3,18 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DEFAULT_POOL_SIZE, DatasetName, DatasetNamespace, ManifestHash, ManifestPath, datasets,
-    manifests,
+    DEFAULT_POOL_MAX_CONNECTIONS, DatasetName, DatasetNamespace, ManifestHash, ManifestPath,
+    datasets, manifests,
 };
 
 #[tokio::test]
 async fn commit_persists_changes() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-commit");
@@ -54,9 +55,10 @@ async fn commit_persists_changes() {
 async fn explicit_rollback_discards_changes() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-rollback");
@@ -98,9 +100,10 @@ async fn explicit_rollback_discards_changes() {
 async fn rollback_on_drop_discards_changes() {
     //* Given
     let temp_db = PgTempDB::new();
-    let conn = crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_SIZE)
-        .await
-        .expect("Failed to connect to metadata db");
+    let conn =
+        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
+            .await
+            .expect("Failed to connect to metadata db");
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-drop");

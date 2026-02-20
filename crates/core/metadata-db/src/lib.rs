@@ -4,6 +4,7 @@ use futures::{future::BoxFuture, stream::BoxStream};
 use sqlx::Connection as _;
 use tracing::instrument;
 
+pub mod config;
 pub mod datasets;
 mod db;
 mod error;
@@ -18,6 +19,10 @@ pub mod physical_table_revision;
 pub mod workers;
 
 pub use self::{
+    config::{
+        DEFAULT_ACQUIRE_TIMEOUT, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_LIFETIME,
+        DEFAULT_POOL_MAX_CONNECTIONS, DEFAULT_POOL_MIN_CONNECTIONS, PoolConfig,
+    },
     datasets::{
         DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
         DatasetVersion, DatasetVersionOwned,
@@ -40,9 +45,6 @@ pub use self::{
     },
 };
 
-/// Default pool size for the metadata DB.
-pub const DEFAULT_POOL_SIZE: u32 = 10;
-
 /// Connects to the metadata database with a single connection (no pooling).
 /// Does not run migrations - the database schema must already be initialized.
 #[instrument(skip_all, err)]
@@ -63,19 +65,19 @@ pub async fn connect_with_retry(url: &str) -> Result<SingleConnMetadataDb, Error
 /// Automatically runs migrations to ensure the database schema is up-to-date.
 #[instrument(skip_all, err)]
 pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
-    connect_pool_with_config(url, size, true).await
+    connect_pool_with_config(url, PoolConfig::with_size(size), true).await
 }
 
-/// Connects to the metadata database with connection pooling and configurable migrations.
-/// Similar to [`connect_pool`], but allows control over whether migrations run automatically.
+/// Connects to the metadata database with connection pooling and configurable settings.
+/// Similar to [`connect_pool`], but allows full control over pool behavior and migrations.
 #[instrument(skip_all, err)]
 pub async fn connect_pool_with_config(
     url: impl AsRef<str>,
-    size: u32,
+    pool_config: impl Into<PoolConfig>,
     auto_migrate: bool,
 ) -> Result<MetadataDb, Error> {
     let url = url.as_ref();
-    let pool = db::ConnPool::connect(url, size).await?;
+    let pool = db::ConnPool::connect(url, pool_config).await?;
     if auto_migrate {
         pool.run_migrations().await?;
     }
@@ -113,7 +115,7 @@ pub async fn connect_pool_with_retry(url: &str, size: u32) -> Result<MetadataDb,
         );
     }
 
-    let pool = (|| db::ConnPool::connect(url, size))
+    let pool = (|| db::ConnPool::connect(url, PoolConfig::with_size(size)))
         .retry(retry_policy)
         .when(is_db_starting_up)
         .notify(notify_retry)
