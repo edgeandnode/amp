@@ -1301,6 +1301,7 @@ dependencies = [
  "monitoring",
  "pg_escape",
  "pgtemp",
+ "rustls",
  "sqlparser",
  "sqlx",
  "thiserror 2.0.18",
