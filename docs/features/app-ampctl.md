@@ -1,7 +1,8 @@
 ---
 name: "app-ampctl"
 description: "Administration CLI for Amp operators. Load when asking about ampctl, admin commands, or operator tooling"
-type: feature
+type: meta
+status: stable
 components: "app:ampctl,crate:admin-client"
 ---
 
@@ -28,14 +29,20 @@ ampctl is the administration CLI for Amp engine operators. It provides a compreh
 
 ampctl communicates with the Amp controller's Admin API, providing CLI access to administrative capabilities:
 
+### Capabilities
+
 | Capability | Description |
 |------------|-------------|
 | Dataset Management | List, register, deploy datasets |
 | Job Control | Monitor, stop, delete extraction jobs |
+| Table Revision Control | Activate, deactivate, and manage table revision lifecycle |
 | Storage Management | Query storage locations and file metadata |
 | Provider Configuration | Manage EVM RPC and Firehose sources |
 | Worker Monitoring | List workers and check heartbeat status |
 | Schema Analysis | Validate SQL queries and infer schemas |
+| Data Verification | Verify dataset integrity |
+
+Run `ampctl --help` for a complete list of supported commands.
 
 ### Communication
 
@@ -94,6 +101,18 @@ export AMP_AUTH_TOKEN="<token>"
 ampctl worker list
 ```
 
+### Output Format
+
+All commands support JSON output for scripting and automation:
+
+```bash
+# Human-readable output (default)
+ampctl dataset list
+
+# JSON output
+ampctl dataset list --json
+```
+
 ## References
 
-- [app-ampd-controller](app-ampd-controller.md) - Related: Controller and Admin API
+- [admin](admin.md) - Related: Administration overview

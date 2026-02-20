@@ -1,6 +1,6 @@
 ---
 name: "admin-revisions"
-description: "Table revision activation and deactivation API for controlling which physical table revision is queryable. Load when asking about revision management, activate/deactivate endpoints, or table revision lifecycle"
+description: "Table revision registration, activation, and deactivation API for controlling which physical table revision is queryable. Load when asking about revision management, register/activate/deactivate endpoints, or table revision lifecycle"
 type: "feature"
 status: "development"
 components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
@@ -10,7 +10,7 @@ components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
 
 ## Summary
 
-The Table Revision Management API provides endpoints to list, retrieve, activate, and deactivate physical table revisions, controlling which revision of a table is served for queries. All revisions can be listed with an optional active status filter. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors.
+The Table Revision Management API provides endpoints to register, list, retrieve, activate, and deactivate physical table revisions, controlling which revision of a table is served for queries. New revisions are registered as inactive records before they can be activated. All revisions can be listed with an optional active status filter. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors.
 
 ## Table of Contents
 
@@ -23,10 +23,11 @@ The Table Revision Management API provides endpoints to list, retrieve, activate
 
 ## Key Concepts
 
-- **Table Revision**: An immutable snapshot of table data at a specific [location](../glossary.md#location) ID, representing one physical version of a table
+- **Table Revision**: An immutable snapshot of table data at a specific [location](../glossary.md#physical-table-revision) ID, representing one physical version of a table
 - **Active Revision**: The revision currently served for queries; at most one revision per table can be active at a time
 - **Location ID**: Unique identifier for a physical table revision in the metadata database
 - **Activation**: Atomically switch which revision is queryable by deactivating all revisions and activating the specified one within a transaction
+- **Registration**: Creates an inactive, unassigned physical table revision record. Revisions must be registered before they can be activated. Registration is idempotent by path — registering the same path twice returns the existing location ID
 - **Deactivation**: Mark all revisions for a table as inactive so the table is no longer queryable
 
 ## Architecture
@@ -37,60 +38,21 @@ The Table Revision Management API provides endpoints to list, retrieve, activate
 | ----------------- | ------------------------------------------------------------------------------ |
 | **Admin API**     | Orchestration - resolves dataset reference, delegates to DataStore              |
 | **Admin API**     | Presentation - returns HTTP status codes to REST clients                       |
+| **`DataStore`**   | Single-operation register (builds metadata, inserts revision record)            |
 | **`DataStore`**   | Transaction management for activate (begin, mark inactive, mark active, commit) |
 | **`DataStore`**   | Single-operation deactivate (mark inactive)                                    |
 | **`DataStore`**   | Single-operation get revision by location ID                                   |
-| **`metadata_db`** | SQL operations on `physical_tables` (list_all, mark_inactive_by_table_name, mark_active_by_id, get_by_location_id) |
+| **`metadata_db`** | SQL operations on `physical_table_revisions` (register, list_all, get_by_location_id) and `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
 
 **Key Principle**: Admin API handlers do not interact with `metadata_db` directly. All database access is encapsulated in `DataStore` methods, keeping handlers as pure orchestration and presentation logic.
 
 ### Handler Flow
 
-**Activate (`POST /revisions/{id}/activate`):**
-
-```
-1. Parse ActivationPayload (dataset, table_name)
-2. Parse location_id from path
-2. Resolve dataset reference to manifest hash via DatasetsRegistry
-3. If dataset not found → return DATASET_NOT_FOUND (404)
-5. Call DataStore::activate_table_revision(reference, table_name, location_id)
-   a. Begin transaction
-   b. mark_inactive_by_table_name() — deactivate all revisions for the table
-   c. mark_active_by_id() — activate the specified revision
-   d. Commit transaction
-6. Return HTTP 200 (no body)
-```
-
-**Deactivate (`POST /revisions/deactivate`):**
-
-```
-1. Parse DeactivationPayload (dataset, table_name)
-2. Resolve dataset reference to manifest hash via DatasetsRegistry
-3. If dataset not found → return DATASET_NOT_FOUND (404)
-4. Call DataStore::deactivate_table_revision(reference, table_name)
-   a. mark_inactive_by_table_name() — single DB call, no transaction wrapper
-5. Return HTTP 200 (no body)
-```
-
-**List (`GET /revisions?active=...&limit=...`):**
-
-```
-1. Parse optional `active` and `limit` (default: 100) query parameters
-2. Call DataStore::list_all_table_revisions(active, limit)
-3. Return HTTP 200 with Vec<RevisionInfo> JSON body
-```
-
-**Get By ID (`GET /revisions/{id}`):**
-
-```
-1. Parse location_id from path
-2. Call DataStore::get_revision_by_location_id(location_id)
-3. If not found → return REVISION_NOT_FOUND (404)
-4. Return HTTP 200 with RevisionInfo JSON body
-```
+Each handler follows the same pattern: parse request, resolve dataset reference, delegate to `DataStore`, and return an HTTP response. For detailed handler logic, see the doc comments in the handler source files listed in [Implementation](#implementation).
 
 ### Atomicity
 
+- **Register**: Single database call (no transaction needed) that inserts an inactive revision record. Idempotent by path
 - **Activate**: Wrapped in a database transaction to ensure exactly one revision is active. If any step fails, the transaction rolls back automatically
 - **Deactivate**: Single database call (no transaction needed) that marks all revisions inactive
 
@@ -99,113 +61,94 @@ The Table Revision Management API provides endpoints to list, retrieve, activate
 | Endpoint                      | Method | Description                                       |
 | ----------------------------- | ------ | ------------------------------------------------- |
 | `/revisions`                  | GET    | List revisions (optional `?active=true\|false` filter, `?limit=N` default 100) |
+| `/revisions`                  | POST   | Register a new inactive table revision             |
 | `/revisions/{id}`             | GET    | Retrieve a specific revision by location ID       |
 | `/revisions/{id}/activate`    | POST   | Activate a specific table revision by location ID |
 | `/revisions/deactivate`       | POST   | Deactivate all revisions for a table              |
 
-### Request Schemas
+### Request & Response Schemas
 
-**ActivationPayload:**
-
-```json
-{
-  "dataset": "_/eth_rpc@0.0.0",
-  "table_name": "blocks",
-}
-```
-
-**DeactivationPayload:**
-
-```json
-{
-  "dataset": "_/eth_rpc@0.0.0",
-  "table_name": "blocks"
-}
-```
-
-**Response (list) — `Vec<RevisionInfo>`:** HTTP 200 with JSON array. Same `RevisionInfo` schema as get by ID.
-
-**Response (activate/deactivate):** HTTP 200 with no body on success.
-
-**Response (get by ID) — `RevisionInfo`:**
-
-```json
-{
-  "id": 42,
-  "path": "relative/path/to/revision",
-  "active": true,
-  "writer": 7,
-  "metadata": {
-    "dataset_namespace": "_",
-    "dataset_name": "eth_rpc",
-    "manifest_hash": "abc123",
-    "table_name": "blocks"
-  }
-}
-```
-
-The `writer` field is omitted when no writer job is assigned.
+See the [Admin API OpenAPI spec](../openapi-specs/admin.spec.json) for complete request/response body schemas for all revision endpoints.
 
 ### Error Codes
 
-| Code                              | Status | Description                                      |
-| --------------------------------- | ------ | ------------------------------------------------ |
-| `INVALID_QUERY_PARAMETERS`        | 400    | Invalid query parameters (list endpoint)         |
-| `INVALID_PATH_PARAMETERS`         | 400    | Invalid path parameters                          |
-| `DATASET_NOT_FOUND`               | 404    | Dataset or revision not found                    |
-| `REVISION_NOT_FOUND`              | 404    | No revision with the specified location ID       |
-| `ACTIVATE_TABLE_REVISION_ERROR`   | 500    | Database error during activation                 |
-| `DEACTIVATE_TABLE_REVISION_ERROR` | 500    | Database error during deactivation               |
-| `GET_REVISION_BY_LOCATION_ID_ERROR` | 500  | Database error during retrieval                  |
-| `LIST_ALL_TABLE_REVISIONS_ERROR`  | 500    | Data store error during listing                  |
-| `RESOLVE_REVISION_ERROR`          | 500    | Failed to resolve dataset revision               |
+See the [Admin API OpenAPI spec](../openapi-specs/admin.spec.json) for error codes and HTTP status mappings.
 
 ## Usage
 
-**Deactivate all revisions for a table:**
+**Register a new table revision:**
 
 ```bash
-curl -X POST http://localhost:1610/revisions/deactivate \
+# Via ampctl
+ampctl table register _/eth_rpc@0.0.0 blocks relative/path/to/revision
+
+# Via API
+curl -X POST http://localhost:1610/revisions \
   -H 'Content-Type: application/json' \
-  -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks"}'
+  -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks", "path": "relative/path/to/revision"}'
+```
+
+**List table revisions:**
+
+```bash
+# Via ampctl
+ampctl table list
+ampctl table list --active true
+ampctl table list --active true --limit 5
+
+# Via API
+curl http://localhost:1610/revisions
+curl http://localhost:1610/revisions?active=true
+```
+
+**Get a specific revision:**
+
+```bash
+# Via ampctl
+ampctl table get 42
+
+# Via API
+curl http://localhost:1610/revisions/42
 ```
 
 **Activate a specific revision:**
 
+Atomically deactivates all existing revisions for the table and activates the specified one.
+
 ```bash
+# Via ampctl
+ampctl table activate _/eth_rpc@0.0.0 blocks 42
+
+# Via API
 curl -X POST http://localhost:1610/revisions/42/activate \
   -H 'Content-Type: application/json' \
   -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks"}'
 ```
 
-**List all revisions:**
+**Deactivate all revisions for a table:**
 
 ```bash
-curl http://localhost:1610/revisions
-```
+# Via ampctl
+ampctl table deactivate _/eth_rpc@0.0.0 blocks
 
-**List only active revisions:**
-
-```bash
-curl http://localhost:1610/revisions?active=true
-```
-
-**Retrieve a revision by location ID:**
-
-```bash
-curl http://localhost:1610/revisions/42
+# Via API
+curl -X POST http://localhost:1610/revisions/deactivate \
+  -H 'Content-Type: application/json' \
+  -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks"}'
 ```
 
 ## Implementation
 
 ### Source Files
 
+- `crates/services/admin-api/src/handlers/revisions/create.rs` - Register endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/list_all.rs` - List endpoint handler with optional active filter and error types
 - `crates/services/admin-api/src/handlers/revisions/get_by_id.rs` - Get by ID endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/activate.rs` - Activate endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/deactivate.rs` - Deactivate endpoint handler and error types
-- `crates/core/data-store/src/lib.rs` - `activate_table_revision` (transactional) and `deactivate_table_revision` methods
-- `crates/core/metadata-db/src/physical_table.rs` - `mark_inactive_by_table_name` and `mark_active_by_id` SQL operations
+- `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), and `deactivate_table_revision` methods
+- `crates/core/metadata-db/src/physical_table.rs` - `mark_inactive_by_table_name` and `mark_active_by_id` SQL operations on `physical_tables`
+- `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list_all`, and `get_by_location_id` SQL operations on `physical_table_revisions`
 
 ## References
 

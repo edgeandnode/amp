@@ -80,6 +80,10 @@ A high-level classification grouping [datasets](#dataset) by their data processi
 - **Raw** (a.k.a. **Extractor Datasets**): Extracts data directly from external blockchain sources (includes _evm-rpc_ and _firehose_ [kinds](#dataset-kind))
 - **Derived**: Transforms and combines data from existing datasets (_derived_ [kind](#dataset-kind))
 
+### Physical Table Revision
+
+A uniquely identified, via location ID, physical [table](#table) revision in the [metadata database](#metadata-database). Each location ID maps to a specific storage path where a revision's [Parquet](#parquet) files reside. Used to register, activate, and deactivate table revisions.
+
 ## Physical
 
 Amp currently adopts the FDAP stack for its physical layer, see https://www.influxdata.com/glossary/fdap-stack/.
