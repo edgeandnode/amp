@@ -27,16 +27,14 @@
 use std::time::Duration;
 
 use admin_api::scheduler::{
-    DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, ListJobsByDatasetError,
-    ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError, SchedulerJobs,
-    SchedulerWorkers, StopJobError,
+    DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, JobDescriptor,
+    ListJobsByDatasetError, ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError,
+    SchedulerJobs, SchedulerWorkers, StopJobError,
 };
 use async_trait::async_trait;
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
-    hash_reference::HashReference, name::Name, namespace::Namespace,
+    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };
-use datasets_derived::DerivedDatasetKind;
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, jobs::JobStatusUpdateError, workers::Worker,
 };
@@ -69,19 +67,18 @@ impl Scheduler {
         Self { metadata_db }
     }
 
-    /// Schedule a dataset synchronization job
+    /// Schedule a job with a pre-built descriptor
     ///
     /// Checks for existing scheduled or running jobs to avoid duplicates, selects an available
     /// worker node (either randomly, by exact worker_id, or by matching a glob pattern) and registers the job in the metadata database.
-    async fn schedule_dataset_sync_job_impl(
+    async fn schedule_job_impl(
         &self,
-        end_block: EndBlock,
-        max_writers: u16,
         hash_reference: HashReference,
-        dataset_kind: DatasetKindStr,
+        job_descriptor: JobDescriptor,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
         // Avoid re-scheduling jobs in a scheduled or running state.
+        // TODO: Deduplicate jobs based on an idempotency key (not in the job descriptor)
         let existing_jobs =
             metadata_db::jobs::get_by_dataset(&self.metadata_db, hash_reference.hash())
                 .await
@@ -135,32 +132,13 @@ impl Scheduler {
             }
         };
 
-        let job_desc = if dataset_kind == DerivedDatasetKind {
-            amp_worker_datasets_derived::job_descriptor::JobDescriptor {
-                end_block,
-                dataset_namespace: hash_reference.namespace().clone(),
-                dataset_name: hash_reference.name().clone(),
-                manifest_hash: hash_reference.hash().clone(),
-            }
-            .into()
-        } else {
-            amp_worker_datasets_raw::job_descriptor::JobDescriptor {
-                end_block,
-                max_writers,
-                dataset_namespace: hash_reference.namespace().clone(),
-                dataset_name: hash_reference.name().clone(),
-                manifest_hash: hash_reference.hash().clone(),
-            }
-            .into()
-        };
-
         let mut tx = self
             .metadata_db
             .begin_txn()
             .await
             .map_err(ScheduleJobError::BeginTransaction)?;
 
-        let job_id = metadata_db::jobs::register(&mut tx, &node_id, &job_desc)
+        let job_id = metadata_db::jobs::register(&mut tx, &node_id, job_descriptor)
             .await
             .map(Into::into)
             .map_err(ScheduleJobError::RegisterJob)?;
@@ -347,22 +325,14 @@ pub enum RescheduleJobError {
 
 #[async_trait]
 impl SchedulerJobs for Scheduler {
-    async fn schedule_dataset_sync_job(
+    async fn schedule_job(
         &self,
         dataset_reference: HashReference,
-        dataset_kind: DatasetKindStr,
-        end_block: EndBlock,
-        max_writers: u16,
+        job_descriptor: JobDescriptor,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
-        self.schedule_dataset_sync_job_impl(
-            end_block,
-            max_writers,
-            dataset_reference,
-            dataset_kind,
-            worker_id,
-        )
-        .await
+        self.schedule_job_impl(dataset_reference, job_descriptor, worker_id)
+            .await
     }
 
     async fn stop_job(&self, job_id: JobId) -> Result<(), StopJobError> {

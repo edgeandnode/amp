@@ -54,6 +54,18 @@ impl<'a> JobDescriptorRaw<'a> {
     }
 }
 
+impl JobDescriptorRaw<'static> {
+    /// Consume and return the inner `Box<RawValue>`.
+    ///
+    /// Only available on owned (`'static`) descriptors where the `Cow` is guaranteed `Owned`.
+    pub fn into_inner(self) -> Box<RawValue> {
+        match self.0 {
+            Cow::Owned(boxed) => boxed,
+            Cow::Borrowed(_) => unreachable!("'static lifetime guarantees Cow::Owned"),
+        }
+    }
+}
+
 impl<'a> AsRef<RawValue> for JobDescriptorRaw<'a> {
     fn as_ref(&self) -> &RawValue {
         &self.0
