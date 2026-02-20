@@ -1,8 +1,8 @@
 use futures::TryStreamExt;
-use solana_datasets::{SolanaExtractor, UseArchive, of1_client, rpc_client};
+use solana_datasets::{Client, UseArchive, of1_client, rpc_client};
 use url::Url;
 
-/// Test the transition from historical blocks to JSON-RPC blocks in the Solana extractor.
+/// Test the transition from historical blocks to JSON-RPC blocks in the Solana client.
 #[tokio::test]
 async fn historical_to_json_rpc_transition() {
     let provider_name = "test_provider"
@@ -15,7 +15,7 @@ async fn historical_to_json_rpc_transition() {
         .expect("Failed to parse URL");
     let network = "mainnet".parse().expect("Failed to parse network id");
 
-    let extractor = SolanaExtractor::new(
+    let client = Client::new(
         url,
         None, // Auth
         None, // Rate limit
@@ -45,7 +45,7 @@ async fn historical_to_json_rpc_transition() {
         rewards: Some(true),
         commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
     };
-    let block_stream = extractor.block_stream_impl(start, end, historical, get_block_config);
+    let block_stream = client.block_stream_impl(start, end, historical, get_block_config);
 
     let mut expected_block = start;
     let mut stream = std::pin::pin!(block_stream);
