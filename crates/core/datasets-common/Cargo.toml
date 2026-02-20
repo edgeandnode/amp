@@ -12,7 +12,7 @@ default = ["metadata-db"]
 alloy = { workspace = true }
 bincode = { workspace = true, optional = true }
 datafusion = { workspace = true }
-downcast-rs = "1.2"
+downcast-rs = "2.0"
 hex = { workspace = true }
 metadata-db = { path = "../metadata-db", optional = true }
 schemars = { workspace = true, optional = true }
