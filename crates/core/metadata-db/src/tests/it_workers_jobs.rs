@@ -22,17 +22,17 @@ async fn schedule_and_retrieve_job() {
         .expect("Failed to pre-register the worker");
 
     // Specify the job descriptor
-    let job_desc = serde_json::json!({
+    let job_desc_json = serde_json::json!({
         "dataset": "test-dataset",
         "dataset_version": "test-dataset-version",
         "table": "test-table",
         "locations": ["test-location"],
     });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
+    let job_desc = raw_descriptor(&job_desc_json);
 
     //* When
     // Register the job
-    let job_id = jobs::register(&conn, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&conn, &worker_id, &job_desc)
         .await
         .expect("Failed to register job");
 
@@ -46,7 +46,9 @@ async fn schedule_and_retrieve_job() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
-    assert_eq!(job.desc, job_desc);
+    let roundtripped: serde_json::Value =
+        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+    assert_eq!(roundtripped, job_desc_json);
 }
 
 #[tokio::test]
@@ -67,13 +69,12 @@ async fn pagination_traverses_all_jobs_ordered() {
 
     let mut created_job_ids = Vec::new();
     for i in 0..total_jobs {
-        let job_desc = serde_json::json!({
+        let job_desc = raw_descriptor(&serde_json::json!({
             "dataset": format!("dataset-{}", i),
             "table": "test-table",
-        });
-        let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+        }));
 
-        let job_id = jobs::register(&conn, &worker_id, &job_desc_str)
+        let job_id = jobs::register(&conn, &worker_id, &job_desc)
             .await
             .expect("Failed to register job");
         created_job_ids.push(job_id);
@@ -108,4 +109,10 @@ async fn pagination_traverses_all_jobs_ordered() {
     for i in 0..all_jobs.len() - 1 {
         assert!(all_jobs[i].id > all_jobs[i + 1].id);
     }
+}
+
+/// Helper to create a [`jobs::JobDescriptorRaw`] from a [`serde_json::Value`].
+fn raw_descriptor(value: &serde_json::Value) -> jobs::JobDescriptorRaw<'static> {
+    let raw = serde_json::value::to_raw_value(value).expect("Failed to serialize to raw value");
+    jobs::JobDescriptorRaw::from_owned_unchecked(raw)
 }

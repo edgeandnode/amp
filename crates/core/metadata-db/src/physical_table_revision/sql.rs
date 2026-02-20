@@ -3,7 +3,7 @@
 //! The public API layer (in `physical_table_revision.rs`) wraps these functions with the custom
 //! `Executor` trait and converts errors to `metadata_db::Error`.
 
-use sqlx::{Executor, Postgres, types::JsonValue};
+use sqlx::{Executor, Postgres};
 
 use super::{
     LocationWithDetails, PhysicalTableRevision, RevisionMetadata, RevisionMetadataOwned,
@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     JobStatus,
-    jobs::{Job, JobId},
+    jobs::{Job, JobDescriptorRawOwned, JobId},
     manifests::ManifestHash,
     physical_table::name::Name,
     workers::WorkerNodeIdOwned,
@@ -159,7 +159,7 @@ where
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeIdOwned>,
         writer_job_status: Option<JobStatus>,
-        writer_job_descriptor: Option<JsonValue>,
+        writer_job_descriptor: Option<JobDescriptorRawOwned>,
         writer_job_created_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
         writer_job_updated_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
     }

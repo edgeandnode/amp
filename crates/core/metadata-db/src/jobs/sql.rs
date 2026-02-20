@@ -2,8 +2,15 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::{Job, JobId, JobStatus, JobStatusUpdateError};
-use crate::{DatasetName, DatasetNamespace, ManifestHash, workers::WorkerNodeId};
+use super::{
+    Job, JobStatusUpdateError, job_descriptor::JobDescriptorRaw, job_id::JobId,
+    job_status::JobStatus,
+};
+use crate::{
+    datasets::{DatasetName, DatasetNamespace},
+    manifests::ManifestHash,
+    workers::WorkerNodeId,
+};
 
 /// Job with calculated retry information
 ///
@@ -28,7 +35,7 @@ pub struct JobWithRetryInfo {
 pub async fn insert<'c, E>(
     exe: E,
     node_id: WorkerNodeId<'_>,
-    descriptor: &str,
+    descriptor: &JobDescriptorRaw<'_>,
     status: JobStatus,
 ) -> Result<JobId, sqlx::Error>
 where
@@ -36,7 +43,7 @@ where
 {
     let query = indoc::indoc! {r#"
         INSERT INTO jobs (node_id, descriptor, status, created_at, updated_at)
-        VALUES ($1, $2::jsonb, $3, (timezone('UTC', now())), (timezone('UTC', now())))
+        VALUES ($1, $2, $3, (timezone('UTC', now())), (timezone('UTC', now())))
         RETURNING id
     "#};
     let res = sqlx::query_scalar(query)
@@ -55,7 +62,7 @@ where
 pub async fn insert_with_default_status<'c, E>(
     exe: E,
     node_id: WorkerNodeId<'_>,
-    descriptor: &str,
+    descriptor: &JobDescriptorRaw<'_>,
 ) -> Result<JobId, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -224,9 +231,9 @@ where
             created_at,
             updated_at
         FROM jobs
-        WHERE descriptor->'Dump'->>'dataset_namespace' = $1
-          AND descriptor->'Dump'->>'dataset_name' = $2
-          AND descriptor->'Dump'->>'manifest_hash' = $3
+        WHERE descriptor->>'dataset_namespace' = $1
+          AND descriptor->>'dataset_name' = $2
+          AND descriptor->>'manifest_hash' = $3
         ORDER BY id ASC
     "#};
     let res = sqlx::query_as(query)

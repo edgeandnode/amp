@@ -238,19 +238,6 @@ pub enum SpawnJobError {
     /// - Job already in a terminal state (completed, failed, stopped)
     #[error("failed to update job status to RUNNING: {0}")]
     StatusUpdateFailed(#[source] metadata_db::Error),
-
-    /// Failed to parse job descriptor.
-    ///
-    /// This occurs when the job descriptor JSON stored in the database cannot
-    /// be deserialized into the expected `Descriptor` type. This indicates either
-    /// corrupted data in the database or a schema mismatch.
-    ///
-    /// Common causes include:
-    /// - Invalid JSON syntax in the descriptor field
-    /// - Missing required fields in the descriptor
-    /// - Schema version mismatch between job creation and execution
-    #[error("failed to parse job descriptor: {0}")]
-    DescriptorParseFailed(#[source] serde_json::Error),
 }
 
 /// Errors that can occur when aborting a job.

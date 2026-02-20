@@ -36,11 +36,12 @@ use datasets_common::{
     dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
     hash_reference::HashReference, name::Name, namespace::Namespace,
 };
+use datasets_derived::DerivedDatasetKind;
 use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
 use monitoring::logging;
 use rand::seq::IndexedRandom as _;
 use worker::{
-    job::{Job, JobDescriptor, JobId, JobNotification, JobStatus},
+    job::{Job, JobId, JobNotification, JobStatus},
     node_id::NodeId,
 };
 
@@ -132,15 +133,25 @@ impl Scheduler {
             }
         };
 
-        let job_desc = serde_json::to_string(&JobDescriptor::Dump {
-            end_block,
-            max_writers,
-            dataset_namespace: hash_reference.namespace().clone(),
-            dataset_name: hash_reference.name().clone(),
-            manifest_hash: hash_reference.hash().clone(),
-            dataset_kind,
-        })
-        .map_err(ScheduleJobError::SerializeJobDescriptor)?;
+        let job_desc = if dataset_kind == DerivedDatasetKind {
+            amp_worker_datasets_derived::job_descriptor::JobDescriptor {
+                end_block,
+                dataset_namespace: hash_reference.namespace().clone(),
+                dataset_name: hash_reference.name().clone(),
+                manifest_hash: hash_reference.hash().clone(),
+            }
+            .into()
+        } else {
+            amp_worker_datasets_raw::job_descriptor::JobDescriptor {
+                end_block,
+                max_writers,
+                dataset_namespace: hash_reference.namespace().clone(),
+                dataset_name: hash_reference.name().clone(),
+                manifest_hash: hash_reference.hash().clone(),
+            }
+            .into()
+        };
+
         let mut tx = self
             .metadata_db
             .begin_txn()

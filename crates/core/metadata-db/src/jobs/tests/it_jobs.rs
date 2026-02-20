@@ -3,9 +3,9 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DEFAULT_POOL_MAX_CONNECTIONS, WorkerInfo, WorkerNodeId, job_attempts,
-    jobs::{self, JobStatus},
-    workers,
+    DEFAULT_POOL_MAX_CONNECTIONS, job_attempts,
+    jobs::{self, JobDescriptorRaw, JobStatus},
+    workers::{self, WorkerInfo, WorkerNodeId},
 };
 
 #[tokio::test]
@@ -23,16 +23,16 @@ async fn register_job_creates_with_scheduled_status() {
         .await
         .expect("Failed to pre-register the worker");
 
-    let job_desc = serde_json::json!({
+    let job_desc_json = serde_json::json!({
         "dataset": "test-dataset",
         "dataset_version": "test-dataset-version",
         "table": "test-table",
         "locations": ["test-location"],
     });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
+    let job_desc = raw_descriptor(&job_desc_json);
 
     //* When
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
         .await
         .expect("Failed to schedule job");
 
@@ -44,7 +44,9 @@ async fn register_job_creates_with_scheduled_status() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
-    assert_eq!(job.desc, job_desc);
+    let roundtripped: serde_json::Value =
+        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+    assert_eq!(roundtripped, job_desc_json);
 }
 
 #[tokio::test]
@@ -68,35 +70,32 @@ async fn get_jobs_for_node_filters_by_node_id() {
         .expect("Failed to pre-register the worker 2");
 
     // Register jobs
-    let job_desc1 = serde_json::json!({ "job": 1 });
-    let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
+    let job_desc1 = raw_descriptor(&serde_json::json!({ "job": 1 }));
     let job_id1 = jobs::sql::insert(
         &conn,
         worker_id_main.clone(),
-        &job_desc_str1,
+        &job_desc1,
         JobStatus::default(),
     )
     .await
     .expect("Failed to register job 1");
 
-    let job_desc2 = serde_json::json!({ "job": 2 });
-    let job_desc_str2 = serde_json::to_string(&job_desc2).expect("Failed to serialize");
+    let job_desc2 = raw_descriptor(&serde_json::json!({ "job": 2 }));
     let job_id2 = jobs::sql::insert(
         &conn,
         worker_id_main.clone(),
-        &job_desc_str2,
+        &job_desc2,
         JobStatus::default(),
     )
     .await
     .expect("Failed to register job 2");
 
     // Register a job for a different worker to ensure it's not retrieved
-    let job_desc_other = serde_json::json!({ "job": "other" });
-    let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
+    let job_desc_other = raw_descriptor(&serde_json::json!({ "job": "other" }));
     let job_id_other = jobs::sql::insert(
         &conn,
         worker_id_other.clone(),
-        &job_desc_str_other,
+        &job_desc_other,
         JobStatus::default(),
     )
     .await
@@ -146,38 +145,27 @@ async fn get_jobs_for_node_filters_by_status() {
         .await
         .expect("Failed to pre-register the worker");
 
-    let job_desc = serde_json::json!({ "key": "value" });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({ "key": "value" }));
 
     // Active jobs
-    let job_id_scheduled = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Scheduled,
-    )
-    .await
-    .expect("Failed to register job_id_scheduled");
-
-    let job_id_running =
-        jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+    let job_id_scheduled =
+        jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Scheduled)
             .await
-            .expect("Failed to register job_id_running");
+            .expect("Failed to register job_id_scheduled");
+
+    let job_id_running = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Running)
+        .await
+        .expect("Failed to register job_id_running");
 
     // Terminal state jobs (should not be retrieved)
-    jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Completed,
-    )
-    .await
-    .expect("Failed to register completed job");
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Completed)
+        .await
+        .expect("Failed to register completed job");
 
     jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
@@ -186,13 +174,13 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_id_stop_requested = jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::StopRequested,
     )
     .await
     .expect("Failed to register job_id_stop_requested");
 
-    jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Stopped)
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Stopped)
         .await
         .expect("Failed to register stopped job");
 
@@ -244,14 +232,14 @@ async fn get_job_by_id_returns_job() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({
+    let job_desc_json = serde_json::json!({
         "dataset": "test-dataset",
         "table": "test-table",
         "operation": "dump"
     });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&job_desc_json);
 
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
         .await
         .expect("Failed to register job");
 
@@ -265,7 +253,9 @@ async fn get_job_by_id_returns_job() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.node_id, worker_id);
     assert_eq!(job.status, JobStatus::Scheduled);
-    assert_eq!(job.desc, job_desc);
+    let roundtripped: serde_json::Value =
+        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+    assert_eq!(roundtripped, job_desc_json);
 }
 
 #[tokio::test]
@@ -283,13 +273,13 @@ async fn get_job_includes_timestamps() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({
+    let job_desc_json = serde_json::json!({
         "dataset": "detailed-dataset",
         "table": "detailed-table",
     });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&job_desc_json);
 
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
         .await
         .expect("Failed to register job");
 
@@ -303,7 +293,9 @@ async fn get_job_includes_timestamps() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.node_id, worker_id);
     assert_eq!(job.status, JobStatus::Scheduled);
-    assert_eq!(job.desc, job_desc);
+    let roundtripped: serde_json::Value =
+        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+    assert_eq!(roundtripped, job_desc_json);
     assert!(job.created_at <= job.updated_at);
 }
 
@@ -343,13 +335,12 @@ async fn list_jobs_first_page_respects_limit() {
             .await
             .expect("Failed to register worker");
 
-        let job_desc = serde_json::json!({
+        let job_desc = raw_descriptor(&serde_json::json!({
             "dataset": format!("dataset-{}", i),
             "table": "test-table",
-        });
-        let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+        }));
 
-        let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+        let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
             .await
             .expect("Failed to register job");
         job_ids.push(job_id);
@@ -391,13 +382,12 @@ async fn list_jobs_next_page_uses_cursor() {
             .await
             .expect("Failed to register worker");
 
-        let job_desc = serde_json::json!({
+        let job_desc = raw_descriptor(&serde_json::json!({
             "dataset": format!("dataset-{}", i),
             "table": "test-table",
-        });
-        let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+        }));
 
-        let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+        let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
             .await
             .expect("Failed to register job");
         all_job_ids.push(job_id);
@@ -449,10 +439,9 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc_str)
+    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
         .await
         .expect("Failed to insert job");
 
@@ -485,10 +474,9 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Running)
         .await
         .expect("Failed to insert job");
 
@@ -522,27 +510,16 @@ async fn delete_by_status_deletes_all_matching_jobs() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create 3 jobs, 2 will be Completed, 1 will be Running
-    let job_id1 = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Completed,
-    )
-    .await
-    .expect("Failed to insert job 1");
-    let job_id2 = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Completed,
-    )
-    .await
-    .expect("Failed to insert job 2");
-    let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+    let job_id1 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Completed)
+        .await
+        .expect("Failed to insert job 1");
+    let job_id2 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Completed)
+        .await
+        .expect("Failed to insert job 2");
+    let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Running)
         .await
         .expect("Failed to insert job 3");
 
@@ -591,30 +568,24 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create 4 jobs with different statuses
-    let job_id1 = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc_str,
-        JobStatus::Completed,
-    )
-    .await
-    .expect("Failed to insert job 1");
+    let job_id1 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Completed)
+        .await
+        .expect("Failed to insert job 1");
     let job_id2 = jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
     .expect("Failed to insert job 2");
-    let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Stopped)
+    let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Stopped)
         .await
         .expect("Failed to insert job 3");
-    let job_id4 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc_str, JobStatus::Running)
+    let job_id4 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Running)
         .await
         .expect("Failed to insert job 4");
 
@@ -676,14 +647,13 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
     let job_id = jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
@@ -718,14 +688,13 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
     jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
@@ -755,14 +724,13 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
     let job_id = jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
@@ -808,14 +776,13 @@ async fn get_failed_jobs_handles_missing_attempts() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job WITHOUT any attempts (edge case)
     let job_id = jobs::sql::insert(
         &conn,
         worker_id.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
@@ -861,13 +828,12 @@ async fn reschedule_updates_status_and_worker() {
         .await
         .expect("Failed to register worker 2");
 
-    let job_desc = serde_json::json!({"test": "job"});
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     let job_id = jobs::sql::insert(
         &conn,
         worker_id1.clone(),
-        &job_desc_str,
+        &job_desc,
         JobStatus::FailedRecoverable,
     )
     .await
@@ -886,4 +852,10 @@ async fn reschedule_updates_status_and_worker() {
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id2);
     assert!(job.updated_at > job.created_at);
+}
+
+/// Helper to create a [`JobDescriptorRaw`] from a [`serde_json::Value`].
+fn raw_descriptor(value: &serde_json::Value) -> JobDescriptorRaw<'static> {
+    let raw = serde_json::value::to_raw_value(value).expect("Failed to serialize to raw value");
+    JobDescriptorRaw::from_owned_unchecked(raw)
 }

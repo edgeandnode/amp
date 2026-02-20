@@ -3,16 +3,19 @@
 //! This module provides functionality for managing distributed job queues with state tracking
 //! and coordination between multiple worker nodes.
 
-use sqlx::types::{
-    JsonValue,
-    chrono::{DateTime, Utc},
-};
+use sqlx::types::chrono::{DateTime, Utc};
 
+mod job_descriptor;
 mod job_id;
 mod job_status;
 pub(crate) mod sql;
 
-pub use self::{job_id::JobId, job_status::JobStatus, sql::JobWithRetryInfo};
+pub use self::{
+    job_descriptor::{JobDescriptorRaw, JobDescriptorRawOwned},
+    job_id::JobId,
+    job_status::JobStatus,
+    sql::JobWithRetryInfo,
+};
 use crate::{
     ManifestHash,
     db::Executor,
@@ -30,12 +33,13 @@ use crate::{
 pub async fn register<'c, E>(
     exe: E,
     node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
-    job_desc: &str,
+    job_desc: impl Into<JobDescriptorRaw<'_>> + std::fmt::Debug,
 ) -> Result<JobId, Error>
 where
     E: Executor<'c>,
 {
-    sql::insert_with_default_status(exe, node_id.into(), job_desc)
+    let job_desc = job_desc.into();
+    sql::insert_with_default_status(exe, node_id.into(), &job_desc)
         .await
         .map_err(Error::Database)
 }
@@ -446,7 +450,7 @@ pub struct Job {
 
     /// Job descriptor
     #[sqlx(rename = "descriptor")]
-    pub desc: JsonValue,
+    pub desc: JobDescriptorRawOwned,
 
     /// Job creation timestamp
     pub created_at: DateTime<Utc>,

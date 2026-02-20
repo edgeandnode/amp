@@ -68,14 +68,17 @@ impl std::fmt::Display for ListResult {
 fn show_dataset_descriptor(descriptor: &serde_json::Value) -> Option<String> {
     let descriptor: JobDescriptor = serde_json::from_value(descriptor.clone()).ok()?;
     match descriptor {
-        JobDescriptor::Dump {
-            dataset_namespace,
-            dataset_name,
-            manifest_hash,
-            ..
-        } => Some(format!(
-            "dump {dataset_namespace}/{dataset_name}@{}",
-            &manifest_hash.as_str()[..7],
+        JobDescriptor::MaterializeRaw(desc) => Some(format!(
+            "materialize-raw {}/{dataset_name}@{hash}",
+            desc.dataset_namespace,
+            dataset_name = desc.dataset_name,
+            hash = &desc.manifest_hash.as_str()[..7],
+        )),
+        JobDescriptor::MaterializeDerived(desc) => Some(format!(
+            "materialize-derived {}/{dataset_name}@{hash}",
+            desc.dataset_namespace,
+            dataset_name = desc.dataset_name,
+            hash = &desc.manifest_hash.as_str()[..7],
         )),
     }
 }
