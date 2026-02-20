@@ -8,6 +8,8 @@ use sqlx::{
     postgres::PgPoolOptions,
 };
 
+use crate::config::PoolConfig;
+
 /// A dedicated connection to the metadata DB.
 #[derive(Debug)]
 pub struct Connection(PgConnection);
@@ -97,12 +99,9 @@ impl std::ops::DerefMut for Connection {
 pub struct ConnPool(Pool<Postgres>);
 
 impl ConnPool {
-    /// Creates a connection pool using the given [`PoolConfig`](crate::PoolConfig).
+    /// Creates a connection pool using the given [`PoolConfig`](crate::config::PoolConfig).
     #[tracing::instrument(skip_all, err)]
-    pub async fn connect(
-        url: &str,
-        config: impl Into<crate::PoolConfig>,
-    ) -> Result<Self, ConnError> {
+    pub async fn connect(url: &str, config: impl Into<PoolConfig>) -> Result<Self, ConnError> {
         let config = config.into();
         PgPoolOptions::new()
             .max_connections(config.max_connections)

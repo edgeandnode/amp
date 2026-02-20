@@ -3,7 +3,7 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DatasetName, DatasetNamespace,
+    datasets::{DatasetName, DatasetNamespace},
     db::Connection,
     error::Error,
     manifests::ManifestHash,

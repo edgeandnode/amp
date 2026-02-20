@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use metadata_db::{DEFAULT_POOL_MAX_CONNECTIONS, MetadataDb as MetadataDbConnPool};
+use metadata_db::{MetadataDb as MetadataDbConnPool, config::DEFAULT_POOL_MAX_CONNECTIONS};
 use metadata_db_postgres::{PostgresBuilder, SharedBuffers, service::Handle};
 use tokio::task::JoinHandle;
 

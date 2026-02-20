@@ -218,8 +218,8 @@ impl Default for WorkerMetadata {
     }
 }
 
-impl From<metadata_db::Worker> for WorkerDetailResponse {
-    fn from(worker: metadata_db::Worker) -> Self {
+impl From<metadata_db::workers::Worker> for WorkerDetailResponse {
+    fn from(worker: metadata_db::workers::Worker) -> Self {
         // Convert the WorkerInfoOwned (JSON RawValue wrapper) from the database
         // into the strongly-typed build info struct from the worker crate.
         // If deserialization fails or fields are missing, fall back to defaults.

@@ -127,7 +127,7 @@ pub async fn dump(
     dataset_reference: &HashReference,
     max_writers: u16,
     end: EndBlock,
-    writer: impl Into<Option<metadata_db::JobId>>,
+    writer: impl Into<Option<metadata_db::jobs::JobId>>,
     progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     let writer = writer.into();

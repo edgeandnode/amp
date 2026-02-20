@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
 };
 use metadata_db::{
-    JobId,
+    jobs::JobId,
     physical_table_revision::{LocationId, PhysicalTableRevision},
 };
 use monitoring::logging;

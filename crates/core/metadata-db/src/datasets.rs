@@ -20,7 +20,11 @@ pub use self::{
     tags::Tag as DatasetTag,
     version::{Version as DatasetVersion, VersionOwned as DatasetVersionOwned},
 };
-use crate::{ManifestHashOwned, db::Executor, error::Error, manifests::ManifestHash};
+use crate::{
+    db::Executor,
+    error::Error,
+    manifests::{ManifestHash, ManifestHashOwned},
+};
 
 /// Link manifest to dataset in junction table
 ///

@@ -330,7 +330,7 @@ pub enum NotificationError {
     /// - Missing required fields in the notification
     /// - Schema version mismatch between sender and receiver
     #[error("failed to deserialize notification: {0}")]
-    DeserializationFailed(#[source] metadata_db::WorkerNotifRecvError),
+    DeserializationFailed(#[source] metadata_db::workers::WorkerNotifRecvError),
 
     /// Notification stream closed unexpectedly.
     ///

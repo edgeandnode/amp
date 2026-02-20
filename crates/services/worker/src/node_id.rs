@@ -149,25 +149,25 @@ pub fn validate_node_id(id: &str) -> Result<(), InvalidIdError> {
     Ok(())
 }
 
-impl From<metadata_db::WorkerNodeIdOwned> for NodeId {
-    fn from(value: metadata_db::WorkerNodeIdOwned) -> Self {
+impl From<metadata_db::workers::WorkerNodeIdOwned> for NodeId {
+    fn from(value: metadata_db::workers::WorkerNodeIdOwned) -> Self {
         // Convert to string - this should always pass since WorkerNodeIdOwned
         // comes from the database and should already be valid
         NodeId(value.into_inner())
     }
 }
 
-impl From<NodeId> for metadata_db::WorkerNodeIdOwned {
+impl From<NodeId> for metadata_db::workers::WorkerNodeIdOwned {
     fn from(value: NodeId) -> Self {
         // SAFETY: NodeId is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
-        metadata_db::WorkerNodeId::from_owned_unchecked(value.0)
+        metadata_db::workers::WorkerNodeId::from_owned_unchecked(value.0)
     }
 }
 
-impl<'a> From<&'a NodeId> for metadata_db::WorkerNodeId<'a> {
+impl<'a> From<&'a NodeId> for metadata_db::workers::WorkerNodeId<'a> {
     fn from(value: &'a NodeId) -> Self {
         // SAFETY: NodeId is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
-        metadata_db::WorkerNodeId::from_ref_unchecked(&value.0)
+        metadata_db::workers::WorkerNodeId::from_ref_unchecked(&value.0)
     }
 }
 

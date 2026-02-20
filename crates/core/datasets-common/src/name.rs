@@ -138,8 +138,8 @@ impl<'de> serde::Deserialize<'de> for Name {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<metadata_db::DatasetNameOwned> for Name {
-    fn from(value: metadata_db::DatasetNameOwned) -> Self {
+impl From<metadata_db::datasets::DatasetNameOwned> for Name {
+    fn from(value: metadata_db::datasets::DatasetNameOwned) -> Self {
         // Convert to string and validate - this should always pass since DatasetName
         // comes from the database and should already be valid
         Name(value.into_inner())
@@ -147,58 +147,58 @@ impl From<metadata_db::DatasetNameOwned> for Name {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<Name> for metadata_db::DatasetNameOwned {
+impl From<Name> for metadata_db::datasets::DatasetNameOwned {
     fn from(value: Name) -> Self {
         // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
-        metadata_db::DatasetName::from_owned_unchecked(value.0)
+        metadata_db::datasets::DatasetName::from_owned_unchecked(value.0)
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
+impl<'a> From<&'a Name> for metadata_db::datasets::DatasetName<'a> {
     fn from(value: &'a Name) -> Self {
         // SAFETY: Name is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
-        metadata_db::DatasetName::from_ref_unchecked(&value.0)
+        metadata_db::datasets::DatasetName::from_ref_unchecked(&value.0)
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<metadata_db::DatasetName<'a>> for Name {
-    fn eq(&self, other: &metadata_db::DatasetName<'a>) -> bool {
+impl<'a> PartialEq<metadata_db::datasets::DatasetName<'a>> for Name {
+    fn eq(&self, other: &metadata_db::datasets::DatasetName<'a>) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<Name> for metadata_db::DatasetName<'a> {
+impl<'a> PartialEq<Name> for metadata_db::datasets::DatasetName<'a> {
     fn eq(&self, other: &Name) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<&metadata_db::DatasetName<'a>> for Name {
-    fn eq(&self, other: &&metadata_db::DatasetName<'a>) -> bool {
+impl<'a> PartialEq<&metadata_db::datasets::DatasetName<'a>> for Name {
+    fn eq(&self, other: &&metadata_db::datasets::DatasetName<'a>) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<Name> for &metadata_db::DatasetName<'a> {
+impl<'a> PartialEq<Name> for &metadata_db::datasets::DatasetName<'a> {
     fn eq(&self, other: &Name) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<metadata_db::DatasetName<'a>> for &Name {
-    fn eq(&self, other: &metadata_db::DatasetName<'a>) -> bool {
+impl<'a> PartialEq<metadata_db::datasets::DatasetName<'a>> for &Name {
+    fn eq(&self, other: &metadata_db::datasets::DatasetName<'a>) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<&Name> for metadata_db::DatasetName<'a> {
+impl<'a> PartialEq<&Name> for metadata_db::datasets::DatasetName<'a> {
     fn eq(&self, other: &&Name) -> bool {
         self.as_str() == other.as_str()
     }

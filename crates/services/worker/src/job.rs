@@ -35,7 +35,7 @@ pub struct Job {
 }
 
 impl From<metadata_db::jobs::Job> for Job {
-    fn from(job_meta: metadata_db::Job) -> Self {
+    fn from(job_meta: metadata_db::jobs::Job) -> Self {
         Self {
             id: job_meta.id.into(),
             node_id: job_meta.node_id.into(),

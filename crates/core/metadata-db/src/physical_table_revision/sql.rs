@@ -11,8 +11,7 @@ use super::{
     path::{Path, PathOwned},
 };
 use crate::{
-    JobStatus,
-    jobs::{Job, JobDescriptorRawOwned, JobId},
+    jobs::{Job, JobDescriptorRawOwned, JobId, JobStatus},
     manifests::ManifestHash,
     physical_table::name::Name,
     workers::WorkerNodeIdOwned,

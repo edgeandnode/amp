@@ -6,8 +6,8 @@ use backon::{ExponentialBuilder, Retryable};
 use common::dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::{
-    Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle,
-    WorkerNotifListener as NotifListener, notification_multiplexer,
+    Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle, notification_multiplexer,
+    workers::WorkerNotifListener as NotifListener,
 };
 use monitoring::{logging, telemetry::metrics::Meter};
 use tokio::time::MissedTickBehavior;

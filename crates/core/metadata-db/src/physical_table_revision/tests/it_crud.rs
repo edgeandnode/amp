@@ -1,13 +1,14 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DatasetName, DatasetNamespace, Error, JobId, WorkerInfo, WorkerNodeId,
+    datasets::{DatasetName, DatasetNamespace},
     db::Connection,
-    jobs,
+    error::Error,
+    jobs::{self, JobId},
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},
-    workers,
+    workers::{self, WorkerInfo, WorkerNodeId},
 };
 
 #[tokio::test]

@@ -12,8 +12,11 @@ use sqlx::{Postgres, error::BoxDynError};
 
 pub use self::name::{Name as TableName, NameOwned as TableNameOwned};
 use crate::{
-    DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, JobStatus,
-    ManifestHashOwned, db::Executor, error::Error, jobs::JobId, manifests::ManifestHash,
+    datasets::{DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned},
+    db::Executor,
+    error::Error,
+    jobs::{JobId, JobStatus},
+    manifests::{ManifestHash, ManifestHashOwned},
     physical_table_revision::location_id::LocationId,
 };
 

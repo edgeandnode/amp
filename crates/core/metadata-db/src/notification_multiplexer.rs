@@ -6,7 +6,9 @@ use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::instrument;
 
-use crate::{LocationNotification, MetadataDb, physical_table_revision::LocationId};
+use crate::{
+    MetadataDb, physical_table::events::LocationNotification, physical_table_revision::LocationId,
+};
 
 struct NotificationMultiplexer {
     metadata_db: MetadataDb,

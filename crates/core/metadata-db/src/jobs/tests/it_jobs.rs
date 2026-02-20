@@ -3,7 +3,8 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DEFAULT_POOL_MAX_CONNECTIONS, job_attempts,
+    config::DEFAULT_POOL_MAX_CONNECTIONS,
+    job_attempts,
     jobs::{self, JobDescriptorRaw, JobStatus},
     workers::{self, WorkerInfo, WorkerNodeId},
 };

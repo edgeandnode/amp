@@ -2,7 +2,11 @@
 
 use pgtemp::PgTempDB;
 
-use crate::{DEFAULT_POOL_MAX_CONNECTIONS, JobStatus, WorkerInfo, WorkerNodeId, jobs, workers};
+use crate::{
+    config::DEFAULT_POOL_MAX_CONNECTIONS,
+    jobs::{self, JobStatus},
+    workers::{self, WorkerInfo, WorkerNodeId},
+};
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {

@@ -8,6 +8,7 @@ mod node_id;
 pub(crate) mod sql;
 
 pub use self::{
+    events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
     info::{WorkerInfo, WorkerInfoOwned},
     node_id::{NodeId as WorkerNodeId, NodeIdOwned as WorkerNodeIdOwned},
 };

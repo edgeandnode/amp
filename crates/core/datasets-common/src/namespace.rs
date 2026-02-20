@@ -147,8 +147,8 @@ impl<'de> serde::Deserialize<'de> for Namespace {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<metadata_db::DatasetNamespaceOwned> for Namespace {
-    fn from(value: metadata_db::DatasetNamespaceOwned) -> Self {
+impl From<metadata_db::datasets::DatasetNamespaceOwned> for Namespace {
+    fn from(value: metadata_db::datasets::DatasetNamespaceOwned) -> Self {
         // Convert to string and validate - this should always pass since DatasetNamespace
         // comes from the database and should already be valid
         Namespace(value.into_inner())
@@ -156,58 +156,58 @@ impl From<metadata_db::DatasetNamespaceOwned> for Namespace {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<Namespace> for metadata_db::DatasetNamespaceOwned {
+impl From<Namespace> for metadata_db::datasets::DatasetNamespaceOwned {
     fn from(value: Namespace) -> Self {
         // SAFETY: Namespace is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
-        metadata_db::DatasetNamespace::from_owned_unchecked(value.0)
+        metadata_db::datasets::DatasetNamespace::from_owned_unchecked(value.0)
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> From<&'a Namespace> for metadata_db::DatasetNamespace<'a> {
+impl<'a> From<&'a Namespace> for metadata_db::datasets::DatasetNamespace<'a> {
     fn from(value: &'a Namespace) -> Self {
         // SAFETY: Namespace is validated at construction via TryFrom/FromStr, ensuring invariants are upheld.
-        metadata_db::DatasetNamespace::from_ref_unchecked(&value.0)
+        metadata_db::datasets::DatasetNamespace::from_ref_unchecked(&value.0)
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<metadata_db::DatasetNamespace<'a>> for Namespace {
-    fn eq(&self, other: &metadata_db::DatasetNamespace<'a>) -> bool {
+impl<'a> PartialEq<metadata_db::datasets::DatasetNamespace<'a>> for Namespace {
+    fn eq(&self, other: &metadata_db::datasets::DatasetNamespace<'a>) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<Namespace> for metadata_db::DatasetNamespace<'a> {
+impl<'a> PartialEq<Namespace> for metadata_db::datasets::DatasetNamespace<'a> {
     fn eq(&self, other: &Namespace) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<&metadata_db::DatasetNamespace<'a>> for Namespace {
-    fn eq(&self, other: &&metadata_db::DatasetNamespace<'a>) -> bool {
+impl<'a> PartialEq<&metadata_db::datasets::DatasetNamespace<'a>> for Namespace {
+    fn eq(&self, other: &&metadata_db::datasets::DatasetNamespace<'a>) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<Namespace> for &metadata_db::DatasetNamespace<'a> {
+impl<'a> PartialEq<Namespace> for &metadata_db::datasets::DatasetNamespace<'a> {
     fn eq(&self, other: &Namespace) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<metadata_db::DatasetNamespace<'a>> for &Namespace {
-    fn eq(&self, other: &metadata_db::DatasetNamespace<'a>) -> bool {
+impl<'a> PartialEq<metadata_db::datasets::DatasetNamespace<'a>> for &Namespace {
+    fn eq(&self, other: &metadata_db::datasets::DatasetNamespace<'a>) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> PartialEq<&Namespace> for metadata_db::DatasetNamespace<'a> {
+impl<'a> PartialEq<&Namespace> for metadata_db::datasets::DatasetNamespace<'a> {
     fn eq(&self, other: &&Namespace) -> bool {
         self.as_str() == other.as_str()
     }

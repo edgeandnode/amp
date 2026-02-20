@@ -3,7 +3,11 @@
 use futures::StreamExt;
 use pgtemp::PgTempDB;
 
-use crate::{DEFAULT_POOL_MAX_CONNECTIONS, JobId, JobStatus, WorkerInfo, WorkerNodeId, workers};
+use crate::{
+    config::DEFAULT_POOL_MAX_CONNECTIONS,
+    jobs::{JobId, JobStatus},
+    workers::{self, WorkerInfo, WorkerNodeId},
+};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct JobNotification {

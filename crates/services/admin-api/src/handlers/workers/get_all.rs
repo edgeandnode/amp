@@ -130,8 +130,8 @@ pub struct WorkerInfo {
     pub heartbeat_at: String,
 }
 
-impl From<metadata_db::Worker> for WorkerInfo {
-    fn from(worker: metadata_db::Worker) -> Self {
+impl From<metadata_db::workers::Worker> for WorkerInfo {
+    fn from(worker: metadata_db::workers::Worker) -> Self {
         Self {
             node_id: worker.node_id.into(),
             heartbeat_at: worker.heartbeat_at.to_rfc3339(),

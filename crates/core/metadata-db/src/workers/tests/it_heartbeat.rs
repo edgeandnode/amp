@@ -5,9 +5,8 @@ use std::time::Duration;
 use pgtemp::PgTempDB;
 
 use crate::{
-    WorkerInfo,
     db::Connection,
-    workers::{self, WorkerNodeId},
+    workers::{self, WorkerInfo, WorkerNodeId},
 };
 
 /// The interval used for testing the active workers list

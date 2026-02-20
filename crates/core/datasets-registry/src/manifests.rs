@@ -184,26 +184,26 @@ impl std::fmt::Display for ManifestPath {
     }
 }
 
-impl From<metadata_db::ManifestPathOwned> for ManifestPath {
-    fn from(value: metadata_db::ManifestPathOwned) -> Self {
+impl From<metadata_db::manifests::ManifestPathOwned> for ManifestPath {
+    fn from(value: metadata_db::manifests::ManifestPathOwned) -> Self {
         // Convert to string - Database values are trusted to uphold invariants
         ManifestPath(value.into_inner())
     }
 }
 
-impl From<ManifestPath> for metadata_db::ManifestPathOwned {
+impl From<ManifestPath> for metadata_db::manifests::ManifestPathOwned {
     fn from(value: ManifestPath) -> Self {
         // SAFETY: ManifestPath is created from validated content hash in store() method,
         // ensuring invariants are upheld.
-        metadata_db::ManifestPath::from_owned_unchecked(value.0)
+        metadata_db::manifests::ManifestPath::from_owned_unchecked(value.0)
     }
 }
 
-impl<'a> From<&'a ManifestPath> for metadata_db::ManifestPath<'a> {
+impl<'a> From<&'a ManifestPath> for metadata_db::manifests::ManifestPath<'a> {
     fn from(value: &'a ManifestPath) -> Self {
         // SAFETY: ManifestPath is created from validated content hash in store() method,
         // ensuring invariants are upheld.
-        metadata_db::ManifestPath::from_ref_unchecked(&value.0)
+        metadata_db::manifests::ManifestPath::from_ref_unchecked(&value.0)
     }
 }
 
