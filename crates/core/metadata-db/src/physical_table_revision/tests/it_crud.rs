@@ -191,10 +191,11 @@ async fn get_by_location_id_with_details_returns_revision_with_writer_when_assig
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"operation": "write"});
-    let job_desc_str =
-        serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc_str)
+    let job_desc = crate::jobs::JobDescriptorRaw::from_owned_unchecked(
+        serde_json::value::to_raw_value(&serde_json::json!({"operation": "write"}))
+            .expect("Failed to serialize job description"),
+    );
+    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc)
         .await
         .expect("Failed to register job");
 
@@ -511,10 +512,11 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         .await
         .expect("Failed to register worker");
 
-    let job_desc = serde_json::json!({"operation": "write"});
-    let job_desc_str =
-        serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc_str)
+    let job_desc = crate::jobs::JobDescriptorRaw::from_owned_unchecked(
+        serde_json::value::to_raw_value(&serde_json::json!({"operation": "write"}))
+            .expect("Failed to serialize job description"),
+    );
+    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc)
         .await
         .expect("Failed to register job");
 

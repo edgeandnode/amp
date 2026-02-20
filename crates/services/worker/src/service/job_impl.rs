@@ -4,7 +4,6 @@ use std::{future::Future, sync::Arc};
 
 use amp_worker_core::{Ctx, ProgressReporter, metrics::MetricsRegistry};
 use datasets_common::hash_reference::HashReference;
-use datasets_derived::DerivedDatasetKind;
 use tracing::{Instrument, info_span};
 
 use crate::{
@@ -14,30 +13,28 @@ use crate::{
     service::WorkerJobCtx,
 };
 
-/// Create and run a worker job that dumps tables from a dataset.
+/// Create and run a worker job that materializes tables from a dataset.
 ///
-/// This function returns a future that executes the dump operation.
+/// This function returns a future that executes the materialization operation.
 /// Raw datasets are handled by `amp_worker_datasets_raw` and derived
 /// datasets are handled by `amp_worker_datasets_derived`.
 pub(super) fn new(
     job_ctx: WorkerJobCtx,
     job_id: JobId,
     job_desc: JobDescriptor,
-) -> impl Future<Output = Result<(), DumpError>> {
-    let JobDescriptor::Dump {
-        end_block,
-        max_writers,
-        dataset_namespace,
-        dataset_name,
-        manifest_hash,
-        dataset_kind,
-    } = job_desc;
-
-    let reference = HashReference::new(
-        dataset_namespace.clone(),
-        dataset_name.clone(),
-        manifest_hash.clone(),
-    );
+) -> impl Future<Output = Result<(), JobError>> {
+    let reference = match &job_desc {
+        JobDescriptor::MaterializeRaw(desc) => HashReference::new(
+            desc.dataset_namespace.clone(),
+            desc.dataset_name.clone(),
+            desc.manifest_hash.clone(),
+        ),
+        JobDescriptor::MaterializeDerived(desc) => HashReference::new(
+            desc.dataset_namespace.clone(),
+            desc.dataset_name.clone(),
+            desc.manifest_hash.clone(),
+        ),
+    };
 
     let metrics = job_ctx
         .meter
@@ -48,9 +45,9 @@ pub(super) fn new(
     // Always create the reporter - NoOpEmitter will discard events if not needed
     let progress_reporter: Option<Arc<dyn ProgressReporter>> = {
         let dataset_info = proto::DatasetInfo {
-            namespace: dataset_namespace.to_string(),
-            name: dataset_name.to_string(),
-            manifest_hash: manifest_hash.to_string(),
+            namespace: reference.namespace().to_string(),
+            name: reference.name().to_string(),
+            manifest_hash: reference.hash().to_string(),
         };
         Some(Arc::new(WorkerProgressReporter::new(
             job_id,
@@ -69,68 +66,73 @@ pub(super) fn new(
         metrics,
     };
 
-    let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
     let writer: metadata_db::JobId = job_id.into();
     async move {
-        if dataset_kind == DerivedDatasetKind {
-            amp_worker_datasets_derived::dump(
-                ctx,
-                &reference,
-                microbatch_max_interval,
-                end_block,
-                writer,
-                progress_reporter,
-            )
-            .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
-            .await
-            .map_err(DumpError::Derived)?;
-        } else {
-            amp_worker_datasets_raw::dump(
-                ctx,
-                &reference,
-                max_writers,
-                end_block,
-                writer,
-                progress_reporter,
-            )
-            .instrument(info_span!("dump_job", %job_id, dataset = %format!("{reference:#}")))
-            .await
-            .map_err(DumpError::Raw)?;
+        match job_desc {
+            JobDescriptor::MaterializeRaw(desc) => {
+                amp_worker_datasets_raw::dump(
+                    ctx,
+                    &reference,
+                    desc.max_writers,
+                    desc.end_block,
+                    writer,
+                    progress_reporter,
+                )
+                .instrument(
+                    info_span!("materialize_raw_job", %job_id, dataset = %format!("{reference:#}")),
+                )
+                .await
+                .map_err(JobError::MaterializeRaw)?;
+            }
+            JobDescriptor::MaterializeDerived(desc) => {
+                let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
+                amp_worker_datasets_derived::dump(
+                    ctx,
+                    &reference,
+                    microbatch_max_interval,
+                    desc.end_block,
+                    writer,
+                    progress_reporter,
+                )
+                .instrument(info_span!("materialize_derived_job", %job_id, dataset = %format!("{reference:#}")))
+                .await
+                .map_err(JobError::MaterializeDerived)?;
+            }
         }
 
         Ok(())
     }
 }
 
-/// Errors from dataset dump job execution.
+/// Errors from dataset materialization job execution.
 ///
-/// Wraps the specific error types from raw and derived dataset dump operations
+/// Wraps the specific error types from raw and derived dataset materialization operations
 /// to provide a unified error type for the worker job system.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum DumpError {
-    /// Raw dataset dump operation failed
+pub(crate) enum JobError {
+    /// Raw dataset materialization operation failed
     ///
     /// This occurs when the raw dataset extraction and Parquet file writing
     /// process encounters an error. Common causes include blockchain client
     /// connectivity issues, consistency check failures, and partition task errors.
-    #[error("Failed to dump raw dataset")]
-    Raw(#[source] amp_worker_datasets_raw::Error),
+    #[error("Failed to materialize raw dataset")]
+    MaterializeRaw(#[source] amp_worker_datasets_raw::Error),
 
-    /// Derived dataset dump operation failed
+    /// Derived dataset materialization operation failed
     ///
     /// This occurs when the derived dataset SQL query execution and Parquet
     /// file writing process encounters an error. Common causes include query
     /// environment creation failures, manifest retrieval errors, and table
-    /// dump failures.
-    #[error("Failed to dump derived dataset")]
-    Derived(#[source] amp_worker_datasets_derived::Error),
+    /// materialization failures.
+    #[error("Failed to materialize derived dataset")]
+    MaterializeDerived(#[source] amp_worker_datasets_derived::Error),
 }
 
-impl DumpError {
+impl JobError {
     pub fn is_fatal(&self) -> bool {
         match self {
-            Self::Raw(err) => err.is_fatal(),
-            Self::Derived(err) => err.is_fatal(),
+            Self::MaterializeRaw(err) => err.is_fatal(),
+            Self::MaterializeDerived(err) => err.is_fatal(),
         }
     }
 }

@@ -13,6 +13,8 @@ amp-worker-core = { path = "../worker-core" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

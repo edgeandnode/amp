@@ -464,8 +464,13 @@ impl Worker {
 
         // Construct the job instance and spawn it in the job set
         let job_id = job.id;
-        let job_desc: crate::job::JobDescriptor =
-            serde_json::from_value(job.desc).map_err(SpawnJobError::DescriptorParseFailed)?;
+        let job_desc = match serde_json::from_str(job.desc.as_str()) {
+            Ok(desc) => desc,
+            Err(err) => {
+                tracing::warn!(%job_id, %err, "unknown job descriptor, skipping job");
+                return Ok(());
+            }
+        };
 
         // Note: sync.started/completed/failed events are now emitted per-table from
         // the dump layer where table names are known, ensuring partition key consistency

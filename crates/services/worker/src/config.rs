@@ -39,7 +39,7 @@ impl Config {
     /// Create an amp_worker_core::config::Config from this worker configuration
     ///
     /// This method extracts only the fields needed by the worker core crate for
-    /// executing dataset dump operations.
+    /// executing dataset materialization operations.
     pub fn dump_config(&self) -> amp_worker_core::config::Config {
         amp_worker_core::config::Config {
             poll_interval: self.poll_interval,

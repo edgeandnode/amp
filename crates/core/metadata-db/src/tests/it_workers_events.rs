@@ -29,13 +29,15 @@ async fn schedule_job_and_receive_notification() {
         .expect("Failed to pre-register the worker");
 
     // Specify the job descriptor
-    let job_desc = serde_json::json!({
+    let job_desc_json = serde_json::json!({
         "dataset": "test-dataset-events",
         "dataset_version": "test-dataset-version",
         "table": "test-table",
         "locations": ["test-location"],
     });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
+    let job_desc = crate::jobs::JobDescriptorRaw::from_owned_unchecked(
+        serde_json::value::to_raw_value(&job_desc_json).expect("Failed to serialize job desc"),
+    );
 
     // Start listening for notifications before scheduling the job
     let listener = workers::listen_for_job_notif(&conn, worker_id.clone())
@@ -46,7 +48,7 @@ async fn schedule_job_and_receive_notification() {
 
     //* When
     // Register the job
-    let job_id = crate::jobs::register(&conn, &worker_id, &job_desc_str)
+    let job_id = crate::jobs::register(&conn, &worker_id, &job_desc)
         .await
         .expect("Failed to register job");
 
@@ -86,5 +88,7 @@ async fn schedule_job_and_receive_notification() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
-    assert_eq!(job.desc, job_desc);
+    let roundtripped: serde_json::Value =
+        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+    assert_eq!(roundtripped, job_desc_json);
 }

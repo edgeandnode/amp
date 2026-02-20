@@ -5,7 +5,7 @@ use std::{
 
 use tokio::task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet};
 
-use super::job_impl::DumpError;
+use super::job_impl::JobError;
 use crate::job::JobId;
 
 /// A collection of jobs that are spawned and managed by a [`Worker`].
@@ -26,7 +26,7 @@ pub struct JobSet {
     task_id_to_job_id: HashMap<TaskId, JobId>,
 
     /// The set of jobs that are spawned and managed by the worker.
-    jobs: JoinSet<Result<(), DumpError>>,
+    jobs: JoinSet<Result<(), JobError>>,
 }
 
 impl JobSet {
@@ -38,7 +38,7 @@ impl JobSet {
     pub(super) fn spawn(
         &mut self,
         job_id: JobId,
-        job_fut: impl Future<Output = Result<(), DumpError>> + Send + 'static,
+        job_fut: impl Future<Output = Result<(), JobError>> + Send + 'static,
     ) {
         let handle = self.jobs.spawn(job_fut);
 
@@ -118,10 +118,10 @@ impl JobSet {
 pub enum JoinError {
     /// The job failed with a recoverable error
     #[error("Job failed with a recoverable error: {0}")]
-    FailedRecoverable(Box<DumpError>),
+    FailedRecoverable(Box<JobError>),
     /// The job failed with a fatal error
     #[error("Job failed with a fatal error: {0}")]
-    FailedFatal(Box<DumpError>),
+    FailedFatal(Box<JobError>),
     /// The job was aborted
     #[error("Job was aborted")]
     Aborted,

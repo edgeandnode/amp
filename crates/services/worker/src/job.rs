@@ -1,10 +1,6 @@
 pub use amp_worker_core::Ctx;
 use chrono::{DateTime, Utc};
-use datasets_common::{
-    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash, name::Name,
-    namespace::Namespace,
-};
-use serde_json::Value as JsonValue;
+use metadata_db::jobs::JobDescriptorRawOwned;
 
 use crate::node_id::NodeId;
 
@@ -18,63 +14,11 @@ pub use self::{
     status::JobStatus,
 };
 
-/// The logical descriptor of a job, as stored in the `descriptor` column of the `jobs`
-/// metadata DB table.
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum JobDescriptor {
-    Dump {
-        end_block: EndBlock,
-        #[serde(default = "default_max_writers")]
-        max_writers: u16,
-
-        dataset_namespace: Namespace,
-        dataset_name: Name,
-        manifest_hash: Hash,
-        dataset_kind: DatasetKindStr,
-    },
-}
-
-fn default_max_writers() -> u16 {
-    1
-}
-
-impl JobDescriptor {
-    /// Get the dataset namespace from the job descriptor
-    pub fn dataset_namespace(&self) -> &Namespace {
-        match self {
-            JobDescriptor::Dump {
-                dataset_namespace, ..
-            } => dataset_namespace,
-        }
-    }
-
-    /// Get the dataset name from the job descriptor
-    pub fn dataset_name(&self) -> &Name {
-        match self {
-            JobDescriptor::Dump { dataset_name, .. } => dataset_name,
-        }
-    }
-
-    /// Get the manifest hash from the job descriptor
-    pub fn manifest_hash(&self) -> &Hash {
-        match self {
-            JobDescriptor::Dump { manifest_hash, .. } => manifest_hash,
-        }
-    }
-
-    /// Get the dataset kind from the job descriptor
-    pub fn dataset_kind(&self) -> &DatasetKindStr {
-        match self {
-            JobDescriptor::Dump { dataset_kind, .. } => dataset_kind,
-        }
-    }
-}
-
 /// Job data transfer object for the Worker service.
 ///
 /// This DTO decouples the Worker service from the metadata-db `Job` type,
 /// providing a stable interface that can evolve independently of the database schema.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Job {
     /// Unique identifier for the job
     pub id: JobId,
@@ -83,14 +27,14 @@ pub struct Job {
     /// Current status of the job
     pub status: JobStatus,
     /// Job descriptor (contains dataset name and other metadata)
-    pub desc: JsonValue,
+    pub desc: JobDescriptorRawOwned,
     /// Job creation timestamp
     pub created_at: DateTime<Utc>,
     /// Job last update timestamp
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<metadata_db::Job> for Job {
+impl From<metadata_db::jobs::Job> for Job {
     fn from(job_meta: metadata_db::Job) -> Self {
         Self {
             id: job_meta.id.into(),
@@ -103,7 +47,7 @@ impl From<metadata_db::Job> for Job {
     }
 }
 
-impl From<Job> for metadata_db::Job {
+impl From<Job> for metadata_db::jobs::Job {
     fn from(job: Job) -> Self {
         Self {
             id: job.id.into(),
@@ -114,4 +58,13 @@ impl From<Job> for metadata_db::Job {
             updated_at: job.updated_at,
         }
     }
+}
+
+/// The logical descriptor of a job, as stored in the `descriptor` column of the `jobs`
+/// metadata DB table.
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum JobDescriptor {
+    MaterializeRaw(amp_worker_datasets_raw::job_descriptor::JobDescriptor),
+    MaterializeDerived(amp_worker_datasets_derived::job_descriptor::JobDescriptor),
 }

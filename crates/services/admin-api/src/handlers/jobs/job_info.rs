@@ -32,13 +32,17 @@ pub struct JobInfo {
 
 impl From<Job> for JobInfo {
     fn from(value: Job) -> Self {
+        // SAFETY: This is safe because the descriptor is validated JSON from the database.
+        let descriptor =
+            serde_json::from_str(value.desc.as_str()).expect("job descriptor should be valid JSON");
+
         Self {
             id: value.id,
             created_at: value.created_at.to_rfc3339(),
             updated_at: value.updated_at.to_rfc3339(),
             node_id: value.node_id.to_string(),
             status: value.status.to_string(),
-            descriptor: value.desc,
+            descriptor,
         }
     }
 }
