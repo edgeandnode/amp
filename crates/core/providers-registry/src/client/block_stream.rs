@@ -54,7 +54,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        solana_datasets::extractor(name.clone(), typed_config, meter)
+        solana_datasets::client(name.clone(), typed_config, meter)
             .map(BlockStreamClient::Solana)
             .map_err(|err| CreateClientError::ProviderClient {
                 name,
@@ -86,7 +86,7 @@ pub async fn create(
 #[derive(Clone)]
 pub enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
-    Solana(solana_datasets::SolanaExtractor),
+    Solana(solana_datasets::Client),
     Firehose(Box<firehose_datasets::Client>),
 }
 
@@ -209,7 +209,7 @@ pub enum ProviderClientError {
     /// This occurs during initialization of the Solana extractor, which may fail due to
     /// invalid or unsupported URL schemes.
     #[error("failed to create Solana extractor")]
-    Solana(#[source] solana_datasets::error::ExtractorError),
+    Solana(#[source] solana_datasets::error::ClientError),
 
     /// Failed to create Firehose client.
     ///

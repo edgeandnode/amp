@@ -1,6 +1,6 @@
-//! Solana extractor that implements the [`BlockStreamer`] trait.
+//! Solana client that implements the [`BlockStreamer`] trait.
 //!
-//! The extractor is designed to work in two stages:
+//! The client is designed to work in two stages:
 //!     1. Download historical data from the Old Faithful archive
 //!     2. Stream new data using the Solana JSON-RPC subscription API (not implemented yet)
 //!
@@ -33,14 +33,14 @@ use url::Url;
 
 use crate::{metrics, of1_client, rpc_client, rpc_client::Auth, tables};
 
-/// Handles related to the OF1 CAR manager task, stored in the extractor for cleanup.
+/// Handles related to the OF1 CAR manager task, stored in the client for cleanup.
 struct Of1CarManagerHandles {
     tx: tokio::sync::mpsc::Sender<of1_client::CarManagerMessage>,
     jh: tokio::task::JoinHandle<()>,
 }
 
-/// A JSON-RPC based Solana extractor that implements the [`BlockStreamer`] trait.
-pub struct SolanaExtractor {
+/// A JSON-RPC based Solana client that implements the [`BlockStreamer`] trait.
+pub struct Client {
     of1_car_manager_handles: Arc<Mutex<Option<Of1CarManagerHandles>>>,
     rpc_client: Arc<rpc_client::SolanaRpcClient>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -50,7 +50,7 @@ pub struct SolanaExtractor {
     use_archive: UseArchive,
 }
 
-impl SolanaExtractor {
+impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         rpc_provider_url: Redacted<Url>,
@@ -196,11 +196,11 @@ impl SolanaExtractor {
     }
 }
 
-impl Clone for SolanaExtractor {
+impl Clone for Client {
     fn clone(&self) -> Self {
         assert!(
             self.of1_car_manager_handles.lock().unwrap().is_some(),
-            "cannot clone SolanaExtractor after cleanup"
+            "cannot clone Client after cleanup"
         );
 
         Self {
@@ -215,7 +215,7 @@ impl Clone for SolanaExtractor {
     }
 }
 
-impl BlockStreamer for SolanaExtractor {
+impl BlockStreamer for Client {
     async fn block_stream(
         self,
         start: BlockNum,
@@ -507,7 +507,7 @@ mod tests {
     use futures::StreamExt;
     use url::Url;
 
-    use super::SolanaExtractor;
+    use super::Client;
     use crate::{of1_client, rpc_client};
 
     #[tokio::test]
@@ -518,7 +518,7 @@ mod tests {
             .parse()
             .expect("Failed to parse provider name");
 
-        let extractor = SolanaExtractor::new(
+        let client = Client::new(
             Redacted::from(url),
             None,
             None,
@@ -540,7 +540,7 @@ mod tests {
             }
         };
 
-        let block_stream = extractor.block_stream_impl(
+        let block_stream = client.block_stream_impl(
             start,
             end,
             historical,
