@@ -225,7 +225,7 @@ impl DataStore {
     pub async fn lock_revisions_for_writer<'a>(
         &self,
         revisions: impl IntoIterator<Item = &'a PhyTableRevision>,
-        writer: impl Into<metadata_db::JobId> + std::fmt::Debug,
+        writer: impl Into<metadata_db::jobs::JobId> + std::fmt::Debug,
     ) -> Result<(), LockRevisionsForWriterError> {
         let location_ids: Vec<_> = revisions.into_iter().map(|r| r.location_id).collect();
         metadata_db::physical_table_revision::assign_job_writer(

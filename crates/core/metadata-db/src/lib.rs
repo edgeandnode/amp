@@ -19,30 +19,9 @@ pub mod physical_table_revision;
 pub mod workers;
 
 pub use self::{
-    config::{
-        DEFAULT_ACQUIRE_TIMEOUT, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_LIFETIME,
-        DEFAULT_POOL_MAX_CONNECTIONS, DEFAULT_POOL_MIN_CONNECTIONS, PoolConfig,
-    },
-    datasets::{
-        DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, DatasetTag,
-        DatasetVersion, DatasetVersionOwned,
-    },
     db::{ConnError, Executor, Transaction},
     error::Error,
-    jobs::{Job, JobId, JobStatus, JobStatusUpdateError},
-    manifests::{ManifestHash, ManifestHashOwned, ManifestPath, ManifestPathOwned},
     notification_multiplexer::NotificationMultiplexerHandle,
-    physical_table::{
-        GetActiveByLocationIdError, PhysicalTable, TableWriterInfo, WriterTableInfo,
-        events::{
-            LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
-            LocationNotification,
-        },
-    },
-    workers::{
-        Worker, WorkerInfo, WorkerInfoOwned, WorkerNodeId, WorkerNodeIdOwned,
-        events::{NotifListener as WorkerNotifListener, NotifRecvError as WorkerNotifRecvError},
-    },
 };
 
 /// Connects to the metadata database with a single connection (no pooling).
@@ -65,7 +44,7 @@ pub async fn connect_with_retry(url: &str) -> Result<SingleConnMetadataDb, Error
 /// Automatically runs migrations to ensure the database schema is up-to-date.
 #[instrument(skip_all, err)]
 pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
-    connect_pool_with_config(url, PoolConfig::with_size(size), true).await
+    connect_pool_with_config(url, config::PoolConfig::with_size(size), true).await
 }
 
 /// Connects to the metadata database with connection pooling and configurable settings.
@@ -73,7 +52,7 @@ pub async fn connect_pool(url: &str, size: u32) -> Result<MetadataDb, Error> {
 #[instrument(skip_all, err)]
 pub async fn connect_pool_with_config(
     url: impl AsRef<str>,
-    pool_config: impl Into<PoolConfig>,
+    pool_config: impl Into<config::PoolConfig>,
     auto_migrate: bool,
 ) -> Result<MetadataDb, Error> {
     let url = url.as_ref();
@@ -115,7 +94,7 @@ pub async fn connect_pool_with_retry(url: &str, size: u32) -> Result<MetadataDb,
         );
     }
 
-    let pool = (|| db::ConnPool::connect(url, PoolConfig::with_size(size)))
+    let pool = (|| db::ConnPool::connect(url, config::PoolConfig::with_size(size)))
         .retry(retry_policy)
         .when(is_db_starting_up)
         .notify(notify_retry)

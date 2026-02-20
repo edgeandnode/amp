@@ -117,23 +117,23 @@ impl JobStatus {
     }
 }
 
-impl From<metadata_db::JobStatus> for JobStatus {
-    fn from(status: metadata_db::JobStatus) -> Self {
+impl From<metadata_db::jobs::JobStatus> for JobStatus {
+    fn from(status: metadata_db::jobs::JobStatus) -> Self {
         match status {
-            metadata_db::JobStatus::Scheduled => Self::Scheduled,
-            metadata_db::JobStatus::Running => Self::Running,
-            metadata_db::JobStatus::Completed => Self::Completed,
-            metadata_db::JobStatus::Stopped => Self::Stopped,
-            metadata_db::JobStatus::StopRequested => Self::StopRequested,
-            metadata_db::JobStatus::Stopping => Self::Stopping,
-            metadata_db::JobStatus::FailedRecoverable => Self::FailedRecoverable,
-            metadata_db::JobStatus::FailedFatal => Self::FailedFatal,
-            metadata_db::JobStatus::Unknown => Self::Unknown,
+            metadata_db::jobs::JobStatus::Scheduled => Self::Scheduled,
+            metadata_db::jobs::JobStatus::Running => Self::Running,
+            metadata_db::jobs::JobStatus::Completed => Self::Completed,
+            metadata_db::jobs::JobStatus::Stopped => Self::Stopped,
+            metadata_db::jobs::JobStatus::StopRequested => Self::StopRequested,
+            metadata_db::jobs::JobStatus::Stopping => Self::Stopping,
+            metadata_db::jobs::JobStatus::FailedRecoverable => Self::FailedRecoverable,
+            metadata_db::jobs::JobStatus::FailedFatal => Self::FailedFatal,
+            metadata_db::jobs::JobStatus::Unknown => Self::Unknown,
         }
     }
 }
 
-impl From<JobStatus> for metadata_db::JobStatus {
+impl From<JobStatus> for metadata_db::jobs::JobStatus {
     fn from(status: JobStatus) -> Self {
         match status {
             JobStatus::Scheduled => Self::Scheduled,

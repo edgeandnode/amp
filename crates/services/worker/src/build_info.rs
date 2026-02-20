@@ -33,28 +33,28 @@ pub struct BuildInfo {
     pub build_date: Option<String>,
 }
 
-impl From<BuildInfo> for metadata_db::WorkerInfoOwned {
+impl From<BuildInfo> for metadata_db::workers::WorkerInfoOwned {
     fn from(value: BuildInfo) -> Self {
         let raw = serde_json::value::to_raw_value(&value)
             .expect("BuildInfo should serialize to RawValue");
         // SAFETY: to_raw_value produces valid JSON, ensuring RawValue invariants are upheld.
-        metadata_db::WorkerInfo::from_owned_unchecked(raw)
+        metadata_db::workers::WorkerInfo::from_owned_unchecked(raw)
     }
 }
 
-impl<'a> From<&'a BuildInfo> for metadata_db::WorkerInfo<'a> {
+impl<'a> From<&'a BuildInfo> for metadata_db::workers::WorkerInfo<'a> {
     fn from(value: &'a BuildInfo) -> Self {
         let raw =
             serde_json::value::to_raw_value(value).expect("BuildInfo should serialize to RawValue");
         // SAFETY: to_raw_value produces valid JSON, ensuring RawValue invariants are upheld.
-        metadata_db::WorkerInfo::from_owned_unchecked(raw)
+        metadata_db::workers::WorkerInfo::from_owned_unchecked(raw)
     }
 }
 
-impl TryFrom<metadata_db::WorkerInfoOwned> for BuildInfo {
+impl TryFrom<metadata_db::workers::WorkerInfoOwned> for BuildInfo {
     type Error = BuildInfoDeserializeError;
 
-    fn try_from(value: metadata_db::WorkerInfoOwned) -> Result<Self, Self::Error> {
+    fn try_from(value: metadata_db::workers::WorkerInfoOwned) -> Result<Self, Self::Error> {
         serde_json::from_str(value.as_str()).map_err(BuildInfoDeserializeError)
     }
 }

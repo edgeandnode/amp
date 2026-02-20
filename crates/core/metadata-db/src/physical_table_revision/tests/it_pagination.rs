@@ -3,8 +3,9 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DatasetName, DatasetNamespace, Error,
+    datasets::{DatasetName, DatasetNamespace},
     db::Connection,
+    error::Error,
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},

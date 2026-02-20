@@ -48,7 +48,7 @@ impl TryFrom<i64> for JobId {
     }
 }
 
-impl From<JobId> for metadata_db::JobId {
+impl From<JobId> for metadata_db::jobs::JobId {
     fn from(value: JobId) -> Self {
         // SAFETY: worker JobId is always valid (positive i64)
         // It is safe to convert without additional checks
@@ -56,7 +56,7 @@ impl From<JobId> for metadata_db::JobId {
     }
 }
 
-impl From<&JobId> for metadata_db::JobId {
+impl From<&JobId> for metadata_db::jobs::JobId {
     fn from(value: &JobId) -> Self {
         // SAFETY: worker JobId is always valid (positive i64)
         // It is safe to convert without additional checks
@@ -64,8 +64,8 @@ impl From<&JobId> for metadata_db::JobId {
     }
 }
 
-impl From<metadata_db::JobId> for JobId {
-    fn from(value: metadata_db::JobId) -> Self {
+impl From<metadata_db::jobs::JobId> for JobId {
+    fn from(value: metadata_db::jobs::JobId) -> Self {
         // SAFETY: metadata_db JobId is always valid (positive i64)
         // It is safe to convert without additional checks
         Self(value.into_i64())

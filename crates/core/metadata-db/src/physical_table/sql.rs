@@ -9,8 +9,10 @@ use sqlx::{Executor, Postgres};
 
 use super::{LocationId, PhysicalTable, PhysicalTableId, name::Name};
 use crate::{
-    DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned, ManifestHashOwned,
-    jobs::JobId, manifests::ManifestHash, physical_table::TableNameOwned,
+    datasets::{DatasetName, DatasetNameOwned, DatasetNamespace, DatasetNamespaceOwned},
+    jobs::JobId,
+    manifests::{ManifestHash, ManifestHashOwned},
+    physical_table::TableNameOwned,
 };
 
 /// Idempotently upsert a physical table record and return its ID.

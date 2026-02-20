@@ -37,7 +37,9 @@ use datasets_common::{
     hash_reference::HashReference, name::Name, namespace::Namespace,
 };
 use datasets_derived::DerivedDatasetKind;
-use metadata_db::{Error as MetadataDbError, JobStatusUpdateError, MetadataDb, Worker};
+use metadata_db::{
+    Error as MetadataDbError, MetadataDb, jobs::JobStatusUpdateError, workers::Worker,
+};
 use monitoring::logging;
 use rand::seq::IndexedRandom as _;
 use worker::{
@@ -106,7 +108,7 @@ impl Scheduler {
         // If no worker_id or glob pattern is provided, choose a random worker node from the list of active workers.
         let node_id = match worker_id {
             Some(NodeSelector::Exact(worker_id)) => {
-                let worker_id_ref = metadata_db::WorkerNodeId::from(&worker_id);
+                let worker_id_ref = metadata_db::workers::WorkerNodeId::from(&worker_id);
                 if !candidates.contains(&worker_id_ref) {
                     return Err(ScheduleJobError::WorkerNotAvailable(worker_id));
                 }
@@ -385,7 +387,7 @@ impl SchedulerJobs for Scheduler {
             statuses
                 .iter()
                 .map(|s| (*s).into())
-                .collect::<Vec<metadata_db::JobStatus>>()
+                .collect::<Vec<metadata_db::jobs::JobStatus>>()
         });
         let jobs = metadata_db::jobs::list(&self.metadata_db, limit, last_id, statuses.as_deref())
             .await

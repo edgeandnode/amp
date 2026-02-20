@@ -68,8 +68,8 @@ impl AsRef<semver::Version> for Version {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<metadata_db::DatasetVersionOwned> for Version {
-    fn from(value: metadata_db::DatasetVersionOwned) -> Self {
+impl From<metadata_db::datasets::DatasetVersionOwned> for Version {
+    fn from(value: metadata_db::datasets::DatasetVersionOwned) -> Self {
         let version_str = value.into_inner();
 
         // SAFETY: The string is already validated at system boundaries, so parsing should succeed
@@ -80,22 +80,22 @@ impl From<metadata_db::DatasetVersionOwned> for Version {
 }
 
 #[cfg(feature = "metadata-db")]
-impl From<Version> for metadata_db::DatasetVersionOwned {
+impl From<Version> for metadata_db::datasets::DatasetVersionOwned {
     fn from(value: Version) -> Self {
         let version_str = value.0.to_string();
 
         // SAFETY: semver::Version always produces valid semver strings
-        metadata_db::DatasetVersion::from_owned_unchecked(version_str)
+        metadata_db::datasets::DatasetVersion::from_owned_unchecked(version_str)
     }
 }
 
 #[cfg(feature = "metadata-db")]
-impl<'a> From<&'a Version> for metadata_db::DatasetVersion<'a> {
+impl<'a> From<&'a Version> for metadata_db::datasets::DatasetVersion<'a> {
     fn from(value: &'a Version) -> Self {
         let version_str = value.0.to_string();
 
         // SAFETY: semver::Version always produces valid semver strings
-        metadata_db::DatasetVersion::from_owned_unchecked(version_str)
+        metadata_db::datasets::DatasetVersion::from_owned_unchecked(version_str)
     }
 }
 

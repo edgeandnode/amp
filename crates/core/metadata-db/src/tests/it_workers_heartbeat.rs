@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use pgtemp::PgTempDB;
 
-use crate::{DEFAULT_POOL_MAX_CONNECTIONS, WorkerInfo, WorkerNodeId, workers};
+use crate::{
+    config::DEFAULT_POOL_MAX_CONNECTIONS,
+    workers::{self, WorkerInfo, WorkerNodeId},
+};
 
 #[tokio::test]
 async fn register_worker() {

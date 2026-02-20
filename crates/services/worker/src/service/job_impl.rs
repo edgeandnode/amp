@@ -66,7 +66,7 @@ pub(super) fn new(
         metrics,
     };
 
-    let writer: metadata_db::JobId = job_id.into();
+    let writer: metadata_db::jobs::JobId = job_id.into();
     async move {
         match job_desc {
             JobDescriptor::MaterializeRaw(desc) => {

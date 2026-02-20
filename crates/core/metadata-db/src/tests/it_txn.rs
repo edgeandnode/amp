@@ -3,8 +3,9 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    DEFAULT_POOL_MAX_CONNECTIONS, DatasetName, DatasetNamespace, ManifestHash, ManifestPath,
-    datasets, manifests,
+    config::DEFAULT_POOL_MAX_CONNECTIONS,
+    datasets::{self, DatasetName, DatasetNamespace},
+    manifests::{self, ManifestHash, ManifestPath},
 };
 
 #[tokio::test]

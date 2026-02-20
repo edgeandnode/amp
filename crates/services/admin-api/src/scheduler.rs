@@ -28,7 +28,7 @@ use datasets_common::{
     dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
     hash_reference::HashReference, name::Name, namespace::Namespace,
 };
-use metadata_db::Worker;
+use metadata_db::workers::Worker;
 use worker::{
     job::{Job, JobId, JobStatus},
     node_id::{InvalidIdError, NodeId, validate_node_id},

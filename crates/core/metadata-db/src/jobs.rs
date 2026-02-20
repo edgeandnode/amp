@@ -17,10 +17,10 @@ pub use self::{
     sql::JobWithRetryInfo,
 };
 use crate::{
-    ManifestHash,
     db::Executor,
     error::Error,
     job_attempts,
+    manifests::ManifestHash,
     workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
 
@@ -111,8 +111,8 @@ where
 #[tracing::instrument(skip(exe), err)]
 pub async fn list_by_dataset_reference<'c, E>(
     exe: E,
-    dataset_namespace: impl Into<crate::DatasetNamespace<'_>> + std::fmt::Debug,
-    dataset_name: impl Into<crate::DatasetName<'_>> + std::fmt::Debug,
+    dataset_namespace: impl Into<crate::datasets::DatasetNamespace<'_>> + std::fmt::Debug,
+    dataset_name: impl Into<crate::datasets::DatasetName<'_>> + std::fmt::Debug,
     manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
 ) -> Result<Vec<Job>, Error>
 where

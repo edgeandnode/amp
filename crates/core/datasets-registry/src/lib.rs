@@ -458,7 +458,7 @@ impl DatasetsRegistry {
         &self,
         namespace: &Namespace,
         name: &Name,
-    ) -> Result<Vec<metadata_db::DatasetTag>, ListVersionTagsError> {
+    ) -> Result<Vec<metadata_db::datasets::DatasetTag>, ListVersionTagsError> {
         metadata_db::datasets::list_version_tags(&self.metadata_db, namespace, name)
             .await
             .map_err(ListVersionTagsError)
@@ -472,7 +472,7 @@ impl DatasetsRegistry {
     /// Returns an empty list if no datasets are registered.
     pub async fn list_all_datasets(
         &self,
-    ) -> Result<Vec<metadata_db::DatasetTag>, ListAllDatasetsError> {
+    ) -> Result<Vec<metadata_db::datasets::DatasetTag>, ListAllDatasetsError> {
         metadata_db::datasets::list_all(&self.metadata_db)
             .await
             .map_err(ListAllDatasetsError)
@@ -549,8 +549,8 @@ pub struct DatasetTag {
     pub hash: Hash,
 }
 
-impl From<metadata_db::DatasetTag> for DatasetTag {
-    fn from(tag: metadata_db::DatasetTag) -> Self {
+impl From<metadata_db::datasets::DatasetTag> for DatasetTag {
+    fn from(tag: metadata_db::datasets::DatasetTag) -> Self {
         Self {
             namespace: tag.namespace.into(),
             name: tag.name.into(),
