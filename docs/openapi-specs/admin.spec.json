@@ -606,6 +606,105 @@
         }
       }
     },
+    "/datasets/{namespace}/{name}/versions/{revision}/tables/{table_name}/restore": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/tables/{table_name}/restore` endpoint",
+        "description": "Restores a single physical table, either by activating a known revision or\nby discovering the latest revision from object storage.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Revision (version, hash, latest, or dev)\n- `table_name`: Table name\n\n## Request Body (optional JSON)\n- `location_id` (optional, i64): If provided, activates this existing revision\n  for the table. If omitted, discovers the latest revision from object storage\n  via UUID heuristic.\n\n## Response\n- **200 OK**: Table successfully restored\n- **400 Bad Request**: Invalid path parameters or request body\n- **404 Not Found**: Dataset, revision, or table not found\n- **500 Internal Server Error**: Database or storage error\n\n## Error Codes\n- `INVALID_PATH`: Invalid path parameters (namespace, name, revision, or table_name)\n- `INVALID_BODY`: Invalid request body\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to load dataset from store\n- `TABLE_NOT_IN_MANIFEST`: Table not found in the dataset manifest\n- `TABLE_NOT_FOUND`: Table data not found in object storage\n- `GET_REVISION_ERROR`: Failed to look up revision by location ID\n- `REVISION_NOT_FOUND`: No revision exists for the given location ID\n- `REGISTER_AND_ACTIVATE_ERROR`: Failed to register and activate physical table\n- `RESTORE_TABLE_REVISION_ERROR`: Failed to restore a table from storage\n- `REGISTER_FILES_ERROR`: Failed to register files for a table\n\n## Behavior\n\n**With `location_id`:**\n1. Resolves the revision and loads the dataset\n2. Validates the table exists in the dataset manifest\n3. Upserts the `physical_tables` entry\n4. Marks all existing revisions for the table as inactive\n5. Marks the specified `location_id` as active\n\n**Without `location_id`:**\n1. Resolves the revision and loads the dataset\n2. Validates the table exists in the dataset manifest\n3. Scans object storage for the latest revision (by UUID ordering)\n4. Registers and activates the discovered revision\n5. Re-indexes all Parquet file metadata from storage\n\nThis is useful for:\n- Recovering from metadata database loss\n- Activating a specific known revision for a table\n- Setting up a new system with pre-existing data\n- Re-syncing metadata after storage restoration",
+        "operationId": "restore_table",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Dataset namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Dataset name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "description": "Revision (version, hash, latest, or dev)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table_name",
+            "in": "path",
+            "description": "Table name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RestoreTablePayload"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Table successfully restored"
+          },
+          "400": {
+            "description": "Bad request (invalid parameters)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset, revision, or table not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{namespace}/{name}/versions/{version}": {
       "delete": {
         "tags": [
@@ -2630,6 +2729,20 @@
             "type": "integer",
             "format": "int32",
             "description": "Total number of files restored"
+          }
+        }
+      },
+      "RestoreTablePayload": {
+        "type": "object",
+        "description": "Optional request body for restore table operation",
+        "required": [
+          "location_id"
+        ],
+        "properties": {
+          "location_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Location ID of the revision to activate. If omitted, the latest\nrevision is discovered from object storage."
           }
         }
       },

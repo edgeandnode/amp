@@ -123,11 +123,17 @@ ampctl dataset manifest my_namespace/my_dataset@1.2.0
 Re-index dataset metadata from existing data in object storage. Useful for recovery after metadata loss, setting up new systems with pre-existing data, or re-syncing after storage restoration.
 
 ```bash
-# Restore a specific version
+# Restore all tables for a specific version
 ampctl dataset restore my_namespace/my_dataset@1.0.0
 
 # Restore latest version
 ampctl dataset restore my_namespace/my_dataset@latest
+
+# Restore a single table (discovers latest revision from storage)
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks
+
+# Restore a single table with a specific location ID
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks --location-id 42
 ```
 
 **JSON output for scripting:**

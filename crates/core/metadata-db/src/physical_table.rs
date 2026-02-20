@@ -73,15 +73,15 @@ where
     }
 }
 
-/// Mark all active locations for a table as inactive
+/// Mark all active physical tables for a table as inactive
 ///
-/// This is typically used before marking a new location as active, ensuring
-/// only one location per table is active at a time.
+/// This is typically used before marking a new physical table as active, ensuring
+/// only one physical table per table is active at a time.
 ///
 /// # Transaction Boundaries
 ///
 /// This operation should typically be performed within a transaction along with
-/// `mark_active_by_id()` to ensure atomicity when switching active locations.
+/// `mark_active_by_id()` to ensure atomicity when switching active physical tables.
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_inactive_by_table_name<'c, E>(
     exe: E,
@@ -104,15 +104,15 @@ where
     .map_err(Error::Database)
 }
 
-/// Mark a specific location as active
+/// Mark a specific physical table as active
 ///
-/// This does not automatically deactivate other locations. Use `mark_inactive_by_table_id()`
-/// first within a transaction to ensure only one location is active.
+/// This does not automatically deactivate other physical tables. Use `mark_inactive_by_table_name()`
+/// first within a transaction to ensure only one physical table is active.
 ///
 /// # Transaction Boundaries
 ///
 /// This operation should typically be performed within a transaction along with
-/// `mark_inactive_by_table_id()` to ensure atomicity when switching active locations.
+/// `mark_inactive_by_table_name()` to ensure atomicity when switching active physical tables.
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_active_by_id<'c, E>(
     exe: E,

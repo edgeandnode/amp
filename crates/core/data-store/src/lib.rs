@@ -381,6 +381,69 @@ impl DataStore {
         Ok(())
     }
 
+    /// Upserts the physical table entry and activates a specific revision by location ID.
+    ///
+    /// This atomically:
+    /// 1. Upserts the `physical_tables` row (ensures it exists)
+    /// 2. Marks all existing revisions for the table as inactive
+    /// 3. Marks the specified revision as active
+    ///
+    /// Unlike [`activate_table_revision`](Self::activate_table_revision), this also
+    /// ensures the `physical_tables` row exists before activation.
+    pub async fn register_and_activate_physical_table(
+        &self,
+        dataset: &HashReference,
+        table_name: &TableName,
+        location_id: LocationId,
+    ) -> Result<(), RegisterAndActivatePhysicalTableError> {
+        let mut tx = self
+            .metadata_db
+            .begin_txn()
+            .await
+            .map_err(RegisterAndActivatePhysicalTableError::TransactionBegin)?;
+
+        metadata_db::physical_table::register(
+            &mut tx,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(RegisterAndActivatePhysicalTableError::RegisterPhysicalTable)?;
+
+        metadata_db::physical_table::mark_inactive_by_table_name(
+            &mut tx,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(RegisterAndActivatePhysicalTableError::MarkInactive)?;
+
+        let updated = metadata_db::physical_table::mark_active_by_id(
+            &mut tx,
+            location_id,
+            dataset.namespace(),
+            dataset.name(),
+            dataset.hash(),
+            table_name,
+        )
+        .await
+        .map_err(RegisterAndActivatePhysicalTableError::MarkActive)?;
+
+        if !updated {
+            return Err(RegisterAndActivatePhysicalTableError::PhysicalTableNotFound);
+        }
+
+        tx.commit()
+            .await
+            .map_err(RegisterAndActivatePhysicalTableError::TransactionCommit)?;
+
+        Ok(())
+    }
+
     /// Deactivates all revisions for a table.
     ///
     /// Marks all revisions for the given dataset table as inactive. This is a
@@ -928,6 +991,71 @@ pub enum ActivateTableRevisionError {
     /// - Database connection lost during commit
     /// - Transaction conflict with concurrent operations
     /// - Database constraint violation detected at commit time
+    ///
+    /// The operation is safe to retry from the beginning as no partial state was persisted.
+    #[error("Failed to commit transaction")]
+    TransactionCommit(#[source] metadata_db::Error),
+}
+
+/// Errors that occur when upserting a physical table and activating a revision
+///
+/// This error type is used by `DataStore::register_and_activate_physical_table()`.
+/// The operation runs as a single database transaction: on any failure,
+/// PostgreSQL guarantees all changes are rolled back.
+#[derive(Debug, thiserror::Error)]
+pub enum RegisterAndActivatePhysicalTableError {
+    /// Failed to begin a database transaction
+    ///
+    /// Common causes:
+    /// - Database connection pool exhausted
+    /// - Database server unreachable
+    #[error("Failed to begin transaction")]
+    TransactionBegin(#[source] metadata_db::Error),
+
+    /// Failed to upsert the physical table record
+    ///
+    /// The UPSERT ensures a `physical_tables` row exists for the
+    /// dataset+table combination before attempting to activate a revision.
+    ///
+    /// Common causes:
+    /// - Database connection lost during insert
+    /// - Database constraint violation
+    #[error("Failed to register physical table in metadata database")]
+    RegisterPhysicalTable(#[source] metadata_db::Error),
+
+    /// Failed to mark existing active revisions as inactive
+    ///
+    /// Common causes:
+    /// - Database connection lost during update
+    /// - Lock timeout on physical_table_revisions rows
+    /// - Database constraint violation
+    #[error("Failed to mark existing physical tables as inactive")]
+    MarkInactive(#[source] metadata_db::Error),
+
+    /// Failed to mark the specified revision as active
+    ///
+    /// Common causes:
+    /// - Database connection lost during update
+    /// - Lock timeout on physical_table_revisions row
+    /// - Database constraint violation
+    #[error("Failed to mark table revision as active: {0}")]
+    MarkActive(#[source] metadata_db::Error),
+
+    /// No physical table found with the given location ID
+    ///
+    /// The `mark_active_by_id` update matched zero rows, meaning the provided
+    /// `location_id` does not correspond to a registered physical table for this table.
+    #[error("No physical table found")]
+    PhysicalTableNotFound,
+
+    /// Failed to commit transaction after successful database operations
+    ///
+    /// When a commit fails, PostgreSQL guarantees that all changes are rolled back.
+    /// Neither the upsert, deactivation, nor the activation will be persisted.
+    ///
+    /// Common causes:
+    /// - Database connection lost during commit
+    /// - Transaction conflict with concurrent operations
     ///
     /// The operation is safe to retry from the beginning as no partial state was persisted.
     #[error("Failed to commit transaction")]
