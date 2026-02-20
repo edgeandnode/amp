@@ -159,13 +159,13 @@ pub fn copy_from_stdin(table_name: &str) -> String {
 /// # Example
 /// ```ignore
 /// let sql = create_temp_table_like("_temp_123", "users");
-/// // Produces: CREATE TEMP TABLE "_temp_123" (LIKE "users" INCLUDING ALL)
+/// // Produces: CREATE TEMP TABLE "_temp_123" (LIKE "users" INCLUDING DEFAULTS) ON COMMIT DROP
 /// ```
 pub fn create_temp_table_like(temp_name: &str, source_table: &str) -> String {
     let quoted_temp = quote_identifier(temp_name);
     let quoted_source = quote_identifier(source_table);
     format!(
-        "CREATE TEMP TABLE {} (LIKE {} INCLUDING ALL)",
+        "CREATE TEMP TABLE {} (LIKE {} INCLUDING DEFAULTS) ON COMMIT DROP",
         quoted_temp, quoted_source
     )
 }
@@ -340,5 +340,14 @@ mod tests {
         assert!(sql.contains("DELETE FROM"));
         assert!(sql.contains("users") || sql.contains("\"users\""));
         assert!(sql.contains("_tx_id BETWEEN $1 AND $2"));
+    }
+
+    #[test]
+    fn test_create_temp_table_like_is_transaction_scoped() {
+        let sql = create_temp_table_like("_temp_123", "users");
+        assert!(sql.contains("CREATE TEMP TABLE"));
+        assert!(sql.contains("LIKE"));
+        assert!(sql.contains("INCLUDING DEFAULTS"));
+        assert!(sql.contains("ON COMMIT DROP"));
     }
 }
