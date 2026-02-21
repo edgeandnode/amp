@@ -2,6 +2,7 @@
 name: "app-ampd-controller"
 description: "ampd controller for job scheduling and admin API. Load when asking about controller, job scheduling, or admin API"
 type: feature
+status: "stable"
 components: "app:ampd,service:controller,crate:config"
 ---
 
