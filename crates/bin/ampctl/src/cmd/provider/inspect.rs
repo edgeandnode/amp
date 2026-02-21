@@ -23,21 +23,6 @@ pub struct Args {
     pub name: String,
 }
 
-/// Result wrapper for provider inspect output.
-#[derive(serde::Serialize)]
-struct InspectResult {
-    #[serde(flatten)]
-    data: serde_json::Value,
-}
-
-impl std::fmt::Display for InspectResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        // For provider inspect, output pretty JSON as provider configs are complex nested structures
-        let json = serde_json::to_string_pretty(&self.data).map_err(|_| std::fmt::Error)?;
-        write!(f, "{}", json)
-    }
-}
-
 /// Inspect a provider by retrieving it from the admin API.
 ///
 /// Retrieves provider configuration and displays it based on the output format.
@@ -81,6 +66,21 @@ async fn get_provider_value(global: &GlobalArgs, name: &str) -> Result<serde_jso
     })?;
 
     Ok(provider_value)
+}
+
+/// Result wrapper for provider inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: serde_json::Value,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // For provider inspect, output pretty JSON as provider configs are complex nested structures
+        let json = serde_json::to_string_pretty(&self.data).map_err(|_| std::fmt::Error)?;
+        write!(f, "{}", json)
+    }
 }
 
 /// Errors for provider inspection operations.

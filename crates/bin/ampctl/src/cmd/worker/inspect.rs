@@ -26,29 +26,6 @@ pub struct Args {
     pub node_id: NodeId,
 }
 
-/// Result wrapper for worker inspect output.
-#[derive(serde::Serialize)]
-struct InspectResult {
-    #[serde(flatten)]
-    data: client::workers::WorkerDetailResponse,
-}
-
-impl std::fmt::Display for InspectResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "Node ID: {}", self.data.node_id)?;
-        writeln!(f, "Created: {}", self.data.created_at)?;
-        writeln!(f, "Registered: {}", self.data.registered_at)?;
-        writeln!(f, "Heartbeat: {}", self.data.heartbeat_at)?;
-        writeln!(f)?;
-        writeln!(f, "Worker Info:")?;
-        writeln!(f, "  Version: {}", self.data.info.version)?;
-        writeln!(f, "  Commit: {}", self.data.info.commit_sha)?;
-        writeln!(f, "  Commit Timestamp: {}", self.data.info.commit_timestamp)?;
-        writeln!(f, "  Build Date: {}", self.data.info.build_date)?;
-        Ok(())
-    }
-}
-
 /// Inspect worker details by retrieving them from the admin API.
 ///
 /// Retrieves worker information and displays it based on the output format.
@@ -87,6 +64,29 @@ async fn get_worker(
         None => Err(Error::WorkerNotFound {
             node_id: node_id.to_string(),
         }),
+    }
+}
+
+/// Result wrapper for worker inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: client::workers::WorkerDetailResponse,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Node ID: {}", self.data.node_id)?;
+        writeln!(f, "Created: {}", self.data.created_at)?;
+        writeln!(f, "Registered: {}", self.data.registered_at)?;
+        writeln!(f, "Heartbeat: {}", self.data.heartbeat_at)?;
+        writeln!(f)?;
+        writeln!(f, "Worker Info:")?;
+        writeln!(f, "  Version: {}", self.data.info.version)?;
+        writeln!(f, "  Commit: {}", self.data.info.commit_sha)?;
+        writeln!(f, "  Commit Timestamp: {}", self.data.info.commit_timestamp)?;
+        writeln!(f, "  Build Date: {}", self.data.info.build_date)?;
+        Ok(())
     }
 }
 

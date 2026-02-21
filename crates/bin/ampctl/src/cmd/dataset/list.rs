@@ -21,35 +21,6 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
-/// Result of a dataset list operation.
-#[derive(serde::Serialize)]
-struct ListResult {
-    datasets: Vec<client::datasets::DatasetSummary>,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.datasets.is_empty() {
-            writeln!(f, "No datasets found")
-        } else {
-            writeln!(f, "Datasets:")?;
-            for dataset in &self.datasets {
-                let versions_str = if dataset.versions.is_empty() {
-                    "no versions".to_string()
-                } else {
-                    format!("{} version(s)", dataset.versions.len())
-                };
-                writeln!(
-                    f,
-                    "  {}/{} - {}",
-                    dataset.namespace, dataset.name, versions_str
-                )?;
-            }
-            Ok(())
-        }
-    }
-}
-
 /// List all datasets by retrieving them from the admin API.
 ///
 /// Retrieves all datasets and displays them based on the output format.
@@ -83,6 +54,35 @@ async fn get_datasets(global: &GlobalArgs) -> Result<client::datasets::DatasetsR
     })?;
 
     Ok(datasets_response)
+}
+
+/// Result of a dataset list operation.
+#[derive(serde::Serialize)]
+struct ListResult {
+    datasets: Vec<client::datasets::DatasetSummary>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.datasets.is_empty() {
+            writeln!(f, "No datasets found")
+        } else {
+            writeln!(f, "Datasets:")?;
+            for dataset in &self.datasets {
+                let versions_str = if dataset.versions.is_empty() {
+                    "no versions".to_string()
+                } else {
+                    format!("{} version(s)", dataset.versions.len())
+                };
+                writeln!(
+                    f,
+                    "  {}/{} - {}",
+                    dataset.namespace, dataset.name, versions_str
+                )?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Errors for datasets listing operations.

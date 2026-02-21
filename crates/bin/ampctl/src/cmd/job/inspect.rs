@@ -25,28 +25,6 @@ pub struct Args {
     pub id: JobId,
 }
 
-/// Result wrapper for job inspect output.
-#[derive(serde::Serialize)]
-struct InspectResult {
-    #[serde(flatten)]
-    data: client::jobs::JobInfo,
-}
-
-impl std::fmt::Display for InspectResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "Job ID: {}", self.data.id)?;
-        writeln!(f, "Status: {}", self.data.status)?;
-        writeln!(f, "Worker: {}", self.data.node_id)?;
-        writeln!(f, "Created: {}", self.data.created_at)?;
-        writeln!(f, "Updated: {}", self.data.updated_at)?;
-        writeln!(f)?;
-        writeln!(f, "Descriptor:")?;
-        let descriptor_json =
-            serde_json::to_string_pretty(&self.data.descriptor).map_err(|_| std::fmt::Error)?;
-        write!(f, "{}", descriptor_json)
-    }
-}
-
 /// Inspect job details by retrieving them from the admin API.
 ///
 /// Retrieves job information and displays it based on the output format.
@@ -80,6 +58,28 @@ async fn get_job(global: &GlobalArgs, id: JobId) -> Result<client::jobs::JobInfo
     match job {
         Some(job) => Ok(job),
         None => Err(Error::JobNotFound { id }),
+    }
+}
+
+/// Result wrapper for job inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: client::jobs::JobInfo,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Job ID: {}", self.data.id)?;
+        writeln!(f, "Status: {}", self.data.status)?;
+        writeln!(f, "Worker: {}", self.data.node_id)?;
+        writeln!(f, "Created: {}", self.data.created_at)?;
+        writeln!(f, "Updated: {}", self.data.updated_at)?;
+        writeln!(f)?;
+        writeln!(f, "Descriptor:")?;
+        let descriptor_json =
+            serde_json::to_string_pretty(&self.data.descriptor).map_err(|_| std::fmt::Error)?;
+        write!(f, "{}", descriptor_json)
     }
 }
 

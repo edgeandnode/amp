@@ -42,7 +42,59 @@ pub struct Args {
     pub location_id: Option<i64>,
 }
 
-/// Result of a dataset restore operation (all tables).
+/// Restore dataset physical tables from object storage.
+///
+/// Re-indexes physical table metadata from storage into the database.
+/// Optionally targets a single table with `--table`, and can activate
+/// a specific revision with `--location-id`.
+///
+/// # Errors
+///
+/// Returns [`Error`] for invalid paths/URLs, API errors (400/404/500), or network failures.
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %dataset_ref))]
+pub async fn run(
+    Args {
+        global,
+        dataset_ref,
+        table,
+        location_id,
+    }: Args,
+) -> Result<(), Error> {
+    let client = global.build_client().map_err(Error::ClientBuild)?;
+
+    if let Some(table_name) = table {
+        tracing::debug!(%dataset_ref, %table_name, ?location_id, "restoring single table");
+
+        client
+            .datasets()
+            .restore_table(&dataset_ref, &table_name, location_id)
+            .await
+            .map_err(Error::RestoreTable)?;
+
+        let result = RestoreTableResult {
+            table: table_name,
+            location_id,
+        };
+        global.print(&result).map_err(Error::JsonSerialization)?;
+    } else {
+        tracing::debug!(%dataset_ref, "restoring dataset");
+
+        let response = client
+            .datasets()
+            .restore(&dataset_ref)
+            .await
+            .map_err(Error::Restore)?;
+
+        let result = RestoreResult {
+            tables: response.tables,
+        };
+        global.print(&result).map_err(Error::JsonSerialization)?;
+    }
+
+    Ok(())
+}
+
+/// Result of a dataset restore operation.
 #[derive(serde::Serialize)]
 struct RestoreResult {
     tables: Vec<RestoredTableInfo>,
@@ -103,58 +155,6 @@ impl std::fmt::Display for RestoreTableResult {
         }
         Ok(())
     }
-}
-
-/// Restore dataset physical tables from object storage.
-///
-/// Re-indexes physical table metadata from storage into the database.
-/// Optionally targets a single table with `--table`, and can activate
-/// a specific revision with `--location-id`.
-///
-/// # Errors
-///
-/// Returns [`Error`] for invalid paths/URLs, API errors (400/404/500), or network failures.
-#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, %dataset_ref))]
-pub async fn run(
-    Args {
-        global,
-        dataset_ref,
-        table,
-        location_id,
-    }: Args,
-) -> Result<(), Error> {
-    let client = global.build_client().map_err(Error::ClientBuild)?;
-
-    if let Some(table_name) = table {
-        tracing::debug!(%dataset_ref, %table_name, ?location_id, "restoring single table");
-
-        client
-            .datasets()
-            .restore_table(&dataset_ref, &table_name, location_id)
-            .await
-            .map_err(Error::RestoreTable)?;
-
-        let result = RestoreTableResult {
-            table: table_name,
-            location_id,
-        };
-        global.print(&result).map_err(Error::JsonSerialization)?;
-    } else {
-        tracing::debug!(%dataset_ref, "restoring dataset");
-
-        let response = client
-            .datasets()
-            .restore(&dataset_ref)
-            .await
-            .map_err(Error::Restore)?;
-
-        let result = RestoreResult {
-            tables: response.tables,
-        };
-        global.print(&result).map_err(Error::JsonSerialization)?;
-    }
-
-    Ok(())
 }
 
 /// Errors for dataset restore operations.

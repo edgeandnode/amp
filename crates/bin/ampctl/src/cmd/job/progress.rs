@@ -62,38 +62,6 @@ async fn get_progress(global: &GlobalArgs, id: JobId) -> Result<client::jobs::Jo
     }
 }
 
-/// Errors for job progress operations.
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Failed to build admin API client
-    ///
-    /// This occurs when the client configuration is invalid or the admin URL
-    /// is malformed.
-    #[error("failed to build admin API client")]
-    ClientBuild(#[source] crate::args::BuildClientError),
-
-    /// Client error from the API
-    ///
-    /// This wraps errors returned by the admin API client, including network
-    /// failures, invalid responses, and server errors.
-    #[error("client error")]
-    ClientError(#[source] crate::client::jobs::GetProgressError),
-
-    /// Job not found in the system
-    ///
-    /// The specified job ID does not exist in the metadata database.
-    /// Verify the job ID is correct using `ampctl job list`.
-    #[error("job not found: {id}")]
-    JobNotFound { id: JobId },
-
-    /// Failed to format output as JSON
-    ///
-    /// This occurs when serializing the progress result to JSON fails,
-    /// which is unexpected for well-formed data structures.
-    #[error("failed to format output")]
-    JsonFormattingError(#[source] serde_json::Error),
-}
-
 /// Result wrapper for job progress output.
 #[derive(serde::Serialize)]
 struct ProgressResult {
@@ -147,4 +115,36 @@ fn format_bytes(bytes: i64) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+/// Errors for job progress operations.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Failed to build admin API client
+    ///
+    /// This occurs when the client configuration is invalid or the admin URL
+    /// is malformed.
+    #[error("failed to build admin API client")]
+    ClientBuild(#[source] crate::args::BuildClientError),
+
+    /// Client error from the API
+    ///
+    /// This wraps errors returned by the admin API client, including network
+    /// failures, invalid responses, and server errors.
+    #[error("client error")]
+    ClientError(#[source] crate::client::jobs::GetProgressError),
+
+    /// Job not found in the system
+    ///
+    /// The specified job ID does not exist in the metadata database.
+    /// Verify the job ID is correct using `ampctl job list`.
+    #[error("job not found: {id}")]
+    JobNotFound { id: JobId },
+
+    /// Failed to format output as JSON
+    ///
+    /// This occurs when serializing the progress result to JSON fails,
+    /// which is unexpected for well-formed data structures.
+    #[error("failed to format output")]
+    JsonFormattingError(#[source] serde_json::Error),
 }

@@ -21,31 +21,6 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
-/// Result wrapper for manifests list output.
-#[derive(serde::Serialize)]
-struct ListResult {
-    manifests: Vec<client::manifests::ManifestSummary>,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.manifests.is_empty() {
-            writeln!(f, "No manifests found")
-        } else {
-            writeln!(f, "Manifests:")?;
-            for manifest in &self.manifests {
-                let dataset_text = if manifest.dataset_count == 1 {
-                    "1 dataset"
-                } else {
-                    &format!("{} datasets", manifest.dataset_count)
-                };
-                writeln!(f, "  {} - {}", manifest.hash, dataset_text)?;
-            }
-            Ok(())
-        }
-    }
-}
-
 /// List all manifests by retrieving them from the admin API.
 ///
 /// Retrieves all manifests and displays them based on the output format.
@@ -79,6 +54,31 @@ async fn get_manifests(global: &GlobalArgs) -> Result<client::manifests::Manifes
     })?;
 
     Ok(manifests_response)
+}
+
+/// Result wrapper for manifests list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    manifests: Vec<client::manifests::ManifestSummary>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.manifests.is_empty() {
+            writeln!(f, "No manifests found")
+        } else {
+            writeln!(f, "Manifests:")?;
+            for manifest in &self.manifests {
+                let dataset_text = if manifest.dataset_count == 1 {
+                    "1 dataset"
+                } else {
+                    &format!("{} datasets", manifest.dataset_count)
+                };
+                writeln!(f, "  {} - {}", manifest.hash, dataset_text)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Errors for manifests listing operations.

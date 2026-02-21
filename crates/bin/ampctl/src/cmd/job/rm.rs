@@ -27,23 +27,6 @@ pub struct Args {
     pub id: JobId,
 }
 
-/// Result of a job removal operation.
-#[derive(serde::Serialize)]
-struct RemoveResult {
-    job_id: JobId,
-}
-
-impl std::fmt::Display for RemoveResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Job {} removed",
-            console::style("✓").green().bold(),
-            self.job_id
-        )
-    }
-}
-
 /// Remove a job by deleting it via the admin API.
 ///
 /// # Errors
@@ -63,6 +46,23 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
     global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
+}
+
+/// Result of a job removal operation.
+#[derive(serde::Serialize)]
+struct RemoveResult {
+    job_id: JobId,
+}
+
+impl std::fmt::Display for RemoveResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Job {} removed",
+            console::style("✓").green().bold(),
+            self.job_id
+        )
+    }
 }
 
 /// Errors for job rm operations.

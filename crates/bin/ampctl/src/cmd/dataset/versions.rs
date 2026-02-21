@@ -25,39 +25,6 @@ pub struct Args {
     pub fqn: FullyQualifiedName,
 }
 
-/// Result wrapper for versions list output.
-#[derive(serde::Serialize)]
-struct ListResult {
-    #[serde(flatten)]
-    data: client::datasets::VersionsResponse,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "Dataset: {}/{}", self.data.namespace, self.data.name)?;
-        writeln!(f)?;
-
-        if let Some(latest) = &self.data.special_tags.latest {
-            writeln!(f, "Latest version: {}", latest)?;
-        }
-        if let Some(dev) = &self.data.special_tags.dev {
-            writeln!(f, "Dev hash: {}", dev)?;
-        }
-
-        if self.data.versions.is_empty() {
-            writeln!(f, "\nNo versions found")?;
-        } else {
-            writeln!(f, "\nVersions:")?;
-            for version in &self.data.versions {
-                writeln!(f, "  {} ({})", version.version, version.manifest_hash)?;
-                writeln!(f, "    Created: {}", version.created_at)?;
-                writeln!(f, "    Updated: {}", version.updated_at)?;
-            }
-        }
-        Ok(())
-    }
-}
-
 /// List all versions of a dataset by retrieving them from the admin API.
 ///
 /// Retrieves version information and displays it based on the output format.
@@ -94,6 +61,39 @@ async fn get_versions(
     })?;
 
     Ok(versions_response)
+}
+
+/// Result wrapper for versions list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    #[serde(flatten)]
+    data: client::datasets::VersionsResponse,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Dataset: {}/{}", self.data.namespace, self.data.name)?;
+        writeln!(f)?;
+
+        if let Some(latest) = &self.data.special_tags.latest {
+            writeln!(f, "Latest version: {}", latest)?;
+        }
+        if let Some(dev) = &self.data.special_tags.dev {
+            writeln!(f, "Dev hash: {}", dev)?;
+        }
+
+        if self.data.versions.is_empty() {
+            writeln!(f, "\nNo versions found")?;
+        } else {
+            writeln!(f, "\nVersions:")?;
+            for version in &self.data.versions {
+                writeln!(f, "  {} ({})", version.version, version.manifest_hash)?;
+                writeln!(f, "    Created: {}", version.created_at)?;
+                writeln!(f, "    Updated: {}", version.updated_at)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Errors for dataset versions listing operations.

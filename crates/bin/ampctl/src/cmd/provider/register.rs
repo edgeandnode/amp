@@ -45,22 +45,6 @@ pub struct Args {
     pub provider_file: ProviderFilePath,
 }
 
-/// Result of a provider registration operation.
-#[derive(serde::Serialize)]
-struct RegisterResult {
-    name: String,
-}
-
-impl std::fmt::Display for RegisterResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Provider registered successfully",
-            console::style("✓").green().bold()
-        )
-    }
-}
-
 /// Register a provider configuration via the admin API.
 ///
 /// Loads provider TOML content from storage, converts to JSON, and POSTs to `/providers` endpoint.
@@ -170,6 +154,22 @@ async fn register_provider(
         .map_err(Error::ClientError)?;
 
     Ok(())
+}
+
+/// Result of a provider registration operation.
+#[derive(serde::Serialize)]
+struct RegisterResult {
+    name: String,
+}
+
+impl std::fmt::Display for RegisterResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Provider registered successfully",
+            console::style("✓").green().bold()
+        )
+    }
 }
 
 /// Errors for provider registration operations.

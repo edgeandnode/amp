@@ -37,52 +37,6 @@ pub struct Args {
     pub status: String,
 }
 
-/// Result wrapper for jobs list output.
-#[derive(serde::Serialize)]
-struct ListResult {
-    #[serde(flatten)]
-    data: crate::client::jobs::JobsResponse,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.data.jobs.is_empty() {
-            writeln!(f, "No jobs found")
-        } else {
-            writeln!(f, "Jobs:")?;
-            for job in &self.data.jobs {
-                writeln!(f, "  {} - {} ({})", job.id, job.status, job.node_id)?;
-                if let Some(descriptor) = show_dataset_descriptor(&job.descriptor) {
-                    writeln!(f, "    Descriptor: {descriptor}")?;
-                }
-            }
-
-            if let Some(next_cursor) = &self.data.next_cursor {
-                writeln!(f, "\nNext cursor: {}", next_cursor)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn show_dataset_descriptor(descriptor: &serde_json::Value) -> Option<String> {
-    let descriptor: JobDescriptor = serde_json::from_value(descriptor.clone()).ok()?;
-    match descriptor {
-        JobDescriptor::MaterializeRaw(desc) => Some(format!(
-            "materialize-raw {}/{dataset_name}@{hash}",
-            desc.dataset_namespace,
-            dataset_name = desc.dataset_name,
-            hash = &desc.manifest_hash.as_str()[..7],
-        )),
-        JobDescriptor::MaterializeDerived(desc) => Some(format!(
-            "materialize-derived {}/{dataset_name}@{hash}",
-            desc.dataset_namespace,
-            dataset_name = desc.dataset_name,
-            hash = &desc.manifest_hash.as_str()[..7],
-        )),
-    }
-}
-
 /// List all jobs by retrieving them from the admin API.
 ///
 /// Retrieves all jobs with pagination and displays them based on the output format.
@@ -132,6 +86,52 @@ async fn get_jobs(
         })?;
 
     Ok(jobs_response)
+}
+
+/// Result wrapper for jobs list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    #[serde(flatten)]
+    data: crate::client::jobs::JobsResponse,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.data.jobs.is_empty() {
+            writeln!(f, "No jobs found")
+        } else {
+            writeln!(f, "Jobs:")?;
+            for job in &self.data.jobs {
+                writeln!(f, "  {} - {} ({})", job.id, job.status, job.node_id)?;
+                if let Some(descriptor) = show_dataset_descriptor(&job.descriptor) {
+                    writeln!(f, "    Descriptor: {descriptor}")?;
+                }
+            }
+
+            if let Some(next_cursor) = &self.data.next_cursor {
+                writeln!(f, "\nNext cursor: {}", next_cursor)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn show_dataset_descriptor(descriptor: &serde_json::Value) -> Option<String> {
+    let descriptor: JobDescriptor = serde_json::from_value(descriptor.clone()).ok()?;
+    match descriptor {
+        JobDescriptor::MaterializeRaw(desc) => Some(format!(
+            "materialize-raw {}/{dataset_name}@{hash}",
+            desc.dataset_namespace,
+            dataset_name = desc.dataset_name,
+            hash = &desc.manifest_hash.as_str()[..7],
+        )),
+        JobDescriptor::MaterializeDerived(desc) => Some(format!(
+            "materialize-derived {}/{dataset_name}@{hash}",
+            desc.dataset_namespace,
+            dataset_name = desc.dataset_name,
+            hash = &desc.manifest_hash.as_str()[..7],
+        )),
+    }
 }
 
 /// Errors for jobs listing operations.

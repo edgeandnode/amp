@@ -21,26 +21,6 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
-/// Result wrapper for providers list output.
-#[derive(serde::Serialize)]
-struct ListResult {
-    providers: Vec<client::providers::ProviderInfo>,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.providers.is_empty() {
-            writeln!(f, "No providers found")
-        } else {
-            writeln!(f, "Providers:")?;
-            for provider in &self.providers {
-                writeln!(f, "  {} ({})", provider.name, provider.kind)?;
-            }
-            Ok(())
-        }
-    }
-}
-
 /// List all providers by retrieving them from the admin API.
 ///
 /// Retrieves all provider configurations and displays them based on the output format.
@@ -72,6 +52,26 @@ async fn get_providers(global: &GlobalArgs) -> Result<Vec<client::providers::Pro
     })?;
 
     Ok(providers)
+}
+
+/// Result wrapper for providers list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    providers: Vec<client::providers::ProviderInfo>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.providers.is_empty() {
+            writeln!(f, "No providers found")
+        } else {
+            writeln!(f, "Providers:")?;
+            for provider in &self.providers {
+                writeln!(f, "  {} ({})", provider.name, provider.kind)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Errors for provider listing operations.
