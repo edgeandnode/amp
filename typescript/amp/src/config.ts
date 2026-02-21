@@ -7,6 +7,9 @@ export const defineDataset = (fn: (context: Context) => typeof Model.DatasetConf
 }
 
 export const eventQuery = (abi: AbiEvent, rpcSource: string = "anvil") => {
+  if (!/^[a-zA-Z0-9_]+$/.test(rpcSource)) {
+    throw new Error('Invalid input');
+  }
   const signature = formatAbiItem(abi).replace(/^event /, "")
   // TODO: make this configurable?
   const logsColumns = ["block_hash", "tx_hash", "address", "block_num", "timestamp"]
@@ -20,7 +23,12 @@ export const eventQuery = (abi: AbiEvent, rpcSource: string = "anvil") => {
 
   const eventColumns = abi.inputs.map((input) => input.name)
     .filter((name) => name !== undefined)
-    .map((name) => `e.event['${name}'] AS ${camelToSnake(name)}`)
+    .map((name) => {
+      if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+        throw new Error('Invalid input');
+      }
+      return `e.event['${name}'] AS ${camelToSnake(name)}`
+    })
 
   const eventsQuery = `
     SELECT ${[...logsColumns, ...eventColumns].join(", ")}
