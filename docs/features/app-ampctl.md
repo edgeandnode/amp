@@ -31,16 +31,16 @@ ampctl communicates with the Amp controller's Admin API, providing CLI access to
 
 ### Capabilities
 
-| Capability | Description |
-|------------|-------------|
-| Dataset Management | List, register, deploy datasets |
-| Job Control | Monitor, stop, delete extraction jobs |
+| Capability             | Description                                               |
+|------------------------|-----------------------------------------------------------|
+| Dataset Management     | List, register, deploy datasets                           |
+| Job Control            | Monitor, stop, delete extraction jobs                     |
 | Table Revision Control | Activate, deactivate, and manage table revision lifecycle |
-| Storage Management | Query storage locations and file metadata |
-| Provider Configuration | Manage EVM RPC and Firehose sources |
-| Worker Monitoring | List workers and check heartbeat status |
-| Schema Analysis | Validate SQL queries and infer schemas |
-| Data Verification | Verify dataset integrity |
+| Storage Management     | Query storage locations and file metadata                 |
+| Provider Configuration | Manage EVM RPC and Firehose sources                       |
+| Worker Monitoring      | List workers and check heartbeat status                   |
+| Schema Analysis        | Validate SQL queries and infer schemas                    |
+| Data Verification      | Verify dataset integrity                                  |
 
 Run `ampctl --help` for a complete list of supported commands.
 
@@ -112,6 +112,14 @@ ampctl dataset list
 # JSON output
 ampctl dataset list --json
 ```
+
+### Configuration Reference
+
+| Flag           | Env Var          | Default                 | Description            |
+|----------------|------------------|-------------------------|------------------------|
+| `--admin-url`  | `AMP_ADMIN_URL`  | `http://localhost:1610` | Admin API URL          |
+| `--auth-token` | `AMP_AUTH_TOKEN` | —                       | Bearer auth token      |
+| `--json`       | —                | Human readable          | JSON output (CLI-only) |
 
 ## References
 

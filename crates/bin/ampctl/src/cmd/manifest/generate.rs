@@ -14,13 +14,15 @@
 //! Note: Derived datasets are not supported for automatic generation as they
 //! require custom SQL transformation definitions.
 //!
-//! # Configuration
+//! # Configuration (CLI-only flags)
 //!
-//! - Dataset Kind: `--kind` flag or `GM_KIND` env var
-//! - Network: `--network` flag or `GM_NETWORK` env var
-//! - Output: `--out` flag or `GM_OUT` env var (optional, defaults to stdout)
-//! - Start Block: `--start-block` flag or `GM_START_BLOCK` env var (optional, defaults to 0)
-//! - Finalized Blocks Only: `--finalized-blocks-only` flag or `GM_FINALIZED_BLOCKS_ONLY` env var
+//! All parameters are CLI-only flags with no environment variable equivalents:
+//!
+//! - `--kind` — Dataset kind (required)
+//! - `--network` — Network name (required)
+//! - `-o, --out` — Output file/directory (optional, defaults to stdout)
+//! - `--start-block` — Starting block number (optional, defaults to 0)
+//! - `--finalized-blocks-only` — Only include finalized blocks
 
 use std::path::PathBuf;
 
@@ -40,26 +42,26 @@ use solana_datasets::SolanaDatasetKind;
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// Kind of the dataset (evm-rpc, firehose, solana).
-    #[arg(long, required = true, env = "GM_KIND")]
+    #[arg(long, required = true)]
     pub kind: DatasetKindStr,
 
     /// The name of the network.
-    #[arg(long, required = true, env = "GM_NETWORK")]
+    #[arg(long, required = true)]
     pub network: NetworkId,
 
     /// Output file or directory. If it's a directory, the generated file name will
     /// match the `kind` parameter.
     ///
     /// If not specified, the manifest will be printed to stdout.
-    #[arg(short, long, env = "GM_OUT")]
+    #[arg(short, long)]
     pub out: Option<PathBuf>,
 
     /// The starting block number for the dataset. Defaults to 0.
-    #[arg(long, env = "GM_START_BLOCK")]
+    #[arg(long)]
     pub start_block: Option<u64>,
 
     /// Only include finalized block data.
-    #[arg(long, env = "GM_FINALIZED_BLOCKS_ONLY")]
+    #[arg(long)]
     pub finalized_blocks_only: bool,
 }
 

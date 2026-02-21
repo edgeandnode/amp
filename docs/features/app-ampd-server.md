@@ -89,13 +89,28 @@ This command does not create directories itself; it relies on the configured pat
 
 ## Usage
 
+### Endpoint Selection
+
+By default, `ampd server` starts both Flight and JSONL endpoints. Use `--flight-server` and `--jsonl-server` flags (or their env var equivalents `AMP_FLIGHT_SERVER` / `AMP_JSONL_SERVER`) to selectively enable only specific endpoints:
+
+```bash
+# Start only the Flight endpoint
+ampd server --flight-server
+
+# Start only the JSONL endpoint
+ampd server --jsonl-server
+
+# Via environment variables
+AMP_FLIGHT_SERVER=true ampd server
+```
+
 ### Starting the Server
 
 ```bash
-# Start ampd with default server configuration
-ampd
+# Start ampd with default server configuration (both endpoints)
+ampd server
 
-# The query server starts automatically with both endpoints:
+# The query server starts with both endpoints:
 # - Arrow Flight on port 1602
 # - JSON Lines on port 1603
 ```
