@@ -227,10 +227,12 @@ where
     Ok(())
 }
 
-/// Delete a revision by its ID
+/// Delete a revision by its ID, only if it is not currently active.
 ///
 /// This will also delete all associated file_metadata entries due to CASCADE.
-/// Returns true if the revision was deleted, false if it didn't exist.
+///
+/// Returns true if the revision was deleted, false if it didn't exist or was
+/// active at the time of deletion.
 pub async fn delete_by_id<'c, E>(exe: E, id: LocationId) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -238,6 +240,10 @@ where
     let query = indoc::indoc! {"
         DELETE FROM physical_table_revisions
         WHERE id = $1
+          AND NOT EXISTS (
+              SELECT 1 FROM physical_tables
+              WHERE active_revision_id = $1
+          )
     "};
 
     let result = sqlx::query(query).bind(id).execute(exe).await?;

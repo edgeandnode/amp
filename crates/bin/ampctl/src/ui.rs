@@ -58,6 +58,23 @@ macro_rules! detail {
     };
 }
 
+/// Asks users if they are certain about a certain action.
+pub fn prompt_for_confirmation(prompt: &str) -> Result<bool, std::io::Error> {
+    use std::io::Write;
+
+    print!("{prompt} [y/N] ");
+    std::io::stdout().flush()?;
+
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    answer.make_ascii_lowercase();
+
+    match answer.trim() {
+        "y" | "yes" => Ok(true),
+        _ => Ok(false),
+    }
+}
+
 /// Style a version string (bold white)
 pub fn version(v: impl std::fmt::Display) -> String {
     style(v).bold().to_string()

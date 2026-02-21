@@ -468,6 +468,22 @@ impl DataStore {
         Ok(())
     }
 
+    /// Deletes a physical table revision by its location ID.
+    ///
+    /// This removes the revision record from the metadata database. Due to CASCADE
+    /// constraints, all associated `file_metadata` entries are also deleted.
+    ///
+    /// Returns `true` if the revision was deleted, `false` if it did not exist or
+    /// was active at the time of deletion.
+    pub async fn delete_table_revision(
+        &self,
+        location_id: LocationId,
+    ) -> Result<bool, DeleteTableRevisionError> {
+        metadata_db::physical_table_revision::delete_by_id(&self.metadata_db, location_id)
+            .await
+            .map_err(DeleteTableRevisionError)
+    }
+
     /// Finds the latest table revision by lexicographic comparison of revision IDs.
     ///
     /// This function performs a `list_with_delimiter` query on the provided table path,
@@ -1086,6 +1102,18 @@ pub enum DeactivateTableRevisionError {
     #[error("No physical table found for dataset and table name")]
     TableNotFound,
 }
+
+/// Failed to delete a table revision from the metadata database
+///
+/// This error occurs when the database delete operation fails.
+///
+/// Common causes:
+/// - Database connection lost during delete
+/// - Database server unreachable
+/// - Network connectivity issues
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to delete table revision from metadata database")]
+pub struct DeleteTableRevisionError(#[source] pub metadata_db::Error);
 
 /// Failed to find the latest table revision in object store
 ///
