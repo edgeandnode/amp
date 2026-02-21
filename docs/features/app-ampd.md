@@ -2,6 +2,7 @@
 name: "app-ampd"
 description: "ampd daemon for data extraction, transformation, and query serving. Load when asking about ampd, operational modes, or the Amp daemon"
 type: meta
+status: "stable"
 components: "app:ampd"
 ---
 
@@ -29,12 +30,20 @@ ampd supports multiple operational modes and deployment patterns. For detailed i
 
 ### Quick Reference
 
-| Command | Description |
-|---------|-------------|
-| `ampd solo` | Single-node mode for development |
-| `ampd server` | Query server (Flight + JSONL) |
-| `ampd controller` | Job scheduling and admin API |
-| `ampd worker` | Data extraction worker |
+| Command           | Description                      |
+|-------------------|----------------------------------|
+| `ampd solo`       | Single-node mode for development |
+| `ampd server`     | Query server (Flight + JSONL)    |
+| `ampd controller` | Job scheduling and admin API     |
+| `ampd worker`     | Data extraction worker           |
+
+### Global CLI Options
+
+| Flag       | Env Var      | Description             |
+|------------|--------------|-------------------------|
+| `--config` | `AMP_CONFIG` | Configuration file path |
+
+For subcommand-specific options, see the individual mode documentation.
 
 ## References
 

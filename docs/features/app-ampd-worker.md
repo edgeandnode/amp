@@ -2,6 +2,7 @@
 name: "app-ampd-worker"
 description: "ampd worker for blockchain data extraction. Load when asking about workers, extraction jobs, or data ingestion"
 type: feature
+status: "stable"
 components: "app:ampd,service:worker,crate:config"
 ---
 
@@ -50,9 +51,9 @@ For detailed deployment patterns, see [Operational Modes](../modes.md).
 
 ## Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `node_id` | Required | Unique worker identifier |
+| Setting   | Flag        | Env Var       | Default  | Description              |
+|-----------|-------------|---------------|----------|--------------------------|
+| `node_id` | `--node-id` | `AMP_NODE_ID` | Required | Unique worker identifier |
 
 ### Environment Variables
 
