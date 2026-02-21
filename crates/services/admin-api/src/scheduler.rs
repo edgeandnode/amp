@@ -25,10 +25,9 @@
 
 use async_trait::async_trait;
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
-    hash_reference::HashReference, name::Name, namespace::Namespace,
+    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };
-use metadata_db::workers::Worker;
+use metadata_db::{jobs::JobDescriptorRawOwned, workers::Worker};
 use worker::{
     job::{Job, JobId, JobStatus},
     node_id::{InvalidIdError, NodeId, validate_node_id},
@@ -50,13 +49,11 @@ impl<T> Scheduler for T where T: SchedulerJobs + SchedulerWorkers {}
 // because const generics make the trait not dyn-compatible.
 #[async_trait]
 pub trait SchedulerJobs: Send + Sync {
-    /// Schedule a dataset synchronization job
-    async fn schedule_dataset_sync_job(
+    /// Schedule a job with a pre-built descriptor
+    async fn schedule_job(
         &self,
         dataset_reference: HashReference,
-        dataset_kind: DatasetKindStr,
-        end_block: EndBlock,
-        max_writers: u16,
+        job_descriptor: JobDescriptorRawOwned,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError>;
 
@@ -139,15 +136,6 @@ pub enum ScheduleJobError {
     /// - The specified worker hasn't sent heartbeats recently (inactive)
     #[error("specified worker '{0}' not found or inactive")]
     WorkerNotAvailable(NodeId),
-
-    /// Failed to serialize job descriptor to JSON
-    ///
-    /// This occurs when:
-    /// - JobDescriptor cannot be serialized to JSON
-    /// - Invalid UTF-8 characters in job parameters
-    /// - Serialization buffer overflow
-    #[error("failed to serialize job descriptor: {0}")]
-    SerializeJobDescriptor(#[source] serde_json::Error),
 
     /// Failed to register job in the metadata database
     ///

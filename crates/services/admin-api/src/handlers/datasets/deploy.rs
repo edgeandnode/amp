@@ -11,6 +11,8 @@ use axum::{
 };
 use common::dataset_store::GetDatasetError;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
+use datasets_derived::DerivedDatasetKind;
+use metadata_db::jobs::JobDescriptorRawOwned;
 use monitoring::logging;
 use worker::job::JobId;
 
@@ -143,16 +145,30 @@ pub async fn handler(
         .await
         .map_err(Error::GetDataset)?;
 
+    // Build the job descriptor based on dataset kind
+    let job_descriptor: JobDescriptorRawOwned = if dataset.kind() == DerivedDatasetKind {
+        amp_worker_datasets_derived::job_descriptor::JobDescriptor {
+            end_block: end_block.into(),
+            dataset_namespace: reference.namespace().clone(),
+            dataset_name: reference.name().clone(),
+            manifest_hash: reference.hash().clone(),
+        }
+        .into()
+    } else {
+        amp_worker_datasets_raw::job_descriptor::JobDescriptor {
+            end_block: end_block.into(),
+            max_writers: parallelism,
+            dataset_namespace: reference.namespace().clone(),
+            dataset_name: reference.name().clone(),
+            manifest_hash: reference.hash().clone(),
+        }
+        .into()
+    };
+
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
-        .schedule_dataset_sync_job(
-            reference.clone(),
-            dataset.kind().clone(),
-            end_block.into(),
-            parallelism,
-            worker_id,
-        )
+        .schedule_job(reference.clone(), job_descriptor, worker_id)
         .await
         .map_err(|err| {
             tracing::error!(
