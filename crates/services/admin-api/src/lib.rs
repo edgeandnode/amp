@@ -47,6 +47,10 @@ pub fn router(ctx: Ctx) -> Router<()> {
             post(datasets::restore::handler),
         )
         .route(
+            "/datasets/{namespace}/{name}/versions/{revision}/tables/{table_name}/restore",
+            post(datasets::restore_table::handler),
+        )
+        .route(
             "/datasets/{namespace}/{name}/versions/{revision}/jobs",
             get(datasets::list_jobs::handler),
         )
@@ -121,6 +125,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::register::handler,
         handlers::datasets::deploy::handler,
         handlers::datasets::restore::handler,
+        handlers::datasets::restore_table::handler,
         handlers::datasets::delete::handler,
         handlers::datasets::delete_version::handler,
         // Manifest endpoints
@@ -178,6 +183,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::deploy::DeployResponse,
         handlers::datasets::restore::RestoreResponse,
         handlers::datasets::restore::RestoredTableInfo,
+        handlers::datasets::restore_table::RestoreTablePayload,
         // Job schemas
         handlers::jobs::progress::JobProgressResponse,
         handlers::jobs::progress::TableProgress,
