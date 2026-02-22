@@ -121,12 +121,12 @@ use common::{
             for_dump as physical_catalog,
         },
     },
-    context::{planning::PlanningContext, query::QueryContext},
+    context::{exec::ExecContext, plan::PlanContext},
     dataset_store::ResolveRevisionError,
     detached_logical_plan::DetachedLogicalPlan,
+    exec_env::ExecEnv,
     metadata::Generation,
     parquet::errors::ParquetError,
-    query_env::QueryEnv,
     sql::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
@@ -242,7 +242,7 @@ pub async fn dump(
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set = tasks::FailFastJoinSet::<Result<(), DumpTableError>>::new();
 
-    let env = common::query_env::create(
+    let env = common::exec_env::create(
         ctx.config.max_mem_mb,
         ctx.config.query_max_mem_mb,
         &ctx.config.spill_location,
@@ -430,7 +430,7 @@ impl Error {
 async fn dump_table(
     ctx: Ctx,
     manifest: &DerivedManifest,
-    env: QueryEnv,
+    env: ExecEnv,
     table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
     opts: Arc<WriterProperties>,
@@ -504,7 +504,7 @@ async fn dump_table(
             .await
             .map_err(DumpTableError::CreatePhysicalCatalog)?
     };
-    let planning_ctx = PlanningContext::new(env.session_config.clone(), catalog.logical().clone());
+    let planning_ctx = PlanContext::new(env.session_config.clone(), catalog.logical().clone());
     let manifest_start_block = manifest.start_block;
 
     join_set.spawn(
@@ -543,7 +543,7 @@ async fn dump_table(
 
             let resolved = resolve_end_block(&end, start, async {
                 let query_ctx =
-                    QueryContext::for_catalog(env.clone(), catalog.clone(), false).await?;
+                    ExecContext::for_catalog(env.clone(), catalog.clone(), false).await?;
                 let max_end_blocks = query_ctx
                     .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
                     .await?;
@@ -730,7 +730,7 @@ pub enum DumpTableSpawnError {
     /// This occurs when DataFusion cannot create an execution plan
     /// from the parsed SQL query.
     #[error("failed to plan SQL query: {0}")]
-    PlanSql(#[source] common::context::planning::PlanSqlError),
+    PlanSql(#[source] common::context::plan::SqlError),
 
     /// The query is not incremental and cannot be synced
     ///
@@ -787,7 +787,7 @@ pub enum DumpTableSpawnError {
 #[expect(clippy::too_many_arguments)]
 async fn dump_sql_query(
     ctx: &Ctx,
-    env: &QueryEnv,
+    env: &ExecEnv,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
     start: BlockNum,

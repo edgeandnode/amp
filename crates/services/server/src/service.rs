@@ -188,7 +188,7 @@ pub enum InitError {
     /// - DataFusion session configuration is invalid
     /// - Query execution pool initialization fails
     #[error("failed to create query environment: {0}")]
-    QueryEnv(#[source] DataFusionError),
+    ExecEnv(#[source] DataFusionError),
 
     /// Failed to initialize Flight server
     ///
