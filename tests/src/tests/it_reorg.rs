@@ -474,7 +474,7 @@ impl ReorgTestCtx {
         let test_env = &self.ctx;
         let sql_query = SqlStr::new_unchecked(format!("select * from {}.blocks", dataset));
         let sql = sql::parse(&sql_query).expect("Failed to parse SQL for dataset.blocks");
-        let env = common::query_env::create(
+        let env = common::exec_env::create(
             test_env.daemon_server().config().max_mem_mb,
             test_env.daemon_server().config().query_max_mem_mb,
             &test_env.daemon_server().config().spill_location,
