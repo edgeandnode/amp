@@ -11,14 +11,14 @@ use datafusion::{
 };
 
 use crate::{
-    context::query::QueryContext,
+    context::exec::ExecContext,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::{is_incremental, propagate_block_num},
     sql::TableReference,
 };
 
-/// A plan that has `PlanningTable` for its `TableProvider`s. It cannot be executed before being
-/// first "attached" to a `QueryContext`.
+/// A plan that has `PlanTable` for its `TableProvider`s. It cannot be executed before being
+/// first "attached" to a `ExecContext`.
 #[derive(Debug, Clone)]
 pub struct DetachedLogicalPlan(LogicalPlan);
 
@@ -28,10 +28,10 @@ impl DetachedLogicalPlan {
         Self(plan)
     }
 
-    /// Attaches this plan to a query context by replacing `PlanningTable` providers
+    /// Attaches this plan to a query context by replacing `PlanTable` providers
     /// with actual `TableSnapshot` providers from the catalog.
     #[tracing::instrument(skip_all, err)]
-    pub fn attach_to(self, ctx: &QueryContext) -> Result<LogicalPlan, AttachPlanError> {
+    pub fn attach_to(self, ctx: &ExecContext) -> Result<LogicalPlan, AttachPlanError> {
         Ok(self
             .0
             .transform_with_subqueries(|mut node| match &mut node {
@@ -91,7 +91,7 @@ impl std::ops::Deref for DetachedLogicalPlan {
 
 /// Failed to attach a detached logical plan to a query context
 ///
-/// This occurs when transforming `PlanningTable` references into actual
+/// This occurs when transforming `PlanTable` references into actual
 /// `TableSnapshot` references fails during plan attachment.
 #[derive(Debug, thiserror::Error)]
 #[error("failed to attach plan to query context")]

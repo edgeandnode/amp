@@ -1,3 +1,3 @@
 mod common;
-pub mod planning;
-pub mod query;
+pub mod exec;
+pub mod plan;

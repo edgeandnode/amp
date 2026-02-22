@@ -10,10 +10,10 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
-    context::planning::{PlanSqlError as PlanningPlanSqlError, PlanningContext},
+    context::plan::{PlanContext, SqlError as PlanSqlError},
     dataset_store::{DatasetStore, GetDatasetError},
+    exec_env::default_session_config,
     metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
-    query_env::default_session_config,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
@@ -339,7 +339,7 @@ pub async fn validate_derived_manifest(
         references,
     )
     .await
-    .map(|catalog| PlanningContext::new(session_config, catalog))
+    .map(|catalog| PlanContext::new(session_config, catalog))
     .map_err(|err| match &err {
         CreateLogicalCatalogError::ResolveTables(resolve_error) => match resolve_error {
             ResolveTablesError::UnqualifiedTable { .. } => {
@@ -583,7 +583,7 @@ pub enum ManifestValidationError {
         /// The table whose SQL query failed to plan
         table_name: TableName,
         #[source]
-        source: PlanningPlanSqlError,
+        source: PlanSqlError,
     },
 
     /// Failed to create DataFusion session configuration
