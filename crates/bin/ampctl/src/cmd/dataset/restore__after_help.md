@@ -1,9 +1,21 @@
 ## Examples
 
-Restore dataset physical tables from storage:
+Restore all dataset physical tables from storage:
 
 ```
 ampctl dataset restore my_namespace/my_dataset@1.0.0
+```
+
+Restore a single table from storage (UUID heuristic):
+
+```
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table logs
+```
+
+Activate a specific revision for a table:
+
+```
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table logs --location-id 42
 ```
 
 Restore latest version of a dataset:
@@ -38,6 +50,13 @@ ampctl dataset restore production/eth_mainnet@2.1.0
 ```
 # New controller, but object storage already has data
 ampctl dataset restore analytics/uniswap_v3@1.0.0
+```
+
+**Activating a specific revision for a table:**
+
+```
+# Switch a table to a known good revision
+ampctl dataset restore production/eth_mainnet@2.1.0 --table blocks --location-id 123
 ```
 
 **Re-syncing metadata after storage restoration:**

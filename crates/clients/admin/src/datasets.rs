@@ -93,6 +93,18 @@ fn dataset_restore(namespace: &Namespace, name: &Name, version: &Revision) -> St
     format!("datasets/{namespace}/{name}/versions/{version}/restore")
 }
 
+/// Build URL path for restoring a single table in a dataset version.
+///
+/// POST `/datasets/{namespace}/{name}/versions/{version}/tables/{table_name}/restore`
+fn dataset_restore_table(
+    namespace: &Namespace,
+    name: &Name,
+    version: &Revision,
+    table_name: &str,
+) -> String {
+    format!("datasets/{namespace}/{name}/versions/{version}/tables/{table_name}/restore")
+}
+
 /// Build URL path for listing jobs for a dataset revision.
 ///
 /// GET `/datasets/{namespace}/{name}/versions/{revision}/jobs`
@@ -430,6 +442,137 @@ impl<'a> DatasetsClient<'a> {
                     .await
                     .unwrap_or_else(|_| String::from("Failed to read response body"));
                 Err(RestoreError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
+    /// Restore a single table in a dataset version.
+    ///
+    /// POSTs to `/datasets/{namespace}/{name}/versions/{version}/tables/{table_name}/restore` endpoint.
+    ///
+    /// If `location_id` is provided, activates that existing revision for the table.
+    /// If omitted, discovers the latest revision from object storage via UUID heuristic.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RestoreTableError`] for network errors, API errors (400/404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(dataset_ref = %dataset_ref, table_name = %table_name, ?location_id))]
+    pub async fn restore_table(
+        &self,
+        dataset_ref: &Reference,
+        table_name: &str,
+        location_id: Option<i64>,
+    ) -> Result<(), RestoreTableError> {
+        let namespace = dataset_ref.namespace();
+        let name = dataset_ref.name();
+        let version = dataset_ref.revision();
+
+        let url = self
+            .client
+            .base_url()
+            .join(&dataset_restore_table(namespace, name, version, table_name))
+            .expect("valid URL");
+
+        tracing::debug!("sending restore table request");
+
+        let mut request = self.client.http().post(url.as_str());
+
+        if let Some(id) = location_id {
+            request = request.json(&RestoreTablePayload { location_id: id });
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|err| RestoreTableError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            200 => {
+                tracing::debug!("table restored");
+                Ok(())
+            }
+            400 | 404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    RestoreTableError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    RestoreTableError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH" => Err(RestoreTableError::InvalidPath(error_response.into())),
+                    "INVALID_BODY" => Err(RestoreTableError::InvalidBody(error_response.into())),
+                    "DATASET_NOT_FOUND" => {
+                        Err(RestoreTableError::DatasetNotFound(error_response.into()))
+                    }
+                    "RESOLVE_REVISION_ERROR" => Err(RestoreTableError::ResolveRevisionError(
+                        error_response.into(),
+                    )),
+                    "GET_DATASET_ERROR" => {
+                        Err(RestoreTableError::GetDatasetError(error_response.into()))
+                    }
+                    "TABLE_NOT_IN_MANIFEST" => {
+                        Err(RestoreTableError::TableNotInManifest(error_response.into()))
+                    }
+                    "TABLE_NOT_FOUND" => {
+                        Err(RestoreTableError::TableNotFound(error_response.into()))
+                    }
+                    "GET_REVISION_ERROR" => {
+                        Err(RestoreTableError::GetRevisionError(error_response.into()))
+                    }
+                    "REVISION_NOT_FOUND" => {
+                        Err(RestoreTableError::RevisionNotFound(error_response.into()))
+                    }
+                    "REGISTER_AND_ACTIVATE_ERROR" => Err(
+                        RestoreTableError::RegisterAndActivateError(error_response.into()),
+                    ),
+                    "RESTORE_TABLE_REVISION_ERROR" => Err(
+                        RestoreTableError::RestoreTableRevisionError(error_response.into()),
+                    ),
+                    "REGISTER_FILES_ERROR" => {
+                        Err(RestoreTableError::RegisterFilesError(error_response.into()))
+                    }
+                    _ => Err(RestoreTableError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(RestoreTableError::UnexpectedResponse {
                     status: status.as_u16(),
                     message: text,
                 })
@@ -1401,6 +1544,122 @@ pub enum RestoreError {
     /// - Table has never been dumped or data was deleted
     #[error("table not found")]
     TableNotFound(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Request payload for restoring a single table with a specific location ID.
+#[derive(Debug, serde::Serialize)]
+struct RestoreTablePayload {
+    location_id: i64,
+}
+
+/// Errors that can occur when restoring a single table.
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreTableError {
+    /// Invalid path parameters (400, INVALID_PATH)
+    ///
+    /// This occurs when:
+    /// - The namespace, name, revision, or table_name in the URL path is invalid
+    /// - Path parameter parsing fails
+    #[error("invalid path")]
+    InvalidPath(#[source] ApiError),
+
+    /// Invalid request body (400, INVALID_BODY)
+    ///
+    /// This occurs when:
+    /// - The request body is not valid JSON
+    /// - The JSON structure doesn't match the expected schema
+    /// - Required fields are missing or have invalid types
+    #[error("invalid body")]
+    InvalidBody(#[source] ApiError),
+
+    /// Dataset or revision not found (404, DATASET_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - The combination of namespace, name, and revision doesn't match any dataset
+    /// - The dataset has not been registered
+    #[error("dataset not found")]
+    DatasetNotFound(#[source] ApiError),
+
+    /// Failed to resolve revision (500, RESOLVE_REVISION_ERROR)
+    ///
+    /// This occurs when:
+    /// - The datasets registry could not resolve the revision reference
+    /// - The revision string is valid but cannot be mapped to a manifest hash
+    #[error("resolve revision error")]
+    ResolveRevisionError(#[source] ApiError),
+
+    /// Failed to load dataset (500, GET_DATASET_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to load dataset configuration from manifest
+    /// - Manifest parsing errors
+    /// - Invalid dataset structure
+    #[error("get dataset error")]
+    GetDatasetError(#[source] ApiError),
+
+    /// Table not found in dataset manifest (404, TABLE_NOT_IN_MANIFEST)
+    ///
+    /// This occurs when:
+    /// - The table name doesn't match any table in the dataset definition
+    /// - The dataset was resolved but doesn't define the requested table
+    #[error("table not in manifest")]
+    TableNotInManifest(#[source] ApiError),
+
+    /// Table data not found in object storage (404, TABLE_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - No physical table files exist in storage for this table
+    /// - The UUID heuristic scan found no revision directories
+    #[error("table not found")]
+    TableNotFound(#[source] ApiError),
+
+    /// Failed to look up revision by location ID (500, GET_REVISION_ERROR)
+    ///
+    /// This occurs when:
+    /// - The metadata database query for the location_id failed
+    /// - Database connection or query errors
+    #[error("get revision error")]
+    GetRevisionError(#[source] ApiError),
+
+    /// No revision found for the given location ID (404, REVISION_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - The provided location_id doesn't correspond to any registered revision
+    /// - The revision was deleted or never existed
+    #[error("revision not found")]
+    RevisionNotFound(#[source] ApiError),
+
+    /// Failed to register and activate physical table (500, REGISTER_AND_ACTIVATE_ERROR)
+    ///
+    /// This occurs when:
+    /// - The transactional upsert-and-activate operation failed
+    /// - Database connection or constraint errors during activation
+    #[error("register and activate error")]
+    RegisterAndActivateError(#[source] ApiError),
+
+    /// Failed to restore table revision from storage (500, RESTORE_TABLE_REVISION_ERROR)
+    ///
+    /// This occurs when:
+    /// - Error scanning object storage for table files
+    /// - Error registering location in metadata database
+    #[error("restore table revision error")]
+    RestoreTableRevisionError(#[source] ApiError),
+
+    /// Failed to register files (500, REGISTER_FILES_ERROR)
+    ///
+    /// This occurs when:
+    /// - Error re-indexing Parquet file metadata from storage
+    /// - Database errors while registering file metadata
+    #[error("register files error")]
+    RegisterFilesError(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]
