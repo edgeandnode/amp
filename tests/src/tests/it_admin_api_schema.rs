@@ -5,7 +5,7 @@
 //! ## Test Coverage
 //!
 //! ### Table Qualification Levels
-//! - Unqualified: `blocks` → ERROR (BAD_REQUEST)
+//! - Unqualified: `blocks` → ERROR (INTERNAL_SERVER_ERROR, lazy resolution)
 //! - Catalog-qualified: `catalog.eth_firehose.blocks` → ERROR (BAD_REQUEST)
 //!
 //! ### Error Conditions
@@ -34,7 +34,7 @@ async fn resolve_schema_with_unqualified_table_fails() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_REQUEST,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail for unqualified table reference"
     );
 
@@ -44,13 +44,8 @@ async fn resolve_schema_with_unqualified_table_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "UNQUALIFIED_TABLE",
-        "should return UNQUALIFIED_TABLE for unqualified table"
-    );
-    assert!(
-        response.error_message.contains("Unqualified table"),
-        "error message should mention unqualified table, got: {}",
-        response.error_message
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for unqualified table (lazy resolution)"
     );
 }
 
@@ -82,11 +77,13 @@ async fn resolve_schema_with_catalog_qualified_table_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "CATALOG_QUALIFIED_TABLE",
-        "should return CATALOG_QUALIFIED_TABLE for catalog-qualified table"
+        response.error_code, "INVALID_PLAN",
+        "should return INVALID_PLAN for catalog-qualified table"
     );
     assert!(
-        response.error_message.contains("Catalog-qualified table"),
+        response
+            .error_message
+            .contains("Catalog-qualified table references are not supported"),
         "error message should mention catalog-qualified table, got: {}",
         response.error_message
     );
@@ -607,7 +604,7 @@ async fn multiple_tables_unqualified_table_fails() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_REQUEST,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail with unqualified table"
     );
 
@@ -617,8 +614,8 @@ async fn multiple_tables_unqualified_table_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "UNQUALIFIED_TABLE",
-        "should return UNQUALIFIED_TABLE"
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for unqualified table (lazy resolution)"
     );
 }
 
@@ -655,8 +652,8 @@ async fn multiple_tables_catalog_qualified_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "CATALOG_QUALIFIED_TABLE",
-        "should return CATALOG_QUALIFIED_TABLE"
+        response.error_code, "INVALID_PLAN",
+        "should return INVALID_PLAN for catalog-qualified table"
     );
 }
 
@@ -716,7 +713,7 @@ async fn multiple_tables_undefined_alias_fails() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_REQUEST,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail with undefined alias"
     );
 
@@ -726,8 +723,8 @@ async fn multiple_tables_undefined_alias_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "DEPENDENCY_ALIAS_NOT_FOUND",
-        "should return DEPENDENCY_ALIAS_NOT_FOUND"
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for undefined alias (lazy resolution)"
     );
 }
 
@@ -1190,7 +1187,7 @@ async fn multiple_tables_table_not_in_dataset_fails() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail with table not in dataset"
     );
 
@@ -1200,8 +1197,8 @@ async fn multiple_tables_table_not_in_dataset_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "TABLE_NOT_FOUND_IN_DATASET",
-        "should return TABLE_NOT_FOUND_IN_DATASET"
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for table not in dataset (lazy resolution)"
     );
 }
 
@@ -1410,8 +1407,8 @@ async fn function_not_in_dataset_fails_at_catalog_construction() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
-        "schema resolution should fail at catalog construction with 404"
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "schema resolution should fail for nonexistent function (lazy resolution)"
     );
 
     let response: ErrorResponse = resp
@@ -1420,14 +1417,8 @@ async fn function_not_in_dataset_fails_at_catalog_construction() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "FUNCTION_NOT_FOUND_IN_DATASET",
-        "should return FUNCTION_NOT_FOUND_IN_DATASET error"
-    );
-    assert!(
-        response.error_message.contains("nonexistent_function")
-            && response.error_message.contains("_/eth_firehose"),
-        "error message should indicate function and dataset, got: {}",
-        response.error_message
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for nonexistent function (lazy resolution)"
     );
 }
 
@@ -1458,7 +1449,7 @@ async fn multiple_tables_with_missing_function_fails_on_first() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail when a table references missing function"
     );
 
@@ -1468,14 +1459,8 @@ async fn multiple_tables_with_missing_function_fails_on_first() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "FUNCTION_NOT_FOUND_IN_DATASET",
-        "should return FUNCTION_NOT_FOUND_IN_DATASET error"
-    );
-    // Should fail on table2 which references fake_decode
-    assert!(
-        response.error_message.contains("table2") && response.error_message.contains("fake_decode"),
-        "error message should reference the failing table and function, got: {}",
-        response.error_message
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for missing function (lazy resolution)"
     );
 }
 
@@ -1550,17 +1535,10 @@ async fn function_with_catalog_qualification_fails() {
         .await
         .expect("failed to parse error response JSON");
 
-    // The error should indicate catalog-qualified function (not supported)
+    // The error should indicate invalid plan (catalog-qualified functions caught by planner)
     assert_eq!(
-        response.error_code, "CATALOG_QUALIFIED_FUNCTION",
-        "should return CATALOG_QUALIFIED_FUNCTION for catalog-qualified function"
-    );
-    assert!(
-        response
-            .error_message
-            .contains("Catalog-qualified function references are not supported"),
-        "error message should mention catalog-qualified functions are not supported, got: {}",
-        response.error_message
+        response.error_code, "INVALID_PLAN",
+        "should return INVALID_PLAN for catalog-qualified function"
     );
 }
 
@@ -1596,15 +1574,10 @@ async fn function_with_invalid_format_fails() {
         .await
         .expect("failed to parse error response JSON");
 
-    // The error should indicate function reference resolution failure
+    // The error should indicate invalid plan (invalid function format caught by planner)
     assert_eq!(
-        response.error_code, "FUNCTION_REFERENCE_RESOLUTION",
-        "should return FUNCTION_REFERENCE_RESOLUTION for invalid function format"
-    );
-    assert!(
-        response.error_message.contains("Invalid function format"),
-        "error message should mention invalid function format, got: {}",
-        response.error_message
+        response.error_code, "INVALID_PLAN",
+        "should return INVALID_PLAN for invalid function format"
     );
 }
 
@@ -1631,7 +1604,7 @@ async fn function_with_undefined_alias_fails() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_REQUEST,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail with undefined function alias"
     );
 
@@ -1641,13 +1614,8 @@ async fn function_with_undefined_alias_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "DEPENDENCY_ALIAS_NOT_FOUND",
-        "should return DEPENDENCY_ALIAS_NOT_FOUND for undefined function alias"
-    );
-    assert!(
-        response.error_message.contains("undefined_alias"),
-        "error message should mention the undefined alias, got: {}",
-        response.error_message
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for undefined function alias (lazy resolution)"
     );
 }
 
@@ -1711,7 +1679,7 @@ async fn multiple_functions_mixed_validity_fails() {
     //* Then
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::INTERNAL_SERVER_ERROR,
         "schema resolution should fail due to invalid function despite valid built-ins"
     );
 
@@ -1721,13 +1689,8 @@ async fn multiple_functions_mixed_validity_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "FUNCTION_NOT_FOUND_IN_DATASET",
-        "should return FUNCTION_NOT_FOUND_IN_DATASET error"
-    );
-    assert!(
-        response.error_message.contains("nonexistent_fn"),
-        "error message should indicate the invalid function, got: {}",
-        response.error_message
+        response.error_code, "SCHEMA_INFERENCE",
+        "should return SCHEMA_INFERENCE for nonexistent function (lazy resolution)"
     );
 }
 

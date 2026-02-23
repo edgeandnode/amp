@@ -1,199 +1,156 @@
 use std::sync::Arc;
 
 use datafusion::{
-    catalog::MemorySchemaProvider,
-    common::DFSchemaRef,
-    error::DataFusionError,
-    execution::{SessionStateBuilder, config::SessionConfig, context::SessionContext},
-    sql::parser,
+    catalog::AsyncCatalogProvider as TableAsyncCatalogProvider, common::DFSchemaRef,
+    error::DataFusionError, execution::config::SessionConfig, sql::parser,
 };
 
+pub use crate::context::session::is_user_input_error;
 use crate::{
-    catalog::logical::{LogicalCatalog, LogicalTable},
-    context::common::{SqlToPlanError, builtin_udfs, sql_to_plan},
+    context::{
+        common::{INVALID_INPUT_CONTEXT, ReadOnlyCheckError, read_only_check},
+        session::{SessionContext, SessionStateBuilder},
+    },
     detached_logical_plan::DetachedLogicalPlan,
-    plan_table::PlanTable,
+    func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
+    plan_visitors::forbid_underscore_prefixed_aliases,
 };
 
 /// A context for planning SQL queries.
+///
+/// Delegates SQL planning and schema inference to a custom [`SessionContext`]
+/// that performs async catalog pre-resolution before calling DataFusion.
+/// Async-resolved catalogs are registered via `with_table_catalog` and
+/// `with_func_catalog`.
 pub struct PlanContext {
-    session_config: SessionConfig,
-    catalog: LogicalCatalog,
+    session_ctx: SessionContext,
 }
 
 impl PlanContext {
-    /// Creates a planning context from a logical catalog.
-    pub fn new(session_config: SessionConfig, catalog: LogicalCatalog) -> Self {
-        Self {
-            session_config,
-            catalog,
-        }
-    }
-
-    /// Returns the logical tables registered in this planning context.
-    pub fn logical_tables(&self) -> &[LogicalTable] {
-        &self.catalog.tables
-    }
-
     /// Infers the output schema of the query by planning it against empty tables.
     pub async fn sql_output_schema(
         &self,
         query: parser::Statement,
-    ) -> Result<DFSchemaRef, SqlError> {
-        let ctx = new_session_ctx(self.session_config.clone());
-        register_catalog(&ctx, &self.catalog).map_err(SqlError::RegisterTable)?;
-        let plan = sql_to_plan(&ctx, query)
-            .await
-            .map_err(SqlError::SqlToPlan)?;
+    ) -> Result<DFSchemaRef, DataFusionError> {
+        let plan = self.statement_to_plan(query).await?;
         Ok(plan.schema().clone())
     }
 
-    /// Converts a parsed SQL statement into a detached logical plan.
-    pub async fn plan_sql(
+    /// Plans a SQL statement into a validated [`LogicalPlan`].
+    ///
+    /// Delegates to the session for pure DF planning, then enforces
+    /// consumer-level policies: forbidden underscore-prefixed aliases
+    /// and read-only constraints.
+    pub async fn statement_to_plan(
         &self,
         query: parser::Statement,
-    ) -> Result<DetachedLogicalPlan, SqlError> {
-        let ctx = new_session_ctx(self.session_config.clone());
-        register_catalog(&ctx, &self.catalog).map_err(SqlError::RegisterTable)?;
-        let plan = sql_to_plan(&ctx, query)
-            .await
-            .map_err(SqlError::SqlToPlan)?;
+    ) -> Result<DetachedLogicalPlan, DataFusionError> {
+        let plan = self.session_ctx.statement_to_plan(query).await?;
+
+        forbid_underscore_prefixed_aliases(&plan)
+            .map_err(|err| StatementToPlanError::ForbiddenAliases(err).into_datafusion_error())?;
+        read_only_check(&plan)
+            .map_err(|err| StatementToPlanError::ReadOnlyCheck(err).into_datafusion_error())?;
+
         Ok(DetachedLogicalPlan::new(plan))
     }
 
     /// Applies DataFusion logical optimizations to a detached plan.
     #[tracing::instrument(skip_all, err)]
-    pub async fn optimize_plan(
+    pub fn optimize(
         &self,
         plan: &DetachedLogicalPlan,
-    ) -> Result<DetachedLogicalPlan, OptimizePlanError> {
-        let ctx = new_session_ctx(self.session_config.clone());
-        register_catalog(&ctx, &self.catalog).map_err(OptimizePlanError::RegisterTable)?;
-        ctx.state()
+    ) -> Result<DetachedLogicalPlan, DataFusionError> {
+        self.session_ctx
             .optimize(plan)
-            .map_err(OptimizePlanError::Optimize)
             .map(DetachedLogicalPlan::new)
     }
 }
 
-/// Creates a bare DataFusion session context with builtin UDFs but no catalog tables.
+/// Builder for [`PlanContext`].
 ///
-/// Call [`register_catalog`] on the returned context to populate it with tables and UDFs
-/// from a [`LogicalCatalog`].
-fn new_session_ctx(config: SessionConfig) -> SessionContext {
-    let ctx = {
-        let state = SessionStateBuilder::new()
-            .with_config(config)
-            .with_runtime_env(Default::default())
-            .with_default_features()
-            .build();
-        SessionContext::new_with_state(state)
-    };
-
-    // Register the builtin UDFs
-    for udf in builtin_udfs() {
-        ctx.register_udf(udf);
-    }
-
-    ctx
+/// Composes a [`SessionStateBuilder`] internally. The exposed API covers
+/// async table catalog registration (`with_table_catalog`) and async function
+/// catalog registration (`with_func_catalog`). No internals of the state
+/// builder are passed through directly.
+pub struct PlanContextBuilder {
+    state_builder: SessionStateBuilder,
 }
 
-/// Registers the tables and UDFs from a [`LogicalCatalog`] into a [`SessionContext`].
-fn register_catalog(
-    ctx: &SessionContext,
-    catalog: &LogicalCatalog,
-) -> Result<(), RegisterTableError> {
-    // Register tables first to ensure schemas are created before UDF registration
-    for table in catalog.tables.iter() {
-        let schema_name = table.sql_schema_name();
-
-        // The catalog schema needs to be explicitly created or table creation will fail.
-        if ctx
-            .catalog(&ctx.catalog_names()[0])
-            .unwrap()
-            .schema(schema_name)
-            .is_none()
-        {
-            let schema = Arc::new(MemorySchemaProvider::new());
-            ctx.catalog(&ctx.catalog_names()[0])
-                .unwrap()
-                .register_schema(schema_name, schema)
-                .unwrap();
+impl PlanContextBuilder {
+    /// Creates a new builder for configuring a [`PlanContext`].
+    pub fn new(session_config: SessionConfig) -> Self {
+        Self {
+            state_builder: SessionStateBuilder::new(session_config),
         }
-
-        // Register the table with a planning-only provider that exposes the schema but cannot be scanned.
-        let table_schema = table.schema().clone();
-        ctx.register_table(
-            table.table_ref().clone(),
-            Arc::new(PlanTable::new(table_schema)),
-        )
-        .map_err(RegisterTableError)?;
     }
 
-    // Register UDFs after tables to ensure any schema dependencies are resolved
-    for udf in catalog.udfs.iter() {
-        ctx.register_udf(udf.clone());
+    /// Registers a named async table catalog provider.
+    ///
+    /// Referenced catalogs are resolved before SQL planning via the
+    /// pre-resolution pipeline in the custom session. The `name` must
+    /// match the `SessionConfig` default catalog for the provider to
+    /// be reachable — see [`SessionContextBuilder`] docs.
+    pub fn with_table_catalog(
+        mut self,
+        name: impl Into<String>,
+        provider: Arc<dyn TableAsyncCatalogProvider>,
+    ) -> Self {
+        self.state_builder = self.state_builder.with_table_catalog(name, provider);
+        self
     }
 
-    Ok(())
-}
-
-/// Failed to register a catalog table with the planning session context
-///
-/// This occurs when DataFusion rejects a table registration during planning
-/// session creation, typically because a table with the same name already
-/// exists or the table metadata is invalid.
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to register catalog table with planning session context")]
-pub struct RegisterTableError(#[source] DataFusionError);
-
-/// Failed to plan a SQL query against the planning context
-///
-/// This error is shared by `plan_sql` and `sql_output_schema` because they
-/// produce the exact same error variants.
-#[derive(Debug, thiserror::Error)]
-pub enum SqlError {
-    /// Failed to create a planning session context
+    /// Registers a named async function catalog provider.
     ///
-    /// This occurs when building a `SessionContext` for SQL planning fails,
-    /// typically due to a table registration error during context setup.
-    #[error("failed to create planning session context")]
-    RegisterTable(#[source] RegisterTableError),
+    /// Referenced qualified function catalogs are resolved before SQL planning
+    /// and registered as `ScalarUDF`s. The `name` must match the
+    /// `SessionConfig` default catalog for the provider to be reachable —
+    /// see [`SessionContextBuilder`] docs.
+    pub fn with_func_catalog(
+        mut self,
+        name: impl Into<String>,
+        provider: Arc<dyn FuncAsyncCatalogProvider>,
+    ) -> Self {
+        self.state_builder = self.state_builder.with_func_catalog(name, provider);
+        self
+    }
 
-    /// Failed to convert SQL to a logical plan
-    ///
-    /// This occurs during SQL-to-logical-plan conversion, including
-    /// statement parsing, alias validation, and read-only enforcement.
-    #[error("failed to convert SQL to logical plan: {0}")]
-    SqlToPlan(#[source] SqlToPlanError),
-}
-
-impl SqlError {
-    /// Returns `true` if this error represents an invalid plan due to user input
-    /// (forbidden aliases or read-only violations) rather than an internal failure.
-    pub fn is_invalid_plan(&self) -> bool {
-        matches!(self, Self::SqlToPlan(err) if err.is_invalid_plan())
+    /// Builds the [`PlanContext`].
+    pub fn build(self) -> PlanContext {
+        PlanContext {
+            session_ctx: SessionContext::new_with_state(self.state_builder.build()),
+        }
     }
 }
 
-/// Failed to optimize a logical plan
+/// Failed to convert a SQL statement into a validated logical plan.
 ///
-/// This error covers failures during the logical optimization phase.
+/// Covers all failure modes during policy-enforcing SQL planning in
+/// [`PlanContext::statement_to_plan`]: alias validation and read-only
+/// enforcement. Flattened to [`DataFusionError`] before leaving the method.
 #[derive(Debug, thiserror::Error)]
-pub enum OptimizePlanError {
-    /// Failed to create a planning session context
-    ///
-    /// This occurs when building a `SessionContext` for optimization fails,
-    /// typically due to a table registration error during context setup.
-    #[error("failed to create planning session context")]
-    RegisterTable(#[source] RegisterTableError),
+enum StatementToPlanError {
+    /// Query uses underscore-prefixed column aliases which are reserved
+    #[error("query uses forbidden underscore-prefixed aliases")]
+    ForbiddenAliases(#[source] DataFusionError),
 
-    /// DataFusion optimizer failed to process the plan
-    ///
-    /// Possible causes:
-    /// - Optimizer rule failure during logical optimization
-    /// - Type inference errors
-    /// - Schema inconsistencies
-    #[error("failed to optimize logical plan")]
-    Optimize(#[source] DataFusionError),
+    /// Query plan violates read-only constraints
+    #[error("query plan violates read-only constraints")]
+    ReadOnlyCheck(#[source] ReadOnlyCheckError),
+}
+
+impl StatementToPlanError {
+    /// Converts into a [`DataFusionError`] with appropriate user-input tagging.
+    fn into_datafusion_error(self) -> DataFusionError {
+        match self {
+            Self::ForbiddenAliases(err) => DataFusionError::Plan(format!(
+                "query uses forbidden underscore-prefixed aliases: {err}"
+            ))
+            .context(INVALID_INPUT_CONTEXT),
+            Self::ReadOnlyCheck(err) => {
+                DataFusionError::Plan(format!("query plan violates read-only constraints: {err}"))
+                    .context(INVALID_INPUT_CONTEXT)
+            }
+        }
+    }
 }

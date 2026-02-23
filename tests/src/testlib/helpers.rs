@@ -15,7 +15,7 @@ use anyhow::{Result, anyhow};
 use common::{
     BlockRange,
     catalog::{
-        logical::{LogicalCatalog, LogicalTable},
+        logical::LogicalTable,
         physical::{Catalog, CatalogTable},
     },
     dataset_store::DatasetStore,
@@ -375,8 +375,12 @@ pub async fn catalog_for_dataset(
             )
         })
         .collect();
-    let logical = LogicalCatalog::from_tables(resolved_tables.iter());
-    Ok(Catalog::new(logical, tables))
+    Ok(Catalog::new(
+        resolved_tables,
+        vec![],
+        tables,
+        Default::default(),
+    ))
 }
 
 /// Create a test metrics context for validating metrics collection.

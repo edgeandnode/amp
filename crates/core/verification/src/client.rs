@@ -405,7 +405,7 @@ pub async fn fetch_blocks(
 
     let mut block_data: Vec<Block> = Default::default();
 
-    let mut logs_by_block: BTreeMap<BlockNumber, Vec<Log>> = Default::default();
+    let mut logs_by_block: BTreeMap<BlockNumber, Vec<Log>> = BTreeMap::new();
     let escaped_dataset = escape_dataset_name(dataset);
     let logs_query = format!(
         "SELECT * FROM {escaped_dataset}.logs WHERE block_num >= {start_block} AND block_num <= {end_block}"
@@ -444,7 +444,7 @@ pub async fn fetch_blocks(
     }
 
     // Fetch transactions for the range
-    let mut transactions_by_block: BTreeMap<BlockNumber, Vec<Transaction>> = Default::default();
+    let mut transactions_by_block: BTreeMap<BlockNumber, Vec<Transaction>> = BTreeMap::new();
     let tx_query = format!(
         "SELECT * FROM {escaped_dataset}.transactions WHERE block_num >= {start_block} AND block_num <= {end_block}"
     );

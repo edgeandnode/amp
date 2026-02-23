@@ -106,7 +106,7 @@ use amp_worker_core::{
 use common::{
     BlockNum,
     catalog::{
-        logical::{LogicalCatalog, LogicalTable},
+        logical::LogicalTable,
         physical::{Catalog, CatalogTable},
     },
     parquet::errors::ParquetError,
@@ -219,13 +219,14 @@ pub async fn dump(
             )
         })
         .collect();
-    let logical = LogicalCatalog::from_tables(resolved_tables.iter());
     let catalog = Catalog::new(
-        logical,
+        resolved_tables,
+        vec![],
         tables
             .iter()
             .map(|(t, _)| CatalogTable::new(Arc::clone(t), sql_schema_name.clone()))
             .collect(),
+        Default::default(),
     );
 
     // Ensure consistency before starting the dump procedure.
@@ -1075,7 +1076,7 @@ fn spawn_freshness_tracker(
         let mut subscriptions: BTreeMap<
             LocationId,
             (Arc<PhysicalTable>, tokio::sync::watch::Receiver<()>),
-        > = BTreeMap::new();
+        > = Default::default();
         for table in catalog.physical_tables() {
             let location_id = table.location_id();
             let receiver = multiplexer.subscribe(location_id).await;

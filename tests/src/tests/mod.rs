@@ -17,6 +17,7 @@ mod it_multi_network_batch;
 mod it_multi_table_continuous;
 mod it_non_incremental;
 mod it_reorg;
+mod it_server_sql_references;
 mod it_solana_historical_to_json_rpc_transition;
 mod it_sql;
 mod it_sql_dataset_batch_size;
