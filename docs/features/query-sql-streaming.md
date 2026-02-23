@@ -28,7 +28,7 @@ Streaming SQL queries enable real-time, continuous data delivery as new blockcha
 - **Block Range**: The `[start, end]` interval of block numbers processed in a single microbatch, including the network, end block hash, and previous hash for chain validation
 - **Delta**: New data arriving in the current microbatch (blocks in range `[start, end]`)
 - **History**: Previously processed data (blocks before the current microbatch's `start`)
-- **Watermark**: A checkpoint containing the last processed block number and hash, used for resumption and reorg detection
+- **Cursor**: A checkpoint containing the last processed block number and hash for each network, used for resumption and reorg detection
 - **Incrementalizable**: A query plan property indicating it can be executed in microbatches without maintaining cross-batch state
 
 ## Architecture
@@ -43,21 +43,22 @@ Streaming SQL queries enable real-time, continuous data delivery as new blockcha
    - Calculate next microbatch range
    - Transform plan with block range constraints
    - Execute and stream results ordered by `_block_num`
-   - Update watermark
+   - Update cursor
 5. **Repeat** until `end_block` reached or error occurs
 
 ### Message Protocol
 
 The streaming query emits four types of messages:
 
-| Message | Description |
-|---------|-------------|
+| Message           | Description                                                   |
+| ----------------- | ------------------------------------------------------------- |
 | `MicrobatchStart` | Signals start of a microbatch with block range and reorg flag |
-| `Data` | Arrow RecordBatch containing query results |
-| `BlockComplete` | Emitted when all data for a specific block has been sent |
-| `MicrobatchEnd` | Signals completion of current microbatch |
+| `Data`            | Arrow RecordBatch containing query results                    |
+| `BlockComplete`   | Emitted when all data for a specific block has been sent      |
+| `MicrobatchEnd`   | Signals completion of current microbatch                      |
 
 **Message Sequence**:
+
 ```
 MicrobatchStart { range: 100..=102, is_reorg: false }
   Data(batch_1)
@@ -68,20 +69,20 @@ MicrobatchStart { range: 100..=102, is_reorg: false }
 MicrobatchEnd { range: 100..=102 }
 ```
 
-### Resume and Watermarks
+### Resume and Cursors
 
 Clients can resume a stream after disconnection:
 
-1. Save the watermark from the last `MicrobatchEnd`
-2. Include watermark in next request via `amp-resume` header
-3. Stream continues from `watermark.block_number + 1`
-4. If watermark hash doesn't match canonical chain, reorg recovery initiates
+1. Save the cursor from the last `MicrobatchEnd`
+2. Include cursor in next request via `amp-resume` header
+3. Stream continues from `cursor.block_number + 1`
+4. If cursor hash doesn't match canonical chain, reorg recovery initiates
 
 ### Reorg Handling
 
 When a blockchain reorganization occurs:
 
-1. **Detection**: Previous watermark hash not found on canonical chain
+1. **Detection**: Previous cursor hash not found on canonical chain
 2. **Recovery**: Walk backwards to find common ancestor block
 3. **Signal**: Next microbatch has `is_reorg: true` flag
 4. **Recompute**: Results from reorg base are recomputed with new canonical data
@@ -90,10 +91,10 @@ Clients receiving `is_reorg: true` should invalidate cached data from affected b
 
 ## Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `server_microbatch_max_interval` | - | Maximum blocks per microbatch |
-| `keep_alive_interval` | - | Seconds between keep-alive messages (minimum 30s) |
+| Setting                          | Default | Description                                       |
+| -------------------------------- | ------- | ------------------------------------------------- |
+| `server_microbatch_max_interval` | -       | Maximum blocks per microbatch                     |
+| `keep_alive_interval`            | -       | Seconds between keep-alive messages (minimum 30s) |
 
 ### Keep-Alive
 
@@ -117,17 +118,17 @@ Via Arrow Flight with headers:
 
 ```
 amp-stream: true       -- Enable streaming (alternative to SETTINGS)
-amp-resume: {...}      -- Resume from watermark (JSON)
+amp-resume: {...}      -- Resume from cursor (JSON)
 ```
 
 ### Streaming vs Batch
 
-| Aspect | Streaming | Batch |
-|--------|-----------|-------|
-| Activation | `SETTINGS stream = true` | Default |
-| Execution | Continuous loop | Single execution |
-| Operations | Incrementalizable only | Any SQL |
-| State | Tracks watermark | Stateless |
+| Aspect     | Streaming                | Batch            |
+| ---------- | ------------------------ | ---------------- |
+| Activation | `SETTINGS stream = true` | Default          |
+| Execution  | Continuous loop          | Single execution |
+| Operations | Incrementalizable only   | Any SQL          |
+| State      | Tracks cursor            | Stateless        |
 
 ## Limitations
 

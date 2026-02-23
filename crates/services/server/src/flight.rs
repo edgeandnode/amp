@@ -20,7 +20,7 @@ use async_stream::stream;
 use axum::{Router, http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    BlockNum, BlockRange, ResumeWatermark,
+    BlockNum, BlockRange, Cursor,
     arrow::{
         self,
         array::RecordBatch,
@@ -123,7 +123,7 @@ impl Service {
         &self,
         sql: impl AsRef<SqlStr>,
         is_streaming: Option<bool>,
-        resume_watermark: Option<ResumeWatermark>,
+        cursor: Option<Cursor>,
     ) -> Result<QueryResultStream, Error> {
         let query = common::sql::parse(sql.as_ref()).map_err(Error::SqlParse)?;
         let catalog = {
@@ -149,13 +149,7 @@ impl Service {
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
         let result = self
-            .execute_plan(
-                catalog,
-                &self.dataset_store,
-                plan,
-                is_streaming,
-                resume_watermark,
-            )
+            .execute_plan(catalog, &self.dataset_store, plan, is_streaming, cursor)
             .await;
 
         // Record execution error
@@ -180,7 +174,7 @@ impl Service {
         dataset_store: &DatasetStore,
         plan: DetachedLogicalPlan,
         is_streaming: bool,
-        resume_watermark: Option<ResumeWatermark>,
+        cursor: Option<Cursor>,
     ) -> Result<QueryResultStream, Error> {
         let query_start_time = std::time::Instant::now();
         let schema = {
@@ -257,7 +251,7 @@ impl Service {
                 plan,
                 earliest_block,
                 None,
-                resume_watermark,
+                cursor,
                 &self.notification_multiplexer,
                 None,
                 self.config.server_microbatch_max_interval,
@@ -288,7 +282,7 @@ impl Service {
     async fn get_flight_info(
         &self,
         descriptor: FlightDescriptor,
-        resume_watermark: Option<ResumeWatermark>,
+        cursor: Option<Cursor>,
         streaming_override: Option<bool>,
     ) -> Result<FlightInfo, Error> {
         let (ticket, schema) = match DescriptorType::try_from(descriptor.r#type)
@@ -341,7 +335,7 @@ impl Service {
                     let ticket = AmpTicket {
                         query: sql_query.query,
                         is_streaming,
-                        resume_watermark: resume_watermark.map(Into::into),
+                        cursor: cursor.map(Into::into),
                     };
                     (ticket, schema)
                 } else {
@@ -418,7 +412,7 @@ impl Service {
             .execute_query(
                 &sql_str,
                 Some(ticket.is_streaming),
-                ticket.resume_watermark.map(Into::into),
+                ticket.cursor.map(Into::into),
             )
             .await?;
 
@@ -479,7 +473,7 @@ impl FlightService for Service {
             .unwrap_or_else(|| format!("{:016x}", rand::random::<u64>()));
         tracing::Span::current().record("request_id", &request_id);
 
-        let resume_watermark = request
+        let cursor = request
             .metadata()
             .get("amp-resume")
             .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
@@ -497,7 +491,7 @@ impl FlightService for Service {
 
         let descriptor = request.into_inner();
         let info = self
-            .get_flight_info(descriptor, resume_watermark, streaming_override)
+            .get_flight_info(descriptor, cursor, streaming_override)
             .await?;
         Ok(Response::new(info))
     }
@@ -556,7 +550,7 @@ impl FlightService for Service {
 pub struct AmpTicket {
     pub query: String,
     pub is_streaming: bool,
-    pub resume_watermark: Option<BTreeMap<NetworkId, (BlockNum, [u8; 32])>>,
+    pub cursor: Option<BTreeMap<NetworkId, (BlockNum, [u8; 32])>>,
 }
 
 pub enum QueryResultStream {
@@ -693,7 +687,7 @@ fn track_query_metrics(
                                         metrics.record_streaming_microbatch_duration(duration);
                                     }
                                 }
-                                QueryMessage::BlockComplete(_) => {}
+                                QueryMessage::Watermark(_) => {}
                             }
 
                             yield Ok(message);
@@ -840,7 +834,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                             }
                         };
                     }
-                    QueryMessage::BlockComplete(_) => (),
+                    QueryMessage::Watermark(_) => (),
                     QueryMessage::MicrobatchEnd(_) => {
                         assert!(!ranges.is_empty());
                         let empty_batch = RecordBatch::new_empty(schema.clone());

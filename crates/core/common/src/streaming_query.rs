@@ -28,7 +28,7 @@ use tracing::{Instrument, instrument};
 
 use self::message_stream_with_block_complete::MessageStreamError;
 use crate::{
-    BlockNum, BlockRange, LogicalCatalog, ResumeWatermark, Watermark,
+    BlockNum, BlockRange, Cursor, LogicalCatalog, NetworkCursor, Watermark,
     arrow::{
         array::{RecordBatch, TimestampNanosecondArray},
         datatypes::SchemaRef,
@@ -42,7 +42,7 @@ use crate::{
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     incrementalizer::incrementalize_plan,
-    metadata::segments::{Segment, WatermarkNotFoundError},
+    metadata::segments::{CursorNetworkNotFoundError, Segment},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
     sql_str::SqlStr,
 };
@@ -124,22 +124,22 @@ pub enum SpawnError {
     #[error("failed to resolve blocks table for network")]
     ResolveBlocksTable(#[source] ResolveBlocksTableError),
 
-    /// Failed to convert resume watermark to target network
+    /// Failed to convert cursor to target network
     ///
-    /// When resuming a streaming query from a previous watermark, the watermark
+    /// When resuming a streaming query from a previous cursor, the cursor
     /// must be converted to the target network's format. This error occurs when
-    /// the resume watermark doesn't contain an entry for the expected network.
+    /// the cursor doesn't contain an entry for the expected network.
     ///
     /// Common causes:
-    /// - Resume watermark from a different network than current query
-    /// - Corrupted or invalid resume watermark state
+    /// - Cursor from a different network than current query
+    /// - Corrupted or invalid cursor state
     /// - Network name mismatch (e.g., "ethereum" vs "mainnet")
     /// - Resume state out of sync with current catalog
     ///
     /// This prevents the query from resuming at the correct position and may
     /// require starting from scratch or using a different resume point.
-    #[error("failed to convert resume watermark")]
-    ConvertResumeWatermark(#[source] WatermarkNotFoundError),
+    #[error("failed to convert cursor")]
+    ConvertCursor(#[source] CursorNetworkNotFoundError),
 }
 
 /// Awaits any update for tables in a query context catalog.
@@ -195,12 +195,16 @@ impl TableUpdates {
 ///
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
-    MicrobatchStart { range: BlockRange, is_reorg: bool },
+    MicrobatchStart {
+        range: BlockRange,
+        is_reorg: bool,
+    },
     Data(RecordBatch),
     MicrobatchEnd(BlockRange),
 
-    //// Indicates that the query has emitted all outputs up to the given block number.
-    BlockComplete(BlockNum),
+    /// Watermark indicating the query has emitted all outputs up to the given block number.
+    /// This represents a monotonically increasing checkpoint in the stream.
+    Watermark(Watermark),
 }
 
 struct MicrobatchRange {
@@ -303,9 +307,9 @@ pub struct StreamingQuery {
     network: NetworkId,
     /// `blocks` table for the network associated with the catalog.
     blocks_table: Arc<PhysicalTable>,
-    /// The watermark associated with the previously processed range. This may be provided by the
-    /// consumer to resume a stream.
-    prev_watermark: Option<Watermark>,
+    /// The single-network cursor for the previously processed range. This may be provided by the
+    /// consumer (as a multi-network cursor) and converted to this single-network cursor.
+    prev_cursor: Option<NetworkCursor>,
 }
 
 impl StreamingQuery {
@@ -322,7 +326,7 @@ impl StreamingQuery {
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
-        resume_watermark: Option<ResumeWatermark>,
+        cursor: Option<Cursor>,
         multiplexer_handle: &NotificationMultiplexerHandle,
         destination: Option<Arc<PhysicalTable>>,
         microbatch_max_interval: u64,
@@ -374,10 +378,10 @@ impl StreamingQuery {
         .map_err(SpawnError::ResolveBlocksTable)?;
 
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
-        let prev_watermark = resume_watermark
-            .map(|w| w.to_watermark(network))
+        let prev_cursor = cursor
+            .map(|c| c.to_single_network(network))
             .transpose()
-            .map_err(SpawnError::ConvertResumeWatermark)?;
+            .map_err(SpawnError::ConvertCursor)?;
         let streaming_query = Self {
             exec_env,
             catalog,
@@ -385,7 +389,7 @@ impl StreamingQuery {
             tx,
             start_block,
             end_block,
-            prev_watermark,
+            prev_cursor,
             table_updates,
             microbatch_max_interval,
             keep_alive_interval,
@@ -486,7 +490,7 @@ impl StreamingQuery {
                 // If we reached the end block, we are done
                 return Ok(());
             }
-            self.prev_watermark = Some((&range).into());
+            self.prev_cursor = Some((&range).into());
         }
     }
 
@@ -571,7 +575,7 @@ impl StreamingQuery {
         &self,
         ctx: &ExecContext,
     ) -> Result<Option<StreamDirection>, NextMicrobatchStartError> {
-        match &self.prev_watermark {
+        match &self.prev_cursor {
             // start stream
             None => {
                 let block = self
@@ -651,9 +655,9 @@ impl StreamingQuery {
         let mut latest_src_watermarks: Vec<BlockWatermark> = Default::default();
         'chain_loop: for chain in chains {
             for segment in chain.iter().rev() {
-                let watermark = segment.single_range().into();
+                let cursor = segment.single_range().into();
                 if let Some(block_watermark) = self
-                    .blocks_table_contains(ctx, &watermark)
+                    .blocks_table_contains(ctx, &cursor)
                     .await
                     .map_err(LatestSrcWatermarkError)?
                 {
@@ -676,7 +680,7 @@ impl StreamingQuery {
     async fn reorg_base(
         &self,
         ctx: &ExecContext,
-        prev_watermark: &Watermark,
+        prev_cursor: &NetworkCursor,
     ) -> Result<Option<BlockRow>, ReorgBaseError> {
         // context for querying forked blocks
         let fork_ctx = {
@@ -689,14 +693,14 @@ impl StreamingQuery {
                 .map_err(ReorgBaseError::CreateExecContext)?
         };
 
-        let mut min_fork_block_num = prev_watermark.number;
+        let mut min_fork_block_num = prev_cursor.number;
         let mut fork: Option<BlockRow> = self
-            .blocks_table_fetch(&fork_ctx, prev_watermark.number, Some(&prev_watermark.hash))
+            .blocks_table_fetch(&fork_ctx, prev_cursor.number, Some(&prev_cursor.hash))
             .await
             .map_err(ReorgBaseError::BlocksTableFetch)?;
         while let Some(block) = fork.take() {
             if self
-                .blocks_table_contains(ctx, &block.watermark())
+                .blocks_table_contains(ctx, &block.cursor())
                 .await
                 .map_err(ReorgBaseError::BlocksTableContains)?
                 .is_some()
@@ -741,7 +745,7 @@ impl StreamingQuery {
     async fn blocks_table_contains(
         &self,
         ctx: &ExecContext,
-        watermark: &Watermark,
+        cursor: &NetworkCursor,
     ) -> Result<Option<BlockWatermark>, BlocksTableContainsError> {
         // Panic safety: The `blocks_ctx` always has a single table.
         let blocks_segments = &ctx.catalog().table_snapshots()[0];
@@ -749,14 +753,14 @@ impl StreamingQuery {
         // Optimization: Check segment metadata first to avoid expensive query,
         // Walk segments in reverse to find one that covers this block number.
         for segment in blocks_segments.canonical_segments().iter().rev() {
-            if *segment.single_range().numbers.start() <= watermark.number {
+            if *segment.single_range().numbers.start() <= cursor.number {
                 // Found segment that could contain this block
-                if *segment.single_range().numbers.end() == watermark.number {
+                if *segment.single_range().numbers.end() == cursor.number {
                     // Exact match on segment end - use segment data directly
                     let range = segment.single_range();
-                    if range.hash == watermark.hash {
+                    if range.hash == cursor.hash {
                         return Ok(Some(BlockWatermark {
-                            number: watermark.number,
+                            number: cursor.number,
                             hash: range.hash,
                             timestamp: range.timestamp,
                         }));
@@ -770,8 +774,7 @@ impl StreamingQuery {
             }
         }
 
-        // Fallback to database query
-        self.blocks_table_fetch(ctx, watermark.number, Some(&watermark.hash))
+        self.blocks_table_fetch(ctx, cursor.number, Some(&cursor.hash))
             .await
             .map(|row| row.map(|r| r.block_watermark()))
             .map_err(BlocksTableContainsError)
@@ -1070,8 +1073,8 @@ struct BlockRow {
 }
 
 impl BlockRow {
-    fn watermark(&self) -> Watermark {
-        Watermark {
+    fn cursor(&self) -> NetworkCursor {
+        NetworkCursor {
             number: self.number,
             hash: self.hash,
         }

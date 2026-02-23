@@ -25,11 +25,12 @@ For each parquet file and streaming query microbatch, Amp tracks metadata for th
 
 Arrow Flight clients receive metadata about the block range associated with each data batch via the `app_metadata` field in `FlightData` messages. This metadata is crucial for handling reorgs at the client level.
 
-For streaming queries, all `RecordBatch` messages include `app_metadata` with block range information and a `ranges_complete` flag. When `ranges_complete` is `true`, it signals that the associated block ranges have been fully processed in the current microbatch, allowing clients to safely use this as a resumption watermark.
+For streaming queries, all `RecordBatch` messages include `app_metadata` with block range information and a `ranges_complete` flag. When `ranges_complete` is `true`, it signals that the associated block ranges have been fully processed in the current microbatch, allowing clients to safely use this as a cursor for resumption.
 
 #### Metadata Format
 
 The `app_metadata` field contains JSON-serialized metadata with the following structure:
+
 ```json
 {
   "ranges": [
@@ -43,7 +44,9 @@ The `app_metadata` field contains JSON-serialized metadata with the following st
   "ranges_complete": false
 }
 ```
+
 where:
+
 - `numbers` is an inclusive range of block numbers.
 - `hash` is the hash associated with the end block.
 - `prev_hash` is the hash associated with the parent of the start block.
@@ -52,18 +55,20 @@ where:
 #### Usage
 
 Clients should track block ranges from consecutive batches to handle reorgs. The basic logic is:
+
 1. Store block ranges from `app_metadata` of the previously processed batch.
 2. For each new batch, compare current ranges with previous ranges. If any network range in the current batch is not equal to the prior range and starts at or before a previous batch's end block, a reorg has occurred.
-3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed. If a start number from the incoming ranges lies in the middle of a previously processed range (`range.start < incoming.start < range.end`), then the client should invalidate all batches associated with the previously processed range and reconnect to the client using a `amp-resume` header (see [Resuming streams](#resuming-streams)) set to a watermark before the start of the incoming ranges such that all record batches after the watermark can be invalidated.
+3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed. If a start number from the incoming ranges lies in the middle of a previously processed range (`range.start < incoming.start < range.end`), then the client should invalidate all batches associated with the previously processed range and reconnect to the client using a `amp-resume` header (see [Resuming streams](#resuming-streams)) set to a cursor before the start of the incoming ranges such that all record batches after the cursor can be invalidated.
 
 For a reference implementation in Rust, see `amp_client::AmpClient::stream` which automatically wraps query result streams to emit three types of events:
+
 - `ProtocolMessage::Data` - Normal data batches with metadata
-- `ProtocolMessage::Watermark` - Emitted when a batch with `ranges_complete: true` is received, indicating the stream has fully processed up to the associated block ranges. This watermark can be used to safely resume a stream when reconnecting.
+- `ProtocolMessage::Watermark` - Emitted when a batch with `ranges_complete: true` is received, indicating the stream has fully processed up to the associated block ranges. This cursor can be used to safely resume a stream when reconnecting.
 - `ProtocolMessage::Reorg` - Reorg detection events with invalidation ranges
 
 #### Resuming Streams
 
-Amp supports resuming streaming queries by adding a `amp-resume` header to the `GetFlightInfo` request to the Amp server. The header value, "resume watermark" can be constructed from the `app_metadata` ranges of prior record batches. To avoid missing batches, construct the resume watermark from the ranges known to be fully processed.
+Amp supports resuming streaming queries by adding a `amp-resume` header to the `GetFlightInfo` request to the Amp server. The header value (cursor) can be constructed from the `app_metadata` ranges of prior record batches. To avoid missing batches, construct the cursor from the ranges known to be fully processed.
 
 The `amp-resume` header value is expected to be JSON-serialized data with the following structure:
 

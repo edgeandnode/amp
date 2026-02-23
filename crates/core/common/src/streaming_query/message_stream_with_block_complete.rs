@@ -11,12 +11,12 @@ use futures::{Stream, ready};
 use super::QueryMessage;
 use crate::BlockNum;
 
-/// A stream adapter that enriches a `QueryMessage` stream with `BlockComplete` messages.
+/// A stream adapter that enriches a `QueryMessage` stream with `Watermark` messages.
 ///
 /// This stream wraps a QueryMessage stream and:
 /// - Validates that Data batches are ordered by `_block_num`
 /// - Tracks the last block number emitted
-/// - Splits batches on block boundaries and emits BlockComplete messages
+/// - Splits batches on block boundaries and emits Watermark messages
 /// - Clears state on MicrobatchEnd and reorgs
 pub struct MessageStreamWithBlockComplete<S> {
     inner: S,
@@ -56,7 +56,7 @@ where
 
         // First, emit any pending block complete message, then pending batch
         if let Some(block_num) = this.pending_block_complete.take() {
-            return Poll::Ready(Some(Ok(QueryMessage::BlockComplete(block_num))));
+            return Poll::Ready(Some(Ok(QueryMessage::Watermark(block_num))));
         }
 
         if let Some(batch) = this.pending_batch.take() {
@@ -97,9 +97,9 @@ where
 
                         // If current block batch is None, emit BlockComplete directly
                         match current_block_batch {
-                            None => Poll::Ready(Some(Ok(QueryMessage::BlockComplete(
-                                completed_block_num,
-                            )))),
+                            None => {
+                                Poll::Ready(Some(Ok(QueryMessage::Watermark(completed_block_num))))
+                            }
                             Some(batch) => {
                                 // Queue the block complete message and emit the current batch first
                                 this.pending_block_complete = Some(completed_block_num);
@@ -119,8 +119,8 @@ where
                 this.last_block_num = None;
                 Poll::Ready(Some(Ok(QueryMessage::MicrobatchEnd(range))))
             }
-            QueryMessage::BlockComplete(block_num) => Poll::Ready(Some(Err(format!(
-                "Unexpected BlockComplete message from inner stream: {}",
+            QueryMessage::Watermark(block_num) => Poll::Ready(Some(Err(format!(
+                "Unexpected Watermark message from inner stream: {}",
                 block_num
             )
             .into()))),
@@ -447,7 +447,7 @@ mod tests {
         ];
 
         let results = collect_messages(messages).await;
-        assert_eq!(results.len(), 3); // No BlockComplete for single block
+        assert_eq!(results.len(), 3); // No Watermark for single block
     }
 
     #[tokio::test]
@@ -468,7 +468,7 @@ mod tests {
         let results = collect_messages(messages).await;
         assert_eq!(results.len(), 6);
         assert_eq!(expect_data_blocks(&results[2]), vec![100]); // Split portion
-        matches!(results[3], Ok(QueryMessage::BlockComplete(100)));
+        matches!(results[3], Ok(QueryMessage::Watermark(100)));
         assert_eq!(expect_data_blocks(&results[4]), vec![101, 101]); // Remainder
     }
 
@@ -489,7 +489,7 @@ mod tests {
 
         let results = collect_messages(messages).await;
         assert_eq!(results.len(), 5);
-        matches!(results[2], Ok(QueryMessage::BlockComplete(100))); // No empty batch emitted
+        matches!(results[2], Ok(QueryMessage::Watermark(100))); // No empty batch emitted
     }
 
     #[tokio::test]
@@ -509,7 +509,7 @@ mod tests {
         ];
 
         let results = collect_messages(messages).await;
-        assert_eq!(results.len(), 5); // No BlockComplete during reorg
+        assert_eq!(results.len(), 5); // No Watermark during reorg
     }
 
     #[tokio::test]
@@ -527,7 +527,7 @@ mod tests {
         let results = collect_messages(messages).await;
         assert_eq!(results.len(), 6);
         assert_eq!(expect_data_blocks(&results[2]), vec![100]); // Split portion
-        matches!(results[3], Ok(QueryMessage::BlockComplete(100)));
+        matches!(results[3], Ok(QueryMessage::Watermark(100)));
         assert_eq!(expect_data_blocks(&results[4]), vec![101, 102, 102]); // Remainder (not split again)
     }
 
@@ -568,7 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unexpected_block_complete_from_inner() {
-        let messages = vec![Ok(QueryMessage::BlockComplete(100))]; // Unexpected from inner
+        let messages = vec![Ok(QueryMessage::Watermark(100))]; // Unexpected from inner
 
         let results = collect_messages(messages).await;
         assert_eq!(results.len(), 1);
@@ -591,7 +591,7 @@ mod tests {
         ];
 
         let results = collect_messages(messages).await;
-        assert_eq!(results.len(), 4); // No BlockComplete, just passthrough
+        assert_eq!(results.len(), 4); // No Watermark, just passthrough
         assert_eq!(expect_data_blocks(&results[1]), vec![100, 100]);
         assert_eq!(expect_data_blocks(&results[2]), vec![100, 100]); // Passed through unchanged
     }

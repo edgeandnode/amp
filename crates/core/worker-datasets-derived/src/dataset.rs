@@ -113,7 +113,7 @@ use amp_worker_core::{
     tasks::{self, TryWaitAllError},
 };
 use common::{
-    BlockNum, ResumeWatermark,
+    BlockNum, Cursor,
     catalog::{
         logical::for_dump as logical_catalog,
         physical::{
@@ -575,11 +575,11 @@ async fn dump_table(
             // Track start time for duration calculation
             let table_dump_start = Instant::now();
 
-            let resume_watermark = table
+            let cursor = table
                 .canonical_chain()
                 .await
                 .map_err(DumpTableSpawnError::CanonicalChain)?
-                .map(|c| ResumeWatermark::from_ranges(c.last_ranges()));
+                .map(|c| Cursor::from_ranges(c.last_ranges()));
 
             // Execute the dump, capturing any errors for sync.failed event
             let dump_result = dump_sql_query(
@@ -589,7 +589,7 @@ async fn dump_table(
                 plan.clone(),
                 start,
                 end,
-                resume_watermark,
+                cursor,
                 table.clone(),
                 compactor,
                 &opts,
@@ -792,7 +792,7 @@ async fn dump_sql_query(
     query: DetachedLogicalPlan,
     start: BlockNum,
     end: Option<BlockNum>,
-    resume_watermark: Option<ResumeWatermark>,
+    cursor: Option<Cursor>,
     physical_table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
     opts: &Arc<WriterProperties>,
@@ -816,7 +816,7 @@ async fn dump_sql_query(
             query,
             start,
             end,
-            resume_watermark,
+            cursor,
             notification_multiplexer,
             Some(physical_table.clone()),
             microbatch_max_interval,
@@ -874,7 +874,7 @@ async fn dump_sql_query(
                     metrics.record_write_call(num_bytes, table_name.to_string(), location_id);
                 }
             }
-            QueryMessage::BlockComplete(_) => {
+            QueryMessage::Watermark(_) => {
                 // TODO: Check if file should be closed early
             }
             QueryMessage::MicrobatchEnd(range) => {
