@@ -58,7 +58,10 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/revisions",
             get(revisions::list_all::handler).post(revisions::create::handler),
         )
-        .route("/revisions/{id}", get(revisions::get_by_id::handler))
+        .route(
+            "/revisions/{id}",
+            get(revisions::get_by_id::handler).delete(revisions::delete::handler),
+        )
         .route("/revisions/{id}/restore", post(revisions::restore::handler))
         .route(
             "/revisions/{id}/activate",
@@ -158,6 +161,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::deactivate::handler,
         handlers::revisions::get_by_id::handler,
         handlers::revisions::create::handler,
+        handlers::revisions::delete::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
         handlers::workers::get_by_id::handler,

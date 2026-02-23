@@ -1,6 +1,6 @@
 use ampctl::client::revisions::{
-    ActivateError, DeactivateError, GetByIdError, ListError, RegisterError, RegisterResponse,
-    RestoreError, RestoreResponse, RevisionInfo,
+    ActivateError, DeactivateError, DeleteError, GetByIdError, ListError, RegisterError,
+    RegisterResponse, RestoreError, RestoreResponse, RevisionInfo,
 };
 use datasets_common::reference::Reference;
 use monitoring::logging;
@@ -521,6 +521,240 @@ async fn restore_revision_with_invalid_id_returns_400() {
     }
 }
 
+#[tokio::test]
+async fn delete_inactive_revision_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("delete_inactive_revision_succeeds").await;
+    let restored_tables = ctx.restore_dataset().await;
+    let location_id = TestCtx::blocks_location_id(&restored_tables);
+
+    // Deactivate the revision first
+    ctx.deactivate_revision("_/eth_rpc@0.0.0", "blocks")
+        .await
+        .expect("failed to deactivate revision");
+
+    // Verify revision is inactive
+    let revision = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision")
+        .expect("revision should exist");
+    assert!(
+        !revision.active,
+        "revision should be inactive before delete"
+    );
+
+    //* When
+    ctx.delete_revision(location_id)
+        .await
+        .expect("failed to delete inactive revision");
+
+    //* Then
+    let deleted = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision after delete");
+    assert!(
+        deleted.is_none(),
+        "revision should not exist after deletion"
+    );
+}
+
+#[tokio::test]
+async fn delete_active_revision_returns_409() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("delete_active_revision_returns_409").await;
+    let restored_tables = ctx.restore_dataset().await;
+    let location_id = TestCtx::blocks_location_id(&restored_tables);
+
+    //* When
+    let resp = ctx.delete_revision(location_id).await;
+
+    //* Then
+    let err = resp.expect_err("delete active revision should return error");
+    match err {
+        DeleteError::RevisionIsActive(api_err) => {
+            assert_eq!(
+                api_err.error_code, "REVISION_IS_ACTIVE",
+                "Expected REVISION_IS_ACTIVE error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected RevisionIsActive error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn delete_nonexistent_revision_returns_404() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("delete_nonexistent_revision_returns_404").await;
+    ctx.restore_dataset().await;
+
+    //* When
+    let resp = ctx.delete_revision(999999).await;
+
+    //* Then
+    let err = resp.expect_err("delete nonexistent revision should return error");
+    match err {
+        DeleteError::RevisionNotFound(api_err) => {
+            assert_eq!(
+                api_err.error_code, "REVISION_NOT_FOUND",
+                "Expected REVISION_NOT_FOUND error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected RevisionNotFound error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn delete_revision_with_invalid_id_returns_400() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("delete_revision_with_invalid_id_returns_400").await;
+    ctx.restore_dataset().await;
+
+    //* When
+    let resp = ctx.delete_revision(-1).await;
+
+    //* Then
+    let err = resp.expect_err("delete with invalid id should return error");
+    match err {
+        DeleteError::InvalidPath(api_err) => {
+            assert_eq!(
+                api_err.error_code, "INVALID_PATH_PARAMETERS",
+                "Expected INVALID_PATH_PARAMETERS error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected InvalidPath error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn delete_revision_with_active_writer_returns_409() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_with_anvil("delete_revision_with_active_writer_returns_409").await;
+
+    // Mine blocks so the worker has data to process
+    ctx.ctx
+        .anvil()
+        .mine(5)
+        .await
+        .expect("failed to mine blocks");
+
+    // Deploy dataset — schedules a job, worker creates revisions and assigns writer
+    ctx.ampctl_client
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .await
+        .expect("failed to deploy dataset");
+
+    let revision_with_writer = ctx.poll_revision_with_writer().await;
+    let location_id = revision_with_writer.id;
+
+    // Deactivate the revision so the active check passes
+    ctx.deactivate_revision(
+        &format!(
+            "{}/{}@{}",
+            revision_with_writer.metadata.dataset_namespace,
+            revision_with_writer.metadata.dataset_name,
+            revision_with_writer.metadata.manifest_hash,
+        ),
+        &revision_with_writer.metadata.table_name,
+    )
+    .await
+    .expect("failed to deactivate revision");
+
+    //* When
+    let resp = ctx.delete_revision(location_id).await;
+
+    //* Then
+    let err = resp.expect_err("delete revision with active writer should return error");
+    match err {
+        DeleteError::WriterJobNotTerminal(api_err) => {
+            assert_eq!(
+                api_err.error_code, "WRITER_JOB_NOT_TERMINAL",
+                "Expected WRITER_JOB_NOT_TERMINAL error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected WriterJobNotTerminal error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn delete_revision_with_stopped_writer_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_with_anvil("delete_revision_with_stopped_writer_succeeds").await;
+
+    // Mine blocks so the worker has data to process
+    ctx.ctx
+        .anvil()
+        .mine(5)
+        .await
+        .expect("failed to mine blocks");
+
+    // Deploy dataset — schedules a job, worker creates revisions and assigns writer
+    let job_id = ctx
+        .ampctl_client
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .await
+        .expect("failed to deploy dataset");
+
+    let revision_with_writer = ctx.poll_revision_with_writer().await;
+    let location_id = revision_with_writer.id;
+
+    // Stop the job and wait for it to reach terminal state
+    ctx.ampctl_client
+        .jobs()
+        .stop(&job_id)
+        .await
+        .expect("failed to stop job");
+
+    ctx.wait_for_job_stopped(&job_id).await;
+
+    // Deactivate the revision so the active check passes
+    ctx.deactivate_revision(
+        &format!(
+            "{}/{}@{}",
+            revision_with_writer.metadata.dataset_namespace,
+            revision_with_writer.metadata.dataset_name,
+            revision_with_writer.metadata.manifest_hash,
+        ),
+        &revision_with_writer.metadata.table_name,
+    )
+    .await
+    .expect("failed to deactivate revision");
+
+    //* When
+    let resp = ctx.delete_revision(location_id).await;
+
+    //* Then
+    assert!(
+        resp.is_ok(),
+        "delete revision with stopped writer should succeed"
+    );
+    let deleted = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision after delete");
+    assert!(
+        deleted.is_none(),
+        "revision should not exist after deletion"
+    );
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: Ampctl,
@@ -546,6 +780,23 @@ impl TestCtx {
     /// Setup with no manifests or snapshots — bare test environment.
     async fn setup_minimal(test_name: &str) -> Self {
         let ctx = TestCtxBuilder::new(test_name)
+            .build()
+            .await
+            .expect("failed to build test context");
+
+        let ampctl = ctx.new_ampctl();
+
+        Self {
+            ctx,
+            ampctl_client: ampctl,
+        }
+    }
+
+    /// Setup with Anvil HTTP node and anvil_rpc dataset manifest for deploy tests.
+    async fn setup_with_anvil(test_name: &str) -> Self {
+        let ctx = TestCtxBuilder::new(test_name)
+            .with_anvil_http()
+            .with_dataset_manifest("anvil_rpc")
             .build()
             .await
             .expect("failed to build test context");
@@ -647,6 +898,62 @@ impl TestCtx {
     /// Restores a revision by re-registering its files from object storage.
     async fn restore_revision(&self, location_id: i64) -> Result<RestoreResponse, RestoreError> {
         self.ampctl_client.revisions().restore(location_id).await
+    }
+
+    /// Polls until a revision with a writer assigned is found.
+    ///
+    /// Panics if no revision with a writer is found within 30 seconds.
+    async fn poll_revision_with_writer(&self) -> RevisionInfo {
+        let start = tokio::time::Instant::now();
+        let timeout = tokio::time::Duration::from_secs(30);
+        loop {
+            if start.elapsed() > timeout {
+                panic!("Timeout waiting for revision with writer to be assigned");
+            }
+
+            let revisions = self
+                .list_revisions(None, None)
+                .await
+                .expect("failed to list revisions");
+
+            if let Some(rev) = revisions.into_iter().find(|r| r.writer.is_some()) {
+                return rev;
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    /// Polls until a job reaches the `Stopped` terminal state.
+    ///
+    /// Panics if the job does not reach `Stopped` within 30 seconds.
+    async fn wait_for_job_stopped(&self, job_id: &worker::job::JobId) {
+        let start = tokio::time::Instant::now();
+        let timeout = tokio::time::Duration::from_secs(30);
+        loop {
+            if start.elapsed() > timeout {
+                panic!("Timeout waiting for job to reach Stopped state");
+            }
+
+            let job = self
+                .ampctl_client
+                .jobs()
+                .get(job_id)
+                .await
+                .expect("failed to get job")
+                .expect("job should exist");
+
+            if job.status == "STOPPED" {
+                return;
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    /// Deletes a revision by its location ID.
+    async fn delete_revision(&self, location_id: i64) -> Result<(), DeleteError> {
+        self.ampctl_client.revisions().delete(location_id).await
     }
 
     /// Registers a table revision.

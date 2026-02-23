@@ -1872,6 +1872,71 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `DELETE /revisions/{id}` endpoint",
+        "description": "Deletes a physical table revision by its location ID.\n\n## Path Parameters\n- `id`: The unique identifier of the revision (must be a valid LocationId)\n\n## Response\n- **204 No Content**: Revision deleted successfully\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Revision not found\n- **409 Conflict**: Revision is currently active or writer job is not in a terminal state\n- **500 Internal Server Error**: Database error\n\n## Error Codes\n- `INVALID_PATH_PARAMETERS`: Invalid path parameters\n- `REVISION_NOT_FOUND`: No revision exists with the specified location ID\n- `REVISION_IS_ACTIVE`: The revision is currently active and must be deactivated before deletion\n- `WRITER_JOB_NOT_TERMINAL`: The revision's writer job is still running and must reach a terminal state before deletion\n- `GET_REVISION_BY_LOCATION_ID_ERROR`: Failed to retrieve revision from database\n- `GET_WRITER_JOB_ERROR`: Failed to retrieve writer job from database\n- `DELETE_TABLE_REVISION_ERROR`: Failed to delete revision from database\n\n## Behavior\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Retrieves the revision to verify it exists\n- Checks that the revision is inactive (active revisions cannot be deleted)\n- Checks that any writer job is in a terminal state (completed, stopped, or failed)\n- Deletes the revision and all associated file metadata (via CASCADE)",
+        "operationId": "delete_table_revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revision deleted successfully"
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision is active or writer job is not terminal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/revisions/{id}/activate": {

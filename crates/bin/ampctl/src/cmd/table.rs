@@ -2,6 +2,7 @@
 
 pub mod activate;
 pub mod deactivate;
+pub mod delete;
 pub mod get;
 pub mod list;
 pub mod register;
@@ -17,6 +18,11 @@ pub enum Commands {
     /// Deactivate all revisions for a table
     #[command(after_help = include_str!("table/deactivate__after_help.md"))]
     Deactivate(deactivate::Args),
+
+    /// Delete a table revision by location ID
+    #[command(alias = "rm")]
+    #[command(after_help = include_str!("table/delete__after_help.md"))]
+    Delete(delete::Args),
 
     /// Get a revision by location ID
     #[command(after_help = include_str!("table/get__after_help.md"))]
@@ -41,6 +47,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
     match command {
         Commands::Activate(args) => activate::run(args).await?,
         Commands::Deactivate(args) => deactivate::run(args).await?,
+        Commands::Delete(args) => delete::run(args).await?,
         Commands::Get(args) => get::run(args).await?,
         Commands::List(args) => list::run(args).await?,
         Commands::Register(args) => register::run(args).await?,

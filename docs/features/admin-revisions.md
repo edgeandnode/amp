@@ -1,6 +1,6 @@
 ---
 name: "admin-revisions"
-description: "Table revision registration, activation, and deactivation API for controlling which physical table revision is queryable. Load when asking about revision management, register/activate/deactivate endpoints, or table revision lifecycle"
+description: "Table revision registration, activation, deactivation, and deletion API for controlling which physical table revision is queryable. Load when asking about revision management, register/activate/deactivate/delete endpoints, or table revision lifecycle"
 type: "feature"
 status: "development"
 components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
@@ -10,7 +10,7 @@ components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
 
 ## Summary
 
-The Table Revision Management API provides endpoints to register, list, retrieve, activate, and deactivate physical table revisions, controlling which revision of a table is served for queries. New revisions are registered as inactive records before they can be activated. All revisions can be listed with an optional active status filter. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors.
+The Table Revision Management API provides endpoints to register, list, retrieve, activate, deactivate, and delete physical table revisions, controlling which revision of a table is served for queries. New revisions are registered as inactive records before they can be activated. All revisions can be listed with an optional active status filter. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors. Deletion permanently removes an inactive revision and its associated file metadata, with guards to prevent deleting active revisions or those with running writer jobs.
 
 ## Table of Contents
 
@@ -29,6 +29,7 @@ The Table Revision Management API provides endpoints to register, list, retrieve
 - **Activation**: Atomically switch which revision is queryable by deactivating all revisions and activating the specified one within a transaction
 - **Registration**: Creates an inactive, unassigned physical table revision record. Revisions must be registered before they can be activated. Registration is idempotent by path — registering the same path twice returns the existing location ID
 - **Deactivation**: Mark all revisions for a table as inactive so the table is no longer queryable
+- **Deletion**: Permanently removes an inactive revision and all associated file metadata from the database. Active revisions must be deactivated before they can be deleted
 - **Restoration**: Re-reads files from a revision's object storage path and registers their metadata in the database
 
 ## Architecture
@@ -43,7 +44,8 @@ The Table Revision Management API provides endpoints to register, list, retrieve
 | **`DataStore`**   | Transaction management for activate (begin, mark inactive, mark active, commit) |
 | **`DataStore`**   | Single-operation deactivate (mark inactive)                                    |
 | **`DataStore`**   | Single-operation get revision by location ID                                   |
-| **`metadata_db`** | SQL operations on `physical_table_revisions` (register, list_all, get_by_location_id) and `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
+| **`DataStore`**   | Single-operation delete revision by location ID (CASCADE deletes file metadata) |
+| **`metadata_db`** | SQL operations on `physical_table_revisions` (register, list_all, get_by_location_id, delete_by_id) and `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
 
 **Key Principle**: Admin API handlers do not interact with `metadata_db` directly. All database access is encapsulated in `DataStore` methods, keeping handlers as pure orchestration and presentation logic.
 
@@ -56,6 +58,7 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 - **Register**: Single database call (no transaction needed) that inserts an inactive revision record. Idempotent by path
 - **Activate**: Wrapped in a database transaction to ensure exactly one revision is active. If any step fails, the transaction rolls back automatically
 - **Deactivate**: Single database call (no transaction needed) that marks all revisions inactive
+- **Delete**: Single database call (no transaction needed) that removes the revision record. Associated `file_metadata` entries are removed automatically via CASCADE foreign key constraints. The handler performs pre-checks (revision must be inactive, writer job must be in a terminal state) before issuing the delete
 
 ## API Reference
 
@@ -64,6 +67,7 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 | `/revisions`                  | GET    | List revisions (optional `?active=true\|false` filter, `?limit=N` default 100) |
 | `/revisions`                  | POST   | Register a new inactive table revision             |
 | `/revisions/{id}`             | GET    | Retrieve a specific revision by location ID       |
+| `/revisions/{id}`             | DELETE | Delete an inactive table revision by location ID  |
 | `/revisions/{id}/activate`    | POST   | Activate a specific table revision by location ID |
 | `/revisions/{id}/restore`     | POST   | Restore revision files from object storage        |
 | `/revisions/deactivate`       | POST   | Deactivate all revisions for a table              |
@@ -139,6 +143,19 @@ curl -X POST http://localhost:1610/revisions/deactivate \
   -d '{"dataset": "_/eth_rpc@0.0.0", "table_name": "blocks"}'
 ```
 
+**Delete an inactive revision:**
+
+```bash
+# Via ampctl (with confirmation prompt)
+ampctl table delete 42
+
+# Via ampctl (skip confirmation)
+ampctl table delete 42 --force
+
+# Via API
+curl -X DELETE http://localhost:1610/revisions/42
+```
+
 **Restore a revision's file metadata:**
 
 Lists files in object storage under the revision's path and registers their Parquet metadata into the database
@@ -159,11 +176,12 @@ curl -X POST http://localhost:1610/revisions/42/restore
 - `crates/services/admin-api/src/handlers/revisions/list_all.rs` - List endpoint handler with optional active filter and error types
 - `crates/services/admin-api/src/handlers/revisions/get_by_id.rs` - Get by ID endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/activate.rs` - Activate endpoint handler and error types
+- `crates/services/admin-api/src/handlers/revisions/delete.rs` - Delete endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/deactivate.rs` - Deactivate endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/restore.rs` - Restore endpoint handler and error types
-- `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), and `deactivate_table_revision` methods
+- `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), `deactivate_table_revision`, and `delete_table_revision` methods
 - `crates/core/metadata-db/src/physical_table.rs` - `mark_inactive_by_table_name` and `mark_active_by_id` SQL operations on `physical_tables`
-- `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list_all`, and `get_by_location_id` SQL operations on `physical_table_revisions`
+- `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list_all`, `get_by_location_id`, and `delete_by_id` SQL operations on `physical_table_revisions`
 
 ## References
 

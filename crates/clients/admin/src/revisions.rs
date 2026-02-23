@@ -55,6 +55,13 @@ fn revision_restore(id: i64) -> String {
     format!("revisions/{id}/restore")
 }
 
+/// Build URL path for deleting a revision.
+///
+/// DELETE `/revisions/{id}`
+fn revision_delete(id: i64) -> String {
+    format!("revisions/{id}")
+}
+
 /// Build URL path for creating a table revision.
 ///
 /// POST `/revisions`
@@ -512,6 +519,112 @@ impl<'a> RevisionsClient<'a> {
         }
     }
 
+    /// Delete a table revision by location ID.
+    ///
+    /// Sends DELETE to `/revisions/{id}` endpoint.
+    ///
+    /// The revision must be inactive before it can be deleted. Attempting to
+    /// delete an active revision returns a conflict error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeleteError`] for network errors, API errors (400/404/409/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(location_id = %location_id))]
+    pub async fn delete(&self, location_id: i64) -> Result<(), DeleteError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&revision_delete(location_id))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "DELETE request sent for revision");
+
+        let response = self
+            .client
+            .http()
+            .delete(url.as_str())
+            .send()
+            .await
+            .map_err(|err| DeleteError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            204 => {
+                tracing::debug!(location_id = %location_id, "revision deleted");
+                Ok(())
+            }
+            400 | 404 | 409 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    DeleteError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    DeleteError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH_PARAMETERS" => {
+                        Err(DeleteError::InvalidPath(error_response.into()))
+                    }
+                    "REVISION_NOT_FOUND" => {
+                        Err(DeleteError::RevisionNotFound(error_response.into()))
+                    }
+                    "REVISION_IS_ACTIVE" => {
+                        Err(DeleteError::RevisionIsActive(error_response.into()))
+                    }
+                    "WRITER_JOB_NOT_TERMINAL" => {
+                        Err(DeleteError::WriterJobNotTerminal(error_response.into()))
+                    }
+                    "GET_REVISION_BY_LOCATION_ID_ERROR" => {
+                        Err(DeleteError::GetRevision(error_response.into()))
+                    }
+                    "GET_WRITER_JOB_ERROR" => Err(DeleteError::GetWriterJob(error_response.into())),
+                    "DELETE_TABLE_REVISION_ERROR" => {
+                        Err(DeleteError::DeleteRevision(error_response.into()))
+                    }
+                    _ => Err(DeleteError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(DeleteError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
     /// Activate a table revision by location ID.
     ///
     /// POSTs to `/revisions/{id}/activate` endpoint.
@@ -946,6 +1059,60 @@ pub enum RegisterError {
 pub struct RestoreResponse {
     /// Total number of files restored
     pub total_files: i32,
+}
+
+/// Errors that can occur when deleting a table revision.
+#[derive(Debug, thiserror::Error)]
+pub enum DeleteError {
+    /// Invalid path parameters (400, INVALID_PATH_PARAMETERS)
+    ///
+    /// The location ID in the URL path is invalid.
+    #[error("invalid path parameters")]
+    InvalidPath(#[source] ApiError),
+
+    /// Revision not found (404, REVISION_NOT_FOUND)
+    ///
+    /// No revision exists with the specified location ID.
+    #[error("revision not found")]
+    RevisionNotFound(#[source] ApiError),
+
+    /// Revision is active (409, REVISION_IS_ACTIVE)
+    ///
+    /// The revision is currently active and must be deactivated before deletion.
+    #[error("revision is active")]
+    RevisionIsActive(#[source] ApiError),
+
+    /// Writer job is not in a terminal state (409, WRITER_JOB_NOT_TERMINAL)
+    ///
+    /// The revision's writer job is still running and must reach a terminal state before deletion.
+    #[error("writer job is not in a terminal state")]
+    WriterJobNotTerminal(#[source] ApiError),
+
+    /// Failed to get revision (500, GET_REVISION_BY_LOCATION_ID_ERROR)
+    ///
+    /// The database query to get the revision failed.
+    #[error("failed to get revision")]
+    GetRevision(#[source] ApiError),
+
+    /// Failed to get writer job (500, GET_WRITER_JOB_ERROR)
+    ///
+    /// The database query to get the writer job failed.
+    #[error("failed to get writer job")]
+    GetWriterJob(#[source] ApiError),
+
+    /// Failed to delete revision (500, DELETE_TABLE_REVISION_ERROR)
+    ///
+    /// The database operation to delete the revision failed.
+    #[error("failed to delete table revision")]
+    DeleteRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
 }
 
 /// Errors that can occur when restoring a revision.
