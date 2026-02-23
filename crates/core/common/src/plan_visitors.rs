@@ -368,6 +368,75 @@ pub fn extract_table_references_from_plan(
     Ok(refs.into_iter().collect())
 }
 
+/// Information about a cross-network join detected in the logical plan.
+///
+/// A cross-network join occurs when the left and right inputs of a join reference
+/// tables from different blockchain networks. This is not supported for streaming
+/// queries because blocks from different chains cannot be synchronized.
+#[derive(Debug, Clone)]
+pub struct CrossNetworkJoinInfo {
+    /// Networks involved in the cross-network join
+    pub networks: BTreeSet<datasets_common::network_id::NetworkId>,
+}
+
+impl fmt::Display for CrossNetworkJoinInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "join across multiple networks: {:?}", self.networks)
+    }
+}
+
+/// Checks if any join in the logical plan crosses multiple networks.
+///
+/// Streaming queries cannot join tables from different networks because blocks
+/// from different chains cannot be synchronized. Returns the first cross-network
+/// join found, or `None` if all joins operate within a single network.
+pub fn find_cross_network_join(
+    plan: &LogicalPlan,
+    catalog: &crate::catalog::physical::Catalog,
+) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
+    use std::collections::HashMap;
+
+    use datasets_common::network_id::NetworkId;
+
+    let table_to_network: HashMap<TableReference, NetworkId> = catalog
+        .tables()
+        .iter()
+        .map(|t| (t.table_ref().into(), t.network().clone()))
+        .collect();
+
+    let reference_networks =
+        |subtree: &LogicalPlan| -> Result<BTreeSet<NetworkId>, DataFusionError> {
+            let table_refs = extract_table_references_from_plan(subtree)?;
+            Ok(table_refs
+                .into_iter()
+                .filter_map(|table_ref| table_to_network.get(&table_ref).cloned())
+                .collect())
+        };
+
+    let mut cross_network_join: Option<CrossNetworkJoinInfo> = None;
+
+    plan.apply(|node| {
+        if cross_network_join.is_some() {
+            return Ok(TreeNodeRecursion::Stop);
+        }
+
+        if let LogicalPlan::Join(join) = node {
+            let mut networks: BTreeSet<NetworkId> = Default::default();
+            networks.extend(reference_networks(&join.left)?);
+            networks.extend(reference_networks(&join.right)?);
+
+            if networks.len() > 1 {
+                cross_network_join = Some(CrossNetworkJoinInfo { networks });
+                return Ok(TreeNodeRecursion::Stop);
+            }
+        }
+
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+
+    Ok(cross_network_join)
+}
+
 pub fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
     let sort = Sort {
         expr: vec![block_num_col().sort(true, false)],
