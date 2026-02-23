@@ -7,6 +7,7 @@ pub mod get;
 pub mod list;
 pub mod register;
 pub mod restore;
+pub mod truncate;
 
 /// Revision management subcommands.
 #[derive(Debug, clap::Subcommand)]
@@ -40,6 +41,10 @@ pub enum Commands {
     /// Restore a revision by re-registering its files from object storage
     #[command(after_help = include_str!("table/restore__after_help.md"))]
     Restore(restore::Args),
+
+    /// Truncate a table revision, deleting all files and metadata
+    #[command(after_help = include_str!("table/truncate__after_help.md"))]
+    Truncate(truncate::Args),
 }
 
 /// Execute the revision command with the given subcommand.
@@ -52,6 +57,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::List(args) => list::run(args).await?,
         Commands::Register(args) => register::run(args).await?,
         Commands::Restore(args) => restore::run(args).await?,
+        Commands::Truncate(args) => truncate::run(args).await?,
     }
     Ok(())
 }

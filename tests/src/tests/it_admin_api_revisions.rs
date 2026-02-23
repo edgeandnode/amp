@@ -1,6 +1,6 @@
 use ampctl::client::revisions::{
     ActivateError, DeactivateError, DeleteError, GetByIdError, ListError, RegisterError,
-    RegisterResponse, RestoreError, RestoreResponse, RevisionInfo,
+    RegisterResponse, RestoreError, RestoreResponse, RevisionInfo, TruncateError, TruncateResponse,
 };
 use datasets_common::reference::Reference;
 use monitoring::logging;
@@ -755,6 +755,274 @@ async fn delete_revision_with_stopped_writer_succeeds() {
     );
 }
 
+#[tokio::test]
+async fn truncate_inactive_revision_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("truncate_inactive_revision_succeeds").await;
+    let restored_tables = ctx.restore_dataset().await;
+    let location_id = TestCtx::blocks_location_id(&restored_tables);
+
+    // Deactivate the revision first
+    ctx.deactivate_revision("_/eth_rpc@0.0.0", "blocks")
+        .await
+        .expect("failed to deactivate revision");
+
+    // Verify revision is inactive
+    let revision = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision")
+        .expect("revision should exist");
+    assert!(
+        !revision.active,
+        "revision should be inactive before truncate"
+    );
+
+    //* When
+    let resp = ctx
+        .truncate_revision(location_id, None)
+        .await
+        .expect("failed to truncate inactive revision");
+
+    //* Then
+    assert!(resp.files_deleted > 0, "files_deleted should be positive");
+    let truncated = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision after truncate");
+    assert!(
+        truncated.is_none(),
+        "revision should not exist after truncation"
+    );
+}
+
+#[tokio::test]
+async fn truncate_active_revision_returns_409() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("truncate_active_revision_returns_409").await;
+    let restored_tables = ctx.restore_dataset().await;
+    let location_id = TestCtx::blocks_location_id(&restored_tables);
+
+    //* When
+    let resp = ctx.truncate_revision(location_id, None).await;
+
+    //* Then
+    let err = resp.expect_err("truncate active revision should return error");
+    match err {
+        TruncateError::RevisionIsActive(api_err) => {
+            assert_eq!(
+                api_err.error_code, "REVISION_IS_ACTIVE",
+                "Expected REVISION_IS_ACTIVE error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected RevisionIsActive error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn truncate_nonexistent_revision_returns_404() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("truncate_nonexistent_revision_returns_404").await;
+    ctx.restore_dataset().await;
+
+    //* When
+    let resp = ctx.truncate_revision(999999, None).await;
+
+    //* Then
+    let err = resp.expect_err("truncate nonexistent revision should return error");
+    match err {
+        TruncateError::RevisionNotFound(api_err) => {
+            assert_eq!(
+                api_err.error_code, "REVISION_NOT_FOUND",
+                "Expected REVISION_NOT_FOUND error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected RevisionNotFound error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn truncate_revision_with_invalid_id_returns_400() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("truncate_revision_with_invalid_id_returns_400").await;
+    ctx.restore_dataset().await;
+
+    //* When
+    let resp = ctx.truncate_revision(-1, None).await;
+
+    //* Then
+    let err = resp.expect_err("truncate with invalid id should return error");
+    match err {
+        TruncateError::InvalidPath(api_err) => {
+            assert_eq!(
+                api_err.error_code, "INVALID_PATH_PARAMETERS",
+                "Expected INVALID_PATH_PARAMETERS error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected InvalidPath error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn truncate_revision_with_active_writer_returns_409() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_with_anvil("truncate_revision_with_active_writer_returns_409").await;
+
+    // Mine blocks so the worker has data to process
+    ctx.ctx
+        .anvil()
+        .mine(5)
+        .await
+        .expect("failed to mine blocks");
+
+    // Deploy dataset — schedules a job, worker creates revisions and assigns writer
+    ctx.ampctl_client
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .await
+        .expect("failed to deploy dataset");
+
+    let revision_with_writer = ctx.poll_revision_with_writer().await;
+    let location_id = revision_with_writer.id;
+
+    // Deactivate the revision so the active check passes
+    ctx.deactivate_revision(
+        &format!(
+            "{}/{}@{}",
+            revision_with_writer.metadata.dataset_namespace,
+            revision_with_writer.metadata.dataset_name,
+            revision_with_writer.metadata.manifest_hash,
+        ),
+        &revision_with_writer.metadata.table_name,
+    )
+    .await
+    .expect("failed to deactivate revision");
+
+    //* When
+    let resp = ctx.truncate_revision(location_id, None).await;
+
+    //* Then
+    let err = resp.expect_err("truncate revision with active writer should return error");
+    match err {
+        TruncateError::WriterJobNotTerminal(api_err) => {
+            assert_eq!(
+                api_err.error_code, "WRITER_JOB_NOT_TERMINAL",
+                "Expected WRITER_JOB_NOT_TERMINAL error code, got: {}",
+                api_err.error_code
+            );
+        }
+        _ => panic!("Expected WriterJobNotTerminal error, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
+async fn truncate_revision_with_stopped_writer_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup_with_anvil("truncate_revision_with_stopped_writer_succeeds").await;
+
+    // Mine blocks so the worker has data to process
+    ctx.ctx
+        .anvil()
+        .mine(5)
+        .await
+        .expect("failed to mine blocks");
+
+    // Deploy dataset — schedules a job, worker creates revisions and assigns writer
+    let job_id = ctx
+        .ampctl_client
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .await
+        .expect("failed to deploy dataset");
+
+    let revision_with_writer = ctx.poll_revision_with_writer().await;
+    let location_id = revision_with_writer.id;
+
+    // Stop the job and wait for it to reach terminal state
+    ctx.ampctl_client
+        .jobs()
+        .stop(&job_id)
+        .await
+        .expect("failed to stop job");
+
+    ctx.wait_for_job_stopped(&job_id).await;
+
+    // Deactivate the revision so the active check passes
+    ctx.deactivate_revision(
+        &format!(
+            "{}/{}@{}",
+            revision_with_writer.metadata.dataset_namespace,
+            revision_with_writer.metadata.dataset_name,
+            revision_with_writer.metadata.manifest_hash,
+        ),
+        &revision_with_writer.metadata.table_name,
+    )
+    .await
+    .expect("failed to deactivate revision");
+
+    //* When
+    let resp = ctx.truncate_revision(location_id, None).await;
+
+    //* Then
+    assert!(
+        resp.is_ok(),
+        "truncate revision with stopped writer should succeed"
+    );
+    let truncated = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision after truncate");
+    assert!(
+        truncated.is_none(),
+        "revision should not exist after truncation"
+    );
+}
+
+#[tokio::test]
+async fn truncate_revision_with_concurrency_param_succeeds() {
+    logging::init();
+
+    //* Given
+    let ctx = TestCtx::setup("truncate_revision_with_concurrency_param_succeeds").await;
+    let restored_tables = ctx.restore_dataset().await;
+    let location_id = TestCtx::blocks_location_id(&restored_tables);
+
+    // Deactivate the revision first
+    ctx.deactivate_revision("_/eth_rpc@0.0.0", "blocks")
+        .await
+        .expect("failed to deactivate revision");
+
+    //* When
+    let resp = ctx
+        .truncate_revision(location_id, Some(2))
+        .await
+        .expect("failed to truncate revision with concurrency param");
+
+    //* Then
+    assert!(resp.files_deleted > 0, "files_deleted should be positive");
+    let truncated = ctx
+        .get_revision(location_id)
+        .await
+        .expect("failed to get revision after truncate");
+    assert!(
+        truncated.is_none(),
+        "revision should not exist after truncation"
+    );
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: Ampctl,
@@ -954,6 +1222,18 @@ impl TestCtx {
     /// Deletes a revision by its location ID.
     async fn delete_revision(&self, location_id: i64) -> Result<(), DeleteError> {
         self.ampctl_client.revisions().delete(location_id).await
+    }
+
+    /// Truncates a revision by its location ID.
+    async fn truncate_revision(
+        &self,
+        location_id: i64,
+        concurrency: Option<usize>,
+    ) -> Result<TruncateResponse, TruncateError> {
+        self.ampctl_client
+            .revisions()
+            .truncate(location_id, concurrency)
+            .await
     }
 
     /// Registers a table revision.
