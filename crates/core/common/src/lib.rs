@@ -27,7 +27,7 @@ pub mod streaming_query;
 
 pub use self::{
     catalog::logical::{LogicalCatalog, LogicalTable},
-    metadata::segments::{ResumeWatermark, Watermark},
+    metadata::segments::{Cursor, NetworkCursor, Watermark},
 };
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);

@@ -39,17 +39,17 @@ The Arrow Flight transport provides a high-performance gRPC interface for execut
 
 ### Batch vs Streaming
 
-| Mode | Activation | Behavior |
-|------|------------|----------|
-| Batch | Default (no SETTINGS) | Query runs once, returns complete results |
+| Mode      | Activation               | Behavior                                  |
+| --------- | ------------------------ | ----------------------------------------- |
+| Batch     | Default (no SETTINGS)    | Query runs once, returns complete results |
 | Streaming | `SETTINGS stream = true` | Continuous execution, incremental results |
 
 ### Headers
 
-| Header | Description |
-|--------|-------------|
+| Header       | Description                             |
+| ------------ | --------------------------------------- |
 | `amp-stream` | Override streaming mode (`true` or `1`) |
-| `amp-resume` | Resume streaming from watermark (JSON) |
+| `amp-resume` | Resume streaming from cursor (JSON)     |
 
 ### Streaming Metadata
 
@@ -57,7 +57,13 @@ For streaming queries, `FlightData.app_metadata` contains:
 
 ```json
 {
-  "ranges": [{"network": "eth", "numbers": {"start": 100, "end": 102}, "hash": "0x..."}],
+  "ranges": [
+    {
+      "network": "eth",
+      "numbers": { "start": 100, "end": 102 },
+      "hash": "0x..."
+    }
+  ],
   "ranges_complete": true
 }
 ```
