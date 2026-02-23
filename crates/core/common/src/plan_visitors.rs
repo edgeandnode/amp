@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     sync::Arc,
 };
 
@@ -17,11 +16,14 @@ use datafusion::{
     },
     physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
-    sql::{TableReference, utils::UNNEST_PLACEHOLDER},
+    sql::{TableReference as DFTableReference, utils::UNNEST_PLACEHOLDER},
 };
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
-use crate::incrementalizer::{NonIncrementalQueryError, incremental_op_kind};
+use crate::{
+    incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
+    sql::TableReference,
+};
 
 /// Helper function to create a column reference to `_block_num`
 fn block_num_col() -> Expr {
@@ -189,7 +191,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
                         // Both the user expression and the generated one are simple column references to `_block_num`.
                         // But they were not equal, probably due to qualifiers. If there is only one input table, we can ignore the qualifier difference.
                         let input_schema = projection.input.schema();
-                        let input_qualifiers: BTreeSet<&TableReference> =
+                        let input_qualifiers: BTreeSet<&DFTableReference> =
                             input_schema.iter().filter_map(|x| x.0).collect();
 
                         if input_qualifiers.len() <= 1 {
@@ -254,7 +256,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 Ok(Transformed::yes(LogicalPlan::SubqueryAlias(rebuilt)))
             }
 
-            // These nodes do not cache schema and are not leaves, so we can leave them as-is
+            // These DfTableReferencenodes do not cache schema and are not leaves, so we can leave them as-is
             Filter(_) | Repartition(_) | Subquery(_) | Explain(_) | Analyze(_)
             | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
 
@@ -320,8 +322,8 @@ pub enum NonIncrementalOp {
     RecursiveQuery,
 }
 
-impl fmt::Display for NonIncrementalOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for NonIncrementalOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use NonIncrementalOp::*;
         match self {
             Limit => write!(f, "Limit"),
@@ -358,7 +360,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
 
 pub fn extract_table_references_from_plan(
     plan: &LogicalPlan,
-) -> Result<Vec<TableReference>, DataFusionError> {
+) -> Result<Vec<DFTableReference>, DataFusionError> {
     let mut refs = BTreeSet::new();
 
     plan.apply(|node| {
@@ -380,11 +382,11 @@ pub fn extract_table_references_from_plan(
 #[derive(Debug, Clone)]
 pub struct CrossNetworkJoinInfo {
     /// Networks involved in the cross-network join
-    pub networks: BTreeSet<datasets_common::network_id::NetworkId>,
+    pub networks: BTreeSet<NetworkId>,
 }
 
-impl fmt::Display for CrossNetworkJoinInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for CrossNetworkJoinInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "join across multiple networks: {:?}", self.networks)
     }
 }
@@ -398,10 +400,16 @@ pub fn find_cross_network_join(
     plan: &LogicalPlan,
     catalog: &crate::catalog::physical::Catalog,
 ) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
-    let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
+    let table_to_network: BTreeMap<DFTableReference, NetworkId> = catalog
         .entries()
         .iter()
-        .map(|t| (t.table_ref().into(), t.physical_table().network().clone()))
+        .map(|t| {
+            let table_ref = TableReference::Partial {
+                schema: Arc::new(t.sql_schema_name().to_owned()),
+                table: Arc::new(t.physical_table().table_name().clone()),
+            };
+            (table_ref.into(), t.physical_table().network().clone())
+        })
         .collect();
 
     let reference_networks =

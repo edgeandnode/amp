@@ -3,7 +3,7 @@ use std::{any::Any, collections::BTreeMap, fmt::Debug, sync::Arc};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use super::catalog_provider::CatalogProvider as FuncCatalogProvider;
+use super::catalog_provider::AsyncCatalogProvider;
 
 /// List of named function catalogs.
 ///
@@ -18,20 +18,20 @@ pub trait CatalogProviderList: Debug + Sync + Send {
     fn register_catalog(
         &self,
         name: String,
-        catalog: Arc<dyn FuncCatalogProvider>,
-    ) -> Option<Arc<dyn FuncCatalogProvider>>;
+        catalog: Arc<dyn AsyncCatalogProvider>,
+    ) -> Option<Arc<dyn AsyncCatalogProvider>>;
 
     /// Returns all registered catalog names.
     fn catalog_names(&self) -> Vec<String>;
 
     /// Looks up a catalog by name.
-    async fn catalog(&self, name: &str) -> Option<Arc<dyn FuncCatalogProvider>>;
+    async fn catalog(&self, name: &str) -> Option<Arc<dyn AsyncCatalogProvider>>;
 }
 
 /// In-memory function catalog list.
 #[derive(Debug, Default)]
 pub struct MemoryCatalogProviderList {
-    catalogs: RwLock<BTreeMap<String, Arc<dyn FuncCatalogProvider>>>,
+    catalogs: RwLock<BTreeMap<String, Arc<dyn AsyncCatalogProvider>>>,
 }
 
 impl MemoryCatalogProviderList {
@@ -50,8 +50,8 @@ impl CatalogProviderList for MemoryCatalogProviderList {
     fn register_catalog(
         &self,
         name: String,
-        catalog: Arc<dyn FuncCatalogProvider>,
-    ) -> Option<Arc<dyn FuncCatalogProvider>> {
+        catalog: Arc<dyn AsyncCatalogProvider>,
+    ) -> Option<Arc<dyn AsyncCatalogProvider>> {
         self.catalogs.write().insert(name, catalog)
     }
 
@@ -59,33 +59,28 @@ impl CatalogProviderList for MemoryCatalogProviderList {
         self.catalogs.read().keys().cloned().collect()
     }
 
-    async fn catalog(&self, name: &str) -> Option<Arc<dyn FuncCatalogProvider>> {
+    async fn catalog(&self, name: &str) -> Option<Arc<dyn AsyncCatalogProvider>> {
         self.catalogs.read().get(name).cloned()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use datafusion::error::DataFusionError;
+
     use super::*;
-    use crate::func_catalog::schema_provider::SchemaProvider as FuncSchemaProvider;
+    use crate::func_catalog::schema_provider::AsyncSchemaProvider as FuncAsyncSchemaProvider;
 
     #[derive(Debug)]
-    struct DummyCatalog {
-        id: &'static str,
-    }
+    struct DummyCatalog;
 
     #[async_trait]
-    impl FuncCatalogProvider for DummyCatalog {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
-        fn schema_names(&self) -> Vec<String> {
-            Vec::new()
-        }
-
-        async fn schema(&self, _name: &str) -> Option<Arc<dyn FuncSchemaProvider>> {
-            None
+    impl AsyncCatalogProvider for DummyCatalog {
+        async fn schema(
+            &self,
+            _name: &str,
+        ) -> Result<Option<Arc<dyn FuncAsyncSchemaProvider>>, DataFusionError> {
+            Ok(None)
         }
     }
 
@@ -93,7 +88,7 @@ mod tests {
     fn register_catalog_with_new_name_returns_none() {
         //* Given
         let name = "amp".to_string();
-        let catalog = Arc::new(DummyCatalog { id: "first" }) as Arc<dyn FuncCatalogProvider>;
+        let catalog = Arc::new(DummyCatalog);
 
         let list = MemoryCatalogProviderList::new();
 
@@ -112,9 +107,8 @@ mod tests {
         //* Given
         let name = "amp".to_string();
 
-        let first_catalog = Arc::new(DummyCatalog { id: "first" }) as Arc<dyn FuncCatalogProvider>;
-        let second_catalog =
-            Arc::new(DummyCatalog { id: "second" }) as Arc<dyn FuncCatalogProvider>;
+        let first_catalog = Arc::new(DummyCatalog) as Arc<dyn AsyncCatalogProvider>;
+        let second_catalog = Arc::new(DummyCatalog) as Arc<dyn AsyncCatalogProvider>;
 
         let list = MemoryCatalogProviderList::new();
         list.register_catalog(name.clone(), first_catalog);
@@ -127,27 +121,19 @@ mod tests {
             replaced.is_some(),
             "should return previously registered catalog"
         );
-        let current = list
+        let _current = list
             .catalog(&name)
             .await
             .expect("catalog should exist after replacement");
-        let current = current
-            .as_any()
-            .downcast_ref::<DummyCatalog>()
-            .expect("should downcast to DummyCatalog");
-        assert_eq!(
-            current.id, "second",
-            "catalog should be the newly registered one"
-        );
     }
 
     #[test]
     fn catalog_names_with_multiple_catalogs_returns_sorted_names() {
         //* Given
         let alpha_name = "alpha".to_string();
-        let alpha_catalog = Arc::new(DummyCatalog { id: "a" }) as Arc<dyn FuncCatalogProvider>;
+        let alpha_catalog = Arc::new(DummyCatalog) as Arc<dyn AsyncCatalogProvider>;
         let beta_name = "beta".to_string();
-        let beta_catalog = Arc::new(DummyCatalog { id: "b" }) as Arc<dyn FuncCatalogProvider>;
+        let beta_catalog = Arc::new(DummyCatalog) as Arc<dyn AsyncCatalogProvider>;
 
         let list = MemoryCatalogProviderList::new();
         list.register_catalog(alpha_name, alpha_catalog);

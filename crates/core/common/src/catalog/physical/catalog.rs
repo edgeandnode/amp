@@ -1,24 +1,45 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
+
+use datafusion::logical_expr::ScalarUDF;
+use datasets_common::hash_reference::HashReference;
 
 use crate::{
     BlockNum,
-    catalog::logical::LogicalCatalog,
+    catalog::logical::LogicalTable,
     physical_table::{MultiNetworkSegmentsError, SnapshotError, table::PhysicalTable},
-    sql::TableReference,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Catalog {
-    /// The logical catalog describing dataset schemas and metadata.
-    logical: LogicalCatalog,
+    /// Logical tables describing dataset schemas and metadata.
+    tables: Vec<LogicalTable>,
+    /// UDFs specific to the datasets corresponding to the resolved tables.
+    udfs: Vec<ScalarUDF>,
     /// The physical catalog entries, each pairing a physical table with SQL naming.
     entries: Vec<CatalogTable>,
+    /// Dependency alias to hash reference mappings for lazy resolution.
+    dep_aliases: BTreeMap<String, HashReference>,
 }
 
 impl Catalog {
-    /// Creates a new catalog from the given entries and logical catalog.
-    pub fn new(logical: LogicalCatalog, entries: Vec<CatalogTable>) -> Self {
-        Catalog { logical, entries }
+    /// Creates a new catalog from the given entries, logical tables, and UDFs.
+    pub fn new(
+        tables: Vec<LogicalTable>,
+        udfs: Vec<ScalarUDF>,
+        entries: Vec<CatalogTable>,
+        dep_aliases: BTreeMap<String, HashReference>,
+    ) -> Self {
+        Catalog {
+            tables,
+            udfs,
+            entries,
+            dep_aliases,
+        }
+    }
+
+    /// Returns the dependency alias to hash reference mappings.
+    pub fn dep_aliases(&self) -> &BTreeMap<String, HashReference> {
+        &self.dep_aliases
     }
 
     /// Returns the catalog entries.
@@ -32,14 +53,19 @@ impl Catalog {
         self.entries.iter().map(|entry| entry.physical_table())
     }
 
-    /// Returns a reference to the logical catalog.
-    pub fn logical(&self) -> &LogicalCatalog {
-        &self.logical
+    /// Returns the logical tables.
+    pub fn tables(&self) -> &[LogicalTable] {
+        &self.tables
     }
 
-    /// Consumes the catalog, returning its entries and logical catalog.
-    pub fn into_parts(self) -> (Vec<CatalogTable>, LogicalCatalog) {
-        (self.entries, self.logical)
+    /// Returns the user-defined functions.
+    pub fn udfs(&self) -> &[ScalarUDF] {
+        &self.udfs
+    }
+
+    /// Consumes the catalog, returning its entries, logical tables, and UDFs.
+    pub fn into_parts(self) -> (Vec<CatalogTable>, Vec<LogicalTable>, Vec<ScalarUDF>) {
+        (self.entries, self.tables, self.udfs)
     }
 
     /// Returns the earliest synced block number across all tables in this catalog.
@@ -123,13 +149,5 @@ impl CatalogTable {
     /// Returns the dataset reference portion for SQL table references.
     pub fn sql_schema_name(&self) -> &str {
         &self.sql_schema_name
-    }
-
-    /// Qualified table reference in the format `dataset_name.table_name`.
-    pub fn table_ref(&self) -> TableReference {
-        TableReference::partial(
-            self.sql_schema_name.clone(),
-            self.physical_table.table_name().clone(),
-        )
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     Json,
@@ -6,19 +6,12 @@ use axum::{
     http::StatusCode,
 };
 use common::{
-    catalog::logical::for_admin_api::{
-        self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
-        TableReferencesMap,
-    },
-    context::plan::{PlanContext, SqlError as PlanSqlError},
-    dataset_store::GetDatasetError,
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
+    context::plan::{PlanContextBuilder, is_user_input_error},
     exec_env::default_session_config,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
-    sql::{
-        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
-        TableReference, resolve_function_references, resolve_table_references,
-    },
+    self_schema_provider::SelfSchemaProvider,
     sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
@@ -26,10 +19,7 @@ use datasets_common::{
     hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
 };
 use datasets_derived::{
-    deps::{
-        DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, DepReference,
-        HashOrVersion,
-    },
+    deps::{DepAlias, DepReference, HashOrVersion},
     func_name::FuncName,
     manifest::{Function, TableSchema},
 };
@@ -141,14 +131,14 @@ pub async fn handler(
         // 2. Checking if the provided function names match what's used in SQL
         // 3. Warning or erroring if functions are defined but never used
         return Ok(Json(SchemaResponse {
-            schemas: BTreeMap::new(),
+            schemas: Default::default(),
         }));
     }
 
     // Resolve all dependencies to their manifest hashes
     // This must happen before parsing SQL to ensure all dependencies exist
     let dependencies = {
-        let mut resolved: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
+        let mut resolved: BTreeMap<DepAlias, HashReference> = Default::default();
         for (alias, dep_ref) in dependencies {
             let (fqn, hash_or_version) = dep_ref.clone().into_fqn_and_hash_or_version();
 
@@ -199,9 +189,8 @@ pub async fn handler(
     };
 
     // Parse all SQL queries from tables and extract table references and function names
-    let (statements, references) = {
-        let mut statements: BTreeMap<TableName, Statement> = BTreeMap::new();
-        let mut references = TableReferencesMap::new();
+    let statements = {
+        let mut statements: BTreeMap<TableName, Statement> = Default::default();
 
         for (table_name, sql_query) in tables {
             let stmt = common::sql::parse(&sql_query).map_err(|err| Error::InvalidTableSql {
@@ -209,137 +198,46 @@ pub async fn handler(
                 source: err,
             })?;
 
-            // Extract table references from the statement
-            let table_refs =
-                resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
-                    ResolveTableReferencesError::InvalidTableName { .. } => {
-                        Error::InvalidTableName(err)
-                    }
-                    ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
-                        Error::CatalogQualifiedTable {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                    }
-                    ResolveTableReferencesError::InvalidSchemaFormat { .. } => {
-                        Error::InvalidDependencyAliasForTableRef {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                    }
-                    _ => Error::TableReferenceResolution {
-                        table_name: table_name.clone(),
-                        source: err,
-                    },
-                })?;
-
-            // Validate dependency aliases in table references before catalog creation
-            for table_ref in &table_refs {
-                if let TableReference::Partial { schema, .. } = table_ref
-                    && !dependencies.contains_key(schema.as_ref())
-                {
-                    return Err(Error::DependencyAliasNotFound {
-                        table_name: table_name.clone(),
-                        alias: schema.to_string(),
-                    }
-                    .into());
-                }
-            }
-
-            // Extract function references from the statement (supports both external deps and self-references)
-            let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(
-                |err| match &err {
-                    ResolveFunctionReferencesError::InvalidSchemaFormat { .. } => {
-                        Error::InvalidDependencyAliasForFunctionRef {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                    }
-                    ResolveFunctionReferencesError::CatalogQualifiedFunction { .. } => {
-                        Error::CatalogQualifiedFunction {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                    }
-                    _ => Error::FunctionReferenceResolution {
-                        table_name: table_name.clone(),
-                        source: err,
-                    },
-                },
-            )?;
-
-            // Validate dependency aliases in function references before catalog creation
-            for func_ref in &func_refs {
-                if let FunctionReference::Qualified { schema, .. } = func_ref
-                    && let DepAliasOrSelfRef::DepAlias(dep_alias) = schema.as_ref()
-                    && !dependencies.contains_key(dep_alias)
-                {
-                    return Err(Error::DependencyAliasNotFound {
-                        table_name: table_name.clone(),
-                        alias: dep_alias.to_string(),
-                    }
-                    .into());
-                }
-            }
-
-            statements.insert(table_name.clone(), stmt);
-            references.insert(table_name, (table_refs, func_refs));
+            statements.insert(table_name, stmt);
         }
 
-        (statements, references)
+        statements
     };
 
-    // Create logical catalog using resolved dependencies
-    let catalog = catalog::create(
-        &ctx.dataset_store,
-        IsolatePool::dummy(), // For schema validation only (no JS execution)
-        dependencies,
-        functions,
-        references,
-    )
-    .await
-    .map_err(|err| match &err {
-        CreateLogicalCatalogError::ResolveTables(inner) => match inner {
-            ResolveTablesError::UnqualifiedTable { .. } => Error::UnqualifiedTable(err),
-            ResolveTablesError::GetDataset {
-                source: GetDatasetError::DatasetNotFound(_),
-                ..
-            } => Error::DatasetNotFound(err),
-            ResolveTablesError::GetDataset { .. } => Error::GetDataset(err),
-            ResolveTablesError::TableNotFoundInDataset { .. } => Error::TableNotFoundInDataset(err),
-        },
-        CreateLogicalCatalogError::ResolveUdfs(inner) => match inner {
-            ResolveUdfsError::GetDataset {
-                source: GetDatasetError::DatasetNotFound(_),
-                ..
-            } => Error::DatasetNotFound(err),
-            ResolveUdfsError::GetDataset { .. } => Error::GetDataset(err),
-            ResolveUdfsError::EthCallUdfCreation { .. } => Error::EthCallUdfCreation(err),
-            ResolveUdfsError::EthCallNotAvailable { .. } => Error::EthCallNotAvailable(err),
-            ResolveUdfsError::FunctionNotFoundInDataset { .. } => {
-                Error::FunctionNotFoundInDataset(err)
-            }
-            ResolveUdfsError::SelfReferencedFunctionNotFound { .. } => {
-                Error::FunctionNotFoundInDataset(err)
-            }
-        },
-    })?;
+    // Build dep_aliases for AmpCatalogProvider before dependencies is consumed
+    let dep_aliases: BTreeMap<String, HashReference> = dependencies
+        .iter()
+        .map(|(alias, hash_ref)| (alias.to_string(), hash_ref.clone()))
+        .collect();
 
-    // Create planning context from catalog
+    // Create planning context with self-schema provider
     let session_config = default_session_config().map_err(Error::SessionConfig)?;
-    let planning_ctx = PlanContext::new(session_config, catalog);
+    let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
+        Arc::new(SelfSchemaProvider::from_manifest_udfs(
+            datasets_derived::deps::SELF_REF_KEYWORD.to_string(),
+            IsolatePool::dummy(),
+            &functions,
+        ));
+    let amp_catalog = Arc::new(
+        AmpCatalogProvider::new(ctx.dataset_store.clone(), IsolatePool::dummy())
+            .with_dep_aliases(dep_aliases.clone())
+            .with_self_schema(self_schema),
+    );
+    let planning_ctx = PlanContextBuilder::new(session_config)
+        .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
+        .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
+        .build();
 
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
     for (table_name, stmt) in statements {
-        let plan =
-            planning_ctx
-                .plan_sql(stmt.clone())
-                .await
-                .map_err(|err| Error::SchemaInference {
-                    table_name: table_name.clone(),
-                    source: err,
-                })?;
+        let plan = planning_ctx
+            .statement_to_plan(stmt.clone())
+            .await
+            .map_err(|err| Error::SchemaPlanInference {
+                table_name: table_name.clone(),
+                source: err,
+            })?;
         // Return error if query is non-incremental
         plan.is_incremental()
             .map_err(|err| Error::NonIncrementalQuery {
@@ -347,14 +245,12 @@ pub async fn handler(
                 source: err,
             })?;
         // Infer schema using the planning context
-        let schema =
-            planning_ctx
-                .sql_output_schema(stmt)
-                .await
-                .map_err(|err| Error::SchemaInference {
-                    table_name: table_name.clone(),
-                    source: err,
-                })?;
+        let schema = planning_ctx.sql_output_schema(stmt).await.map_err(|err| {
+            Error::SchemaOutputInference {
+                table_name: table_name.clone(),
+                source: err,
+            }
+        })?;
 
         // Prepend the special block number field
         let schema = prepend_special_block_num_field(&schema);
@@ -475,35 +371,6 @@ enum Error {
         source: NonIncrementalQueryError,
     },
 
-    /// Failed to resolve table references in SQL query
-    ///
-    /// This occurs when:
-    /// - Table references contain invalid identifiers
-    /// - Table references have unsupported format (not 1-3 parts)
-    /// - Table names don't conform to identifier rules
-    #[error("Failed to resolve table references for table '{table_name}': {source}")]
-    TableReferenceResolution {
-        /// The table name that contains the invalid references
-        table_name: TableName,
-        /// The underlying resolution error
-        #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
-    },
-
-    /// Failed to resolve function references from SQL query
-    ///
-    /// This occurs when:
-    /// - Function references cannot be extracted from the parsed SQL statement
-    /// - Unsupported DML statements are encountered
-    #[error("Failed to resolve function references for table '{table_name}': {source}")]
-    FunctionReferenceResolution {
-        /// The table name that contains the invalid functions
-        table_name: TableName,
-        /// The underlying extraction error
-        #[source]
-        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
-    },
-
     /// Dependency not found in dataset store
     ///
     /// This occurs when:
@@ -547,149 +414,34 @@ enum Error {
         source: amp_datasets_registry::error::ResolveRevisionError,
     },
 
-    /// Catalog-qualified table reference not supported
-    ///
-    /// Only dataset-qualified tables are supported (e.g., `dataset.table`).
-    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
-    ///
-    /// This error is detected during table reference resolution from SQL.
-    #[error("Catalog-qualified table in '{table_name}': {source}")]
-    CatalogQualifiedTable {
-        /// The table name that contains the catalog-qualified reference
-        table_name: TableName,
-        /// The underlying resolution error
-        #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
-    },
-
-    /// Unqualified table reference
-    ///
-    /// All tables must be qualified with a dataset reference in the schema portion.
-    /// Unqualified tables (e.g., just `table_name`) are not allowed.
-    #[error(transparent)]
-    UnqualifiedTable(CreateLogicalCatalogError),
-
-    /// Invalid table name
-    ///
-    /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
-    /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error("Invalid table name in SQL query: {0}")]
-    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
-
-    /// Dataset reference not found
-    ///
-    /// The referenced dataset does not exist in the store.
-    #[error(transparent)]
-    DatasetNotFound(CreateLogicalCatalogError),
-
-    /// Failed to retrieve dataset from store
-    ///
-    /// This occurs when loading a dataset definition fails due to:
-    /// - Invalid or corrupted manifest
-    /// - Unsupported dataset kind
-    /// - Storage backend errors
-    #[error(transparent)]
-    GetDataset(CreateLogicalCatalogError),
-
-    /// Failed to create ETH call UDF
-    ///
-    /// This occurs when creating the eth_call user-defined function fails.
-    #[error(transparent)]
-    EthCallUdfCreation(CreateLogicalCatalogError),
-
-    /// Table not found in dataset
-    ///
-    /// The referenced table does not exist in the dataset.
-    #[error(transparent)]
-    TableNotFoundInDataset(CreateLogicalCatalogError),
-
-    /// Function not found in dataset
-    ///
-    /// The referenced function does not exist in the dataset.
-    #[error(transparent)]
-    FunctionNotFoundInDataset(CreateLogicalCatalogError),
-
-    /// eth_call function not available
-    ///
-    /// The eth_call function is not available for the referenced dataset.
-    #[error(transparent)]
-    EthCallNotAvailable(CreateLogicalCatalogError),
-
-    /// Invalid dependency alias in table reference
-    ///
-    /// The dependency alias in a table reference does not conform to alias rules
-    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
-    ///
-    /// This error is detected during table reference resolution from SQL.
-    #[error("Invalid dependency alias in table reference in '{table_name}': {source}")]
-    InvalidDependencyAliasForTableRef {
-        /// The table name that contains the invalid alias
-        table_name: TableName,
-        /// The underlying resolution error
-        #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
-    },
-
-    /// Invalid dependency alias in function reference
-    ///
-    /// The dependency alias in a function reference does not conform to alias rules
-    /// (must start with letter, contain only alphanumeric/underscore, and be <= 63 bytes).
-    ///
-    /// This error is detected during function reference resolution from SQL.
-    #[error("Invalid dependency alias in function reference in '{table_name}': {source}")]
-    InvalidDependencyAliasForFunctionRef {
-        /// The table name that contains the invalid alias
-        table_name: TableName,
-        /// The underlying resolution error
-        #[source]
-        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
-    },
-
-    /// Catalog-qualified function reference not supported
-    ///
-    /// Only dataset-qualified functions are supported (e.g., `dataset.function`).
-    /// Catalog-qualified functions (e.g., `catalog.schema.function`) are not supported.
-    ///
-    /// This error is detected during function reference resolution from SQL.
-    #[error("Catalog-qualified function in '{table_name}': {source}")]
-    CatalogQualifiedFunction {
-        /// The table name that contains the catalog-qualified function reference
-        table_name: TableName,
-        /// The underlying resolution error
-        #[source]
-        source: ResolveFunctionReferencesError<DepAliasOrSelfRefError>,
-    },
-
-    /// Dependency alias not found
-    ///
-    /// A table or function reference uses an alias that was not provided in the dependencies map.
-    #[error(
-        "Dependency alias not found: In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
-    )]
-    DependencyAliasNotFound {
-        /// The table being processed when the error occurred
-        table_name: TableName,
-        /// The dependency alias that was not found
-        alias: String,
-    },
-
     /// Failed to create DataFusion session configuration
     #[error("failed to create session config")]
     SessionConfig(#[source] datafusion::error::DataFusionError),
 
-    /// Failed to infer schema for table
+    /// Failed to plan SQL during schema inference for a table
     ///
-    /// This occurs when:
-    /// - Query planning fails due to invalid references
-    /// - Type inference fails for the query
-    /// - Schema determination encounters errors
-    #[error("Failed to infer schema for table '{table_name}': {source}")]
-    SchemaInference {
+    /// This occurs when SQL planning fails for a table query during schema
+    /// inference (e.g., invalid references, type mismatches).
+    #[error("Failed to plan SQL for table '{table_name}': {source}")]
+    SchemaPlanInference {
         /// The table name that failed schema inference
         table_name: TableName,
-        /// The underlying query context error
+        /// The underlying SQL planning error
         #[source]
-        source: PlanSqlError,
+        source: datafusion::error::DataFusionError,
+    },
+
+    /// Failed to infer output schema for a table
+    ///
+    /// This occurs when schema inference fails after SQL planning succeeds
+    /// (e.g., schema determination encounters errors).
+    #[error("Failed to infer output schema for table '{table_name}': {source}")]
+    SchemaOutputInference {
+        /// The table name that failed schema inference
+        table_name: TableName,
+        /// The underlying schema inference error
+        #[source]
+        source: datafusion::error::DataFusionError,
     },
 }
 
@@ -720,30 +472,19 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => "EMPTY_TABLES_AND_FUNCTIONS",
             Error::InvalidTableSql { .. } => "INVALID_TABLE_SQL",
             Error::NonIncrementalQuery { .. } => "NON_INCREMENTAL_QUERY",
-            Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
-            Error::FunctionReferenceResolution { .. } => "FUNCTION_REFERENCE_RESOLUTION",
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
             Error::DependencyManifestLinkCheck { .. } => "DEPENDENCY_MANIFEST_LINK_CHECK",
             Error::DependencyVersionResolution { .. } => "DEPENDENCY_VERSION_RESOLUTION",
-            Error::CatalogQualifiedTable { .. } => "CATALOG_QUALIFIED_TABLE",
-            Error::UnqualifiedTable(_) => "UNQUALIFIED_TABLE",
-            Error::InvalidTableName(_) => "INVALID_TABLE_NAME",
-            Error::InvalidDependencyAliasForTableRef { .. } => {
-                "INVALID_DEPENDENCY_ALIAS_FOR_TABLE_REF"
-            }
-            Error::InvalidDependencyAliasForFunctionRef { .. } => {
-                "INVALID_DEPENDENCY_ALIAS_FOR_FUNCTION_REF"
-            }
-            Error::CatalogQualifiedFunction { .. } => "CATALOG_QUALIFIED_FUNCTION",
-            Error::DatasetNotFound(_) => "DATASET_NOT_FOUND",
-            Error::GetDataset(_) => "GET_DATASET_ERROR",
-            Error::EthCallUdfCreation(_) => "ETH_CALL_UDF_CREATION_ERROR",
-            Error::TableNotFoundInDataset(_) => "TABLE_NOT_FOUND_IN_DATASET",
-            Error::FunctionNotFoundInDataset(_) => "FUNCTION_NOT_FOUND_IN_DATASET",
-            Error::EthCallNotAvailable(_) => "ETH_CALL_NOT_AVAILABLE",
-            Error::DependencyAliasNotFound { .. } => "DEPENDENCY_ALIAS_NOT_FOUND",
             Error::SessionConfig(_) => "SESSION_CONFIG_ERROR",
-            Error::SchemaInference { .. } => "SCHEMA_INFERENCE",
+            Error::SchemaPlanInference { source, .. } if is_user_input_error(source) => {
+                "INVALID_PLAN"
+            }
+            Error::SchemaOutputInference { source, .. } if is_user_input_error(source) => {
+                "INVALID_PLAN"
+            }
+            Error::SchemaPlanInference { .. } | Error::SchemaOutputInference { .. } => {
+                "SCHEMA_INFERENCE"
+            }
         }
     }
 
@@ -753,26 +494,154 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => StatusCode::BAD_REQUEST,
             Error::InvalidTableSql { .. } => StatusCode::BAD_REQUEST,
             Error::NonIncrementalQuery { .. } => StatusCode::BAD_REQUEST,
-            Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
-            Error::FunctionReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
             Error::DependencyManifestLinkCheck { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DependencyVersionResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::CatalogQualifiedTable { .. } => StatusCode::BAD_REQUEST,
-            Error::UnqualifiedTable(_) => StatusCode::BAD_REQUEST,
-            Error::InvalidTableName(_) => StatusCode::BAD_REQUEST,
-            Error::InvalidDependencyAliasForTableRef { .. } => StatusCode::BAD_REQUEST,
-            Error::InvalidDependencyAliasForFunctionRef { .. } => StatusCode::BAD_REQUEST,
-            Error::CatalogQualifiedFunction { .. } => StatusCode::BAD_REQUEST,
-            Error::DatasetNotFound(_) => StatusCode::NOT_FOUND,
-            Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::EthCallUdfCreation(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::TableNotFoundInDataset(_) => StatusCode::NOT_FOUND,
-            Error::FunctionNotFoundInDataset(_) => StatusCode::NOT_FOUND,
-            Error::EthCallNotAvailable(_) => StatusCode::NOT_FOUND,
-            Error::DependencyAliasNotFound { .. } => StatusCode::BAD_REQUEST,
             Error::SessionConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::SchemaInference { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SchemaPlanInference { source, .. } if is_user_input_error(source) => {
+                StatusCode::BAD_REQUEST
+            }
+            Error::SchemaOutputInference { source, .. } if is_user_input_error(source) => {
+                StatusCode::BAD_REQUEST
+            }
+            Error::SchemaPlanInference { .. } | Error::SchemaOutputInference { .. } => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use datafusion::error::DataFusionError;
+
+    use super::*;
+
+    #[test]
+    fn status_code_with_schema_plan_inference_user_input_error_returns_bad_request() {
+        //* Given
+        let table_name = "derived_table"
+            .parse::<TableName>()
+            .expect("table name should parse");
+        let error = Error::SchemaPlanInference {
+            table_name,
+            source: DataFusionError::Plan(
+                "failed to extract table references: Catalog-qualified table references are not supported: amp.public.blocks"
+                    .to_string(),
+            )
+            .context("amp::invalid_input"),
+        };
+
+        //* When
+        let status_code = error.status_code();
+
+        //* Then
+        assert_eq!(status_code, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn status_code_with_schema_output_inference_user_input_error_returns_bad_request() {
+        //* Given
+        let table_name = "derived_table"
+            .parse::<TableName>()
+            .expect("table name should parse");
+        let error = Error::SchemaOutputInference {
+            table_name,
+            source: DataFusionError::Plan(
+                "failed to extract function references: Catalog-qualified function references are not supported: amp.public.identity_udf"
+                    .to_string(),
+            )
+            .context("amp::invalid_input"),
+        };
+
+        //* When
+        let status_code = error.status_code();
+
+        //* Then
+        assert_eq!(status_code, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn status_code_with_schema_plan_inference_internal_error_returns_internal_error() {
+        //* Given
+        let table_name = "derived_table"
+            .parse::<TableName>()
+            .expect("table name should parse");
+        let error = Error::SchemaPlanInference {
+            table_name,
+            source: DataFusionError::Plan("failed to resolve async catalog provider".to_string()),
+        };
+
+        //* When
+        let status_code = error.status_code();
+
+        //* Then
+        assert_eq!(status_code, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// Regression: classification is based on context tag, not message text.
+    /// Changing the diagnostic message must not affect the status code.
+    #[test]
+    fn status_code_with_schema_plan_inference_user_input_different_message_returns_bad_request() {
+        //* Given
+        let table_name = "derived_table"
+            .parse::<TableName>()
+            .expect("table name should parse");
+        let error = Error::SchemaPlanInference {
+            table_name,
+            source: DataFusionError::Plan("completely different diagnostic text".to_string())
+                .context("amp::invalid_input"),
+        };
+
+        //* When
+        let status_code = error.status_code();
+
+        //* Then
+        assert_eq!(status_code, StatusCode::BAD_REQUEST);
+    }
+
+    /// Regression (T29): user-input tag inside a nested context wrapper must
+    /// still map to `BAD_REQUEST`. A future caller that adds an outer
+    /// `.context("…")` to an already-tagged error must not accidentally
+    /// produce an `INTERNAL_SERVER_ERROR` status.
+    #[test]
+    fn status_code_with_schema_plan_inference_nested_user_input_tag_returns_bad_request() {
+        //* Given — amp::invalid_input is wrapped by an outer context layer
+        let table_name = "derived_table"
+            .parse::<TableName>()
+            .expect("table name should parse");
+        let tagged = DataFusionError::Plan("invalid table reference".to_string())
+            .context("amp::invalid_input");
+        let error = Error::SchemaPlanInference {
+            table_name,
+            source: tagged.context("failed to convert SQL statement to logical plan"),
+        };
+
+        //* When
+        let status_code = error.status_code();
+
+        //* Then
+        assert_eq!(status_code, StatusCode::BAD_REQUEST);
+    }
+
+    /// Regression (T29): same as above but for `SchemaOutputInference`.
+    #[test]
+    fn status_code_with_schema_output_inference_nested_user_input_tag_returns_bad_request() {
+        //* Given — amp::invalid_input is wrapped by an outer context layer
+        let table_name = "derived_table"
+            .parse::<TableName>()
+            .expect("table name should parse");
+        let tagged = DataFusionError::Plan("invalid function reference".to_string())
+            .context("amp::invalid_input");
+        let error = Error::SchemaOutputInference {
+            table_name,
+            source: tagged.context("failed to infer output schema"),
+        };
+
+        //* When
+        let status_code = error.status_code();
+
+        //* Then
+        assert_eq!(status_code, StatusCode::BAD_REQUEST);
     }
 }

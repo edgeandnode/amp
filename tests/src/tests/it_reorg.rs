@@ -4,10 +4,8 @@ use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
 use common::{
     BlockNum, BlockRange,
-    catalog::{
-        logical::for_query as logical_catalog, physical::for_query as physical_table_catalog,
-    },
-    sql::{self, resolve_function_references, resolve_table_references},
+    catalog::physical::for_query as physical_table_catalog,
+    sql::{self, resolve_table_references},
     sql_str::SqlStr,
 };
 use datasets_common::{partial_reference::PartialReference, reference::Reference};
@@ -476,29 +474,13 @@ impl ReorgTestCtx {
         let test_env = &self.ctx;
         let sql_query = SqlStr::new_unchecked(format!("select * from {}.blocks", dataset));
         let sql = sql::parse(&sql_query).expect("Failed to parse SQL for dataset.blocks");
-        let env = common::exec_env::create(
-            test_env.daemon_server().config().max_mem_mb,
-            test_env.daemon_server().config().query_max_mem_mb,
-            &test_env.daemon_server().config().spill_location,
-            test_env.daemon_server().data_store().clone(),
-        )
-        .expect("Failed to create query environment");
         let catalog = {
             let table_refs = resolve_table_references::<PartialReference>(&sql)
                 .expect("Failed to resolve table references");
-            let func_refs = resolve_function_references::<PartialReference>(&sql)
-                .expect("Failed to resolve function references");
-            let logical = logical_catalog::create(
-                test_env.daemon_server().dataset_store(),
-                &env.isolate_pool,
-                (table_refs, func_refs),
-            )
-            .await
-            .expect("Failed to create logical catalog");
             physical_table_catalog::create(
                 test_env.daemon_server().dataset_store(),
                 test_env.daemon_server().data_store(),
-                logical,
+                table_refs,
             )
             .await
             .expect("Failed to create physical catalog for SQL query")
@@ -645,7 +627,7 @@ async fn check_batch(flight_client: &mut FlightClient, take: usize) {
     let blocks: Vec<BlockRow> =
         serde_json::from_value(blocks).expect("Failed to deserialize blocks");
 
-    let mut by_number: BTreeMap<BlockNum, Vec<BlockRow>> = BTreeMap::new();
+    let mut by_number: BTreeMap<BlockNum, Vec<BlockRow>> = Default::default();
     for block in blocks {
         by_number.entry(block.block_num).or_default().push(block);
     }

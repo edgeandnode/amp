@@ -114,11 +114,9 @@ use amp_worker_core::{
 };
 use common::{
     BlockNum,
-    catalog::{
-        logical::for_dump as logical_catalog,
-        physical::{Catalog, EarliestBlockError, for_dump as physical_for_dump},
-    },
-    context::{exec::ExecContext, plan::PlanContext},
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
+    catalog::physical::{Catalog, EarliestBlockError, for_dump as physical_for_dump},
+    context::{exec::ExecContextBuilder, plan::PlanContextBuilder},
     cursor::Cursor,
     dataset_store::ResolveRevisionError,
     detached_logical_plan::DetachedLogicalPlan,
@@ -126,10 +124,8 @@ use common::{
     metadata::Generation,
     parquet::errors::ParquetError,
     physical_table::{CanonicalChainError, PhysicalTable},
-    sql::{
-        ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
-        resolve_function_references, resolve_table_references,
-    },
+    self_schema_provider::SelfSchemaProvider,
+    sql::{ParseSqlError, ResolveTableReferencesError, resolve_table_references},
     streaming_query::{
         QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
@@ -137,7 +133,7 @@ use common::{
 use datasets_common::hash_reference::HashReference;
 use datasets_derived::{
     Manifest as DerivedManifest,
-    deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
+    deps::{DepAlias, DepAliasError},
     manifest::TableInput,
 };
 use futures::StreamExt as _;
@@ -243,6 +239,7 @@ pub async fn dump(
         ctx.config.query_max_mem_mb,
         &ctx.config.spill_location,
         ctx.data_store.clone(),
+        ctx.dataset_store.clone(),
     )
     .map_err(Error::CreateQueryEnv)?;
     for (table, compactor) in &tables {
@@ -449,7 +446,7 @@ async fn dump_table(
     // Resolve all dependencies from the manifest to HashReference
     // This ensures SQL schema references map to the exact dataset versions
     // specified in the manifest's dependencies
-    let mut dependencies: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
+    let mut dependencies: BTreeMap<DepAlias, HashReference> = Default::default();
 
     for (alias, dep_reference) in &manifest.dependencies {
         // Convert DepReference to Reference for resolution
@@ -471,30 +468,45 @@ async fn dump_table(
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), DumpTableSpawnError>>::new();
 
+    let self_schema_provider = SelfSchemaProvider::from_manifest_udfs(
+        datasets_derived::deps::SELF_REF_KEYWORD.to_string(),
+        env.isolate_pool.clone(),
+        &manifest.functions,
+    );
+
     let catalog = {
         let table_refs = resolve_table_references::<DepAlias>(&query)
             .map_err(DumpTableError::ResolveTableReferences)?;
-        let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&query)
-            .map_err(DumpTableError::ResolveFunctionReferences)?;
-        let logical = logical_catalog::create(
+        physical_for_dump::create(
             &ctx.dataset_store,
-            &env.isolate_pool,
+            &ctx.data_store,
             &dependencies,
-            &manifest.functions,
-            (table_refs, func_refs),
+            table_refs,
+            self_schema_provider.udfs().to_vec(),
         )
         .await
-        .map_err(DumpTableError::CreateCatalog)?;
-        physical_for_dump::create(&ctx.dataset_store, &ctx.data_store, logical)
-            .await
-            .map_err(DumpTableError::CreatePhysicalCatalog)?
+        .map_err(DumpTableError::CreatePhysicalCatalog)?
     };
-    let planning_ctx = PlanContext::new(env.session_config.clone(), catalog.logical().clone());
+    let dep_alias_map = catalog.dep_aliases().clone();
+
+    // Planning context: tables resolved lazily by AmpCatalogProvider with dep aliases.
+    // UDFs are kept in the self-schema provider for self-refs and eth_call.
+    let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
+        Arc::new(self_schema_provider);
+    let amp_catalog = Arc::new(
+        AmpCatalogProvider::new(ctx.dataset_store.clone(), env.isolate_pool.clone())
+            .with_dep_aliases(dep_alias_map)
+            .with_self_schema(self_schema),
+    );
+    let planning_ctx = PlanContextBuilder::new(env.session_config.clone())
+        .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
+        .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
+        .build();
 
     join_set.spawn(
         async move {
             let plan = planning_ctx
-                .plan_sql(query.clone())
+                .statement_to_plan(query.clone())
                 .await
                 .map_err(DumpTableSpawnError::PlanSql)?;
             if let Err(err) = plan.is_incremental() {
@@ -518,8 +530,9 @@ async fn dump_table(
             let start = dependency_earliest_block;
 
             let resolved = resolve_end_block(&end, start, async {
-                let query_ctx =
-                    ExecContext::for_catalog(env.clone(), catalog.clone(), false).await?;
+                let query_ctx = ExecContextBuilder::new(env.clone())
+                    .for_catalog(catalog.clone(), false)
+                    .await?;
                 let max_end_blocks = query_ctx
                     .max_end_blocks(&plan.clone().attach_to(&query_ctx)?)
                     .await?;
@@ -666,20 +679,6 @@ pub enum DumpTableError {
     #[error("failed to resolve table references: {0}")]
     ResolveTableReferences(#[source] ResolveTableReferencesError<DepAliasError>),
 
-    /// Failed to resolve function references from the SQL query
-    ///
-    /// This occurs when extracting and resolving function references from the
-    /// parsed SQL query fails.
-    #[error("failed to resolve function references: {0}")]
-    ResolveFunctionReferences(#[source] ResolveFunctionReferencesError<DepAliasOrSelfRefError>),
-
-    /// Failed to create the logical catalog for query execution
-    ///
-    /// This occurs when building the logical catalog from the resolved
-    /// table and function references fails.
-    #[error("failed to create catalog: {0}")]
-    CreateCatalog(#[source] logical_catalog::CreateCatalogError),
-
     /// Failed to create the physical catalog for query execution
     ///
     /// This occurs when building the physical catalog from the logical
@@ -706,7 +705,7 @@ pub enum DumpTableSpawnError {
     /// This occurs when DataFusion cannot create an execution plan
     /// from the parsed SQL query.
     #[error("failed to plan SQL query: {0}")]
-    PlanSql(#[source] common::context::plan::SqlError),
+    PlanSql(#[source] datafusion::error::DataFusionError),
 
     /// The query is not incremental and cannot be synced
     ///
@@ -776,7 +775,6 @@ async fn dump_sql_query(
         StreamingQuery::spawn(
             env.clone(),
             catalog.clone(),
-            &ctx.dataset_store,
             query,
             start,
             end,
