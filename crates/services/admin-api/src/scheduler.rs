@@ -25,10 +25,10 @@
 
 use async_trait::async_trait;
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, end_block::EndBlock, hash::Hash,
-    hash_reference::HashReference, name::Name, namespace::Namespace,
+    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };
 use metadata_db::workers::Worker;
+use serde_json::value::RawValue;
 use worker::{
     job::{Job, JobId, JobStatus},
     node_id::{InvalidIdError, NodeId, validate_node_id},
@@ -50,13 +50,11 @@ impl<T> Scheduler for T where T: SchedulerJobs + SchedulerWorkers {}
 // because const generics make the trait not dyn-compatible.
 #[async_trait]
 pub trait SchedulerJobs: Send + Sync {
-    /// Schedule a dataset synchronization job
-    async fn schedule_dataset_sync_job(
+    /// Schedule a job with a pre-built descriptor
+    async fn schedule_job(
         &self,
         dataset_reference: HashReference,
-        dataset_kind: DatasetKindStr,
-        end_block: EndBlock,
-        max_writers: u16,
+        job_descriptor: JobDescriptor,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError>;
 
@@ -102,6 +100,58 @@ pub trait SchedulerJobs: Send + Sync {
     ) -> Result<Vec<Job>, ListJobsByDatasetError>;
 }
 
+/// Invariant-preserving bridge between typed worker job descriptors and the scheduler.
+///
+/// Acts as the admin-api's canonical job descriptor type, decoupling the scheduler trait
+/// interface from both the typed worker descriptor crates (`amp-worker-datasets-raw`,
+/// `amp-worker-datasets-derived`) and the metadata-db storage type (`JobDescriptorRawOwned`).
+///
+/// Invariants are established at the point of construction (via the `From` impls from typed
+/// worker descriptors) and preserved throughout. All subsequent conversions to/from
+/// `JobDescriptorRawOwned` or `JobDescriptorRaw` are infallible.
+#[derive(Clone, Debug)]
+pub struct JobDescriptor(Box<RawValue>);
+
+impl From<JobDescriptor> for metadata_db::jobs::JobDescriptorRawOwned {
+    fn from(value: JobDescriptor) -> Self {
+        // SAFETY: JobDescriptor inner data is valid JSON from trusted sources
+        metadata_db::jobs::JobDescriptorRaw::from_owned_unchecked(value.0)
+    }
+}
+
+impl<'a> From<&'a JobDescriptor> for metadata_db::jobs::JobDescriptorRaw<'a> {
+    fn from(value: &'a JobDescriptor) -> Self {
+        // SAFETY: JobDescriptor inner data is valid JSON from trusted sources
+        metadata_db::jobs::JobDescriptorRaw::from_ref_unchecked(&value.0)
+    }
+}
+
+impl From<metadata_db::jobs::JobDescriptorRawOwned> for JobDescriptor {
+    fn from(value: metadata_db::jobs::JobDescriptorRawOwned) -> Self {
+        Self(value.into_inner())
+    }
+}
+
+impl From<&metadata_db::jobs::JobDescriptorRaw<'_>> for JobDescriptor {
+    fn from(value: &metadata_db::jobs::JobDescriptorRaw<'_>) -> Self {
+        Self(value.as_raw().to_owned())
+    }
+}
+
+impl From<amp_worker_datasets_raw::job_descriptor::JobDescriptor> for JobDescriptor {
+    fn from(desc: amp_worker_datasets_raw::job_descriptor::JobDescriptor) -> Self {
+        let raw: metadata_db::jobs::JobDescriptorRawOwned = desc.into();
+        Self(raw.into_inner())
+    }
+}
+
+impl From<amp_worker_datasets_derived::job_descriptor::JobDescriptor> for JobDescriptor {
+    fn from(desc: amp_worker_datasets_derived::job_descriptor::JobDescriptor) -> Self {
+        let raw: metadata_db::jobs::JobDescriptorRawOwned = desc.into();
+        Self(raw.into_inner())
+    }
+}
+
 /// Errors that can occur when scheduling a dataset dump job
 #[derive(Debug, thiserror::Error)]
 pub enum ScheduleJobError {
@@ -139,15 +189,6 @@ pub enum ScheduleJobError {
     /// - The specified worker hasn't sent heartbeats recently (inactive)
     #[error("specified worker '{0}' not found or inactive")]
     WorkerNotAvailable(NodeId),
-
-    /// Failed to serialize job descriptor to JSON
-    ///
-    /// This occurs when:
-    /// - JobDescriptor cannot be serialized to JSON
-    /// - Invalid UTF-8 characters in job parameters
-    /// - Serialization buffer overflow
-    #[error("failed to serialize job descriptor: {0}")]
-    SerializeJobDescriptor(#[source] serde_json::Error),
 
     /// Failed to register job in the metadata database
     ///
