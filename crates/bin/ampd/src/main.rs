@@ -28,41 +28,67 @@ struct Args {
 
 #[derive(Debug, Clone, clap::Subcommand)]
 enum Command {
-    /// Run Amp in local development mode with all services
+    /// All-in-one mode: server, controller and worker in a single process.
+    ///
+    /// Starts Flight, JSONL, and Admin API endpoints plus an embedded worker.
+    /// If any --*-server flag is set, only those endpoints are enabled.
+    /// Intended for local development, testing, and CI — not production.
     #[command(alias = "dev")]
     Solo {
-        /// Directory for Amp daemon state and data. Defaults to `<cwd>/.amp/`.
-        /// If `--config` is not provided, searches for `config.toml` within this directory.
+        /// Amp state directory containing data, manifests, and providers.
+        ///
+        /// Defaults to `<cwd>/.amp/`. When --config is not provided, looks
+        /// for `config.toml` inside this directory.
         #[arg(long, env = "AMP_DIR")]
         amp_dir: Option<PathBuf>,
-        /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "FLIGHT_SERVER")]
+        /// Enable the Arrow Flight gRPC endpoint (port 1602).
+        ///
+        /// When any --*-server flag is set, only flagged endpoints start.
+        #[arg(long, env = "AMP_FLIGHT_SERVER")]
         flight_server: bool,
-        /// Enable JSON Lines Server.
-        #[arg(long, env = "JSONL_SERVER")]
+        /// Enable the JSON Lines HTTP endpoint (port 1603).
+        ///
+        /// When any --*-server flag is set, only flagged endpoints start.
+        #[arg(long, env = "AMP_JSONL_SERVER")]
         jsonl_server: bool,
-        /// Enable Admin API Server.
-        #[arg(long, env = "ADMIN_SERVER")]
+        /// Enable the Admin API HTTP endpoint (port 1610).
+        ///
+        /// When any --*-server flag is set, only flagged endpoints start.
+        #[arg(long, env = "AMP_ADMIN_SERVER")]
         admin_server: bool,
     },
-    /// Run query server (Arrow Flight, JSON Lines)
+    /// Query server exposing Flight and JSONL endpoints.
+    ///
+    /// Requires --config. If any --*-server flag is set, only those
+    /// endpoints are enabled; otherwise both start.
     Server {
-        /// Enable Arrow Flight RPC Server.
-        #[arg(long, env = "FLIGHT_SERVER")]
+        /// Enable the Arrow Flight gRPC endpoint (port 1602).
+        #[arg(long, env = "AMP_FLIGHT_SERVER")]
         flight_server: bool,
-        /// Enable JSON Lines Server.
-        #[arg(long, env = "JSONL_SERVER")]
+        /// Enable the JSON Lines HTTP endpoint (port 1603).
+        #[arg(long, env = "AMP_JSONL_SERVER")]
         jsonl_server: bool,
     },
-    /// Run a distributed worker node
+    /// Extraction worker that executes scheduled data ingestion jobs.
+    ///
+    /// Requires --config and --node-id. Registers with the metadata database,
+    /// listens for job assignments, and writes Parquet files to storage.
     Worker {
-        /// The node id of the worker.
+        /// Unique identifier for this worker instance.
+        ///
+        /// Used for job assignment, heartbeat tracking, and log correlation.
         #[arg(long, env = "AMP_NODE_ID")]
         node_id: String,
     },
-    /// Run the controller with Admin API
+    /// Controller providing the Admin API for job scheduling and management.
+    ///
+    /// Requires --config. Exposes a REST API (port 1610) for dataset
+    /// registration, job control, worker monitoring, and storage queries.
     Controller,
-    /// Run migrations on the metadata database
+    /// Apply pending schema migrations to the metadata database and exit.
+    ///
+    /// Requires --config. Connects to PostgreSQL, runs any unapplied
+    /// migrations, then terminates. Safe to run multiple times.
     Migrate,
 }
 
@@ -111,6 +137,22 @@ async fn main_inner() -> Result<(), Error> {
             mut jsonl_server,
             mut admin_server,
         } => {
+            // Backward compat: FLIGHT_SERVER -> AMP_FLIGHT_SERVER
+            if !flight_server && matches!(env::var("FLIGHT_SERVER").as_deref(), Ok("true" | "1")) {
+                eprintln!("env var FLIGHT_SERVER is deprecated, use AMP_FLIGHT_SERVER instead");
+                flight_server = true;
+            }
+            // Backward compat: JSONL_SERVER -> AMP_JSONL_SERVER
+            if !jsonl_server && matches!(env::var("JSONL_SERVER").as_deref(), Ok("true" | "1")) {
+                eprintln!("env var JSONL_SERVER is deprecated, use AMP_JSONL_SERVER instead");
+                jsonl_server = true;
+            }
+            // Backward compat: ADMIN_SERVER -> AMP_ADMIN_SERVER
+            if !admin_server && matches!(env::var("ADMIN_SERVER").as_deref(), Ok("true" | "1")) {
+                eprintln!("env var ADMIN_SERVER is deprecated, use AMP_ADMIN_SERVER instead");
+                admin_server = true;
+            }
+
             if !flight_server && !jsonl_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
@@ -153,6 +195,17 @@ async fn main_inner() -> Result<(), Error> {
             mut flight_server,
             mut jsonl_server,
         } => {
+            // Backward compat: FLIGHT_SERVER -> AMP_FLIGHT_SERVER
+            if !flight_server && matches!(env::var("FLIGHT_SERVER").as_deref(), Ok("true" | "1")) {
+                eprintln!("env var FLIGHT_SERVER is deprecated, use AMP_FLIGHT_SERVER instead");
+                flight_server = true;
+            }
+            // Backward compat: JSONL_SERVER -> AMP_JSONL_SERVER
+            if !jsonl_server && matches!(env::var("JSONL_SERVER").as_deref(), Ok("true" | "1")) {
+                eprintln!("env var JSONL_SERVER is deprecated, use AMP_JSONL_SERVER instead");
+                jsonl_server = true;
+            }
+
             // If neither of the flags are set, enable both servers
             if !flight_server && !jsonl_server {
                 flight_server = true;

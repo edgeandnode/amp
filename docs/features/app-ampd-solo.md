@@ -2,7 +2,7 @@
 name: "app-ampd-solo"
 description: "ampd solo mode for local development and testing. Load when asking about solo mode, development setup, or single-node deployments"
 type: feature
-status: "unstable"
+status: "stable"
 components: "app:ampd,service:server,service:controller,service:worker"
 ---
 
@@ -79,6 +79,14 @@ ampd solo --flight-server --admin-server
 
 # Solo with JSONL only (no Flight, no Admin API)
 ampd solo --jsonl-server
+```
+
+These flags can also be set via environment variables:
+
+```bash
+export AMP_FLIGHT_SERVER=true
+export AMP_JSONL_SERVER=true
+export AMP_ADMIN_SERVER=true
 ```
 
 **Note:** The embedded worker always runs regardless of flags.
