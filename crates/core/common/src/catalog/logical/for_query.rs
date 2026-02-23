@@ -45,7 +45,7 @@ pub type ResolvedReferences = (
 /// 1. Extract table references and function names from the query
 /// 2. Resolve dataset names to hashes via the dataset store
 /// 3. Build logical catalog with schemas and UDFs
-/// 4. Return logical catalog for use with `PlanningContext::new()`
+/// 4. Return logical catalog for use with `PlanContext`
 ///
 /// Unlike `catalog_for_sql`, this does not query the metadata database for physical
 /// parquet locations, making it faster for planning-only operations.

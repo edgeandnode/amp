@@ -12,16 +12,16 @@ use crate::{
     catalog::logical::{LogicalCatalog, LogicalTable},
     context::common::{SqlToPlanError, builtin_udfs, sql_to_plan},
     detached_logical_plan::DetachedLogicalPlan,
-    planning_table::PlanningTable,
+    plan_table::PlanTable,
 };
 
 /// A context for planning SQL queries.
-pub struct PlanningContext {
+pub struct PlanContext {
     session_config: SessionConfig,
     catalog: LogicalCatalog,
 }
 
-impl PlanningContext {
+impl PlanContext {
     /// Creates a planning context from a logical catalog.
     pub fn new(session_config: SessionConfig, catalog: LogicalCatalog) -> Self {
         Self {
@@ -39,12 +39,12 @@ impl PlanningContext {
     pub async fn sql_output_schema(
         &self,
         query: parser::Statement,
-    ) -> Result<DFSchemaRef, PlanSqlError> {
+    ) -> Result<DFSchemaRef, SqlError> {
         let ctx = new_session_ctx(self.session_config.clone());
-        register_catalog(&ctx, &self.catalog).map_err(PlanSqlError::RegisterTable)?;
+        register_catalog(&ctx, &self.catalog).map_err(SqlError::RegisterTable)?;
         let plan = sql_to_plan(&ctx, query)
             .await
-            .map_err(PlanSqlError::SqlToPlan)?;
+            .map_err(SqlError::SqlToPlan)?;
         Ok(plan.schema().clone())
     }
 
@@ -52,12 +52,12 @@ impl PlanningContext {
     pub async fn plan_sql(
         &self,
         query: parser::Statement,
-    ) -> Result<DetachedLogicalPlan, PlanSqlError> {
+    ) -> Result<DetachedLogicalPlan, SqlError> {
         let ctx = new_session_ctx(self.session_config.clone());
-        register_catalog(&ctx, &self.catalog).map_err(PlanSqlError::RegisterTable)?;
+        register_catalog(&ctx, &self.catalog).map_err(SqlError::RegisterTable)?;
         let plan = sql_to_plan(&ctx, query)
             .await
-            .map_err(PlanSqlError::SqlToPlan)?;
+            .map_err(SqlError::SqlToPlan)?;
         Ok(DetachedLogicalPlan::new(plan))
     }
 
@@ -125,7 +125,7 @@ fn register_catalog(
         let table_schema = table.schema().clone();
         ctx.register_table(
             table.table_ref().clone(),
-            Arc::new(PlanningTable::new(table_schema)),
+            Arc::new(PlanTable::new(table_schema)),
         )
         .map_err(RegisterTableError)?;
     }
@@ -152,7 +152,7 @@ pub struct RegisterTableError(#[source] DataFusionError);
 /// This error is shared by `plan_sql` and `sql_output_schema` because they
 /// produce the exact same error variants.
 #[derive(Debug, thiserror::Error)]
-pub enum PlanSqlError {
+pub enum SqlError {
     /// Failed to create a planning session context
     ///
     /// This occurs when building a `SessionContext` for SQL planning fails,
@@ -168,7 +168,7 @@ pub enum PlanSqlError {
     SqlToPlan(#[source] SqlToPlanError),
 }
 
-impl PlanSqlError {
+impl SqlError {
     /// Returns `true` if this error represents an invalid plan due to user input
     /// (forbidden aliases or read-only violations) rather than an internal failure.
     pub fn is_invalid_plan(&self) -> bool {

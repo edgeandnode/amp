@@ -16,9 +16,9 @@ use datafusion::{
 /// Must be replaced with actual `TableSnapshot` providers via
 /// `DetachedLogicalPlan::attach_to` before execution.
 #[derive(Clone, Debug)]
-pub struct PlanningTable(SchemaRef);
+pub struct PlanTable(SchemaRef);
 
-impl PlanningTable {
+impl PlanTable {
     /// Creates a planning-only table provider from a schema.
     pub(crate) fn new(schema: SchemaRef) -> Self {
         Self(schema)
@@ -26,7 +26,7 @@ impl PlanningTable {
 }
 
 #[async_trait]
-impl TableProvider for PlanningTable {
+impl TableProvider for PlanTable {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -47,7 +47,7 @@ impl TableProvider for PlanningTable {
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         Err(DataFusionError::External(
-            "PlanningTable should never be scanned".into(),
+            "PlanTable should never be scanned".into(),
         ))
     }
 }

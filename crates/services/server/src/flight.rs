@@ -42,12 +42,12 @@ use common::{
         },
     },
     context::{
-        planning::{self, PlanningContext},
-        query::{self, QueryContext},
+        exec::{self, ExecContext},
+        plan::{self, PlanContext},
     },
     dataset_store::{DatasetStore, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
-    query_env::QueryEnv,
+    exec_env::ExecEnv,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
@@ -85,7 +85,7 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 #[derive(Clone)]
 pub struct Service {
     config: Arc<Config>,
-    env: QueryEnv,
+    env: ExecEnv,
     dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -99,13 +99,13 @@ impl Service {
         dataset_store: DatasetStore,
         meter: Option<Meter>,
     ) -> Result<Self, InitError> {
-        let env = common::query_env::create(
+        let env = common::exec_env::create(
             config.max_mem_mb,
             config.query_max_mem_mb,
             &config.spill_location,
             data_store,
         )
-        .map_err(InitError::QueryEnv)?;
+        .map_err(InitError::ExecEnv)?;
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
         let metrics = meter.as_ref().map(|m| Arc::new(MetricsRegistry::new(m)));
@@ -143,11 +143,8 @@ impl Service {
                 .map_err(Error::PhysicalCatalogError)
         }?;
 
-        let ctx = PlanningContext::new(self.env.session_config.clone(), catalog.logical().clone());
-        let plan = ctx
-            .plan_sql(query.clone())
-            .await
-            .map_err(Error::PlanningPlanSql)?;
+        let ctx = PlanContext::new(self.env.session_config.clone(), catalog.logical().clone());
+        let plan = ctx.plan_sql(query.clone()).await.map_err(Error::PlanSql)?;
 
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
@@ -194,9 +191,9 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = QueryContext::for_catalog(self.env.clone(), catalog, false)
+            let ctx = ExecContext::for_catalog(self.env.clone(), catalog, false)
                 .await
-                .map_err(Error::CreateQueryContext)?;
+                .map_err(Error::CreateExecContext)?;
             let plan = plan.attach_to(&ctx).map_err(Error::AttachPlan)?;
 
             let block_ranges = ctx
@@ -332,7 +329,7 @@ impl Service {
                         )
                         .await
                         .map_err(Error::CreateLogicalCatalogError)?;
-                        PlanningContext::new(self.env.session_config.clone(), catalog)
+                        PlanContext::new(self.env.session_config.clone(), catalog)
                     };
 
                     let is_streaming = streaming_override
@@ -340,7 +337,7 @@ impl Service {
                     let schema = plan_ctx
                         .sql_output_schema(query)
                         .await
-                        .map_err(Error::PlanningPlanSql)?;
+                        .map_err(Error::PlanSql)?;
                     let ticket = AmpTicket {
                         query: sql_query.query,
                         is_streaming,
@@ -976,19 +973,19 @@ pub enum Error {
     SqlParse(#[source] common::sql::ParseSqlError),
 
     #[error("failed to plan SQL query")]
-    PlanningPlanSql(#[source] planning::PlanSqlError),
+    PlanSql(#[source] plan::SqlError),
 
-    #[error("failed to create query context")]
-    CreateQueryContext(#[source] query::CreateContextError),
+    #[error("failed to create exec context")]
+    CreateExecContext(#[source] exec::CreateContextError),
 
     #[error("failed to attach plan to query context")]
     AttachPlan(#[source] AttachPlanError),
 
     #[error("failed to compute common ranges")]
-    QueryCommonRanges(#[source] query::CommonRangesError),
+    QueryCommonRanges(#[source] exec::CommonRangesError),
 
     #[error("failed to execute plan")]
-    QueryExecutePlan(#[source] query::ExecutePlanError),
+    QueryExecutePlan(#[source] exec::ExecutePlanError),
 
     #[error("invalid query: {0}")]
     InvalidQuery(String),
@@ -1016,25 +1013,25 @@ impl Error {
             Error::TableReferenceResolution(_) => "TABLE_REFERENCE_RESOLUTION",
             Error::FunctionReferenceResolution(_) => "FUNCTION_REFERENCE_RESOLUTION",
             Error::SqlParse(_) => "SQL_PARSE_ERROR",
-            Error::PlanningPlanSql(e) if e.is_invalid_plan() => "INVALID_PLAN",
-            Error::PlanningPlanSql(_) => "PLANNING_ERROR",
-            Error::CreateQueryContext(query::CreateContextError::CatalogSnapshot(_)) => {
+            Error::PlanSql(e) if e.is_invalid_plan() => "INVALID_PLAN",
+            Error::PlanSql(_) => "PLANNING_ERROR",
+            Error::CreateExecContext(exec::CreateContextError::CatalogSnapshot(_)) => {
                 "CATALOG_SNAPSHOT_ERROR"
             }
             Error::AttachPlan(_) => "PLANNING_ERROR",
-            Error::QueryCommonRanges(query::CommonRangesError::TableNotFound(_)) => {
+            Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(_)) => {
                 "TABLE_NOT_FOUND_ERROR"
             }
-            Error::QueryCommonRanges(query::CommonRangesError::ExtractTableReferences(_)) => {
+            Error::QueryCommonRanges(exec::CommonRangesError::ExtractTableReferences(_)) => {
                 "EXTRACT_TABLE_REFERENCES_ERROR"
             }
-            Error::QueryCommonRanges(query::CommonRangesError::TableReferenceConversion(_)) => {
+            Error::QueryCommonRanges(exec::CommonRangesError::TableReferenceConversion(_)) => {
                 "TABLE_REFERENCE_CONVERSION_ERROR"
             }
-            Error::QueryExecutePlan(query::ExecutePlanError::RegisterTable(_)) => {
+            Error::QueryExecutePlan(exec::ExecutePlanError::RegisterTable(_)) => {
                 "REGISTER_TABLE_ERROR"
             }
-            Error::QueryExecutePlan(query::ExecutePlanError::Execute(_)) => "CORE_EXECUTION_ERROR",
+            Error::QueryExecutePlan(exec::ExecutePlanError::Execute(_)) => "CORE_EXECUTION_ERROR",
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
             Error::TicketEncodingError(_) => "TICKET_ENCODING_ERROR",
@@ -1060,11 +1057,11 @@ impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         let status_code = match &self {
             Error::SqlParse(_) => StatusCode::BAD_REQUEST,
-            Error::PlanningPlanSql(e) if e.is_invalid_plan() => StatusCode::BAD_REQUEST,
-            Error::PlanningPlanSql(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::CreateQueryContext(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PlanSql(e) if e.is_invalid_plan() => StatusCode::BAD_REQUEST,
+            Error::PlanSql(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CreateExecContext(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AttachPlan(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::QueryCommonRanges(query::CommonRangesError::TableNotFound(_)) => {
+            Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(_)) => {
                 StatusCode::NOT_FOUND
             }
             Error::QueryCommonRanges(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -1104,11 +1101,11 @@ impl From<Error> for Status {
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(message),
             Error::DatasetStoreError(_) => Status::internal(message),
             Error::SqlParse(_) => Status::invalid_argument(message),
-            Error::PlanningPlanSql(e) if e.is_invalid_plan() => Status::invalid_argument(message),
-            Error::PlanningPlanSql(_) => Status::internal(message),
-            Error::CreateQueryContext(_) => Status::internal(message),
+            Error::PlanSql(e) if e.is_invalid_plan() => Status::invalid_argument(message),
+            Error::PlanSql(_) => Status::internal(message),
+            Error::CreateExecContext(_) => Status::internal(message),
             Error::AttachPlan(_) => Status::internal(message),
-            Error::QueryCommonRanges(query::CommonRangesError::TableNotFound(_)) => {
+            Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(_)) => {
                 Status::not_found(message)
             }
             Error::QueryCommonRanges(_) => Status::internal(message),

@@ -10,11 +10,11 @@ use common::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
     },
-    context::planning::{PlanSqlError as PlanningPlanSqlError, PlanningContext},
+    context::plan::{PlanContext, SqlError as PlanSqlError},
     dataset_store::GetDatasetError,
+    exec_env::default_session_config,
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
-    query_env::default_session_config,
     sql::{
         ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
         resolve_table_references,
@@ -304,7 +304,7 @@ pub async fn handler(
 
     // Create planning context from catalog
     let session_config = default_session_config().map_err(Error::SessionConfig)?;
-    let planning_ctx = PlanningContext::new(session_config, catalog);
+    let planning_ctx = PlanContext::new(session_config, catalog);
 
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
@@ -666,7 +666,7 @@ enum Error {
         table_name: TableName,
         /// The underlying query context error
         #[source]
-        source: PlanningPlanSqlError,
+        source: PlanSqlError,
     },
 }
 

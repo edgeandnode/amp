@@ -35,26 +35,26 @@ use crate::{
     context::common::{
         ReadOnlyCheckError, SqlToPlanError, builtin_udfs, read_only_check, sql_to_plan,
     },
+    exec_env::ExecEnv,
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
     plan_visitors::{extract_table_references_from_plan, forbid_duplicate_field_names},
-    query_env::QueryEnv,
     sql::{TableReference, TableReferenceConversionError},
 };
 
 /// A context for executing queries against a catalog.
 #[derive(Clone)]
-pub struct QueryContext {
-    pub env: QueryEnv,
+pub struct ExecContext {
+    pub env: ExecEnv,
     session_config: SessionConfig,
     catalog: CatalogSnapshot,
     /// Per-query memory pool (if per-query limits are enabled)
     tiered_memory_pool: Arc<TieredMemoryPool>,
 }
 
-impl QueryContext {
+impl ExecContext {
     /// Creates a query context from a physical catalog.
     pub async fn for_catalog(
-        env: QueryEnv,
+        env: ExecEnv,
         catalog: Catalog,
         ignore_canonical_segments: bool,
     ) -> Result<Self, CreateContextError> {
@@ -88,17 +88,17 @@ impl QueryContext {
     }
 
     /// Converts a parsed SQL statement into a logical plan against the physical catalog.
-    pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, PlanSqlError> {
+    pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, SqlError> {
         let ctx = new_session_ctx(
             self.session_config.clone(),
             &self.tiered_memory_pool,
             &self.env,
         );
-        register_catalog(&self.env, &ctx, &self.catalog).map_err(PlanSqlError::RegisterTable)?;
+        register_catalog(&self.env, &ctx, &self.catalog).map_err(SqlError::RegisterTable)?;
 
         let plan = sql_to_plan(&ctx, query)
             .await
-            .map_err(PlanSqlError::SqlToPlan)?;
+            .map_err(SqlError::SqlToPlan)?;
         Ok(plan)
     }
 
@@ -225,9 +225,9 @@ impl QueryContext {
     }
 }
 
-/// Failed to create a `QueryContext` from a catalog
+/// Failed to create a `ExecContext` from a catalog
 ///
-/// This error covers failures during `QueryContext::for_catalog()`.
+/// This error covers failures during `ExecContext::for_catalog()`.
 #[derive(Debug, thiserror::Error)]
 pub enum CreateContextError {
     /// Failed to create a catalog snapshot from the physical catalog
@@ -240,14 +240,14 @@ pub enum CreateContextError {
 
 /// Failed to plan a SQL query in the query context
 ///
-/// This error covers failures during `QueryContext::plan_sql()`.
+/// This error covers failures during `ExecContext::plan_sql()`.
 #[derive(Debug, thiserror::Error)]
-pub enum PlanSqlError {
-    /// Failed to create a query session context
+pub enum SqlError {
+    /// Failed to create a exec session context
     ///
     /// This occurs when building a `SessionContext` for query execution fails,
     /// typically due to a table registration error during context setup.
-    #[error("failed to create query session context")]
+    #[error("failed to create exec session context")]
     RegisterTable(#[source] RegisterTableError),
 
     /// Failed to convert SQL to a logical plan
@@ -289,13 +289,13 @@ pub enum ExecuteError {
     CollectExplainResults(#[source] DataFusionError),
 }
 
-/// Failed to execute a plan via `QueryContext::execute_plan`
+/// Failed to execute a plan via `ExecContext::execute_plan`
 ///
 /// This error wraps session context creation and inner execution errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutePlanError {
-    /// Failed to create a query session context
-    #[error("failed to create query session context")]
+    /// Failed to create a exec session context
+    #[error("failed to create exec session context")]
     RegisterTable(#[source] RegisterTableError),
 
     /// Failed during plan execution
@@ -305,11 +305,11 @@ pub enum ExecutePlanError {
 
 /// Failed to execute a plan and concatenate results
 ///
-/// This error covers `QueryContext::execute_and_concat()`.
+/// This error covers `ExecContext::execute_and_concat()`.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecuteAndConcatError {
-    /// Failed to create a query session context
-    #[error("failed to create query session context")]
+    /// Failed to create a exec session context
+    #[error("failed to create exec session context")]
     RegisterTable(#[source] RegisterTableError),
 
     /// Failed during plan execution
@@ -359,7 +359,7 @@ pub enum CommonRangesError {
 fn new_session_ctx(
     config: SessionConfig,
     tiered_memory_pool: &Arc<TieredMemoryPool>,
-    env: &QueryEnv,
+    env: &ExecEnv,
 ) -> SessionContext {
     let runtime_env = Arc::new(RuntimeEnv {
         memory_pool: tiered_memory_pool.clone(),
@@ -387,7 +387,7 @@ fn new_session_ctx(
 
 /// Registers the tables and UDFs from a [`CatalogSnapshot`] into a [`SessionContext`].
 fn register_catalog(
-    env: &QueryEnv,
+    env: &ExecEnv,
     ctx: &SessionContext,
     catalog: &CatalogSnapshot,
 ) -> Result<(), RegisterTableError> {
@@ -428,13 +428,13 @@ fn register_catalog(
     Ok(())
 }
 
-/// Failed to register a dataset table with the query session context
+/// Failed to register a dataset table with the exec session context
 ///
 /// This occurs when DataFusion rejects a table registration during query
 /// session creation, typically because a table with the same name already
 /// exists or the table metadata is invalid.
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to register dataset table with query session context")]
+#[error("Failed to register dataset table with exec session context")]
 pub struct RegisterTableError(#[source] DataFusionError);
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.

@@ -56,7 +56,7 @@ pub fn default_session_config() -> Result<SessionConfig, datafusion::error::Data
 
 /// Handle to the environment resources used by the query engine.
 #[derive(Clone, Debug)]
-pub struct QueryEnv {
+pub struct ExecEnv {
     /// DataFusion session configuration with project-wide defaults.
     pub session_config: SessionConfig,
 
@@ -76,7 +76,7 @@ pub struct QueryEnv {
     pub store: DataStore,
 }
 
-/// Creates a QueryEnv with specified memory and cache configuration
+/// Creates a ExecEnv with specified memory and cache configuration
 ///
 /// Configures DataFusion runtime environment including memory pools, disk spilling,
 /// and parquet footer caching for query execution.
@@ -85,7 +85,7 @@ pub fn create(
     query_max_mem_mb: usize,
     spill_location: &[PathBuf],
     store: DataStore,
-) -> Result<QueryEnv, datafusion::error::DataFusionError> {
+) -> Result<ExecEnv, datafusion::error::DataFusionError> {
     let spill_allowed = !spill_location.is_empty();
     let disk_manager_mode = if spill_allowed {
         DiskManagerMode::Directories(spill_location.to_vec())
@@ -111,7 +111,7 @@ pub fn create(
 
     let session_config = default_session_config()?;
 
-    Ok(QueryEnv {
+    Ok(ExecEnv {
         session_config,
         global_memory_pool: runtime_env.memory_pool,
         disk_manager: runtime_env.disk_manager,

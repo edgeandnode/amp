@@ -37,13 +37,13 @@ use crate::{
         logical::LogicalTable,
         physical::{CanonicalChainError, Catalog, PhysicalTable},
     },
-    context::{planning::PlanningContext, query::QueryContext},
+    context::{exec::ExecContext, plan::PlanContext},
     dataset_store::{DatasetStore, ResolveRevisionError},
     detached_logical_plan::DetachedLogicalPlan,
+    exec_env::ExecEnv,
     incrementalizer::incrementalize_plan,
     metadata::segments::{Segment, WatermarkNotFoundError},
     plan_visitors::{order_by_block_num, unproject_special_block_num_column},
-    query_env::QueryEnv,
     sql_str::SqlStr,
 };
 
@@ -86,7 +86,7 @@ pub enum SpawnError {
     /// Optimization failures prevent the streaming query from starting with an
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
-    OptimizePlan(#[source] crate::context::planning::OptimizePlanError),
+    OptimizePlan(#[source] crate::context::plan::OptimizePlanError),
 
     /// Query references tables from multiple blockchain networks
     ///
@@ -289,7 +289,7 @@ impl StreamingQueryHandle {
 /// This follows a 'microbatch' model where it processes data in chunks based on a block range
 /// stream.
 pub struct StreamingQuery {
-    query_env: QueryEnv,
+    exec_env: ExecEnv,
     catalog: Catalog,
     plan: DetachedLogicalPlan,
     start_block: BlockNum,
@@ -316,7 +316,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     #[expect(clippy::too_many_arguments)]
     pub async fn spawn(
-        query_env: QueryEnv,
+        exec_env: ExecEnv,
         catalog: Catalog,
         dataset_store: &DatasetStore,
         plan: DetachedLogicalPlan,
@@ -346,8 +346,7 @@ impl StreamingQuery {
                 .propagate_block_num()
                 .map_err(SpawnError::PropagateBlockNum)?;
 
-            let ctx =
-                PlanningContext::new(query_env.session_config.clone(), catalog.logical().clone());
+            let ctx = PlanContext::new(exec_env.session_config.clone(), catalog.logical().clone());
             ctx.optimize_plan(&plan)
                 .await
                 .map_err(SpawnError::OptimizePlan)?
@@ -367,7 +366,7 @@ impl StreamingQuery {
 
         let blocks_table = resolve_blocks_table(
             dataset_store,
-            query_env.store.clone(),
+            exec_env.store.clone(),
             unique_refs.into_iter(),
             network,
         )
@@ -380,7 +379,7 @@ impl StreamingQuery {
             .transpose()
             .map_err(SpawnError::ConvertResumeWatermark)?;
         let streaming_query = Self {
-            query_env,
+            exec_env,
             catalog,
             plan,
             tx,
@@ -413,10 +412,9 @@ impl StreamingQuery {
             self.table_updates.changed().await;
 
             // The table snapshots to execute the microbatch against.
-            let ctx =
-                QueryContext::for_catalog(self.query_env.clone(), self.catalog.clone(), false)
-                    .await
-                    .map_err(StreamingQueryExecutionError::CreateQueryContext)?;
+            let ctx = ExecContext::for_catalog(self.exec_env.clone(), self.catalog.clone(), false)
+                .await
+                .map_err(StreamingQueryExecutionError::CreateExecContext)?;
 
             // Get the next execution range
             let Some(MicrobatchRange { range, direction }) = self
@@ -495,7 +493,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     async fn next_microbatch_range(
         &mut self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
     ) -> Result<Option<MicrobatchRange>, NextMicrobatchRangeError> {
         // Gather the chains for each source table.
         let chains = ctx
@@ -518,9 +516,9 @@ impl StreamingQuery {
                 let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
                 Catalog::new(vec![self.blocks_table.clone()], logical)
             };
-            QueryContext::for_catalog(self.query_env.clone(), catalog, false)
+            ExecContext::for_catalog(self.exec_env.clone(), catalog, false)
                 .await
-                .map_err(NextMicrobatchRangeError::CreateQueryContext)?
+                .map_err(NextMicrobatchRangeError::CreateExecContext)?
         };
 
         // The latest common watermark across the source tables.
@@ -571,7 +569,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     async fn next_microbatch_start(
         &self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
     ) -> Result<Option<StreamDirection>, NextMicrobatchStartError> {
         match &self.prev_watermark {
             // start stream
@@ -610,7 +608,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     async fn next_microbatch_end(
         &mut self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
         start: &SegmentStart,
         common_watermark: BlockWatermark,
     ) -> Result<Option<BlockWatermark>, NextMicrobatchEndError> {
@@ -646,7 +644,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     async fn latest_src_watermark(
         &self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
         chains: impl Iterator<Item = &[Segment]>,
     ) -> Result<Option<BlockWatermark>, LatestSrcWatermarkError> {
         // For each chain, collect the latest segment
@@ -677,7 +675,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     async fn reorg_base(
         &self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
         prev_watermark: &Watermark,
     ) -> Result<Option<BlockRow>, ReorgBaseError> {
         // context for querying forked blocks
@@ -686,9 +684,9 @@ impl StreamingQuery {
                 ctx.catalog().physical_tables().cloned().collect(),
                 ctx.catalog().logical().clone(),
             );
-            QueryContext::for_catalog(ctx.env.clone(), catalog, true)
+            ExecContext::for_catalog(ctx.env.clone(), catalog, true)
                 .await
-                .map_err(ReorgBaseError::CreateQueryContext)?
+                .map_err(ReorgBaseError::CreateExecContext)?
         };
 
         let mut min_fork_block_num = prev_watermark.number;
@@ -742,7 +740,7 @@ impl StreamingQuery {
     #[instrument(skip_all, err)]
     async fn blocks_table_contains(
         &self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
         watermark: &Watermark,
     ) -> Result<Option<BlockWatermark>, BlocksTableContainsError> {
         // Panic safety: The `blocks_ctx` always has a single table.
@@ -782,7 +780,7 @@ impl StreamingQuery {
     #[instrument(skip(self, ctx), err)]
     async fn blocks_table_fetch(
         &self,
-        ctx: &QueryContext,
+        ctx: &ExecContext,
         number: BlockNum,
         hash: Option<&BlockHash>,
     ) -> Result<Option<BlockRow>, BlocksTableFetchError> {
@@ -858,11 +856,11 @@ pub enum StreamingQueryExecutionError {
     #[error("streaming task join timed out")]
     TaskTimeout,
 
-    /// Failed to create a query context
+    /// Failed to create an exec context
     ///
-    /// This occurs when the query context cannot be created.
-    #[error("failed to create query context: {0}")]
-    CreateQueryContext(#[source] crate::context::query::CreateContextError),
+    /// This occurs when the exec context cannot be created.
+    #[error("failed to create exec context: {0}")]
+    CreateExecContext(#[source] crate::context::exec::CreateContextError),
 
     /// Failed to get the next microbatch range
     ///
@@ -892,7 +890,7 @@ pub enum StreamingQueryExecutionError {
     ///
     /// This occurs when the plan cannot be executed.
     #[error("failed to execute the plan: {0}")]
-    ExecutePlan(#[source] crate::context::query::ExecutePlanError),
+    ExecutePlan(#[source] crate::context::exec::ExecutePlanError),
 
     /// Failed to stream item
     ///
@@ -906,11 +904,11 @@ pub enum StreamingQueryExecutionError {
 /// This error type is used by `StreamingQuery::next_microbatch_range()`.
 #[derive(Debug, thiserror::Error)]
 pub enum NextMicrobatchRangeError {
-    /// Failed to create a query context
+    /// Failed to create an exec context
     ///
-    /// This occurs when the query context cannot be created.
-    #[error("failed to create query context: {0}")]
-    CreateQueryContext(#[source] crate::context::query::CreateContextError),
+    /// This occurs when the exec context cannot be created.
+    #[error("failed to create exec context: {0}")]
+    CreateExecContext(#[source] crate::context::exec::CreateContextError),
 
     /// Failed to get the latest source watermark
     ///
@@ -975,11 +973,11 @@ pub struct LatestSrcWatermarkError(#[source] BlocksTableContainsError);
 /// This error type is used by `StreamingQuery::reorg_base()`.
 #[derive(Debug, thiserror::Error)]
 pub enum ReorgBaseError {
-    /// Failed to create a query context
+    /// Failed to create an exec context
     ///
-    /// This occurs when the query context cannot be created.
-    #[error("failed to create query context: {0}")]
-    CreateQueryContext(#[source] crate::context::query::CreateContextError),
+    /// This occurs when the exec context cannot be created.
+    #[error("failed to create exec context: {0}")]
+    CreateExecContext(#[source] crate::context::exec::CreateContextError),
 
     /// Failed to fetch the blocks table
     ///
@@ -1022,13 +1020,13 @@ pub enum BlocksTableFetchError {
     ///
     /// This occurs when the SQL cannot be planned.
     #[error("failed to plan the SQL: {0}")]
-    PlanSql(#[source] crate::context::query::PlanSqlError),
+    PlanSql(#[source] crate::context::exec::SqlError),
 
     /// Failed to execute the SQL
     ///
     /// This occurs when the SQL cannot be executed.
     #[error("failed to execute the SQL: {0}")]
-    ExecuteSql(#[source] crate::context::query::ExecuteAndConcatError),
+    ExecuteSql(#[source] crate::context::exec::ExecuteAndConcatError),
 
     /// Failed to extract a hash value from query results
     ///
