@@ -25,22 +25,6 @@ pub struct Args {
     pub name: String,
 }
 
-/// Result of a provider removal operation.
-#[derive(serde::Serialize)]
-struct RemoveResult {
-    name: String,
-}
-
-impl std::fmt::Display for RemoveResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Provider deleted successfully",
-            console::style("✓").green().bold()
-        )
-    }
-}
-
 /// Remove a provider from the admin API.
 ///
 /// Deletes the provider configuration if it exists.
@@ -86,6 +70,22 @@ async fn delete_provider(global: &GlobalArgs, name: &str) -> Result<(), Error> {
                 Error::UnexpectedResponse { status, message }
             }
         })
+}
+
+/// Result of a provider removal operation.
+#[derive(serde::Serialize)]
+struct RemoveResult {
+    name: String,
+}
+
+impl std::fmt::Display for RemoveResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Provider deleted successfully",
+            console::style("✓").green().bold()
+        )
+    }
 }
 
 /// Errors for provider removal operations.

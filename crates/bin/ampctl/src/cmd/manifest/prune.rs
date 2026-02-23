@@ -22,23 +22,6 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
-/// Result of a manifest pruning operation.
-#[derive(serde::Serialize)]
-struct PruneResult {
-    deleted_count: usize,
-}
-
-impl std::fmt::Display for PruneResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Pruned {} orphaned manifest(s)",
-            console::style("✓").green().bold(),
-            self.deleted_count
-        )
-    }
-}
-
 /// Prune all orphaned manifests via the admin API.
 ///
 /// Deletes all manifests that are not linked to any datasets.
@@ -78,6 +61,23 @@ async fn prune_manifests(global: &GlobalArgs) -> Result<usize, Error> {
     };
 
     Ok(response.deleted_count)
+}
+
+/// Result of a manifest pruning operation.
+#[derive(serde::Serialize)]
+struct PruneResult {
+    deleted_count: usize,
+}
+
+impl std::fmt::Display for PruneResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Pruned {} orphaned manifest(s)",
+            console::style("✓").green().bold(),
+            self.deleted_count
+        )
+    }
 }
 
 /// Errors for manifest pruning operations.

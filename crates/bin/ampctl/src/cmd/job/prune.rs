@@ -34,22 +34,6 @@ pub struct Args {
     pub status: Option<crate::client::jobs::JobStatusFilter>,
 }
 
-/// Result of a job pruning operation.
-#[derive(serde::Serialize)]
-struct PruneResult {
-    status_filter: Option<String>,
-}
-
-impl std::fmt::Display for PruneResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let message = match &self.status_filter {
-            None => "Terminal jobs pruned".to_string(),
-            Some(filter) => format!("Jobs with status \"{}\" pruned", filter),
-        };
-        writeln!(f, "{} {}", console::style("✓").green().bold(), message)
-    }
-}
-
 /// Prune jobs via the admin API.
 ///
 /// Deletes jobs in bulk, optionally filtered by status.
@@ -86,6 +70,22 @@ async fn prune_jobs(
     })?;
 
     Ok(())
+}
+
+/// Result of a job pruning operation.
+#[derive(serde::Serialize)]
+struct PruneResult {
+    status_filter: Option<String>,
+}
+
+impl std::fmt::Display for PruneResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let message = match &self.status_filter {
+            None => "Terminal jobs pruned".to_string(),
+            Some(filter) => format!("Jobs with status \"{}\" pruned", filter),
+        };
+        writeln!(f, "{} {}", console::style("✓").green().bold(), message)
+    }
 }
 
 /// Errors for job pruning operations.

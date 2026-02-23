@@ -66,23 +66,6 @@ pub struct Args {
     pub worker_id: Option<NodeSelector>,
 }
 
-/// Result of a dataset deployment operation.
-#[derive(serde::Serialize)]
-struct DeployResult {
-    job_id: JobId,
-}
-
-impl std::fmt::Display for DeployResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Dataset deployed successfully",
-            console::style("✓").green().bold()
-        )?;
-        writeln!(f, "{} Job ID: {}", console::style("→").cyan(), self.job_id)
-    }
-}
-
 /// Deploy a dataset to start syncing blockchain data.
 ///
 /// Schedules a deployment job via the admin API and returns the job ID.
@@ -135,6 +118,23 @@ async fn deploy_dataset(
         .map_err(Error::Deploy)?;
 
     Ok(job_id)
+}
+
+/// Result of a dataset deployment operation.
+#[derive(serde::Serialize)]
+struct DeployResult {
+    job_id: JobId,
+}
+
+impl std::fmt::Display for DeployResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Dataset deployed successfully",
+            console::style("✓").green().bold()
+        )?;
+        writeln!(f, "{} Job ID: {}", console::style("→").cyan(), self.job_id)
+    }
 }
 
 /// Errors for dataset deployment operations.

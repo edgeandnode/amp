@@ -25,23 +25,6 @@ pub struct Args {
     pub id: JobId,
 }
 
-/// Result of a job stop operation.
-#[derive(serde::Serialize)]
-struct StopResult {
-    job_id: JobId,
-}
-
-impl std::fmt::Display for StopResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Job {} stop requested",
-            console::style("✓").green().bold(),
-            self.job_id
-        )
-    }
-}
-
 /// Stop a job by requesting it to stop via the admin API.
 ///
 /// # Errors
@@ -64,6 +47,23 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
     global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
+}
+
+/// Result of a job stop operation.
+#[derive(serde::Serialize)]
+struct StopResult {
+    job_id: JobId,
+}
+
+impl std::fmt::Display for StopResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Job {} stop requested",
+            console::style("✓").green().bold(),
+            self.job_id
+        )
+    }
 }
 
 /// Errors for job stop operations.

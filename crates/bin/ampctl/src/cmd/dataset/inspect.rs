@@ -26,24 +26,6 @@ pub struct Args {
     pub reference: Reference,
 }
 
-/// Result of a dataset inspect operation.
-#[derive(serde::Serialize)]
-struct InspectResult {
-    #[serde(flatten)]
-    dataset: client::datasets::DatasetInfo,
-}
-
-impl std::fmt::Display for InspectResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "Namespace: {}", self.dataset.namespace)?;
-        writeln!(f, "Name: {}", self.dataset.name)?;
-        writeln!(f, "Revision: {}", self.dataset.revision)?;
-        writeln!(f, "Kind: {}", self.dataset.kind)?;
-        writeln!(f, "Manifest Hash: {}", self.dataset.manifest_hash)?;
-        Ok(())
-    }
-}
-
 /// Inspect dataset details by retrieving them from the admin API.
 ///
 /// Retrieves dataset information and displays it based on the output format.
@@ -82,6 +64,24 @@ async fn get_dataset(
         None => Err(Error::DatasetNotFound {
             reference: reference.clone(),
         }),
+    }
+}
+
+/// Result of a dataset inspect operation.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    dataset: client::datasets::DatasetInfo,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "Namespace: {}", self.dataset.namespace)?;
+        writeln!(f, "Name: {}", self.dataset.name)?;
+        writeln!(f, "Revision: {}", self.dataset.revision)?;
+        writeln!(f, "Kind: {}", self.dataset.kind)?;
+        writeln!(f, "Manifest Hash: {}", self.dataset.manifest_hash)?;
+        Ok(())
     }
 }
 

@@ -25,21 +25,6 @@ pub struct Args {
     pub hash: Hash,
 }
 
-/// Result wrapper for manifest inspect output.
-#[derive(serde::Serialize)]
-struct InspectResult {
-    #[serde(flatten)]
-    data: serde_json::Value,
-}
-
-impl std::fmt::Display for InspectResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        // For manifest inspect, output pretty JSON as manifests are complex nested structures
-        let json = serde_json::to_string_pretty(&self.data).map_err(|_| std::fmt::Error)?;
-        write!(f, "{}", json)
-    }
-}
-
 /// Inspect a manifest by retrieving it from content-addressable storage via the admin API.
 ///
 /// Retrieves manifest content and displays it based on the output format.
@@ -85,6 +70,21 @@ async fn get_manifest_value(global: &GlobalArgs, hash: &Hash) -> Result<serde_js
     })?;
 
     Ok(manifest)
+}
+
+/// Result wrapper for manifest inspect output.
+#[derive(serde::Serialize)]
+struct InspectResult {
+    #[serde(flatten)]
+    data: serde_json::Value,
+}
+
+impl std::fmt::Display for InspectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // For manifest inspect, output pretty JSON as manifests are complex nested structures
+        let json = serde_json::to_string_pretty(&self.data).map_err(|_| std::fmt::Error)?;
+        write!(f, "{}", json)
+    }
 }
 
 /// Errors for manifest inspection operations.

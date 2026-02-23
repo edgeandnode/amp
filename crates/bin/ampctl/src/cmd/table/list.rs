@@ -31,36 +31,6 @@ pub struct Args {
     pub limit: Option<i64>,
 }
 
-/// Result of a table list operation.
-#[derive(serde::Serialize)]
-struct ListResult {
-    revisions: Vec<client::revisions::RevisionInfo>,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.revisions.is_empty() {
-            writeln!(f, "No revisions found")
-        } else {
-            writeln!(f, "Revisions ({}):", self.revisions.len())?;
-            for rev in &self.revisions {
-                let meta = &rev.metadata;
-                let active_str = if rev.active {
-                    console::style("active").green().to_string()
-                } else {
-                    console::style("inactive").red().to_string()
-                };
-                writeln!(
-                    f,
-                    "  {} - {}/{} {} [{}]",
-                    rev.id, meta.dataset_namespace, meta.dataset_name, meta.table_name, active_str,
-                )?;
-            }
-            Ok(())
-        }
-    }
-}
-
 /// List all table revisions by retrieving them from the admin API.
 ///
 /// Retrieves table revisions with optional filtering and displays them based on
@@ -111,6 +81,36 @@ async fn get_revisions(
         })?;
 
     Ok(revisions)
+}
+
+/// Result of a table list operation.
+#[derive(serde::Serialize)]
+struct ListResult {
+    revisions: Vec<client::revisions::RevisionInfo>,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.revisions.is_empty() {
+            writeln!(f, "No revisions found")
+        } else {
+            writeln!(f, "Revisions ({}):", self.revisions.len())?;
+            for rev in &self.revisions {
+                let meta = &rev.metadata;
+                let active_str = if rev.active {
+                    console::style("active").green().to_string()
+                } else {
+                    console::style("inactive").red().to_string()
+                };
+                writeln!(
+                    f,
+                    "  {} - {}/{} {} [{}]",
+                    rev.id, meta.dataset_namespace, meta.dataset_name, meta.table_name, active_str,
+                )?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Errors for table revision listing operations.

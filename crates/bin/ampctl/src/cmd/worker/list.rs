@@ -21,31 +21,6 @@ pub struct Args {
     pub global: GlobalArgs,
 }
 
-/// Result wrapper for workers list output.
-#[derive(serde::Serialize)]
-struct ListResult {
-    #[serde(flatten)]
-    data: client::workers::WorkersResponse,
-}
-
-impl std::fmt::Display for ListResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.data.workers.is_empty() {
-            writeln!(f, "No workers found")
-        } else {
-            writeln!(f, "Workers:")?;
-            for worker in &self.data.workers {
-                writeln!(
-                    f,
-                    "  {} (last heartbeat: {})",
-                    worker.node_id, worker.heartbeat_at
-                )?;
-            }
-            Ok(())
-        }
-    }
-}
-
 /// List all workers by retrieving them from the admin API.
 ///
 /// Retrieves all workers and displays them based on the output format.
@@ -79,6 +54,31 @@ async fn get_workers(global: &GlobalArgs) -> Result<client::workers::WorkersResp
     })?;
 
     Ok(workers_response)
+}
+
+/// Result wrapper for workers list output.
+#[derive(serde::Serialize)]
+struct ListResult {
+    #[serde(flatten)]
+    data: client::workers::WorkersResponse,
+}
+
+impl std::fmt::Display for ListResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.data.workers.is_empty() {
+            writeln!(f, "No workers found")
+        } else {
+            writeln!(f, "Workers:")?;
+            for worker in &self.data.workers {
+                writeln!(
+                    f,
+                    "  {} (last heartbeat: {})",
+                    worker.node_id, worker.heartbeat_at
+                )?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Errors for workers listing operations.

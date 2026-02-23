@@ -39,28 +39,6 @@ pub struct Args {
     pub manifest_file: ManifestFilePath,
 }
 
-/// Result of a manifest registration operation.
-#[derive(serde::Serialize)]
-struct RegisterResult {
-    hash: String,
-}
-
-impl std::fmt::Display for RegisterResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Manifest registered successfully",
-            console::style("✓").green().bold()
-        )?;
-        writeln!(
-            f,
-            "{} Manifest hash: {}",
-            console::style("→").cyan(),
-            self.hash
-        )
-    }
-}
-
 /// Register a manifest with content-addressable storage via the admin API.
 ///
 /// Loads manifest content from storage and POSTs to `/manifests` endpoint.
@@ -144,6 +122,28 @@ pub async fn register_manifest(global: &GlobalArgs, manifest_str: &str) -> Resul
         .register(manifest_str)
         .await
         .map_err(Error::RegisterError)
+}
+
+/// Result of a manifest registration operation.
+#[derive(serde::Serialize)]
+struct RegisterResult {
+    hash: String,
+}
+
+impl std::fmt::Display for RegisterResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Manifest registered successfully",
+            console::style("✓").green().bold()
+        )?;
+        writeln!(
+            f,
+            "{} Manifest hash: {}",
+            console::style("→").cyan(),
+            self.hash
+        )
+    }
 }
 
 /// Errors for manifest registration operations.

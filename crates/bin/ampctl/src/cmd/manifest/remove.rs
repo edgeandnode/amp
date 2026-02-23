@@ -27,22 +27,6 @@ pub struct Args {
     pub hash: Hash,
 }
 
-/// Result of a manifest removal operation.
-#[derive(serde::Serialize)]
-struct RemoveResult {
-    hash: String,
-}
-
-impl std::fmt::Display for RemoveResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{} Manifest deleted successfully",
-            console::style("✓").green().bold()
-        )
-    }
-}
-
 /// Remove a manifest from content-addressable storage via the admin API.
 ///
 /// Deletes the manifest if it is not linked to any datasets.
@@ -110,6 +94,22 @@ async fn delete_manifest(global: &GlobalArgs, hash: &Hash) -> Result<(), Error> 
                 Error::UnexpectedResponse { status, message }
             }
         })
+}
+
+/// Result of a manifest removal operation.
+#[derive(serde::Serialize)]
+struct RemoveResult {
+    hash: String,
+}
+
+impl std::fmt::Display for RemoveResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Manifest deleted successfully",
+            console::style("✓").green().bold()
+        )
+    }
 }
 
 /// Errors for manifest removal operations.
