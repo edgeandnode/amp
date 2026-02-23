@@ -403,17 +403,6 @@ pub enum Error {
     /// the beginning.
     #[error("Parallel table dump tasks failed")]
     ParallelTasksFailed(#[source] TryWaitAllError<DumpTableError>),
-
-    /// Start block before dependencies
-    ///
-    /// This occurs when the start block of the derived dataset is before the earliest block of the dependencies.
-    #[error(
-        "derived dataset start_block ({dataset_start_block}) is before dependency's earliest available block ({dependency_earliest_block})"
-    )]
-    StartBlockBeforeDependencies {
-        dataset_start_block: BlockNum,
-        dependency_earliest_block: BlockNum,
-    },
 }
 
 impl Error {
@@ -505,7 +494,6 @@ async fn dump_table(
             .map_err(DumpTableError::CreatePhysicalCatalog)?
     };
     let planning_ctx = PlanContext::new(env.session_config.clone(), catalog.logical().clone());
-    let manifest_start_block = manifest.start_block;
 
     join_set.spawn(
         async move {
@@ -530,16 +518,8 @@ async fn dump_table(
                 return Ok::<(), DumpTableSpawnError>(());
             };
 
-            // If derived dataset has a start_block, validate it
-            if let Some(dataset_start_block) = &manifest_start_block
-                && dataset_start_block < &dependency_earliest_block
-            {
-                return Err(DumpTableSpawnError::StartBlockBeforeDependencies {
-                    dataset_start_block: *dataset_start_block,
-                    dependency_earliest_block,
-                });
-            }
-            let start = manifest_start_block.unwrap_or(dependency_earliest_block);
+            // Derived datasets inherit start_block from their dependencies
+            let start = dependency_earliest_block;
 
             let resolved = resolve_end_block(&end, start, async {
                 let query_ctx =
@@ -749,18 +729,6 @@ pub enum DumpTableSpawnError {
     /// block across all dependency datasets fails.
     #[error("failed to get earliest block: {0}")]
     EarliestBlock(#[source] EarliestBlockError),
-
-    /// Dataset start block is before the earliest dependency block
-    ///
-    /// This occurs when the manifest specifies a start block that is
-    /// earlier than the earliest available data in the dependencies.
-    #[error(
-        "earliest block is before start block: {dataset_start_block} < {dependency_earliest_block}"
-    )]
-    StartBlockBeforeDependencies {
-        dataset_start_block: BlockNum,
-        dependency_earliest_block: BlockNum,
-    },
 
     /// Failed to resolve the end block for dumping
     ///

@@ -258,7 +258,6 @@ export class DatasetConfig extends Schema.Class<DatasetConfig>("DatasetConfig")(
   sources: Schema.Array(DatasetSource).pipe(Schema.optional),
   license: DatasetLicense.pipe(Schema.optional),
   private: Schema.Boolean.pipe(Schema.optional),
-  startBlock: Schema.Number.pipe(Schema.optional),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceFromString }),
   tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
   functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
@@ -328,7 +327,6 @@ export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionMa
 
 export class DatasetDerived extends Schema.Class<DatasetDerived>("DatasetDerived")({
   kind: Schema.Literal("manifest"),
-  startBlock: Schema.NullOr(Schema.Number).pipe(Schema.optional, Schema.fromKey("start_block")),
   dependencies: Schema.Record({ key: Schema.String, value: DatasetReferenceFromString }),
   tables: Schema.Record({ key: Schema.String, value: Table }),
   functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),
