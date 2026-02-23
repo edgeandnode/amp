@@ -15,7 +15,6 @@ use crate::{
 
 pub struct Dataset {
     pub(crate) tables: Vec<Table>,
-    pub(crate) start_block: Option<BlockNum>,
     pub(crate) kind: DerivedDatasetKind,
     pub(crate) dependencies: BTreeMap<DepAlias, DepReference>,
     pub(crate) functions: Vec<Function>,
@@ -32,7 +31,6 @@ impl Dataset {
         reference: HashReference,
         dependencies: BTreeMap<DepAlias, DepReference>,
         kind: DerivedDatasetKind,
-        start_block: Option<BlockNum>,
         finalized_blocks_only: bool,
         tables: Vec<Table>,
         functions: Vec<Function>,
@@ -41,7 +39,6 @@ impl Dataset {
             reference,
             dependencies,
             kind,
-            start_block,
             finalized_blocks_only,
             tables,
             functions,
@@ -97,7 +94,7 @@ impl datasets_common::dataset::Dataset for Dataset {
     }
 
     fn start_block(&self) -> Option<BlockNum> {
-        self.start_block
+        None
     }
 
     fn finalized_blocks_only(&self) -> bool {

@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
 use common::{
-    BlockNum,
     catalog::logical::for_manifest_validation::{
         self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
         TableReferencesMap,
@@ -255,27 +254,6 @@ pub async fn validate_derived_manifest(
             })?;
 
         dependencies.insert(alias.clone(), reference);
-    }
-
-    // Check if the start block is before the earliest available block of the dependencies
-    if let Some(dataset_start_block) = &manifest.start_block {
-        for (alias, dataset_ref) in &dependencies {
-            let dataset = store.get_dataset(dataset_ref).await.map_err(|err| {
-                ManifestValidationError::FetchDependencyDataset {
-                    alias: alias.to_string(),
-                    source: err,
-                }
-            })?;
-
-            if let Some(dep_start_block) = dataset.start_block()
-                && *dataset_start_block < dep_start_block
-            {
-                return Err(ManifestValidationError::StartBlockBeforeDependencies {
-                    dataset_start_block: *dataset_start_block,
-                    dependency_earliest_block: dep_start_block,
-                });
-            }
-        }
     }
 
     // Step 2: Parse all SQL queries and extract references
@@ -589,20 +567,6 @@ pub enum ManifestValidationError {
     /// Failed to create DataFusion session configuration
     #[error("failed to create session config")]
     SessionConfig(#[source] datafusion::error::DataFusionError),
-
-    /// Start block before dependencies
-    ///
-    /// This occurs when the start block of the derived dataset is before
-    /// the earliest block of one of the dependencies.
-    #[error(
-        "derived dataset start_block ({dataset_start_block}) is before dependency's earliest available block ({dependency_earliest_block})"
-    )]
-    StartBlockBeforeDependencies {
-        /// The start block of the derived dataset
-        dataset_start_block: BlockNum,
-        /// The earliest available block of the dependency dataset
-        dependency_earliest_block: BlockNum,
-    },
 }
 
 /// Registers all files in a revision with their Amp-specific metadata.
