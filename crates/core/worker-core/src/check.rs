@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use amp_data_store::{DataStore, file_name::FileName};
-use common::catalog::physical::{GetFilesError, PhysicalTable};
+use common::physical_table::{GetFilesError, PhysicalTable};
 use metadata_db::physical_table_revision::LocationId;
 use object_store::ObjectMeta;
 

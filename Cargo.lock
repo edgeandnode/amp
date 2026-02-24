@@ -1154,6 +1154,7 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "object_store",
+ "opentelemetry",
  "parking_lot",
  "schemars 1.2.1",
  "serde",

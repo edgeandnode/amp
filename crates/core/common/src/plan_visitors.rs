@@ -399,9 +399,9 @@ pub fn find_cross_network_join(
     catalog: &crate::catalog::physical::Catalog,
 ) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
     let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
-        .tables()
+        .entries()
         .iter()
-        .map(|t| (t.table_ref().into(), t.network().clone()))
+        .map(|t| (t.table_ref().into(), t.physical_table().network().clone()))
         .collect();
 
     let reference_networks =

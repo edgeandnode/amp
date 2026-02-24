@@ -1,99 +1,11 @@
-use std::{collections::BTreeMap, fmt::Debug, ops::RangeInclusive};
+use std::ops::RangeInclusive;
 
-use alloy::primitives::BlockHash;
-use datasets_common::network_id::NetworkId;
+use datasets_common::{block_num::BlockNum, block_range::BlockRange};
 use metadata_db::files::FileId;
 use object_store::ObjectMeta;
 
-use crate::{BlockNum, BlockRange, block_range_intersection};
-
-/// A watermark represents a monotonically increasing block number in materialized parquet segments.
-/// Currently stored in the `_block_num` column.
-pub type Watermark = BlockNum;
-
-/// A cursor for a single network, containing both block number and hash.
-/// Used for stream resumption to verify chain continuity.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct NetworkCursor {
-    /// The segment end block.
-    pub number: BlockNum,
-    /// The hash associated with the segment end block.
-    pub hash: BlockHash,
-}
-
-impl From<&BlockRange> for NetworkCursor {
-    fn from(range: &BlockRange) -> Self {
-        Self {
-            number: range.end(),
-            hash: range.hash,
-        }
-    }
-}
-
-/// Cursor for resuming a stream from a specific point.
-///
-/// A cursor contains a pair of block number and block hash for each network,
-/// representing the last successfully processed block per network. This allows
-/// stream resumption to continue from the correct position across multiple networks.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Cursor(pub BTreeMap<NetworkId, NetworkCursor>);
-
-/// Error when extracting a cursor for a specific network from a multi-network Cursor
-///
-/// This occurs when the Cursor does not contain an entry for the requested network.
-#[derive(Debug, thiserror::Error)]
-#[error("expected cursor for network '{0}'")]
-pub struct CursorNetworkNotFoundError(pub NetworkId);
-
-impl Cursor {
-    /// Create a Cursor from a slice of BlockRanges.
-    pub fn from_ranges(ranges: &[BlockRange]) -> Self {
-        let cursors = ranges
-            .iter()
-            .map(|r| (r.network.clone(), r.into()))
-            .collect();
-        Self(cursors)
-    }
-
-    /// Extract the single-network cursor for a specific network.
-    pub fn to_single_network(
-        self,
-        network: &NetworkId,
-    ) -> Result<NetworkCursor, CursorNetworkNotFoundError> {
-        self.0
-            .into_iter()
-            .find(|(n, _)| n == network)
-            .map(|(_, c)| c)
-            .ok_or_else(|| CursorNetworkNotFoundError(network.clone()))
-    }
-}
-
-// encoding to remote plan
-impl From<Cursor> for BTreeMap<NetworkId, (BlockNum, [u8; 32])> {
-    fn from(value: Cursor) -> Self {
-        value
-            .0
-            .into_iter()
-            .map(|(network, NetworkCursor { number, hash })| (network, (number, hash.0)))
-            .collect()
-    }
-}
-// decoding from remote plan
-impl From<BTreeMap<NetworkId, (BlockNum, [u8; 32])>> for Cursor {
-    fn from(value: BTreeMap<NetworkId, (BlockNum, [u8; 32])>) -> Self {
-        let inner = value
-            .into_iter()
-            .map(|(network, (number, hash))| {
-                let hash = hash.into();
-                (network, NetworkCursor { number, hash })
-            })
-            .collect();
-        Self(inner)
-    }
-}
-
 /// A block range associated with the metadata from a file in object storage.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Segment {
     id: FileId,
     object: ObjectMeta,
@@ -467,6 +379,20 @@ pub fn merge_ranges(mut ranges: Vec<RangeInclusive<BlockNum>>) -> Vec<RangeInclu
     ranges
 }
 
+/// Returns the intersection of two block number ranges, or `None` if they don't overlap.
+fn block_range_intersection(
+    a: RangeInclusive<BlockNum>,
+    b: RangeInclusive<BlockNum>,
+) -> Option<RangeInclusive<BlockNum>> {
+    let start = BlockNum::max(*a.start(), *b.start());
+    let end = BlockNum::min(*a.end(), *b.end());
+    if start <= end {
+        Some(start..=end)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::ops::RangeInclusive;
@@ -490,7 +416,8 @@ mod test {
     fn test_object(timestamp: i64) -> ObjectMeta {
         ObjectMeta {
             location: Default::default(),
-            last_modified: DateTime::from_timestamp_millis(timestamp).unwrap(),
+            last_modified: DateTime::from_timestamp_millis(timestamp)
+                .expect("test timestamp should be a valid millisecond timestamp"),
             size: 0,
             e_tag: None,
             version: None,
@@ -535,8 +462,12 @@ mod test {
         )
     }
 
+    /// Tests the `chains()` function across representative scenarios.
+    ///
+    /// Each block is an independent scenario: a comment names the case (acting as Given),
+    /// the `super::chains(...)` call is the When, and the `assert_eq!` is the Then.
     #[test]
-    fn chains() {
+    fn chains_computes_canonical_and_fork() {
         // empty input
         assert_eq!(super::chains(vec![]), None);
 
@@ -734,8 +665,11 @@ mod test {
         );
     }
 
+    /// Tests `chains()` with multi-network segments.
+    ///
+    /// Same scenario/assertion layout as `chains_computes_canonical_and_fork`.
     #[test]
-    fn chains_multi_network() {
+    fn chains_multi_network_computes_canonical_and_fork() {
         // Case 1: Canonical chain with 2 networks
         // Both networks have adjacent ranges forming a canonical chain
         assert_eq!(
@@ -805,8 +739,14 @@ mod test {
         );
     }
 
+    /// Tests `missing_ranges()` across gap and reorg scenarios.
+    ///
+    /// Each `assert_eq!` is an independent case:
+    ///   Given: a set of synced ranges + a desired range
+    ///   When:  `missing_ranges(segments, desired)` is called
+    ///   Then:  the returned gaps (and any reorg ranges) match expectations
     #[test]
-    fn missing_ranges() {
+    fn missing_ranges_includes_gaps_and_reorg_ranges() {
         fn missing_ranges(
             ranges: &[RangeInclusive<BlockNum>],
             desired: RangeInclusive<BlockNum>,
@@ -853,8 +793,10 @@ mod test {
         assert_eq!(missing_ranges(&[0..=5, 3..=8], 2..=7), vec![2..=2]);
     }
 
+    /// Property test: for any randomly generated canonical + reorg chains, `chains()` recovers
+    /// the canonical chain exactly and any returned fork satisfies connectivity invariants.
     #[test]
-    fn chains_prop() {
+    fn chains_prop_canonical_and_fork_satisfy_invariants() {
         const MAX_BLOCK: BlockNum = 15;
         const MAX_FORK: u8 = 3;
         const SAMPLES: usize = 10_000;
@@ -880,6 +822,7 @@ mod test {
         }
 
         for _ in 0..SAMPLES {
+            //* Given
             let seed = rand::rng().next_u64();
             println!("seed: {seed}");
             let mut rng = StdRng::seed_from_u64(seed);
@@ -901,24 +844,43 @@ mod test {
             }
             segments.shuffle(&mut rng);
 
-            let chains = super::chains(segments).unwrap();
-            assert_eq!(chains.canonical, canonical);
+            //* When
+            let chains = super::chains(segments)
+                .expect("chains should return Some for non-empty segment set");
+
+            //* Then
+            assert_eq!(chains.canonical, canonical, "seed: {seed}");
             if let Some(fork) = chains.fork {
-                assert!(fork.last_ranges()[0].end() > canonical.last_ranges()[0].end());
-                assert!(fork.first_ranges()[0].start() > canonical.first_ranges()[0].start());
-                assert!(fork.first_ranges()[0].start() <= canonical.last_ranges()[0].end() + 1);
+                assert!(
+                    fork.last_ranges()[0].end() > canonical.last_ranges()[0].end(),
+                    "seed: {seed}: fork should extend past canonical end"
+                );
+                assert!(
+                    fork.first_ranges()[0].start() > canonical.first_ranges()[0].start(),
+                    "seed: {seed}: fork should start after canonical start"
+                );
+                assert!(
+                    fork.first_ranges()[0].start() <= canonical.last_ranges()[0].end() + 1,
+                    "seed: {seed}: fork should connect back to canonical"
+                );
             } else {
                 assert!(
                     other_chains
                         .iter()
-                        .all(|c| c.last_ranges()[0].end() <= canonical.last_ranges()[0].end())
+                        .all(|c| c.last_ranges()[0].end() <= canonical.last_ranges()[0].end()),
+                    "seed: {seed}: non-canonical chains should not extend past canonical"
                 );
             }
         }
     }
 
+    /// Tests the private `missing_block_ranges()` helper across boundary and overlap scenarios.
+    ///
+    ///   Given: a synced range and a desired range
+    ///   When:  `missing_block_ranges(synced, desired)` is called
+    ///   Then:  the portions of `desired` not covered by `synced` are returned
     #[test]
-    fn missing_block_ranges() {
+    fn missing_block_ranges_returns_uncovered_portions() {
         // no overlap, desired before synced
         assert_eq!(super::missing_block_ranges(10..=20, 0..=5), vec![0..=5]);
         // no overlap, desired after synced
@@ -957,8 +919,13 @@ mod test {
         assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
     }
 
+    /// Tests `merge_ranges()` across disjoint, adjacent, and overlapping inputs.
+    ///
+    ///   Given: an unordered list of block ranges (possibly overlapping or adjacent)
+    ///   When:  `merge_ranges(ranges)` is called
+    ///   Then:  the result is a sorted, non-overlapping, merged list of ranges
     #[test]
-    fn merge_ranges() {
+    fn merge_ranges_joins_overlapping_and_adjacent() {
         assert_eq!(super::merge_ranges(vec![]), vec![]);
         assert_eq!(super::merge_ranges(vec![1..=5]), vec![1..=5]);
         assert_eq!(

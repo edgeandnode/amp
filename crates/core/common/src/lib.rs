@@ -1,7 +1,4 @@
-use std::{
-    ops::RangeInclusive,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
 pub use ::datasets_derived::sql_str;
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
@@ -10,6 +7,7 @@ pub use datasets_common::{block_num::BlockNum, block_range::BlockRange, end_bloc
 
 pub mod catalog;
 pub mod context;
+pub mod cursor;
 pub mod dataset_store;
 pub mod datasets_derived;
 pub mod detached_logical_plan;
@@ -19,16 +17,12 @@ pub mod func_catalog;
 pub mod incrementalizer;
 pub mod memory_pool;
 pub mod metadata;
+pub mod physical_table;
 pub mod plan_table;
 pub mod plan_visitors;
 pub mod sql;
 pub mod stream_helpers;
 pub mod streaming_query;
-
-pub use self::{
-    catalog::logical::{LogicalCatalog, LogicalTable},
-    metadata::segments::{Cursor, NetworkCursor, Watermark},
-};
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;
@@ -44,18 +38,5 @@ impl Timestamp {
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap(),
         )
-    }
-}
-
-pub fn block_range_intersection(
-    a: RangeInclusive<BlockNum>,
-    b: RangeInclusive<BlockNum>,
-) -> Option<RangeInclusive<BlockNum>> {
-    let start = BlockNum::max(*a.start(), *b.start());
-    let end = BlockNum::min(*a.end(), *b.end());
-    if start <= end {
-        Some(start..=end)
-    } else {
-        None
     }
 }

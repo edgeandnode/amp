@@ -18,7 +18,9 @@ use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::{BlockNum, catalog::physical::TableSnapshot, plan_visitors::NonIncrementalOp};
+use crate::{
+    BlockNum, catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
+};
 
 /// Assuming that output table has been synced up to `start - 1`, and that the input tables are immutable (all of our tables currently are), this will return the _incremental version_ of `plan` that computes the microbatch `[start, end]`.
 ///
@@ -173,7 +175,7 @@ impl TreeNodeRewriter for Incrementalizer {
 
 /// Validates that a table provider is suitable for incremental scanning.
 fn validate_table_provider(table_provider: &dyn TableProvider) -> Result<(), DataFusionError> {
-    if !table_provider.as_any().is::<TableSnapshot>() {
+    if !table_provider.as_any().is::<QueryableSnapshot>() {
         return Err(DataFusionError::External(
             format!(
                 "Unsupported table provider in incremental scan: {:?}",

@@ -13,20 +13,16 @@ pub struct LogicalTable {
     /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
     /// This field stores the string form of the `<dataset_ref>` portion - the schema under
     /// which this table is registered in the catalog and referenced in SQL queries.
-    sql_table_ref_schema: String,
+    sql_schema_name: String,
     dataset_reference: HashReference,
     table: Table,
 }
 
 impl LogicalTable {
-    pub fn new(
-        sql_table_ref_schema: String,
-        dataset_reference: HashReference,
-        table: Table,
-    ) -> Self {
+    pub fn new(sql_schema_name: String, dataset_reference: HashReference, table: Table) -> Self {
         Self {
             table,
-            sql_table_ref_schema,
+            sql_schema_name,
             dataset_reference,
         }
     }
@@ -41,7 +37,7 @@ impl LogicalTable {
     }
 
     pub fn table_ref(&self) -> TableReference {
-        TableReference::partial(self.sql_table_ref_schema.clone(), self.table.name().clone())
+        TableReference::partial(self.sql_schema_name.clone(), self.table.name().clone())
     }
 
     pub fn dataset_reference(&self) -> &HashReference {
@@ -58,8 +54,8 @@ impl LogicalTable {
     /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
     /// This returns the string form of the `<dataset_ref>` portion - the schema under which
     /// this table is registered in the catalog and referenced in SQL queries.
-    pub fn sql_table_ref_schema(&self) -> &str {
-        &self.sql_table_ref_schema
+    pub fn sql_schema_name(&self) -> &str {
+        &self.sql_schema_name
     }
 }
 
