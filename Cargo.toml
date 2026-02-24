@@ -34,6 +34,7 @@ members = [
     "crates/core/worker-core",
     "crates/core/worker-datasets-derived",
     "crates/core/worker-datasets-raw",
+    "crates/parquet-ext",
     "crates/extractors/evm-rpc",
     "crates/extractors/evm-rpc/gen",
     "crates/extractors/firehose",
@@ -165,7 +166,6 @@ datafusion = { version = "52", features = ["serde"] }
 datafusion-tracing = { version = "52" }
 datafusion-datasource = { version = "52" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
-parquet-ext = { version = "0.3.0", git = "https://github.com/edgeandnode/parquet-ext.git", rev = "66855214cd1969911e459e78242c36eb91be3951", features = ["zstd"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
 prost = "0.14.1"

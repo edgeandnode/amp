@@ -1,0 +1,75 @@
+[package]
+name = "parquet-ext"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+name = "parquet_ext"
+path = "src/lib.rs"
+bench = false
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["default-parquet", "tokio"]
+default-parquet = ["parquet/default"]
+
+tokio = ["async", "object_store", "parquet/arrow"]
+
+# Pass-through features to parquet
+async = ["parquet/async", "dep:tokio", "dep:futures"]
+object_store = ["parquet/object_store", "async"]
+
+# Compression codecs
+snap = ["parquet/snap"]
+brotli = ["parquet/brotli"]
+flate2 = ["parquet/flate2"]
+flate2-rust_backend = ["parquet/flate2-rust_backened"]
+flate2-zlib-rs = ["parquet/flate2-zlib-rs"]
+lz4 = ["parquet/lz4"]
+lz4_flex = ["parquet/lz4_flex"]
+zstd = ["parquet/zstd"]
+
+# Other features
+arrow_canonical_extension_types = ["parquet/arrow_canonical_extension_types"]
+arrow-csv = ["parquet/arrow-csv"]
+json = ["parquet/json"]
+crc = ["parquet/crc"]
+encryption = ["parquet/encryption"]
+experimental = ["parquet/experimental"]
+serde = ["parquet/serde"]
+
+[dependencies.arrow-array]
+version = "^57.3"
+optional = false
+
+[dependencies.arrow-buffer]
+version = "^57.3"
+optional = true
+
+[dependencies.arrow-schema]
+version = "^57.3"
+optional = false
+
+[dependencies.bytes]
+workspace = true
+optional = false
+
+[dependencies.flume]
+version = "0.11"
+optional = false
+
+[dependencies.futures]
+workspace = true
+features = ["std"]
+optional = true
+
+[dependencies.parquet]
+version = "^57.3"
+features = ["arrow"]
+optional = false
+
+[dependencies.tokio]
+workspace = true
+optional = true

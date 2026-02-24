@@ -16,14 +16,13 @@ use common::{
         file::{metadata::KeyValue, properties::WriterProperties as ParquetWriterProperties},
     },
 };
-use parquet_ext::AsyncArrowWriter;
-
 use metadata_db::{
     MetadataDb,
     files::{FileId, FooterBytes},
     physical_table_revision::LocationId,
 };
 use object_store::{ObjectMeta, buffered::BufWriter};
+use parquet_ext::arrow::async_writer::AsyncArrowWriter;
 use url::Url;
 
 pub async fn commit_metadata(
