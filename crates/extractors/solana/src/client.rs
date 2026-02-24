@@ -28,6 +28,7 @@ use datasets_raw::{
     rows::Rows,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
+use solana_client::rpc_config::CommitmentConfig;
 use solana_clock::Slot;
 use url::Url;
 
@@ -48,6 +49,7 @@ pub struct Client {
     provider_name: ProviderName,
     of1_car_directory: PathBuf,
     use_archive: UseArchive,
+    commitment: CommitmentConfig,
 }
 
 impl Client {
@@ -62,6 +64,7 @@ impl Client {
         keep_of1_car_files: bool,
         use_archive: UseArchive,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
+        commitment: CommitmentConfig,
     ) -> Self {
         assert_eq!(network, "mainnet", "only mainnet is supported");
 
@@ -97,6 +100,7 @@ impl Client {
             provider_name,
             of1_car_directory,
             use_archive,
+            commitment,
         }
     }
 
@@ -211,6 +215,7 @@ impl Clone for Client {
             provider_name: self.provider_name.clone(),
             of1_car_directory: self.of1_car_directory.clone(),
             use_archive: self.use_archive,
+            commitment: self.commitment,
         }
     }
 }
@@ -226,8 +231,7 @@ impl BlockStreamer for Client {
             transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
             max_supported_transaction_version: Some(0),
             rewards: Some(true),
-            // TODO: Make this configurable.
-            commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
+            commitment: Some(self.commitment),
         };
 
         // Determine archive usage based on configuration
@@ -505,6 +509,7 @@ mod tests {
     use amp_providers_common::redacted::Redacted;
     use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
+    use solana_client::rpc_config::CommitmentConfig;
     use url::Url;
 
     use super::Client;
@@ -528,6 +533,7 @@ mod tests {
             false,
             UseArchive::Auto,
             None,
+            CommitmentConfig::finalized(),
         );
 
         let start = 0;

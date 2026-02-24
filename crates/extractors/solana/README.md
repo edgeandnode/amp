@@ -73,6 +73,7 @@ of1_car_directory = "path/to/local/car/files"
 | `use_archive` | No | Archive usage mode: `always` (default), `never`, or `auto` |
 | `start_block` | No | Starting slot number for extraction (set in the manifest) |
 | `finalized_blocks_only` | No | Whether to only extract finalized blocks (set in the manifest) |
+| `commitment` | No | Commitment level for Solana RPC requests: `finalized` (default), `processed` or `confirmed`  |
 
 ## Old Faithful Archive
 

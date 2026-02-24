@@ -54,6 +54,10 @@ pub struct SolanaProviderConfig {
     /// Controls when to use the Solana archive for historical data.
     #[serde(default)]
     pub use_archive: UseArchive,
+
+    /// Commitment level for RPC requests.
+    #[serde(default)]
+    pub commitment: CommitmentLevel,
 }
 
 /// Validated HTTP header name for custom authentication.
@@ -117,4 +121,22 @@ pub enum UseArchive {
     Always,
     /// Never use the archive, fetch all blocks from the RPC provider.
     Never,
+}
+
+/// Commitment level for Solana RPC requests.
+///
+/// Controls the level of finality required when querying the Solana ledger.
+/// Higher commitment levels provide stronger guarantees that transactions
+/// will not be rolled back.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum CommitmentLevel {
+    /// The highest slot of the heaviest fork processed by the node.
+    Processed,
+    /// The highest slot that has been voted on by supermajority of the cluster.
+    Confirmed,
+    /// The highest slot having reached max vote lockout.
+    #[default]
+    Finalized,
 }

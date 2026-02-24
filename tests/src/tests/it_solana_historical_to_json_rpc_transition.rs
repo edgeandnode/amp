@@ -1,5 +1,8 @@
 use futures::TryStreamExt;
-use solana_datasets::{Client, UseArchive, of1_client, rpc_client};
+use solana_datasets::{
+    Client, UseArchive, of1_client,
+    rpc_client::{self, rpc_config::CommitmentConfig},
+};
 use url::Url;
 
 /// Test the transition from historical blocks to JSON-RPC blocks in the Solana client.
@@ -25,6 +28,7 @@ async fn historical_to_json_rpc_transition() {
         false, // keep_of1_car_files
         UseArchive::Auto,
         None, // Metrics
+        CommitmentConfig::finalized(),
     );
 
     let start = 0;
