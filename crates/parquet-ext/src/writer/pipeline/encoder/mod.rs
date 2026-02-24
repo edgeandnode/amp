@@ -1,10 +1,10 @@
 use std::{
-    cell::UnsafeCell,
     sync::atomic::{AtomicUsize, Ordering},
     thread::scope,
 };
 
 use arrow_array::RecordBatch;
+use parking_lot::Mutex;
 use parquet::{
     arrow::arrow_writer::{
         ArrowColumnChunk, ArrowColumnWriter, ArrowLeafColumn, ArrowRowGroupWriterFactory,
@@ -106,6 +106,9 @@ impl RowGroupEncoder {
     }
 }
 
+type ThreadOutput = Vec<(usize, ArrowColumnChunk, isize)>;
+type ThreadResult = Result<ThreadOutput, ParquetError>;
+
 pub fn encode_column_chunks_parallel(
     index: usize,
     batches: &[RecordBatch],
@@ -123,57 +126,44 @@ pub fn encode_column_chunks_parallel(
 
     let num_workers = num_workers.min(writers_len);
 
-    let work_items: Vec<Option<(ArrowColumnWriter, Vec<ArrowLeafColumn>)>> = writers
-        .into_iter()
-        .zip(leaf_columns)
-        .map(|(w, l)| Some((w, l)))
-        .collect();
+    let work_items: Mutex<Vec<(usize, ArrowColumnWriter, Vec<ArrowLeafColumn>)>> = Mutex::new(
+        writers
+            .into_iter()
+            .zip(leaf_columns)
+            .enumerate()
+            .map(|(i, (w, l))| (i, w, l))
+            .collect(),
+    );
 
-    let work_items = UnsafeCell::new(work_items);
-
-    #[allow(clippy::type_complexity)]
-    struct WorkItems(UnsafeCell<Vec<Option<(ArrowColumnWriter, Vec<ArrowLeafColumn>)>>>);
-    // SAFETY: Each slot is taken by exactly one thread (atomic index ensures uniqueness).
-    unsafe impl Sync for WorkItems {}
-    let work_items = WorkItems(work_items);
-
-    let next_idx = AtomicUsize::new(0);
-
-    let thread_results: Vec<Result<Vec<(usize, ArrowColumnChunk, isize)>, ParquetError>> =
-        scope(|s| {
-            let handles: Vec<_> = (0..num_workers)
-                .map(|_| {
-                    let next_idx = &next_idx;
-                    let work_items = &work_items;
-                    s.spawn(move || {
-                        let mut local_results = Vec::new();
-                        loop {
-                            let idx = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if idx >= writers_len {
-                                break;
-                            }
-                            // SAFETY: Each idx is unique (atomic fetch_add), so exactly
-                            // one thread takes each slot.
-                            let (writer, leaves) =
-                                unsafe { &mut *work_items.0.get() }[idx].take().unwrap();
-                            let result = encode_column(writer, leaves, progress)?;
-                            local_results.push((idx, result.0, result.1));
-                        }
-                        Ok(local_results)
-                    })
+    let thread_results: Vec<ThreadResult> = scope(|s| {
+        let handles: Vec<_> = (0..num_workers)
+            .map(|_| {
+                let work_items = &work_items;
+                s.spawn(move || {
+                    let mut local_results = Vec::new();
+                    loop {
+                        let item = work_items.lock().pop();
+                        let Some((idx, writer, leaves)) = item else {
+                            break;
+                        };
+                        let result = encode_column(writer, leaves, progress)?;
+                        local_results.push((idx, result.0, result.1));
+                    }
+                    Ok(local_results)
                 })
-                .collect();
+            })
+            .collect();
 
-            handles
-                .into_iter()
-                .map(|h| match h.join() {
-                    Ok(result) => result,
-                    Err(_) => Err(ParquetError::General(
-                        "Column encoding thread panicked".to_string(),
-                    )),
-                })
-                .collect()
-        });
+        handles
+            .into_iter()
+            .map(|h| match h.join() {
+                Ok(result) => result,
+                Err(_) => Err(ParquetError::General(
+                    "Column encoding thread panicked".to_string(),
+                )),
+            })
+            .collect()
+    });
 
     let mut encoded_cols: Vec<Option<ArrowColumnChunk>> = (0..writers_len).map(|_| None).collect();
     let mut encoded_bytes = 0isize;
