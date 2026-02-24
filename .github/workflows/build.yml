@@ -122,12 +122,12 @@ jobs:
       - name: Build binaries
         run: |
           export RUSTFLAGS="-C link-arg=-fuse-ld=mold ${RUSTFLAGS}"
-          cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampup -p ampsync
+          cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampsync
 
       - name: Compress debug sections (Linux only)
         if: contains(matrix.target, 'linux')
         run: |
-          for binary in ampd ampctl ampup ampsync; do
+          for binary in ampd ampctl ampsync; do
             path="target/${{ matrix.target }}/release/$binary"
             size_before=$(stat -c%s "$path")
             objcopy --compress-debug-sections=zlib-gnu "$path"
@@ -142,7 +142,6 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/ampd
             target/${{ matrix.target }}/release/ampctl
-            target/${{ matrix.target }}/release/ampup
             target/${{ matrix.target }}/release/ampsync
           compression-level: 0
           retention-days: 30
@@ -173,7 +172,7 @@ jobs:
           rustflags: ""
 
       - name: Build binaries
-        run: cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampup -p ampsync
+        run: cargo build --target ${{ matrix.target }} --release -v -p ampd -p ampctl -p ampsync
 
       - name: Upload artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -182,7 +181,6 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/ampd
             target/${{ matrix.target }}/release/ampctl
-            target/${{ matrix.target }}/release/ampup
             target/${{ matrix.target }}/release/ampsync
           compression-level: 0
           retention-days: 30
@@ -196,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        binary: [ampd, ampctl, ampup, ampsync]
+        binary: [ampd, ampctl, ampsync]
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
 
     steps:
@@ -296,12 +294,6 @@ jobs:
           cp artifacts/aarch64-unknown-linux-gnu/ampctl release/ampctl-linux-aarch64
           cp artifacts/x86_64-apple-darwin-ampctl-notarized/ampctl release/ampctl-darwin-x86_64
           cp artifacts/aarch64-apple-darwin-ampctl-notarized/ampctl release/ampctl-darwin-aarch64
-
-          # Copy and rename ampup binaries
-          cp artifacts/x86_64-unknown-linux-gnu/ampup release/ampup-linux-x86_64
-          cp artifacts/aarch64-unknown-linux-gnu/ampup release/ampup-linux-aarch64
-          cp artifacts/x86_64-apple-darwin-ampup-notarized/ampup release/ampup-darwin-x86_64
-          cp artifacts/aarch64-apple-darwin-ampup-notarized/ampup release/ampup-darwin-aarch64
 
           # Copy and rename ampsync binaries
           cp artifacts/x86_64-unknown-linux-gnu/ampsync release/ampsync-linux-x86_64

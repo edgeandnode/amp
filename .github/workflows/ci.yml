@@ -120,32 +120,6 @@ jobs:
           SOLANA_MAINNET_RPC_AUTH_HEADER: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_HEADER }}
           SOLANA_MAINNET_RPC_AUTH_TOKEN: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_TOKEN }}
 
-  ampup-tests:
-    name: Test ampup
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
-        with:
-          cache: true
-          rustflags: ""
-
-      - name: Setup just
-        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
-
-      - name: Install cargo-nextest
-        uses: baptiste0928/cargo-install@b687c656bda5733207e629b50a22bf68974a0305 # v3
-        with:
-          crate: cargo-nextest
-          version: ^0.9
-
-      - name: Run ampup tests
-        run: just test-ampup --verbose
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
   rustfmt:
     name: Check rustfmt style
     runs-on: ubuntu-latest

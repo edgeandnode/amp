@@ -30,7 +30,7 @@ ampup build --pr 123
 ampup build --branch develop
 ```
 
-For more details and advanced options, see the [ampup README](crates/bin/ampup/README.md).
+For more details and advanced options, see the [ampup README](https://github.com/edgeandnode/ampup?tab=readme-ov-file#ampup).
 
 ### Installation via Nix
 
