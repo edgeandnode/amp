@@ -31,12 +31,16 @@ use tracing::field;
 
 use crate::{
     BlockNum, BlockRange, arrow,
-    catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
+    catalog::physical::{
+        Catalog,
+        snapshot::{CatalogSnapshot, FromCatalogError, QueryableSnapshot},
+    },
     context::common::{
         ReadOnlyCheckError, SqlToPlanError, builtin_udfs, read_only_check, sql_to_plan,
     },
     exec_env::ExecEnv,
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
+    physical_table::MultiNetworkSegmentsError,
     plan_visitors::{extract_table_references_from_plan, forbid_duplicate_field_names},
     sql::{TableReference, TableReferenceConversionError},
 };
@@ -46,23 +50,36 @@ use crate::{
 pub struct ExecContext {
     pub env: ExecEnv,
     session_config: SessionConfig,
-    catalog: CatalogSnapshot,
+    physical_table: CatalogSnapshot,
+    query_snapshots: Vec<Arc<QueryableSnapshot>>,
     /// Per-query memory pool (if per-query limits are enabled)
     tiered_memory_pool: Arc<TieredMemoryPool>,
 }
 
 impl ExecContext {
     /// Creates a query context from a physical catalog.
+    ///
+    /// `ignore_canonical` controls whether to use only the canonical chain (`false`, default)
+    /// or all physically present segments (`true`, used for forked-chain contexts).
     pub async fn for_catalog(
         env: ExecEnv,
         catalog: Catalog,
-        ignore_canonical_segments: bool,
+        ignore_canonical: bool,
     ) -> Result<Self, CreateContextError> {
         // Create a catalog snapshot with canonical chain locked in
-        let catalog_snapshot =
-            CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments, env.store.clone())
-                .await
-                .map_err(CreateContextError::CatalogSnapshot)?;
+        let (entries, logical) = catalog.into_parts();
+        let physical_table = CatalogSnapshot::from_catalog(logical, &entries, ignore_canonical)
+            .await
+            .map_err(CreateContextError::CatalogSnapshot)?;
+
+        let query_snapshots = physical_table
+            .table_snapshots()
+            .map(|(s, sql_schema_name)| {
+                QueryableSnapshot::from_snapshot(s, env.store.clone(), sql_schema_name.to_string())
+                    .map(Arc::new)
+                    .map_err(CreateContextError::MultiNetworkSegments)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let tiered_memory_pool: Arc<TieredMemoryPool> = {
             let per_query_bytes = env.query_max_mem_mb * 1024 * 1024;
@@ -77,14 +94,19 @@ impl ExecContext {
         Ok(Self {
             session_config: env.session_config.clone(),
             env,
-            catalog: catalog_snapshot,
+            physical_table,
+            query_snapshots,
             tiered_memory_pool,
         })
     }
 
-    /// Returns the catalog snapshot backing this query context.
-    pub fn catalog(&self) -> &CatalogSnapshot {
-        &self.catalog
+    /// Returns the physical catalog snapshot backing this query context.
+    ///
+    /// Exposes segment-level data for streaming query consumers that need to
+    /// walk segments (e.g. watermark computation, compaction). The execution
+    /// layer accesses tables via `get_table()` instead.
+    pub fn physical_table(&self) -> &CatalogSnapshot {
+        &self.physical_table
     }
 
     /// Converts a parsed SQL statement into a logical plan against the physical catalog.
@@ -94,7 +116,8 @@ impl ExecContext {
             &self.tiered_memory_pool,
             &self.env,
         );
-        register_catalog(&self.env, &ctx, &self.catalog).map_err(SqlError::RegisterTable)?;
+        register_catalog(&self.env, &ctx, &self.physical_table, &self.query_snapshots)
+            .map_err(SqlError::RegisterTable)?;
 
         let plan = sql_to_plan(&ctx, query)
             .await
@@ -113,7 +136,7 @@ impl ExecContext {
             &self.tiered_memory_pool,
             &self.env,
         );
-        register_catalog(&self.env, &ctx, &self.catalog)
+        register_catalog(&self.env, &ctx, &self.physical_table, &self.query_snapshots)
             .map_err(ExecutePlanError::RegisterTable)?;
 
         let result = execute_plan(&ctx, plan, logical_optimize)
@@ -137,7 +160,7 @@ impl ExecContext {
             &self.tiered_memory_pool,
             &self.env,
         );
-        register_catalog(&self.env, &ctx, &self.catalog)
+        register_catalog(&self.env, &ctx, &self.physical_table, &self.query_snapshots)
             .map_err(ExecuteAndConcatError::RegisterTable)?;
 
         let batch_stream = execute_plan(&ctx, plan, true)
@@ -150,15 +173,14 @@ impl ExecContext {
         Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
 
-    /// Looks up a table snapshot by reference. Fails if the table is not in the catalog.
+    /// Looks up a queryable snapshot by reference. Fails if the table is not in the catalog.
     pub fn get_table(
         &self,
         table_ref: &TableReference,
-    ) -> Result<Arc<TableSnapshot>, TableNotFoundError> {
-        self.catalog
-            .table_snapshots()
+    ) -> Result<Arc<QueryableSnapshot>, TableNotFoundError> {
+        self.query_snapshots
             .iter()
-            .find(|snapshot| snapshot.physical_table().table_ref() == *table_ref)
+            .find(|qs| qs.table_ref() == *table_ref)
             .cloned()
             .ok_or_else(|| TableNotFoundError(table_ref.clone()))
     }
@@ -235,7 +257,14 @@ pub enum CreateContextError {
     /// This occurs when creating snapshots of physical tables, typically
     /// due to segment metadata fetch failures or canonical chain computation errors.
     #[error("failed to create catalog snapshot")]
-    CatalogSnapshot(#[source] crate::catalog::physical::FromCatalogError),
+    CatalogSnapshot(#[source] FromCatalogError),
+    /// A physical table has multi-network segments, which the query layer does not support.
+    ///
+    /// `QueryableSnapshot::from_snapshot()` requires single-network segments because
+    /// `synced_range()` can only express a single-network block range. This error is
+    /// returned when that invariant is violated.
+    #[error("failed to build query snapshot")]
+    MultiNetworkSegments(#[source] MultiNetworkSegmentsError),
 }
 
 /// Failed to plan a SQL query in the query context
@@ -390,10 +419,11 @@ fn register_catalog(
     env: &ExecEnv,
     ctx: &SessionContext,
     catalog: &CatalogSnapshot,
+    query_snapshots: &[Arc<QueryableSnapshot>],
 ) -> Result<(), RegisterTableError> {
-    for table in catalog.table_snapshots() {
+    for table in query_snapshots {
         // The catalog schema needs to be explicitly created or table creation will fail.
-        let schema_name = table.physical_table().sql_table_ref_schema();
+        let schema_name = table.sql_schema_name();
         if ctx
             .catalog(&ctx.catalog_names()[0])
             .unwrap()
@@ -407,7 +437,7 @@ fn register_catalog(
                 .unwrap();
         }
 
-        let table_ref = table.physical_table().table_ref().clone();
+        let table_ref = table.table_ref();
 
         // This may overwrite a previously registered store, but that should not make a difference.
         // The only segment of the `table.url()` that matters here is the schema and bucket name.

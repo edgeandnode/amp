@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use common::{
-    catalog::physical::SnapshotError,
     parquet::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
     },
+    physical_table::SnapshotError,
 };
 use datafusion::error::DataFusionError;
 use metadata_db::files::FileId;

@@ -9,7 +9,10 @@ use std::{
 };
 
 use amp_data_store::{DataStore, file_name::FileName};
-use common::{BlockNum, BlockRange, catalog::physical::PhysicalTable, metadata::SegmentSize};
+use common::{
+    BlockNum, BlockRange, catalog::physical::reader::AmpReaderFactory, metadata::SegmentSize,
+    physical_table::PhysicalTable,
+};
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
 use monitoring::logging;
@@ -60,7 +63,7 @@ impl Debug for Compactor {
         write!(
             f,
             "Compactor {{ table: {}, algorithm: {} }}",
-            self.table.table_ref(),
+            self.table.table_ref_compact(),
             self.props.compactor.algorithm.kind()
         )
     }
@@ -72,7 +75,7 @@ impl Display for Compactor {
             f,
             "Compactor {{ opts: {:?}, table: {} }}",
             self.props,
-            self.table.table_ref()
+            self.table.table_ref_compact()
         )
     }
 }
@@ -102,9 +105,14 @@ impl Compactor {
 
         let snapshot = self
             .table
-            .snapshot(false, self.store.clone())
+            .snapshot(false)
             .await
             .map_err(CompactorError::chain_error)?;
+        let reader_factory = Arc::new(AmpReaderFactory {
+            location_id: self.table.location_id(),
+            store: self.store.clone(),
+            schema: self.table.schema(),
+        });
         let props = self.props.clone();
         let table_name = self.table.table_name();
 
@@ -113,6 +121,7 @@ impl Compactor {
             self.store.clone(),
             props,
             &snapshot,
+            reader_factory,
             &self.metrics,
         )? {
             let groups = plan.collect::<Vec<_>>().await;

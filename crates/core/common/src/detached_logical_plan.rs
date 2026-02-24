@@ -29,7 +29,7 @@ impl DetachedLogicalPlan {
     }
 
     /// Attaches this plan to a query context by replacing `PlanTable` providers
-    /// with actual `TableSnapshot` providers from the catalog.
+    /// with actual `QueryableSnapshot` providers from the catalog.
     #[tracing::instrument(skip_all, err)]
     pub fn attach_to(self, ctx: &ExecContext) -> Result<LogicalPlan, AttachPlanError> {
         Ok(self
@@ -92,7 +92,7 @@ impl std::ops::Deref for DetachedLogicalPlan {
 /// Failed to attach a detached logical plan to a query context
 ///
 /// This occurs when transforming `PlanTable` references into actual
-/// `TableSnapshot` references fails during plan attachment.
+/// `QueryableSnapshot` references fails during plan attachment.
 #[derive(Debug, thiserror::Error)]
 #[error("failed to attach plan to query context")]
 pub struct AttachPlanError(#[source] DataFusionError);

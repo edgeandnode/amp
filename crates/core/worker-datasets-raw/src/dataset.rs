@@ -102,13 +102,13 @@ use amp_worker_core::{
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
 use common::{
-    BlockNum, LogicalCatalog,
+    BlockNum,
     catalog::{
-        logical::LogicalTable,
-        physical::{Catalog, MissingRangesError, PhysicalTable},
+        logical::{LogicalCatalog, LogicalTable},
+        physical::{Catalog, CatalogTable},
     },
-    metadata::segments::merge_ranges,
     parquet::errors::ParquetError,
+    physical_table::{MissingRangesError, PhysicalTable, segments::merge_ranges},
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
@@ -144,8 +144,6 @@ pub async fn dump(
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
     for table_def in dataset.tables() {
-        let sql_table_ref_schema = dataset.reference().to_string();
-
         // Try to get existing active physical table (handles retry case)
         let revision = match ctx
             .data_store
@@ -169,7 +167,6 @@ pub async fn dump(
             dataset.start_block(),
             table_def.clone(),
             revision,
-            sql_table_ref_schema,
         ));
 
         let compactor = AmpCompactor::start(
@@ -197,18 +194,25 @@ pub async fn dump(
             .map_err(Error::LockRevisionsForWriter)?;
     }
 
+    let sql_schema_name = dataset.reference().to_string();
     let resolved_tables: Vec<_> = tables
         .iter()
         .map(|(t, _)| {
             LogicalTable::new(
-                t.sql_table_ref_schema().to_string(),
+                sql_schema_name.clone(),
                 dataset_reference.clone(),
                 t.table().clone(),
             )
         })
         .collect();
     let logical = LogicalCatalog::from_tables(resolved_tables.iter());
-    let catalog = Catalog::new(tables.iter().map(|(t, _)| Arc::clone(t)).collect(), logical);
+    let catalog = Catalog::new(
+        logical,
+        tables
+            .iter()
+            .map(|(t, _)| CatalogTable::new(Arc::clone(t), sql_schema_name.clone()))
+            .collect(),
+    );
 
     // Ensure consistency before starting the dump procedure.
     for (table, _) in &tables {
@@ -224,7 +228,6 @@ pub async fn dump(
     ctx.metrics.as_ref().map(|metrics| {
         spawn_freshness_tracker(
             catalog.clone(),
-            ctx.data_store.clone(),
             ctx.notification_multiplexer.clone(),
             metrics.clone(),
         )
@@ -921,8 +924,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
                     let table_name = table_rows.table.name();
                     let physical_table = self
                         .catalog
-                        .tables()
-                        .iter()
+                        .physical_tables()
                         .find(|t| t.table_name() == table_name)
                         .expect("table should exist");
                     let location_id = *physical_table.location_id();
@@ -1021,7 +1023,6 @@ pub enum RunRangeError {
 /// snapshot to get the `synced_range` timestamp and reports it as the table freshness metric.
 fn spawn_freshness_tracker(
     catalog: Catalog,
-    data_store: DataStore,
     multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Arc<metrics::MetricsRegistry>,
 ) -> JoinHandle<()> {
@@ -1031,13 +1032,20 @@ fn spawn_freshness_tracker(
             LocationId,
             (Arc<PhysicalTable>, tokio::sync::watch::Receiver<()>),
         > = BTreeMap::new();
-        for table in catalog.tables() {
+        for table in catalog.physical_tables() {
             let location_id = table.location_id();
             let receiver = multiplexer.subscribe(location_id).await;
             subscriptions.insert(location_id, (table.clone(), receiver));
         }
 
         loop {
+            // `select_all` panics on an empty iterator. All subscriptions being closed
+            // (or an empty initial catalog) is a clean exit condition.
+            if subscriptions.is_empty() {
+                tracing::debug!("all freshness subscriptions closed; exiting freshness tracker");
+                break;
+            }
+
             // Wait for any table to receive a change notification
             let futures = subscriptions.iter_mut().map(|(loc, (table, rx))| {
                 let table = table.clone();
@@ -1055,26 +1063,43 @@ fn spawn_freshness_tracker(
             match result {
                 Ok((location_id, table)) => {
                     // Take snapshot and get synced range
-                    match table.snapshot(false, data_store.clone()).await {
-                        Ok(snapshot) => {
-                            if let Some(range) = snapshot.synced_range()
-                                && let Some(ts) = range.timestamp
-                            {
-                                metrics.record_table_freshness(
-                                    table.table_name().to_string(),
-                                    *location_id,
-                                    ts,
+                    match table.snapshot(false).await {
+                        Ok(snapshot) => match snapshot.synced_range() {
+                            Ok(Some(range)) => {
+                                if let Some(ts) = range.timestamp {
+                                    metrics.record_table_freshness(
+                                        table.table_name().to_string(),
+                                        *location_id,
+                                        ts,
+                                    );
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                tracing::warn!(
+                                    %location_id,
+                                    error = %err,
+                                    error_source = logging::error_source(&err),
+                                    "skipping freshness tracking: table has multi-network segments"
                                 );
                             }
-                        }
-                        Err(e) => {
-                            tracing::warn!(%location_id, error = %e, "failed to take snapshot for freshness tracking");
+                        },
+                        Err(err) => {
+                            tracing::warn!(
+                                %location_id,
+                                error = %err,
+                                error_source = logging::error_source(&err),
+                                "failed to take snapshot for freshness tracking"
+                            );
                         }
                     }
                 }
                 Err(location_id) => {
-                    // Subscription error - should not happen, log and continue
-                    tracing::warn!(%location_id, "freshness subscription unexpectedly ended");
+                    // The watch sender was dropped. Remove this subscription so the next
+                    // iteration of select_all does not immediately re-fire on the same
+                    // closed receiver, which would create a tight busy-loop.
+                    tracing::warn!(%location_id, "freshness subscription ended; removing from tracker");
+                    subscriptions.remove(&location_id);
                 }
             }
         }
@@ -1375,6 +1400,70 @@ mod test {
         assert_eq!(
             super::split_and_partition(vec![1..=100], 4, 10),
             vec![[1..=25], [26..=50], [51..=75], [76..=100]],
+        );
+    }
+
+    /// Regression: closed watch subscriptions must be removed from the subscription map so
+    /// `select_all` does not re-fire immediately on the same closed receiver, creating a
+    /// CPU-spinning busy-loop.
+    ///
+    /// The fix in `spawn_freshness_tracker` removes the closed subscription and exits when the
+    /// map is empty. This test exercises the identical `select_all` + BTreeMap removal pattern
+    /// used in production, verifying that the loop terminates instead of spinning.
+    #[tokio::test]
+    async fn freshness_tracker_loop_exits_when_all_subscriptions_close() {
+        use std::collections::BTreeMap;
+
+        use tokio::sync::watch;
+
+        // Given: two watch channels whose senders are dropped immediately (simulates
+        // the notification multiplexer shutting down or being dropped).
+        let (tx1, rx1) = watch::channel::<()>(());
+        let (tx2, rx2) = watch::channel::<()>(());
+        drop(tx1);
+        drop(tx2);
+
+        let mut subscriptions: BTreeMap<u64, watch::Receiver<()>> = BTreeMap::new();
+        subscriptions.insert(1, rx1);
+        subscriptions.insert(2, rx2);
+
+        // When: running the same select_all + removal pattern as spawn_freshness_tracker.
+        // With the fix both closed receivers are removed one-by-one, then the empty-map
+        // guard exits the loop. Without the fix, the loop would spin indefinitely.
+        let completed = tokio::time::timeout(std::time::Duration::from_millis(500), async move {
+            loop {
+                // Empty-map guard: avoids select_all panic and exits when all channels close.
+                if subscriptions.is_empty() {
+                    break;
+                }
+
+                let futures = subscriptions.iter_mut().map(|(&key, rx)| {
+                    Box::pin(async move {
+                        match rx.changed().await {
+                            Ok(()) => Ok(key),
+                            Err(_) => Err(key),
+                        }
+                    })
+                });
+
+                // Bind to a `let` first so the remaining futures (which hold mutable
+                // references into `subscriptions`) are dropped before the `match` arm
+                // calls `subscriptions.remove()`. Same pattern as production code.
+                let result = futures::future::select_all(futures).await.0;
+                match result {
+                    Ok(_) => {}
+                    Err(key) => {
+                        subscriptions.remove(&key);
+                    }
+                }
+            }
+        })
+        .await;
+
+        // Then: the loop exits within the timeout — no busy-loop
+        assert!(
+            completed.is_ok(),
+            "freshness tracker loop must exit when all subscriptions close"
         );
     }
 }

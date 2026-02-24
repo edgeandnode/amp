@@ -113,20 +113,19 @@ use amp_worker_core::{
     tasks::{self, TryWaitAllError},
 };
 use common::{
-    BlockNum, Cursor,
+    BlockNum,
     catalog::{
         logical::for_dump as logical_catalog,
-        physical::{
-            CanonicalChainError, Catalog, EarliestBlockError, PhysicalTable,
-            for_dump as physical_catalog,
-        },
+        physical::{Catalog, EarliestBlockError, for_dump as physical_for_dump},
     },
     context::{exec::ExecContext, plan::PlanContext},
+    cursor::Cursor,
     dataset_store::ResolveRevisionError,
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     metadata::Generation,
     parquet::errors::ParquetError,
+    physical_table::{CanonicalChainError, PhysicalTable},
     sql::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
@@ -176,8 +175,6 @@ pub async fn dump(
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
     for table_def in dataset.tables() {
-        let sql_table_ref_schema = dataset.reference().to_string();
-
         // Try to get existing active physical table revision (handles retry case)
         let revision = match ctx
             .data_store
@@ -201,7 +198,6 @@ pub async fn dump(
             dataset.start_block(),
             table_def.clone(),
             revision,
-            sql_table_ref_schema,
         ));
 
         let compactor = AmpCompactor::start(
@@ -489,7 +485,7 @@ async fn dump_table(
         )
         .await
         .map_err(DumpTableError::CreateCatalog)?;
-        physical_catalog::create(&ctx.dataset_store, &ctx.data_store, logical)
+        physical_for_dump::create(&ctx.dataset_store, &ctx.data_store, logical)
             .await
             .map_err(DumpTableError::CreatePhysicalCatalog)?
     };
@@ -689,7 +685,7 @@ pub enum DumpTableError {
     /// This occurs when building the physical catalog from the logical
     /// catalog fails.
     #[error("failed to create physical catalog: {0}")]
-    CreatePhysicalCatalog(#[source] physical_catalog::CreateCatalogError),
+    CreatePhysicalCatalog(#[source] physical_for_dump::CreateCatalogError),
 
     /// A parallel dump task failed during execution
     ///
@@ -771,7 +767,7 @@ async fn dump_sql_query(
 ) -> Result<(), DumpSqlQueryError> {
     tracing::info!(
         "dumping {} [{}-{}]",
-        physical_table.table_ref(),
+        physical_table.table_ref_compact(),
         start,
         end.map(|e| e.to_string()).unwrap_or_default(),
     );

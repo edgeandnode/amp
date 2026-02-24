@@ -4,7 +4,9 @@ use alloy::primitives::BlockHash;
 use arrow_flight::FlightData;
 use common::{
     BlockNum, BlockRange,
-    catalog::{logical::for_query as logical_catalog, physical::for_query as physical_catalog},
+    catalog::{
+        logical::for_query as logical_catalog, physical::for_query as physical_table_catalog,
+    },
     sql::{self, resolve_function_references, resolve_table_references},
     sql_str::SqlStr,
 };
@@ -493,7 +495,7 @@ impl ReorgTestCtx {
             )
             .await
             .expect("Failed to create logical catalog");
-            physical_catalog::create(
+            physical_table_catalog::create(
                 test_env.daemon_server().dataset_store(),
                 test_env.daemon_server().data_store(),
                 logical,
@@ -502,8 +504,7 @@ impl ReorgTestCtx {
             .expect("Failed to create physical catalog for SQL query")
         };
         let table = catalog
-            .tables()
-            .iter()
+            .physical_tables()
             .find(|t| t.table_name() == "blocks")
             .expect("Failed to find blocks table in catalog");
         test_helpers::get_table_block_ranges(table).await

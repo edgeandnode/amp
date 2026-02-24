@@ -7,7 +7,7 @@
 //! ## Validation Strategy
 //!
 //! This type **maintains invariants but does not validate** input data. Validation occurs
-//! at system boundaries through types like [`common::catalog::physical::PhyTableRevisionPath`], which enforce
+//! at system boundaries through types like [`amp_data_store::physical_table::PhyTableRevisionPath`], which enforce
 //! the required format before converting into this database-layer type. Database values are
 //! trusted as already valid, following the principle of "validate at boundaries, trust
 //! database data."

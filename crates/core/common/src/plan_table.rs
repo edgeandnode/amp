@@ -13,7 +13,7 @@ use datafusion::{
 /// A placeholder table provider used during SQL planning.
 ///
 /// Provides schema information for logical plan construction but cannot be scanned.
-/// Must be replaced with actual `TableSnapshot` providers via
+/// Must be replaced with actual `catalog::physical::QueryableSnapshot` providers via
 /// `DetachedLogicalPlan::attach_to` before execution.
 #[derive(Clone, Debug)]
 pub struct PlanTable(SchemaRef);

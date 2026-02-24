@@ -195,7 +195,7 @@ impl DatasetStore {
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
     ///
-    /// The function will be named `<sql_table_ref_schema>.eth_call`.
+    /// The function will be named `<sql_schema_name>.eth_call`.
     ///
     /// # Panics
     ///
@@ -203,7 +203,7 @@ impl DatasetStore {
     /// guaranteed by the dataset construction process.
     pub async fn eth_call_for_dataset(
         &self,
-        sql_table_ref_schema: &str,
+        sql_schema_name: &str,
         dataset: &dyn datasets_common::dataset::Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
         if !dataset.is::<EvmRpcDataset>() {
@@ -241,7 +241,7 @@ impl DatasetStore {
             }
         };
 
-        let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(sql_table_ref_schema, provider)))
+        let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(sql_schema_name, provider)))
             .into_scalar_udf();
 
         // Cache the EthCall UDF

@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::catalog::physical::PhysicalTable;
+use common::physical_table::PhysicalTable;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use monitoring::logging;
 use worker::job::JobId;
@@ -40,6 +40,12 @@ use crate::{
 /// - `GET_DATASET_ERROR`: Failed to get dataset definition
 /// - `GET_ACTIVE_REVISION_ERROR`: Failed to get active physical table revision
 /// - `SNAPSHOT_TABLE_ERROR`: Failed to snapshot physical table
+/// - `MULTI_NETWORK_SEGMENTS_ERROR`: Table contains multi-network segments; synced range
+///   cannot be computed. This indicates a catalog inconsistency — the state is
+///   distinguishable from "no data synced yet" (which returns 200 with null block fields).
+/// - `BLOCK_NUMBER_OVERFLOW`: A block number in the synced range cannot be represented as
+///   i64. This indicates data-integrity corruption; the block number is reported in the
+///   error response rather than silently rewritten to 0.
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -136,8 +142,6 @@ pub async fn handler(
             Error::GetDataset(err)
         })?;
 
-    let sql_table_ref_schema = hash_ref.to_reference().to_string();
-
     let mut tables = HashMap::new();
 
     // For each table, compute progress
@@ -185,26 +189,30 @@ pub async fn handler(
                     dataset.start_block(),
                     table_config.clone(),
                     revision,
-                    sql_table_ref_schema.clone(),
                 )
             });
 
         let (current_block, start_block, files_count, total_size_bytes) =
             if let Some(pt) = physical_table {
-                let snapshot = pt
-                    .snapshot(false, ctx.data_store.clone())
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(
-                            table = %table_name,
-                            error = %err,
-                            error_source = logging::error_source(&err),
-                            "failed to snapshot physical table"
-                        );
-                        Error::SnapshotTable(err)
-                    })?;
+                let snapshot = pt.snapshot(false).await.map_err(|err| {
+                    tracing::error!(
+                        table = %table_name,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to snapshot physical table"
+                    );
+                    Error::SnapshotTable(err)
+                })?;
 
-                let synced_range = snapshot.synced_range();
+                let synced_range = snapshot.synced_range().map_err(|err| {
+                    tracing::error!(
+                        table = %table_name,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "table has multi-network segments; cannot compute job progress"
+                    );
+                    Error::MultiNetworkSegments(err)
+                })?;
                 let canonical_segments = snapshot.canonical_segments();
 
                 let files_count = canonical_segments.len() as i64;
@@ -213,13 +221,25 @@ pub async fn handler(
                     .map(|s| s.object().size as i64)
                     .sum();
 
-                let (start, end) = match synced_range {
-                    Some(range) => (
-                        Some(range.start().try_into().unwrap_or(0)),
-                        Some(range.end().try_into().unwrap_or(0)),
-                    ),
-                    None => (None, None),
-                };
+                let (start, end) =
+                    match synced_range {
+                        Some(range) => {
+                            let start: i64 = range.start().try_into().map_err(|_| {
+                                Error::BlockNumberOverflow {
+                                    block_num: range.start(),
+                                }
+                            })?;
+                            let end: i64 =
+                                range
+                                    .end()
+                                    .try_into()
+                                    .map_err(|_| Error::BlockNumberOverflow {
+                                        block_num: range.end(),
+                                    })?;
+                            (Some(start), Some(end))
+                        }
+                        None => (None, None),
+                    };
 
                 (end, start, files_count, total_size_bytes)
             } else {
@@ -305,7 +325,24 @@ pub enum Error {
 
     /// Failed to snapshot physical table
     #[error("failed to snapshot physical table")]
-    SnapshotTable(#[source] common::catalog::physical::SnapshotError),
+    SnapshotTable(#[source] common::physical_table::SnapshotError),
+
+    /// Table contains multi-network segments; synced range cannot be computed.
+    ///
+    /// This indicates a catalog inconsistency and is distinguishable from the
+    /// "no data synced yet" case, which returns HTTP 200 with null block fields.
+    #[error("table has multi-network segments: {0}")]
+    MultiNetworkSegments(#[source] common::physical_table::MultiNetworkSegmentsError),
+
+    /// A block number from the synced range cannot be represented as i64.
+    ///
+    /// The block number is included in the error so that callers can distinguish
+    /// this integrity failure from a valid block-0 response.
+    #[error("block number {block_num} overflows i64 range")]
+    BlockNumberOverflow {
+        /// The block number that could not be converted.
+        block_num: u64,
+    },
 }
 
 impl IntoErrorResponse for Error {
@@ -318,6 +355,8 @@ impl IntoErrorResponse for Error {
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::GetActiveRevision(_) => "GET_ACTIVE_REVISION_ERROR",
             Error::SnapshotTable(_) => "SNAPSHOT_TABLE_ERROR",
+            Error::MultiNetworkSegments(_) => "MULTI_NETWORK_SEGMENTS_ERROR",
+            Error::BlockNumberOverflow { .. } => "BLOCK_NUMBER_OVERFLOW",
         }
     }
 
@@ -330,6 +369,83 @@ impl IntoErrorResponse for Error {
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetActiveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SnapshotTable(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MultiNetworkSegments(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::BlockNumberOverflow { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use common::physical_table::MultiNetworkSegmentsError;
+
+    use super::*;
+
+    /// `MULTI_NETWORK_SEGMENTS_ERROR` is the public API contract. Guard against silent changes.
+    #[test]
+    fn multi_network_segments_error_maps_to_correct_error_code() {
+        // Given: a multi-network segments error from synced_range()
+        let err = Error::MultiNetworkSegments(MultiNetworkSegmentsError);
+
+        // Then: the error code matches the documented API constant
+        assert_eq!(err.error_code(), "MULTI_NETWORK_SEGMENTS_ERROR");
+    }
+
+    /// HTTP 500 is distinct from HTTP 200 (no-data) — this guards the status code contract.
+    #[test]
+    fn multi_network_segments_error_returns_internal_server_error_status() {
+        // Given: a multi-network segments error
+        let err = Error::MultiNetworkSegments(MultiNetworkSegmentsError);
+
+        // Then: returns 500, distinguishable from the 200 "no data synced yet" case
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// `BLOCK_NUMBER_OVERFLOW` is the public API contract. Guard against silent changes.
+    #[test]
+    fn block_number_overflow_maps_to_correct_error_code() {
+        //* Given
+        let err = Error::BlockNumberOverflow {
+            block_num: u64::MAX,
+        };
+
+        //* When
+        let code = err.error_code();
+
+        //* Then
+        assert_eq!(code, "BLOCK_NUMBER_OVERFLOW");
+    }
+
+    /// Overflow is a data-integrity failure, not valid "no data" — guards the status code.
+    #[test]
+    fn block_number_overflow_returns_internal_server_error_status() {
+        //* Given
+        let err = Error::BlockNumberOverflow {
+            block_num: u64::MAX,
+        };
+
+        //* When
+        let status = err.status_code();
+
+        //* Then
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// Overflow carries the offending block number, distinguishing it from block 0.
+    #[test]
+    fn block_number_overflow_display_includes_block_num() {
+        //* Given
+        let block_num = u64::MAX;
+        let err = Error::BlockNumberOverflow { block_num };
+
+        //* When
+        let msg = err.to_string();
+
+        //* Then
+        assert!(
+            msg.contains(&block_num.to_string()),
+            "display should include the overflowing block number; got: {msg}"
+        );
     }
 }

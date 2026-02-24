@@ -11,11 +11,8 @@ use amp_worker_core::{
     },
 };
 use common::{
-    BlockNum, BlockRange,
-    arrow::array::RecordBatch,
-    catalog::physical::{Catalog, PhysicalTable},
-    metadata::Generation,
-    parquet::errors::ParquetError,
+    BlockNum, BlockRange, arrow::array::RecordBatch, catalog::physical::Catalog,
+    metadata::Generation, parquet::errors::ParquetError, physical_table::PhysicalTable,
 };
 use datasets_common::table_name::TableName;
 use datasets_raw::rows::TableRows;
@@ -42,7 +39,7 @@ impl RawDatasetWriter {
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, ParquetError> {
         let mut writers = BTreeMap::new();
-        for table in catalog.tables() {
+        for table in catalog.physical_tables() {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();

@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-use common::catalog::physical::PhysicalTable;
+use common::physical_table::PhysicalTable;
 use datasets_common::reference::Reference;
 use pretty_assertions::assert_eq;
 use serde_json::Value;

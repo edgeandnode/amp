@@ -105,7 +105,7 @@ fn register_catalog(
 ) -> Result<(), RegisterTableError> {
     // Register tables first to ensure schemas are created before UDF registration
     for table in catalog.tables.iter() {
-        let schema_name = table.sql_table_ref_schema();
+        let schema_name = table.sql_schema_name();
 
         // The catalog schema needs to be explicitly created or table creation will fail.
         if ctx
