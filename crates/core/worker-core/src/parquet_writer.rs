@@ -12,11 +12,12 @@ use common::{
         },
     },
     parquet::{
-        arrow::AsyncArrowWriter,
         errors::ParquetError,
         file::{metadata::KeyValue, properties::WriterProperties as ParquetWriterProperties},
     },
 };
+use parquet_ext::AsyncArrowWriter;
+
 use metadata_db::{
     MetadataDb,
     files::{FileId, FooterBytes},
