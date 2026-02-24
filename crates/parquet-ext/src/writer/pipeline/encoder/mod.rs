@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     sync::atomic::{AtomicUsize, Ordering},
     thread::scope,
 };
@@ -108,6 +109,9 @@ impl RowGroupEncoder {
 
 type ThreadOutput = Vec<(usize, ArrowColumnChunk, isize)>;
 type ThreadResult = Result<ThreadOutput, ParquetError>;
+
+type IndexedLeaves = BTreeMap<usize, Vec<Vec<ArrowLeafColumn>>>;
+type IndexedLeavesResult = Result<IndexedLeaves, ParquetError>;
 
 pub fn encode_column_chunks_parallel(
     index: usize,
@@ -235,46 +239,45 @@ fn collect_leaf_columns(
     let num_workers = num_workers.min(batches.len());
     let next_idx = AtomicUsize::new(0);
 
-    let thread_results: Vec<Result<Vec<Vec<ArrowLeafColumn>>, ParquetError>> =
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..num_workers)
-                .map(|_| {
-                    let next_idx = &next_idx;
-                    s.spawn(move || {
-                        let mut local: Option<Vec<Vec<ArrowLeafColumn>>> = None;
-                        loop {
-                            let idx = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if idx >= batches.len() {
-                                break;
-                            }
-                            let leaves = compute_batch_leaves(&batches[idx], writers_len)?;
-                            match &mut local {
-                                Some(acc) => merge_batch_leaves(acc, leaves)?,
-                                None => local = Some(leaves),
-                            }
+    // Each thread returns a BTreeMap<batch_index, leaves> so results are ordered by index.
+    let thread_results: Vec<IndexedLeavesResult> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..num_workers)
+            .map(|_| {
+                let next_idx = &next_idx;
+                s.spawn(move || {
+                    let mut local = BTreeMap::new();
+                    loop {
+                        let idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                        if idx >= batches.len() {
+                            break;
                         }
-                        Ok(local.unwrap_or_default())
-                    })
+                        let leaves = compute_batch_leaves(&batches[idx], writers_len)?;
+                        local.insert(idx, leaves);
+                    }
+                    Ok(local)
                 })
-                .collect();
+            })
+            .collect();
 
-            handles
-                .into_iter()
-                .map(|h| match h.join() {
-                    Ok(result) => result,
-                    Err(_) => Err(ParquetError::General(
-                        "Leaf column collection thread panicked".to_string(),
-                    )),
-                })
-                .collect()
-        });
+        handles
+            .into_iter()
+            .map(|h| match h.join() {
+                Ok(result) => result,
+                Err(_) => Err(ParquetError::General(
+                    "Leaf column collection thread panicked".to_string(),
+                )),
+            })
+            .collect()
+    });
+
+    // Merge thread-local BTreeMaps into one, preserving batch index order.
+    let mut indexed_leaves = BTreeMap::new();
+    for thread_result in thread_results {
+        indexed_leaves.extend(thread_result?);
+    }
 
     let mut combined: Option<Vec<Vec<ArrowLeafColumn>>> = None;
-    for thread_result in thread_results {
-        let leaves = thread_result?;
-        if leaves.is_empty() {
-            continue;
-        }
+    for (_, leaves) in indexed_leaves {
         match &mut combined {
             Some(acc) => merge_batch_leaves(acc, leaves)?,
             None => combined = Some(leaves),
