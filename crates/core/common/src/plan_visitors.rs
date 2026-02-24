@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 use datafusion::{
     common::{
@@ -15,7 +19,7 @@ use datafusion::{
     prelude::{Expr, col, lit},
     sql::{TableReference, utils::UNNEST_PLACEHOLDER},
 };
-use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
+use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
 use crate::incrementalizer::{NonIncrementalQueryError, incremental_op_kind};
 
@@ -394,11 +398,7 @@ pub fn find_cross_network_join(
     plan: &LogicalPlan,
     catalog: &crate::catalog::physical::Catalog,
 ) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
-    use std::collections::HashMap;
-
-    use datasets_common::network_id::NetworkId;
-
-    let table_to_network: HashMap<TableReference, NetworkId> = catalog
+    let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
         .tables()
         .iter()
         .map(|t| (t.table_ref().into(), t.network().clone()))
