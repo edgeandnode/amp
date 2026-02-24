@@ -1,3 +1,5 @@
+use std::mem::ManuallyDrop;
+
 use arrow_array::RecordBatch;
 use futures::future::BoxFuture;
 use parquet::errors::{ParquetError, Result};
@@ -13,8 +15,24 @@ pub struct EncoderExecutor {
     batches: Batches,
     factory: EncoderFactory,
     progress: Option<Progress>,
-    writer_outbox: WriterOutbox,
-    encoder_outbox: EncoderOutbox,
+    writer_outbox: ManuallyDrop<WriterOutbox>,
+    encoder_outbox: ManuallyDrop<EncoderOutbox>,
+}
+
+impl Drop for EncoderExecutor {
+    fn drop(&mut self) {
+        // SAFETY: Channel senders must be dropped before joining the encoder
+        // thread. The encoder thread blocks on `inbox.recv()`, which only
+        // returns `Err` once all senders are dropped. Joining first would
+        // deadlock. These fields are not accessed after this point.
+        unsafe {
+            ManuallyDrop::drop(&mut self.writer_outbox);
+            ManuallyDrop::drop(&mut self.encoder_outbox);
+        }
+        if let Some(mut backend) = self.backend.take() {
+            backend.shutdown();
+        }
+    }
 }
 
 impl EncoderExecutor {
@@ -31,8 +49,8 @@ impl EncoderExecutor {
             batches: Batches::new(max_rows),
             factory,
             progress,
-            writer_outbox,
-            encoder_outbox,
+            writer_outbox: ManuallyDrop::new(writer_outbox),
+            encoder_outbox: ManuallyDrop::new(encoder_outbox),
         }
     }
 
@@ -94,13 +112,14 @@ impl EncoderExecutor {
         let encoder = self.factory.try_next_encoder()?;
 
         let (batches, rows) = self.take_batches();
+        let reply_tx = ManuallyDrop::into_inner(self.encoder_outbox.clone());
 
         let job = EncodeJob {
             encoder,
             batches,
             rows,
             finalize,
-            reply_tx: self.encoder_outbox.clone(),
+            reply_tx,
             progress: self.progress.clone(),
         };
 
@@ -112,6 +131,7 @@ impl EncoderExecutor {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn flush(&mut self, finalize: bool) -> Result<(), ParquetError> {
         if self.batches.is_empty() && !finalize {
             return Ok(());
@@ -120,13 +140,14 @@ impl EncoderExecutor {
         let encoder = self.factory.try_next_encoder()?;
 
         let (batches, rows) = self.take_batches();
+        let reply_tx = ManuallyDrop::into_inner(self.encoder_outbox.clone());
 
         let job = EncodeJob {
             encoder,
             batches,
             rows,
             finalize,
-            reply_tx: self.encoder_outbox.clone(),
+            reply_tx,
             progress: self.progress.clone(),
         };
 
@@ -137,9 +158,7 @@ impl EncoderExecutor {
         Ok(())
     }
 
-    pub fn shutdown(mut self) {
-        if let Some(mut backend) = self.backend.take() {
-            backend.shutdown();
-        }
+    pub fn shutdown(self) {
+        drop(self);
     }
 }
