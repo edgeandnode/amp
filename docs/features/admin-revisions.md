@@ -1,6 +1,6 @@
 ---
 name: "admin-revisions"
-description: "Table revision registration, activation, deactivation, and deletion API for controlling which physical table revision is queryable. Load when asking about revision management, register/activate/deactivate/delete endpoints, or table revision lifecycle"
+description: "Table revision registration, activation, deactivation, deletion, and truncation API for controlling which physical table revision is queryable. Load when asking about revision management, register/activate/deactivate/delete/truncate endpoints, or table revision lifecycle"
 type: "feature"
 status: "development"
 components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
@@ -10,7 +10,7 @@ components: "service:admin-api,crate:amp-data-store,crate:metadata-db"
 
 ## Summary
 
-The Table Revision Management API provides endpoints to register, list, retrieve, activate, deactivate, and delete physical table revisions, controlling which revision of a table is served for queries. New revisions are registered as inactive records before they can be activated. All revisions can be listed with an optional active status filter. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors. Deletion permanently removes an inactive revision and its associated file metadata, with guards to prevent deleting active revisions or those with running writer jobs.
+The Table Revision Management API provides endpoints to register, list, retrieve, activate, deactivate, delete, and truncate physical table revisions, controlling which revision of a table is served for queries. New revisions are registered as inactive records before they can be activated. All revisions can be listed with an optional active status filter. A single revision can be retrieved by its location ID. Activation atomically switches the queryable revision by deactivating all existing revisions and activating the specified one in a single transaction. Deactivation marks all revisions for a table as inactive so queries return errors. Deletion permanently removes an inactive revision and its associated file metadata, with guards to prevent deleting active revisions or those with running writer jobs. Truncation goes further than deletion by first deleting all files from object storage and their metadata rows before removing the revision record itself.
 
 ## Table of Contents
 
@@ -30,6 +30,7 @@ The Table Revision Management API provides endpoints to register, list, retrieve
 - **Registration**: Creates an inactive, unassigned physical table revision record. Revisions must be registered before they can be activated. Registration is idempotent by path — registering the same path twice returns the existing location ID
 - **Deactivation**: Mark all revisions for a table as inactive so the table is no longer queryable
 - **Deletion**: Permanently removes an inactive revision and all associated file metadata from the database. Active revisions must be deactivated before they can be deleted
+- **Truncation**: Deletes all files from object storage and their corresponding metadata rows, verifies cleanup, then deletes the revision record. Unlike deletion (which relies on CASCADE), truncation actively removes object storage files. The revision must be inactive and any writer job must be in a terminal state
 - **Restoration**: Re-reads files from a revision's object storage path and registers their metadata in the database
 
 ## Architecture
@@ -45,6 +46,7 @@ The Table Revision Management API provides endpoints to register, list, retrieve
 | **`DataStore`**   | Single-operation deactivate (mark inactive)                                    |
 | **`DataStore`**   | Single-operation get revision by location ID                                   |
 | **`DataStore`**   | Single-operation delete revision by location ID (CASCADE deletes file metadata) |
+| **`DataStore`**   | Multi-step truncate revision (stream files, delete from object store + metadata, verify, delete revision) |
 | **`metadata_db`** | SQL operations on `physical_table_revisions` (register, list_all, get_by_location_id, delete_by_id) and `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
 
 **Key Principle**: Admin API handlers do not interact with `metadata_db` directly. All database access is encapsulated in `DataStore` methods, keeping handlers as pure orchestration and presentation logic.
@@ -59,6 +61,7 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 - **Activate**: Wrapped in a database transaction to ensure exactly one revision is active. If any step fails, the transaction rolls back automatically
 - **Deactivate**: Single database call (no transaction needed) that marks all revisions inactive
 - **Delete**: Single database call (no transaction needed) that removes the revision record. Associated `file_metadata` entries are removed automatically via CASCADE foreign key constraints. The handler performs pre-checks (revision must be inactive, writer job must be in a terminal state) before issuing the delete
+- **Truncate**: Multi-step operation: streams file metadata, deletes files from object storage and metadata rows with bounded concurrency, verifies no metadata rows remain, then deletes the revision record. Pre-checks match delete (inactive, terminal writer job). Not transactional — partial failures are recoverable by retrying
 
 ## API Reference
 
@@ -69,6 +72,7 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 | `/revisions/{id}`             | GET    | Retrieve a specific revision by location ID       |
 | `/revisions/{id}`             | DELETE | Delete an inactive table revision by location ID  |
 | `/revisions/{id}/activate`    | POST   | Activate a specific table revision by location ID |
+| `/revisions/{id}/truncate`    | DELETE | Truncate a revision (delete files from object storage + metadata, then delete revision) |
 | `/revisions/{id}/restore`     | POST   | Restore revision files from object storage        |
 | `/revisions/deactivate`       | POST   | Deactivate all revisions for a table              |
 
@@ -156,6 +160,27 @@ ampctl table delete 42 --force
 curl -X DELETE http://localhost:1610/revisions/42
 ```
 
+**Truncate a revision (delete files + metadata + revision):**
+
+Unlike `delete`, which only removes database records (relying on CASCADE for file metadata), `truncate` also deletes all files from object storage.
+
+```bash
+# Via ampctl (with confirmation prompt)
+ampctl table truncate 42
+
+# Via ampctl (skip confirmation)
+ampctl table truncate 42 --force
+
+# Via ampctl (custom concurrency)
+ampctl table truncate 42 --force --concurrency 20
+
+# Via API
+curl -X DELETE http://localhost:1610/revisions/42/truncate
+
+# Via API (custom concurrency)
+curl -X DELETE http://localhost:1610/revisions/42/truncate?concurrency=20
+```
+
 **Restore a revision's file metadata:**
 
 Lists files in object storage under the revision's path and registers their Parquet metadata into the database
@@ -178,8 +203,9 @@ curl -X POST http://localhost:1610/revisions/42/restore
 - `crates/services/admin-api/src/handlers/revisions/activate.rs` - Activate endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/delete.rs` - Delete endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/deactivate.rs` - Deactivate endpoint handler and error types
+- `crates/services/admin-api/src/handlers/revisions/truncate.rs` - Truncate endpoint handler and error types
 - `crates/services/admin-api/src/handlers/revisions/restore.rs` - Restore endpoint handler and error types
-- `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), `deactivate_table_revision`, and `delete_table_revision` methods
+- `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), `deactivate_table_revision`, `delete_table_revision`, and `truncate_revision` methods
 - `crates/core/metadata-db/src/physical_table.rs` - `mark_inactive_by_table_name` and `mark_active_by_id` SQL operations on `physical_tables`
 - `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list_all`, `get_by_location_id`, and `delete_by_id` SQL operations on `physical_table_revisions`
 

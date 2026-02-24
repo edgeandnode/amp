@@ -4,7 +4,6 @@ use amp_data_store::{DataStore, HeadInObjectStoreError, file_name::FileName};
 use common::{
     BlockRange, Timestamp,
     arrow::array::RecordBatch,
-    catalog::physical::PhysicalTable,
     metadata::{
         Generation, extract_footer_bytes_from_file,
         parquet::{
@@ -15,6 +14,7 @@ use common::{
         errors::ParquetError,
         file::{metadata::KeyValue, properties::WriterProperties as ParquetWriterProperties},
     },
+    physical_table::PhysicalTable,
 };
 use metadata_db::{
     MetadataDb,

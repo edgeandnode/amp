@@ -20,7 +20,7 @@ use async_stream::stream;
 use axum::{Router, http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    BlockNum, BlockRange, Cursor,
+    BlockNum, BlockRange,
     arrow::{
         self,
         array::RecordBatch,
@@ -35,9 +35,10 @@ use common::{
             },
         },
         physical::{
-            Catalog,
+            Catalog, EarliestBlockError,
             for_query::{
-                CreateCatalogError as PhysicalCreateCatalogError, create as create_physical_catalog,
+                CreateCatalogError as PhysicalCreateCatalogError,
+                create as create_physical_table_catalog,
             },
         },
     },
@@ -45,6 +46,7 @@ use common::{
         exec::{self, ExecContext},
         plan::{self, PlanContext},
     },
+    cursor::Cursor,
     dataset_store::{DatasetStore, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
     exec_env::ExecEnv,
@@ -138,7 +140,7 @@ impl Service {
             )
             .await
             .map_err(Error::CreateLogicalCatalogError)?;
-            create_physical_catalog(&self.dataset_store, &self.env.store, logical)
+            create_physical_table_catalog(&self.dataset_store, &self.env.store, logical)
                 .await
                 .map_err(Error::PhysicalCatalogError)
         }?;
@@ -232,7 +234,7 @@ impl Service {
             let earliest_block = catalog
                 .earliest_block()
                 .await
-                .map_err(|err| Error::StreamingExecutionError(err.to_string()))?;
+                .map_err(Error::StreamingEarliestBlock)?;
 
             // If no tables are synced, we return an empty stream.
             let Some(earliest_block) = earliest_block else {
@@ -987,6 +989,9 @@ pub enum Error {
     #[error("streaming query execution error: {0}")]
     StreamingExecutionError(String),
 
+    #[error("failed to determine streaming start block")]
+    StreamingEarliestBlock(#[source] EarliestBlockError),
+
     #[error("ticket encoding error")]
     TicketEncodingError(#[source] DataFusionError),
 
@@ -1012,6 +1017,9 @@ impl Error {
             Error::CreateExecContext(exec::CreateContextError::CatalogSnapshot(_)) => {
                 "CATALOG_SNAPSHOT_ERROR"
             }
+            Error::CreateExecContext(exec::CreateContextError::MultiNetworkSegments(_)) => {
+                "MULTI_NETWORK_SEGMENTS_ERROR"
+            }
             Error::AttachPlan(_) => "PLANNING_ERROR",
             Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(_)) => {
                 "TABLE_NOT_FOUND_ERROR"
@@ -1028,6 +1036,10 @@ impl Error {
             Error::QueryExecutePlan(exec::ExecutePlanError::Execute(_)) => "CORE_EXECUTION_ERROR",
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
+            Error::StreamingEarliestBlock(EarliestBlockError::MultiNetworkSegments(_)) => {
+                "MULTI_NETWORK_SEGMENTS_ERROR"
+            }
+            Error::StreamingEarliestBlock(_) => "STREAMING_EXECUTION_ERROR",
             Error::TicketEncodingError(_) => "TICKET_ENCODING_ERROR",
             Error::TicketDecodingError(_) => "TICKET_DECODING_ERROR",
         }
@@ -1062,6 +1074,7 @@ impl IntoResponse for Error {
             Error::QueryExecutePlan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::StreamingEarliestBlock(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::CreateLogicalCatalogError(CreateLogicalCatalogError::ResolveTables(
                 logical::for_query::ResolveTablesError::TableNotFoundInDataset { .. },
@@ -1106,6 +1119,7 @@ impl From<Error> for Status {
             Error::QueryExecutePlan(_) => Status::internal(message),
             Error::ExecutionError(df) => datafusion_error_to_status(df, message),
             Error::StreamingExecutionError(_) => Status::internal(message),
+            Error::StreamingEarliestBlock(_) => Status::internal(message),
             Error::CreateLogicalCatalogError(_) => Status::internal(message),
             Error::PhysicalCatalogError(_) => Status::internal(message),
             Error::TableReferenceResolution(_) => Status::invalid_argument(message),
@@ -1142,5 +1156,67 @@ fn error_with_causes(err: &dyn std::error::Error) -> String {
         err.to_string()
     } else {
         format!("{} | Caused by: {}", err, error_chain.join(" -> "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::{
+        catalog::physical::EarliestBlockError,
+        context::exec,
+        physical_table::{CanonicalChainError, MultiNetworkSegmentsError, SnapshotError},
+    };
+
+    use super::*;
+
+    /// `MULTI_NETWORK_SEGMENTS_ERROR` is the public contract for callers that inspect the
+    /// error code. This test regression-guards the mapping so that a future refactor cannot
+    /// silently change the code that clients depend on.
+    #[test]
+    fn multi_network_segments_error_maps_to_correct_error_code() {
+        //* Given
+        let err = Error::CreateExecContext(exec::CreateContextError::MultiNetworkSegments(
+            MultiNetworkSegmentsError,
+        ));
+
+        //* When
+        let code = err.error_code();
+
+        //* Then
+        assert_eq!(code, "MULTI_NETWORK_SEGMENTS_ERROR");
+    }
+
+    /// Streaming preflight (`catalog.earliest_block()`) raises `EarliestBlockError::MultiNetworkSegments`
+    /// when a table has segments from more than one network. This test regression-guards that the
+    /// streaming path returns `MULTI_NETWORK_SEGMENTS_ERROR` rather than the generic
+    /// `STREAMING_EXECUTION_ERROR`, keeping error semantics consistent with the non-streaming path.
+    #[test]
+    fn streaming_earliest_block_with_multi_network_segments_maps_to_correct_error_code() {
+        //* Given
+        let err = Error::StreamingEarliestBlock(EarliestBlockError::MultiNetworkSegments(
+            MultiNetworkSegmentsError,
+        ));
+
+        //* When
+        let code = err.error_code();
+
+        //* Then
+        assert_eq!(code, "MULTI_NETWORK_SEGMENTS_ERROR");
+    }
+
+    /// Other `EarliestBlockError` variants (e.g. snapshot fetch failures) are not
+    /// multi-network errors and should return the generic streaming error code.
+    #[test]
+    fn streaming_earliest_block_with_snapshot_error_maps_to_streaming_execution_error() {
+        //* Given
+        let err = Error::StreamingEarliestBlock(EarliestBlockError::Snapshot(
+            SnapshotError::CanonicalChain(CanonicalChainError::MultiNetworkWithStartBlock),
+        ));
+
+        //* When
+        let code = err.error_code();
+
+        //* Then
+        assert_eq!(code, "STREAMING_EXECUTION_ERROR");
     }
 }

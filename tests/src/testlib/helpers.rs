@@ -13,12 +13,13 @@ use amp_data_store::DataStore;
 use amp_worker_core::consistency_check;
 use anyhow::{Result, anyhow};
 use common::{
-    BlockRange, LogicalCatalog,
+    BlockRange,
     catalog::{
-        logical::LogicalTable,
-        physical::{Catalog, PhysicalTable},
+        logical::{LogicalCatalog, LogicalTable},
+        physical::{Catalog, CatalogTable},
     },
     dataset_store::DatasetStore,
+    physical_table::PhysicalTable,
 };
 use datasets_common::reference::Reference;
 use worker::job::JobId;
@@ -199,14 +200,12 @@ pub async fn load_physical_tables(
             .expect("Failed to get active revision")
             .expect("Active revision not found");
 
-        let sql_table_ref_schema = dataset_ref.to_reference().to_string();
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             dataset_ref.clone(),
             dataset.start_block(),
             table_def.clone(),
             revision,
-            sql_table_ref_schema,
         );
         dumped_tables.push(physical_table.into());
     }
@@ -293,14 +292,12 @@ pub async fn restore_dataset_snapshot(
                 )
             })?;
 
-        let sql_table_ref_schema = dataset_ref.to_reference().to_string();
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             dataset_ref.clone(),
             dataset.start_block(),
             table_def.clone(),
             revision,
-            sql_table_ref_schema,
         );
         tables.push(physical_table.into());
     }
@@ -352,36 +349,35 @@ pub async fn catalog_for_dataset(
 
     let dataset = dataset_store.get_dataset(&dataset_ref).await?;
 
-    let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
+    let mut tables: Vec<CatalogTable> = Vec::new();
     for table_def in dataset.tables() {
         let revision = data_store
             .get_table_active_revision(dataset.reference(), table_def.name())
             .await?
             .expect("Active revision must exist after dump");
 
-        let sql_table_ref_schema = dataset_ref.to_reference().to_string();
+        let sql_schema_name = dataset_ref.to_reference().to_string();
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             dataset_ref.clone(),
             dataset.start_block(),
             table_def.clone(),
             revision,
-            sql_table_ref_schema,
         );
-        tables.push(physical_table.into());
+        tables.push(CatalogTable::new(Arc::new(physical_table), sql_schema_name));
     }
     let resolved_tables: Vec<_> = tables
         .iter()
         .map(|t| {
             LogicalTable::new(
-                t.sql_table_ref_schema().to_string(),
+                t.sql_schema_name().to_string(),
                 dataset_ref.clone(),
-                t.table().clone(),
+                t.physical_table().table().clone(),
             )
         })
         .collect();
     let logical = LogicalCatalog::from_tables(resolved_tables.iter());
-    Ok(Catalog::new(tables, logical))
+    Ok(Catalog::new(logical, tables))
 }
 
 /// Create a test metrics context for validating metrics collection.

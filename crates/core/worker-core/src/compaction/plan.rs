@@ -9,13 +9,14 @@ use std::{
 use amp_data_store::DataStore;
 use common::{
     BlockRange,
-    catalog::physical::{PhysicalTable, TableSnapshot, reader::AmpReaderFactory},
-    metadata::{SegmentSize, segments::Segment},
+    catalog::physical::reader::AmpReaderFactory,
+    metadata::SegmentSize,
     parquet::arrow::{
         ParquetRecordBatchStreamBuilder,
         arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
         async_reader::AsyncFileReader,
     },
+    physical_table::{PhysicalTable, segments::Segment, snapshot::TableSnapshot},
 };
 use datafusion::{
     datasource::{listing::PartitionedFile, physical_plan::ParquetFileReaderFactory},
@@ -136,6 +137,7 @@ impl<'a> CompactionPlan<'a> {
         store: DataStore,
         opts: Arc<WriterProperties>,
         table: &'a TableSnapshot,
+        reader_factory: Arc<AmpReaderFactory>,
         metrics: &Option<Arc<MetricsRegistry>>,
     ) -> CompactionResult<Option<Self>> {
         let chain = table.canonical_segments();
@@ -146,8 +148,6 @@ impl<'a> CompactionPlan<'a> {
         }
 
         tracing::info!("Scanning {size} segments for compaction");
-
-        let reader_factory = Arc::clone(table.reader_factory());
 
         let files = stream::iter(chain)
             .enumerate()

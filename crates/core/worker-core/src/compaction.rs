@@ -13,7 +13,7 @@ use std::{
 pub use algorithm::{CompactionAlgorithm, SegmentSizeLimit};
 use amp_data_store::DataStore;
 pub use collector::{Collector, CollectorProperties};
-use common::{Timestamp, catalog::physical::PhysicalTable};
+use common::{Timestamp, physical_table::PhysicalTable};
 pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
 use futures::FutureExt;

@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::catalog::physical::PhysicalTable;
+use common::physical_table::PhysicalTable;
 use datasets_common::{
     name::Name, namespace::Namespace, reference::Reference, revision::Revision,
     table_name::TableName,
@@ -131,8 +131,6 @@ pub async fn handler(
         tracing::debug!(%dataset_ref, %table_name, "restoring table");
 
         let task = tokio::spawn(async move {
-            let sql_table_ref_schema = dataset_ref.to_reference().to_string();
-
             // Restore latest revision from object storage
             let info = data_store
                 .restore_latest_table_revision(&dataset_ref, table_def.name())
@@ -176,7 +174,6 @@ pub async fn handler(
                 start_block,
                 table_def.clone(),
                 info,
-                sql_table_ref_schema,
             );
 
             tracing::info!(

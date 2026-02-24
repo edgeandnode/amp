@@ -153,8 +153,7 @@ impl TestCtx {
     async fn spawn_compaction_and_await_completion(&self, dataset: &str, table: &str) {
         let catalog = self.catalog_for_dataset(dataset).await.unwrap();
         let table = catalog
-            .tables()
-            .iter()
+            .physical_tables()
             .find(|t| t.table_name() == table)
             .unwrap();
 
@@ -184,8 +183,7 @@ impl TestCtx {
     async fn spawn_collection_and_await_completion(&self, dataset: &str, table: &str) {
         let catalog = self.catalog_for_dataset(dataset).await.unwrap();
         let table = catalog
-            .tables()
-            .iter()
+            .physical_tables()
             .find(|t| t.table_name() == table)
             .unwrap();
         let config = self.ctx.daemon_worker().config();
@@ -210,8 +208,7 @@ impl TestCtx {
     async fn files(&self, dataset: &str, table: &str) -> HashSet<String> {
         let catalog = self.catalog_for_dataset(dataset).await.unwrap();
         let table = catalog
-            .tables()
-            .iter()
+            .physical_tables()
             .find(|t| t.table_name() == table)
             .unwrap();
 

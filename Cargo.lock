@@ -1004,6 +1004,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "url",
  "uuid",
 ]
@@ -1153,6 +1154,7 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "object_store",
+ "opentelemetry",
  "parking_lot",
  "parquet-ext",
  "schemars 1.2.1",

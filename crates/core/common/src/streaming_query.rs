@@ -28,22 +28,25 @@ use tracing::{Instrument, instrument};
 
 use self::message_stream_with_block_complete::MessageStreamError;
 use crate::{
-    BlockNum, BlockRange, Cursor, LogicalCatalog, NetworkCursor, Watermark,
+    BlockNum, BlockRange,
     arrow::{
         array::{RecordBatch, TimestampNanosecondArray},
         datatypes::SchemaRef,
     },
     catalog::{
-        logical::LogicalTable,
-        physical::{CanonicalChainError, Catalog, PhysicalTable},
+        logical::{LogicalCatalog, LogicalTable},
+        physical::{Catalog, CatalogTable},
     },
     context::{exec::ExecContext, plan::PlanContext},
+    cursor::{Cursor, CursorNetworkNotFoundError, NetworkCursor, Watermark},
     dataset_store::{DatasetStore, ResolveRevisionError},
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     incrementalizer::incrementalize_plan,
-    metadata::segments::{CursorNetworkNotFoundError, Segment},
-    plan_visitors::{order_by_block_num, unproject_special_block_num_column},
+    physical_table::{CanonicalChainError, PhysicalTable, segments::Segment},
+    plan_visitors::{
+        find_cross_network_join, order_by_block_num, unproject_special_block_num_column,
+    },
     sql_str::SqlStr,
 };
 
@@ -87,6 +90,23 @@ pub enum SpawnError {
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
     OptimizePlan(#[source] crate::context::plan::OptimizePlanError),
+
+    /// Query contains a join across tables from different blockchain networks
+    ///
+    /// Common causes:
+    /// - User query explicitly joins tables across networks (e.g., Ethereum + Base)
+    /// - Query references datasets with dependencies across multiple networks
+    /// - Catalog construction includes tables from different networks
+    ///
+    /// The error shows which tables are involved in the cross-network join and
+    /// their respective networks.
+    ///
+    /// **Note**: Batch (non-streaming) queries CAN join across networks because
+    /// they process complete, static ranges rather than incremental updates.
+    #[error("streaming query contains a cross-network join: {info}")]
+    CrossNetworkJoin {
+        info: crate::plan_visitors::CrossNetworkJoinInfo,
+    },
 
     /// Query references tables from multiple blockchain networks
     ///
@@ -151,7 +171,7 @@ struct TableUpdates {
 impl TableUpdates {
     async fn new(catalog: &Catalog, multiplexer_handle: &NotificationMultiplexerHandle) -> Self {
         let mut subscriptions: BTreeMap<LocationId, watch::Receiver<()>> = Default::default();
-        for table in catalog.tables() {
+        for table in catalog.physical_tables() {
             let location = table.location_id();
             subscriptions.insert(location, multiplexer_handle.subscribe(location).await);
         }
@@ -306,7 +326,7 @@ pub struct StreamingQuery {
     preserve_block_num: bool,
     network: NetworkId,
     /// `blocks` table for the network associated with the catalog.
-    blocks_table: Arc<PhysicalTable>,
+    blocks_table: CatalogTable,
     /// The single-network cursor for the previously processed range. This may be provided by the
     /// consumer (as a multi-network cursor) and converted to this single-network cursor.
     prev_cursor: Option<NetworkCursor>,
@@ -342,6 +362,13 @@ impl StreamingQuery {
                 .iter()
                 .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME);
 
+        // Prevent streaming cross-network joins (check runs before plan optimization).
+        if let Some(info) = find_cross_network_join(&plan, &catalog).map_err(|err| {
+            SpawnError::OptimizePlan(crate::context::plan::OptimizePlanError::Optimize(err))
+        })? {
+            return Err(SpawnError::CrossNetworkJoin { info });
+        }
+
         // This plan is the starting point of each microbatch execution. Transformations applied to it:œ
         // - Propagate the `_block_num` column.
         // - Run logical optimizations ahead of execution.
@@ -356,30 +383,36 @@ impl StreamingQuery {
                 .map_err(SpawnError::OptimizePlan)?
         };
 
-        let tables: Vec<Arc<PhysicalTable>> = catalog.tables().to_vec();
+        // Collect network and dataset ref data before moving catalog.
+        let (network, blocks_table) = {
+            let networks: BTreeSet<&NetworkId> =
+                catalog.physical_tables().map(|t| t.network()).collect();
+            if networks.len() != 1 {
+                let networks: Vec<NetworkId> = networks.into_iter().cloned().collect();
+                return Err(SpawnError::MultiNetwork { networks });
+            }
+            let network = networks.into_iter().next().unwrap().clone();
 
-        let networks: BTreeSet<&NetworkId> = tables.iter().map(|t| t.network()).collect();
-        if networks.len() != 1 {
-            let networks: Vec<NetworkId> = networks.into_iter().cloned().collect();
-            return Err(SpawnError::MultiNetwork { networks });
-        }
-        let network = networks.into_iter().next().unwrap();
+            let unique_refs: BTreeSet<HashReference> = catalog
+                .physical_tables()
+                .map(|t| t.dataset_reference().clone())
+                .collect();
 
-        let unique_refs: BTreeSet<&HashReference> =
-            tables.iter().map(|t| t.dataset_reference()).collect();
+            let blocks_table = resolve_blocks_table(
+                dataset_store,
+                exec_env.store.clone(),
+                unique_refs.iter(),
+                &network,
+            )
+            .await
+            .map_err(SpawnError::ResolveBlocksTable)?;
 
-        let blocks_table = resolve_blocks_table(
-            dataset_store,
-            exec_env.store.clone(),
-            unique_refs.into_iter(),
-            network,
-        )
-        .await
-        .map_err(SpawnError::ResolveBlocksTable)?;
+            (network, blocks_table)
+        };
 
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let prev_cursor = cursor
-            .map(|c| c.to_single_network(network))
+            .map(|c| c.to_single_network(&network))
             .transpose()
             .map_err(SpawnError::ConvertCursor)?;
         let streaming_query = Self {
@@ -395,8 +428,8 @@ impl StreamingQuery {
             keep_alive_interval,
             destination,
             preserve_block_num,
-            network: network.clone(),
-            blocks_table: Arc::new(blocks_table),
+            network,
+            blocks_table,
         };
 
         let join_handle =
@@ -501,10 +534,9 @@ impl StreamingQuery {
     ) -> Result<Option<MicrobatchRange>, NextMicrobatchRangeError> {
         // Gather the chains for each source table.
         let chains = ctx
-            .catalog()
+            .physical_table()
             .table_snapshots()
-            .iter()
-            .map(|s| s.canonical_segments());
+            .map(|(s, _)| s.canonical_segments());
 
         // Use a single context for all queries against the blocks table. This is to keep a
         // consistent reference chain within the scope of this function.
@@ -513,12 +545,12 @@ impl StreamingQuery {
             let catalog = {
                 let table = &self.blocks_table;
                 let resolved_table = LogicalTable::new(
-                    table.sql_table_ref_schema().to_string(),
-                    table.dataset_reference().clone(),
-                    table.table().clone(),
+                    table.sql_schema_name().to_string(),
+                    table.physical_table().dataset_reference().clone(),
+                    table.physical_table().table().clone(),
                 );
                 let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
-                Catalog::new(vec![self.blocks_table.clone()], logical)
+                Catalog::new(logical, vec![self.blocks_table.clone()])
             };
             ExecContext::for_catalog(self.exec_env.clone(), catalog, false)
                 .await
@@ -685,8 +717,8 @@ impl StreamingQuery {
         // context for querying forked blocks
         let fork_ctx = {
             let catalog = Catalog::new(
-                ctx.catalog().physical_tables().cloned().collect(),
-                ctx.catalog().logical().clone(),
+                ctx.physical_table().logical().clone(),
+                ctx.physical_table().catalog_entries(),
             );
             ExecContext::for_catalog(ctx.env.clone(), catalog, true)
                 .await
@@ -748,7 +780,7 @@ impl StreamingQuery {
         cursor: &NetworkCursor,
     ) -> Result<Option<BlockWatermark>, BlocksTableContainsError> {
         // Panic safety: The `blocks_ctx` always has a single table.
-        let blocks_segments = &ctx.catalog().table_snapshots()[0];
+        let (blocks_segments, _) = ctx.physical_table().table_snapshots().next().unwrap();
 
         // Optimization: Check segment metadata first to avoid expensive query,
         // Walk segments in reverse to find one that covers this block number.
@@ -1138,7 +1170,7 @@ async fn resolve_blocks_table(
     data_store: DataStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
     network: &NetworkId,
-) -> Result<PhysicalTable, ResolveBlocksTableError> {
+) -> Result<CatalogTable, ResolveBlocksTableError> {
     let dataset = search_dependencies_for_raw_dataset(dataset_store, root_dataset_refs, network)
         .await
         .map_err(ResolveBlocksTableError::SearchDependencies)?;
@@ -1162,15 +1194,15 @@ async fn resolve_blocks_table(
             )
         })?;
 
-    let sql_table_ref_schema = dataset.reference().to_reference().to_string();
-    Ok(PhysicalTable::from_revision(
+    let sql_schema_name = dataset.reference().to_reference().to_string();
+    let physical_table = PhysicalTable::from_revision(
         data_store,
         dataset.reference().clone(),
         dataset.start_block(),
         table.clone(),
         revision,
-        sql_table_ref_schema,
-    ))
+    );
+    Ok(CatalogTable::new(physical_table.into(), sql_schema_name))
 }
 
 /// Errors that occur when resolving the blocks table for a network

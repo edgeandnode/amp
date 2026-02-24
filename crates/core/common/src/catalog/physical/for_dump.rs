@@ -6,12 +6,11 @@
 use amp_data_store::DataStore;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 
+use super::catalog::{Catalog, CatalogTable};
 use crate::{
-    catalog::{
-        logical::LogicalCatalog,
-        physical::{Catalog, PhysicalTable},
-    },
+    catalog::logical::LogicalCatalog,
     dataset_store::{DatasetStore, GetDatasetError},
+    physical_table::table::PhysicalTable,
 };
 
 /// Creates a full catalog with physical data access for derived dataset dumps.
@@ -42,7 +41,7 @@ pub async fn create(
     data_store: &DataStore,
     logical: LogicalCatalog,
 ) -> Result<Catalog, CreateCatalogError> {
-    let mut physical_tables = Vec::new();
+    let mut entries = Vec::new();
     for table in &logical.tables {
         let dataset_ref = table.dataset_reference();
         let table_name = table.name();
@@ -69,18 +68,18 @@ pub async fn create(
                 source,
             })?;
 
+        let sql_schema_name = table.sql_schema_name().to_string();
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             table.dataset_reference().clone(),
             dataset.start_block(),
             table.table().clone(),
             revision,
-            table.sql_table_ref_schema().to_string(),
         );
-        physical_tables.push(physical_table.into());
+        entries.push(CatalogTable::new(physical_table.into(), sql_schema_name));
     }
 
-    Ok(Catalog::new(physical_tables, logical))
+    Ok(Catalog::new(logical, entries))
 }
 
 /// Errors that can occur when creating a physical catalog.

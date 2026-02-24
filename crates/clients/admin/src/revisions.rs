@@ -62,6 +62,16 @@ fn revision_delete(id: i64) -> String {
     format!("revisions/{id}")
 }
 
+/// Build URL path for truncating a revision.
+///
+/// DELETE `/revisions/{id}/truncate`
+fn revision_truncate(id: i64, concurrency: Option<usize>) -> String {
+    match concurrency {
+        Some(c) => format!("revisions/{id}/truncate?concurrency={c}"),
+        None => format!("revisions/{id}/truncate"),
+    }
+}
+
 /// Build URL path for creating a table revision.
 ///
 /// POST `/revisions`
@@ -625,6 +635,134 @@ impl<'a> RevisionsClient<'a> {
         }
     }
 
+    /// Truncate a table revision by location ID.
+    ///
+    /// Sends DELETE to `/revisions/{id}/truncate` endpoint.
+    ///
+    /// Deletes all files from object storage and their corresponding metadata,
+    /// verifies cleanup, then deletes the revision. The revision must be
+    /// inactive and any writer job must be in a terminal state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TruncateError`] for network errors, API errors (400/404/409/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(location_id = %location_id))]
+    pub async fn truncate(
+        &self,
+        location_id: i64,
+        concurrency: Option<usize>,
+    ) -> Result<TruncateResponse, TruncateError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&revision_truncate(location_id, concurrency))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "DELETE request sent for revision truncate");
+
+        let response = self
+            .client
+            .http()
+            .delete(url.as_str())
+            .send()
+            .await
+            .map_err(|err| TruncateError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            200 => {
+                let truncate_response =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| TruncateError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("Failed to parse response: {err}"),
+                        })?;
+                tracing::debug!(location_id = %location_id, "revision truncated");
+                Ok(truncate_response)
+            }
+            400 | 404 | 409 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    TruncateError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    TruncateError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH_PARAMETERS" => {
+                        Err(TruncateError::InvalidPath(error_response.into()))
+                    }
+                    "REVISION_NOT_FOUND" => {
+                        Err(TruncateError::RevisionNotFound(error_response.into()))
+                    }
+                    "REVISION_IS_ACTIVE" => {
+                        Err(TruncateError::RevisionIsActive(error_response.into()))
+                    }
+                    "WRITER_JOB_NOT_TERMINAL" => {
+                        Err(TruncateError::WriterJobNotTerminal(error_response.into()))
+                    }
+                    "GET_REVISION_BY_LOCATION_ID_ERROR" => {
+                        Err(TruncateError::GetRevision(error_response.into()))
+                    }
+                    "GET_WRITER_JOB_ERROR" => {
+                        Err(TruncateError::GetWriterJob(error_response.into()))
+                    }
+                    "TRUNCATE_ERROR" => Err(TruncateError::Truncate(error_response.into())),
+                    "VERIFY_FILE_METADATA_ERROR" => {
+                        Err(TruncateError::VerifyFileMetadata(error_response.into()))
+                    }
+                    "FILE_METADATA_REMAINING" => {
+                        Err(TruncateError::FileMetadataRemaining(error_response.into()))
+                    }
+                    "DELETE_REVISION_ERROR" => {
+                        Err(TruncateError::DeleteRevision(error_response.into()))
+                    }
+                    _ => Err(TruncateError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(TruncateError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
     /// Activate a table revision by location ID.
     ///
     /// POSTs to `/revisions/{id}/activate` endpoint.
@@ -1104,6 +1242,85 @@ pub enum DeleteError {
     ///
     /// The database operation to delete the revision failed.
     #[error("failed to delete table revision")]
+    DeleteRevision(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Response from a successful revision truncate operation.
+#[derive(Debug, serde::Deserialize)]
+pub struct TruncateResponse {
+    /// Number of files deleted from object storage.
+    pub files_deleted: u64,
+}
+
+/// Errors that can occur when truncating a revision.
+#[derive(Debug, thiserror::Error)]
+pub enum TruncateError {
+    /// Invalid path parameters (400, INVALID_PATH_PARAMETERS)
+    ///
+    /// The location ID in the URL path is invalid.
+    #[error("invalid path parameters")]
+    InvalidPath(#[source] ApiError),
+
+    /// Revision not found (404, REVISION_NOT_FOUND)
+    ///
+    /// No revision exists with the specified location ID.
+    #[error("revision not found")]
+    RevisionNotFound(#[source] ApiError),
+
+    /// Revision is active (409, REVISION_IS_ACTIVE)
+    ///
+    /// The revision is currently active and must be deactivated before truncation.
+    #[error("revision is active")]
+    RevisionIsActive(#[source] ApiError),
+
+    /// Writer job is not in a terminal state (409, WRITER_JOB_NOT_TERMINAL)
+    ///
+    /// The revision's writer job is still running and must reach a terminal state before truncation.
+    #[error("writer job is not in a terminal state")]
+    WriterJobNotTerminal(#[source] ApiError),
+
+    /// Failed to get revision (500, GET_REVISION_BY_LOCATION_ID_ERROR)
+    ///
+    /// The database query to get the revision failed.
+    #[error("failed to get revision")]
+    GetRevision(#[source] ApiError),
+
+    /// Failed to get writer job (500, GET_WRITER_JOB_ERROR)
+    ///
+    /// The database query to get the writer job failed.
+    #[error("failed to get writer job")]
+    GetWriterJob(#[source] ApiError),
+
+    /// Failed to truncate revision files (500, TRUNCATE_ERROR)
+    ///
+    /// File deletion from object store or streaming metadata failed.
+    #[error("failed to truncate revision files")]
+    Truncate(#[source] ApiError),
+
+    /// Failed to verify file metadata cleanup (500, VERIFY_FILE_METADATA_ERROR)
+    ///
+    /// The database query to check remaining file_metadata rows failed.
+    #[error("failed to verify file metadata cleanup")]
+    VerifyFileMetadata(#[source] ApiError),
+
+    /// File metadata rows remain after truncation (409, FILE_METADATA_REMAINING)
+    ///
+    /// Some file_metadata rows could not be deleted. Retry the operation.
+    #[error("file metadata rows remain after truncation")]
+    FileMetadataRemaining(#[source] ApiError),
+
+    /// Failed to delete revision (500, DELETE_REVISION_ERROR)
+    ///
+    /// The database operation to delete the revision row failed.
+    #[error("failed to delete revision")]
     DeleteRevision(#[source] ApiError),
 
     /// Network or connection error

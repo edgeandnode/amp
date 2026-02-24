@@ -18,6 +18,10 @@
         "null"
       ]
     },
+    "commitment": {
+      "description": "Commitment level for RPC requests.",
+      "$ref": "#/$defs/CommitmentLevel"
+    },
     "keep_of1_car_files": {
       "description": "Whether to keep downloaded CAR files after processing.",
       "type": "boolean",
@@ -60,6 +64,26 @@
     "of1_car_directory"
   ],
   "$defs": {
+    "CommitmentLevel": {
+      "description": "Commitment level for Solana RPC requests.\n\nControls the level of finality required when querying the Solana ledger.\nHigher commitment levels provide stronger guarantees that transactions\nwill not be rolled back.",
+      "oneOf": [
+        {
+          "description": "The highest slot of the heaviest fork processed by the node.",
+          "type": "string",
+          "const": "processed"
+        },
+        {
+          "description": "The highest slot that has been voted on by supermajority of the cluster.",
+          "type": "string",
+          "const": "confirmed"
+        },
+        {
+          "description": "The highest slot having reached max vote lockout.",
+          "type": "string",
+          "const": "finalized"
+        }
+      ]
+    },
     "NetworkId": {
       "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
       "type": "string",

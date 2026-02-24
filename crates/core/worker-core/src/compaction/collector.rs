@@ -6,7 +6,7 @@ use std::{
 };
 
 use amp_data_store::{DataStore, DeleteFilesStreamError};
-use common::catalog::physical::PhysicalTable;
+use common::physical_table::PhysicalTable;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
 use metadata_db::{MetadataDb, files::FileId, gc::GcManifestRow};
 use object_store::{Error as ObjectStoreError, path::Path};
@@ -48,7 +48,7 @@ impl Debug for Collector {
         write!(
             f,
             "Garbage Collector {{ table: {} }}",
-            self.table.table_ref()
+            self.table.table_ref_compact()
         )
     }
 }
@@ -177,7 +177,7 @@ impl Display for Collector {
         write!(
             f,
             "Garbage Collector {{ table: {}, opts: {:?} }}",
-            self.table.table_ref(),
+            self.table.table_ref_compact(),
             self.props
         )
     }
