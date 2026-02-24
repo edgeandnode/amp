@@ -115,6 +115,7 @@ opentelemetry-otlp = { version = "0.31", features = [
     "http-proto",
 ] }
 opentelemetry_sdk = { version = "0.31" }
+parking_lot = "0.12.5"
 pg_escape = "0.1"
 pgtemp = "0.7.1"
 pretty_assertions = "1.4.1"

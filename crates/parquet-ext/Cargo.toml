@@ -65,6 +65,10 @@ workspace = true
 features = ["std"]
 optional = true
 
+[dependencies.parking_lot]
+workspace = true
+optional = false
+
 [dependencies.parquet]
 version = "^57.3"
 features = ["arrow"]

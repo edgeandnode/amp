@@ -7804,6 +7804,7 @@ dependencies = [
  "bytes",
  "flume",
  "futures",
+ "parking_lot",
  "parquet",
  "tokio",
 ]
