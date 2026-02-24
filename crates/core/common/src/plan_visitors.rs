@@ -296,8 +296,16 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 }
             }
 
+            // GROUP BY _block_num, ... — _block_num is already the first group key so it
+            // appears naturally in the aggregate's output schema. Just update
+            // next_block_num_expr for the parent and leave the node unchanged.
+            Aggregate(_) => {
+                self.next_block_num_expr = Some(block_num_col());
+                Ok(Transformed::no(node))
+            }
+
             // These variants would have already errored in `incremental_op_kind` above
-            Limit(_) | Aggregate(_) | Sort(_) | Window(_) | RecursiveQuery(_)
+            Limit(_) | Sort(_) | Window(_) | RecursiveQuery(_)
             | Statement(_) | Dml(_) | Ddl(_) | Copy(_) | Extension(_) => {
                 Err(df_err(
                     format!("incremental_op_kind should have already rejected this node type: {:?}", op_kind)
