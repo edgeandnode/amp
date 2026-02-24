@@ -29,7 +29,8 @@ pub mod of1_client;
 pub mod rpc_client;
 pub mod tables;
 
-pub use amp_providers_solana::config::{SolanaProviderConfig, UseArchive};
+pub use amp_providers_solana::config::{self, SolanaProviderConfig, UseArchive};
+use solana_client::rpc_config::CommitmentConfig;
 
 pub use self::{
     client::{Client, non_empty_of1_slot, non_empty_rpc_slot},
@@ -102,6 +103,8 @@ pub fn client(
         return Err(ClientError(err));
     }
 
+    let commitment = commitment_config(config.commitment);
+
     // Resolve authentication configuration
     let auth = config.auth_token.map(|token| match config.auth_header {
         Some(header) => rpc_client::Auth::CustomHeader {
@@ -122,6 +125,7 @@ pub fn client(
             config.keep_of1_car_files,
             config.use_archive,
             meter,
+            commitment,
         ),
         scheme => {
             let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
@@ -130,4 +134,13 @@ pub fn client(
     };
 
     Ok(client)
+}
+
+/// Convert a [`CommitmentLevel`] config value into a Solana [`CommitmentConfig`].
+pub fn commitment_config(level: config::CommitmentLevel) -> CommitmentConfig {
+    match level {
+        config::CommitmentLevel::Processed => CommitmentConfig::processed(),
+        config::CommitmentLevel::Confirmed => CommitmentConfig::confirmed(),
+        config::CommitmentLevel::Finalized => CommitmentConfig::finalized(),
+    }
 }

@@ -9,7 +9,8 @@ use clap::Parser;
 use futures::StreamExt;
 use solana_clock::Slot;
 use solana_datasets::{
-    SolanaProviderConfig, non_empty_of1_slot, non_empty_rpc_slot, of1_client, rpc_client, tables,
+    SolanaProviderConfig, commitment_config, non_empty_of1_slot, non_empty_rpc_slot, of1_client,
+    rpc_client, tables,
 };
 
 const SLOT_MISMATCH_LIMIT: u8 = 10;
@@ -75,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
         transaction_details: Some(rpc_client::rpc_config::TransactionDetails::Full),
         max_supported_transaction_version: Some(0),
         rewards: Some(true),
-        commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
+        commitment: Some(commitment_config(provider_cfg.commitment)),
     };
 
     let of1_stream = of1_client::stream(
