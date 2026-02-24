@@ -1,13 +1,9 @@
 use std::{io::Write, sync::Arc};
 
-use parquet::file::writer::SerializedFileWriter;
-
-use {
-    arrow_schema::SchemaRef,
-    parquet::{
-        arrow::arrow_writer::ArrowRowGroupWriterFactory,
-        errors::ParquetError
-    },
+use arrow_schema::SchemaRef;
+use parquet::{
+    arrow::arrow_writer::ArrowRowGroupWriterFactory, errors::ParquetError,
+    file::writer::SerializedFileWriter,
 };
 
 use super::RowGroupEncoder;
@@ -21,7 +17,6 @@ impl EncoderFactory {
     pub fn new<W: Write + Send>(
         file_writer: &SerializedFileWriter<W>,
         arrow_schema: &SchemaRef,
-
     ) -> Self {
         let row_group_index = 0;
         let arrow_schema = Arc::clone(arrow_schema);
@@ -34,10 +29,7 @@ impl EncoderFactory {
     }
 
     pub fn try_next_encoder(&mut self) -> Result<RowGroupEncoder, ParquetError> {
-        RowGroupEncoder::try_new(
-            self.row_group_index,
-            &self.row_group_writer_factory,
-        ).inspect(|_| self.row_group_index += 1)
-
+        RowGroupEncoder::try_new(self.row_group_index, &self.row_group_writer_factory)
+            .inspect(|_| self.row_group_index += 1)
     }
 }

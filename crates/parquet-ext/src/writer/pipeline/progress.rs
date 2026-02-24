@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicIsize, AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicIsize, AtomicUsize, Ordering},
 };
 
 #[derive(Default)]

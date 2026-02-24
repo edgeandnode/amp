@@ -45,6 +45,9 @@ impl<W: AsyncFileWriter + Send> AsyncArrowWriter<W> {
     /// which will properly pass the provided configuration options to the writer as well as
     /// map the Arrow schema into the writer properties metadata and ensure the writer is configured
     /// to coerce types as needed.
+    ///
+    /// # Safety
+    /// The provided options are ignored and will not have any effect on the writer's behavior.
     pub unsafe fn try_new_with_options(
         writer: W,
         arrow_schema: SchemaRef,

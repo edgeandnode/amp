@@ -130,6 +130,8 @@ pub fn encode_column_chunks_parallel(
         .collect();
 
     let work_items = UnsafeCell::new(work_items);
+
+    #[allow(clippy::type_complexity)]
     struct WorkItems(UnsafeCell<Vec<Option<(ArrowColumnWriter, Vec<ArrowLeafColumn>)>>>);
     // SAFETY: Each slot is taken by exactly one thread (atomic index ensures uniqueness).
     unsafe impl Sync for WorkItems {}
