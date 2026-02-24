@@ -296,8 +296,46 @@ pub fn incremental_op_kind(
 
         // Operations that are supported only in batch queries
         Limit(_) => Err(NonIncremental(NonIncrementalOp::Limit)),
-        Aggregate(_) => Err(NonIncremental(NonIncrementalOp::Aggregate)),
-        Distinct(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+        Aggregate(agg) => {
+            // An aggregate is incrementally valid when _block_num is the first group-by key.
+            // This also handles DISTINCT ON (_block_num, ...) which DataFusion's optimizer
+            // rewrites to an Aggregate with _block_num as the first group-by key.
+            let first_group_is_block_num = agg
+                .group_expr
+                .first()
+                .map(|e| {
+                    matches!(e, datafusion::prelude::Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME)
+                })
+                .unwrap_or(false);
+            if first_group_is_block_num {
+                Ok(Linear)
+            } else {
+                Err(NonIncremental(NonIncrementalOp::Aggregate))
+            }
+        }
+        Distinct(distinct) => {
+            use datafusion::logical_expr::Distinct as DistinctEnum;
+            match distinct {
+                // SELECT DISTINCT ON (_block_num, ...) is locally incrementalizable:
+                // since on_expr starts with _block_num and microbatches never overlap in
+                // _block_num values, deduplication can be applied per microbatch.
+                DistinctEnum::On(on) => {
+                    let first_on_is_block_num = on
+                        .on_expr
+                        .first()
+                        .map(|e| {
+                            matches!(e, datafusion::prelude::Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME)
+                        })
+                        .unwrap_or(false);
+                    if first_on_is_block_num {
+                        Ok(Linear)
+                    } else {
+                        Err(NonIncremental(NonIncrementalOp::Distinct))
+                    }
+                }
+                DistinctEnum::All(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+            }
+        }
         Sort(_) => Err(NonIncremental(NonIncrementalOp::Sort)),
         Window(_) => Err(NonIncremental(NonIncrementalOp::Window)),
         RecursiveQuery(_) => Err(NonIncremental(NonIncrementalOp::RecursiveQuery)),

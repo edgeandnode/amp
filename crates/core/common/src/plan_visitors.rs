@@ -258,13 +258,50 @@ impl TreeNodeRewriter for BlockNumPropagator {
             Filter(_) | Repartition(_) | Subquery(_) | Explain(_) | Analyze(_)
             | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
 
+            // DISTINCT ON (_block_num) is incrementally valid: the DistinctOn node has a
+            // cached schema field that must be rebuilt to include _block_num after propagation.
+            Distinct(distinct) => {
+                use datafusion::logical_expr::{Distinct as DistinctKind, DistinctOn};
+
+                match distinct {
+                    DistinctKind::On(mut on) => {
+                        let block_num_expr = {
+                            let mut expr =
+                                self.next_block_num_expr.replace(block_num_col()).unwrap();
+                            if expr != block_num_col() {
+                                expr = expr.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
+                            }
+                            expr
+                        };
+
+                        // If _block_num is already in select_expr, no modification needed
+                        for existing_expr in on.select_expr.iter() {
+                            if physical_name(existing_expr).unwrap()
+                                == RESERVED_BLOCK_NUM_COLUMN_NAME
+                            {
+                                return Ok(Transformed::no(LogicalPlan::Distinct(
+                                    DistinctKind::On(on),
+                                )));
+                            }
+                        }
+
+                        // Prepend _block_num to select_expr and rebuild the cached schema
+                        on.select_expr.insert(0, block_num_expr);
+                        on.schema = prepend_special_block_num_field(&on.schema);
+                        Ok(Transformed::yes(LogicalPlan::Distinct(DistinctKind::On(on))))
+                    }
+                    DistinctKind::All(_) => Err(df_err(
+                        format!("incremental_op_kind should have already rejected Distinct::All: {:?}", op_kind)
+                    ))
+                }
+            }
+
             // These variants would have already errored in `incremental_op_kind` above
-            Limit(_) | Aggregate(_) | Distinct(_) | Sort(_) | Window(_) | RecursiveQuery(_)
+            Limit(_) | Aggregate(_) | Sort(_) | Window(_) | RecursiveQuery(_)
             | Statement(_) | Dml(_) | Ddl(_) | Copy(_) | Extension(_) => {
-                unreachable!(
-                    "incremental_op_kind should have already rejected this node type: {:?}",
-                    op_kind
-                )
+                Err(df_err(
+                    format!("incremental_op_kind should have already rejected this node type: {:?}", op_kind)
+                ))
             }
         }
     }
