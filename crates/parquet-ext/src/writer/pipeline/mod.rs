@@ -43,15 +43,15 @@ where
     }
 
     pub async fn add_batch_async(&mut self, batch: RecordBatch) -> Result<()> {
-        tokio::try_join!(
-            self.writer_executor.drain_ready(),
-            self.encoder_executor.handle_batch_async(batch)
+        futures::try_join!(
+            self.encoder_executor.handle_batch_async(batch),
+            self.writer_executor.drain_ready()
         )?;
         Ok(())
     }
 
     pub async fn flush_async(&mut self) -> Result<()> {
-        tokio::try_join!(
+        futures::try_join!(
             self.writer_executor.drain_ready(),
             self.encoder_executor.flush_async(false)
         )?;
@@ -63,7 +63,7 @@ where
     }
 
     pub async fn close_async(mut self) -> Result<ParquetMetaData> {
-        self.encoder_executor.flush(true)?;
+        self.encoder_executor.flush_async(true).await?;
         let metadata = self.writer_executor.close_async().await?;
         Ok(metadata)
     }
@@ -76,7 +76,7 @@ where
     pub fn in_progress_rows(&self) -> usize {
         self.progress
             .as_ref()
-            .map(|p| p.in_progress_rows())
+            .map(Progress::in_progress_rows)
             .unwrap_or_default()
     }
 
@@ -84,7 +84,7 @@ where
     pub fn in_progress_size(&self) -> usize {
         self.progress
             .as_ref()
-            .map(|p| p.in_progress_size())
+            .map(Progress::in_progress_size)
             .unwrap_or_default()
     }
 
@@ -92,7 +92,7 @@ where
     pub fn memory_size(&self) -> usize {
         self.progress
             .as_ref()
-            .map(|p| p.memory_size())
+            .map(Progress::memory_size)
             .unwrap_or_default()
     }
 
@@ -100,7 +100,7 @@ where
     pub fn bytes_written(&self) -> usize {
         self.progress
             .as_ref()
-            .map(|p| p.bytes_written())
+            .map(Progress::bytes_written)
             .unwrap_or_default()
     }
 
