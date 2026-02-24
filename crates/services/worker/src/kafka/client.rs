@@ -398,16 +398,16 @@ mod tests {
     /// Creates a test Kafka config with optional SASL credentials.
     fn make_kafka_config(
         mechanism: Option<&str>,
-        username: Option<String>,
-        password: Option<String>,
+        sasl_user: Option<String>,
+        sasl_pass: Option<String>,
     ) -> KafkaEventsConfig {
         KafkaEventsConfig {
             brokers: vec!["localhost:9092".to_string()],
             topic: "test".to_string(),
             partitions: 1,
             sasl_mechanism: mechanism.map(String::from),
-            sasl_username: username.map(Into::into),
-            sasl_password: password.map(Into::into),
+            sasl_username: sasl_user.map(Into::into),
+            sasl_password: sasl_pass.map(Into::into),
             tls_enabled: false,
         }
     }
