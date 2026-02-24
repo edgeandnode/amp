@@ -81,6 +81,13 @@ impl std::fmt::Display for InspectResult {
         writeln!(f, "Revision: {}", self.dataset.revision)?;
         writeln!(f, "Kind: {}", self.dataset.kind)?;
         writeln!(f, "Manifest Hash: {}", self.dataset.manifest_hash)?;
+        writeln!(f, "Start Block: {}", self.dataset.start_block)?;
+        writeln!(
+            f,
+            "Finalized Blocks Only: {}",
+            self.dataset.finalized_blocks_only
+        )?;
+        writeln!(f, "Tables: {}", self.dataset.tables.join(", "))?;
         Ok(())
     }
 }

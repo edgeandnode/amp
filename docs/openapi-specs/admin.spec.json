@@ -207,7 +207,7 @@
           "datasets"
         ],
         "summary": "Handler for the `GET /datasets/{namespace}/{name}/versions/{revision}` endpoint",
-        "description": "Returns detailed dataset information for the specified revision.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Successfully retrieved dataset information\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or dataset store error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace, name, or revision in path parameters\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_MANIFEST_PATH_ERROR`: Failed to query manifest path from metadata database\n- `READ_MANIFEST_ERROR`: Failed to read manifest file from object store\n- `PARSE_MANIFEST_ERROR`: Failed to parse manifest JSON\n\n## Behavior\nThis endpoint retrieves detailed information about a specific dataset revision.\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\")\n- Manifest hash (SHA256 hash)\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version\n\nThe endpoint first resolves the revision to a manifest hash, then returns\nbasic dataset information including namespace, name, revision, manifest hash, and kind.",
+        "description": "Returns detailed dataset information for the specified revision.\n\n## Path Parameters\n- `namespace`: Dataset namespace\n- `name`: Dataset name\n- `revision`: Revision (version, hash, \"latest\", or \"dev\")\n\n## Response\n- **200 OK**: Successfully retrieved dataset information\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Dataset or revision not found\n- **500 Internal Server Error**: Database or dataset store error\n\n## Error Codes\n- `INVALID_PATH`: Invalid namespace, name, or revision in path parameters\n- `DATASET_NOT_FOUND`: The specified dataset or revision does not exist\n- `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash\n- `GET_DATASET_ERROR`: Failed to get dataset from dataset store\n\n## Behavior\nThis endpoint retrieves detailed information about a specific dataset revision.\nThe revision parameter supports four types:\n- Semantic version (e.g., \"1.2.3\")\n- Manifest hash (SHA256 hash)\n- \"latest\" - resolves to the highest semantic version\n- \"dev\" - resolves to the development version\n\nThe endpoint first resolves the revision to a manifest hash, then returns\ndataset information including namespace, name, revision, manifest hash, kind,\nstart block, finalized blocks setting, and table names.",
         "operationId": "get_dataset_by_revision",
         "parameters": [
           {
@@ -2401,9 +2401,16 @@
           "name",
           "revision",
           "manifest_hash",
-          "kind"
+          "kind",
+          "start_block",
+          "finalized_blocks_only",
+          "tables"
         ],
         "properties": {
+          "finalized_blocks_only": {
+            "type": "boolean",
+            "description": "Finalized blocks only"
+          },
           "kind": {
             "type": "string",
             "description": "Dataset kind"
@@ -2423,6 +2430,19 @@
           "revision": {
             "type": "string",
             "description": "Revision requested"
+          },
+          "start_block": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Starting block",
+            "minimum": 0
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tables"
           }
         }
       },

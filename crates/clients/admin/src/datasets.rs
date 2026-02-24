@@ -1694,6 +1694,9 @@ pub struct DatasetInfo {
     pub revision: Revision,
     pub manifest_hash: String,
     pub kind: String,
+    pub start_block: u64,
+    pub finalized_blocks_only: bool,
+    pub tables: Vec<String>,
 }
 
 /// Response from GET /datasets/{namespace}/{name}/versions endpoint.
