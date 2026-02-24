@@ -607,26 +607,80 @@ impl DataStore {
             .await
     }
 
-    /// Truncate a table revision by deleting all dump files.
+    /// Truncate a table revision by deleting all files and their metadata.
     ///
-    /// Streams file metadata from the database and deletes all files
-    /// in object storage for the specified revision.
+    /// For each file in the revision (with bounded concurrency):
+    /// 1. Deletes the file from object storage (treats "not found" as success
+    ///    for idempotent retries)
+    /// 2. Deletes the corresponding `file_metadata` row from the database
+    ///    (logs a warning and continues on failure)
+    ///
+    /// Returns the number of files processed.
     pub async fn truncate_revision(
         &self,
         revision: &PhyTableRevision,
-    ) -> Result<(), TruncateError> {
-        let file_locations: Vec<Path> = self
+        concurrency: usize,
+    ) -> Result<u64, TruncateError> {
+        let files: Vec<PhyTableRevisionFileMetadata> = self
             .stream_revision_file_metadata(revision)
-            .map_ok(|m| m.object_meta.location)
             .try_collect()
             .await
             .map_err(TruncateError::StreamMetadata)?;
 
-        self.delete_files_in_object_store(file_locations)
-            .await
-            .map_err(TruncateError::DeleteFiles)?;
+        let metadata_db = self.metadata_db.clone();
+        let object_store = self.object_store.clone();
 
-        Ok(())
+        let file_count = files.len() as u64;
+
+        futures::stream::iter(files)
+            .map(|file| {
+                let metadata_db = metadata_db.clone();
+                let object_store = object_store.clone();
+                async move {
+                    // Delete from object store (treat "not found" as success)
+                    match object_store.delete(&file.object_meta.location).await {
+                        Ok(()) => {}
+                        Err(object_store::Error::NotFound { .. }) => {
+                            tracing::debug!(
+                                file_id = %file.file_id,
+                                file_name = %file.file_name,
+                                "file already deleted from object store, skipping"
+                            );
+                        }
+                        Err(err) => {
+                            tracing::error!(
+                                file_id = %file.file_id,
+                                file_name = %file.file_name,
+                                error = %err,
+                                "failed to delete file from object store"
+                            );
+                            return Err(TruncateError::DeleteFile {
+                                file_name: file.file_name.as_str().to_owned(),
+                                source: err,
+                            });
+                        }
+                    }
+
+                    // Delete file_metadata row from DB (warn and continue on failure)
+                    if let Err(err) =
+                        metadata_db::files::delete_by_ids(&metadata_db, &[file.file_id]).await
+                    {
+                        tracing::warn!(
+                            file_id = %file.file_id,
+                            file_name = %file.file_name,
+                            error = %err,
+                            "failed to delete file_metadata row, will be cleaned up on retry or by CASCADE"
+                        );
+                    }
+
+                    Ok(())
+                }
+            })
+            .buffer_unordered(concurrency)
+            .try_collect::<()>()
+            .await?;
+
+        Ok(file_count)
     }
 
     /// Deletes multiple files from object storage.
@@ -1210,9 +1264,9 @@ pub enum RestoreLatestTableRevisionError {
 #[error("Failed to list all table revisions")]
 pub struct ListAllTableRevisionsError(#[source] pub metadata_db::Error);
 
-/// Errors that occur when truncating a physical table
+/// Errors that occur when truncating a physical table revision
 ///
-/// This error type is used by `PhyTable::truncate()`.
+/// This error type is used by `DataStore::truncate_revision()`.
 #[derive(Debug, thiserror::Error)]
 pub enum TruncateError {
     /// Failed to stream file metadata from metadata database
@@ -1226,17 +1280,24 @@ pub enum TruncateError {
     #[error("Failed to stream file metadata")]
     StreamMetadata(#[source] StreamFileMetadataError),
 
-    /// Failed to delete files from object store
+    /// Failed to delete a file from object store
     ///
-    /// This error occurs when the bulk delete operation fails.
+    /// This error occurs when deleting a specific file from object storage fails.
+    /// "Not found" errors are treated as success for idempotency and do not
+    /// produce this variant.
     ///
     /// Common causes:
     /// - Object store unavailable or unreachable
     /// - Network connectivity issues
     /// - Permission denied for deleting objects
-    /// - Incomplete deletion (partial failure)
-    #[error("Failed to delete files from object store")]
-    DeleteFiles(#[source] DeleteFilesInObjectStoreError),
+    #[error("Failed to delete file from object store: {file_name}")]
+    DeleteFile {
+        /// Name of the file that failed to delete
+        file_name: String,
+        /// The underlying object store error
+        #[source]
+        source: object_store::Error,
+    },
 }
 
 /// Failed to register file metadata in the metadata database

@@ -2,7 +2,7 @@
 
 use axum::{
     Router,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 
 pub mod build_info;
@@ -63,6 +63,10 @@ pub fn router(ctx: Ctx) -> Router<()> {
             get(revisions::get_by_id::handler).delete(revisions::delete::handler),
         )
         .route("/revisions/{id}/restore", post(revisions::restore::handler))
+        .route(
+            "/revisions/{id}/truncate",
+            delete(revisions::truncate::handler),
+        )
         .route(
             "/revisions/{id}/activate",
             post(revisions::activate::handler),
@@ -162,6 +166,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::get_by_id::handler,
         handlers::revisions::create::handler,
         handlers::revisions::delete::handler,
+        handlers::revisions::truncate::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
         handlers::workers::get_by_id::handler,
@@ -210,6 +215,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::get_by_id::RevisionMetadataInfo,
         handlers::revisions::create::CreatePayload,
         handlers::revisions::create::CreateRevisionResponse,
+        handlers::revisions::truncate::TruncateResponse,
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,

@@ -2071,6 +2071,90 @@
         }
       }
     },
+    "/revisions/{id}/truncate": {
+      "delete": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `DELETE /revisions/{id}/truncate` endpoint",
+        "description": "Truncates a physical table revision by deleting all associated files from\nobject storage and their corresponding metadata, then deletes the revision.\n\n## Path Parameters\n- `id`: The unique identifier of the revision (must be a valid LocationId)\n\n## Response\n- **200 OK**: Revision truncated and deleted successfully\n- **400 Bad Request**: Invalid path parameters\n- **404 Not Found**: Revision not found\n- **409 Conflict**: Revision is currently active, writer job is not terminal,\n  or file metadata rows remain after truncation\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PATH_PARAMETERS`: Invalid path parameters\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters\n- `REVISION_NOT_FOUND`: No revision exists with the specified location ID\n- `REVISION_IS_ACTIVE`: The revision is currently active and must be deactivated before truncation\n- `WRITER_JOB_NOT_TERMINAL`: The revision's writer job is still running and must reach a terminal state before truncation\n- `GET_REVISION_BY_LOCATION_ID_ERROR`: Failed to retrieve revision from database\n- `GET_WRITER_JOB_ERROR`: Failed to retrieve writer job from database\n- `TRUNCATE_ERROR`: Failed to truncate revision files\n- `VERIFY_FILE_METADATA_ERROR`: Failed to verify file metadata cleanup\n- `FILE_METADATA_REMAINING`: File metadata rows remain after truncation\n- `DELETE_REVISION_ERROR`: Failed to delete revision row\n\n## Behavior\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Retrieves the revision to verify it exists\n- Checks that the revision is inactive (active revisions cannot be truncated)\n- Checks that any writer job is in a terminal state (completed, stopped, or failed)\n- Deletes all files from object storage and their metadata rows with bounded concurrency\n- Verifies no file metadata rows remain for the revision\n- Deletes the revision record from the metadata database",
+        "operationId": "truncate_table_revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "concurrency",
+            "in": "query",
+            "description": "Max concurrent file deletions (default: 10)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revision truncated and deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TruncateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision is active, writer job is not terminal, or file metadata remaining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/schema": {
       "post": {
         "tags": [
@@ -3030,6 +3114,21 @@
           },
           "schema": {
             "description": "The output schema for the table\n\nDescribes the structure and types of columns that will be returned\nwhen executing the SQL query for this table."
+          }
+        }
+      },
+      "TruncateResponse": {
+        "type": "object",
+        "description": "Response for truncate operation",
+        "required": [
+          "files_deleted"
+        ],
+        "properties": {
+          "files_deleted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of files deleted from object storage",
+            "minimum": 0
           }
         }
       },
