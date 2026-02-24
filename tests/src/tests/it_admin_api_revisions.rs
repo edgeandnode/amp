@@ -256,7 +256,7 @@ async fn register_revision_succeeds() {
     let ctx = TestCtx::setup("register_revision_succeeds").await;
 
     // Create revisions for each table pointing to eth_rpc_custom paths
-    let path = "eth_rpc_custom/blocks";
+    let path = "_/eth_rpc_custom/blocks";
     let res = ctx
         .register_revision("_/eth_rpc@0.0.0", "blocks", path)
         .await
@@ -450,7 +450,7 @@ async fn restore_revision_with_registered_revision_succeeds() {
     //* Given
     let ctx = TestCtx::setup_with_custom_snapshots("restore_revision_succeeds").await;
     let dataset = ctx
-        .register_revision("_/eth_rpc@0.0.0", "blocks", "eth_rpc_custom/blocks")
+        .register_revision("_/eth_rpc@0.0.0", "blocks", "_/eth_rpc_custom/blocks")
         .await
         .expect("failed to register revision");
     let location_id = dataset.location_id;

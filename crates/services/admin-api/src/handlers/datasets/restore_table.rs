@@ -88,7 +88,7 @@ use crate::{
             ("namespace" = String, Path, description = "Dataset namespace"),
             ("name" = String, Path, description = "Dataset name"),
             ("revision" = String, Path, description = "Revision (version, hash, latest, or dev)"),
-            ("table_name" = String, Path, description = "Table name"),
+            ("table_name" = String, Path, description = "Table name")
         ),
         request_body(content = Option<RestoreTablePayload>, content_type = "application/json"),
         responses(

@@ -15,7 +15,7 @@ async fn restore_table_from_uuid_path_succeeds() {
     //* Given — register and restore a revision for blocks only
     let ctx = TestCtx::setup("restore_table_from_uuid_path_succeeds").await;
     let reg = ctx
-        .register_revision("_/eth_rpc@0.0.0", "blocks", "eth_rpc_custom/blocks")
+        .register_revision("_/eth_rpc@0.0.0", "blocks", "_/eth_rpc_custom/blocks")
         .await
         .expect("failed to register blocks revision");
     ctx.restore_revision(reg.location_id)
@@ -59,7 +59,7 @@ async fn restore_table_with_location_id_succeeds() {
     //* Given — register and restore a revision for blocks, get its location_id
     let ctx = TestCtx::setup_with_custom_snapshots("restore_table_with_location_id_succeeds").await;
     let reg = ctx
-        .register_revision("_/eth_rpc@0.0.0", "blocks", "eth_rpc_custom/blocks")
+        .register_revision("_/eth_rpc@0.0.0", "blocks", "_/eth_rpc_custom/blocks")
         .await
         .expect("failed to register blocks revision");
     ctx.restore_revision(reg.location_id)
