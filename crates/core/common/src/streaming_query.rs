@@ -43,7 +43,9 @@ use crate::{
     exec_env::ExecEnv,
     incrementalizer::incrementalize_plan,
     metadata::segments::{CursorNetworkNotFoundError, Segment},
-    plan_visitors::{order_by_block_num, unproject_special_block_num_column},
+    plan_visitors::{
+        find_cross_network_join, order_by_block_num, unproject_special_block_num_column,
+    },
     sql_str::SqlStr,
 };
 
@@ -87,6 +89,23 @@ pub enum SpawnError {
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
     OptimizePlan(#[source] crate::context::plan::OptimizePlanError),
+
+    /// Query contains a join across tables from different blockchain networks
+    ///
+    /// Common causes:
+    /// - User query explicitly joins tables across networks (e.g., Ethereum + Base)
+    /// - Query references datasets with dependencies across multiple networks
+    /// - Catalog construction includes tables from different networks
+    ///
+    /// The error shows which tables are involved in the cross-network join and
+    /// their respective networks.
+    ///
+    /// **Note**: Batch (non-streaming) queries CAN join across networks because
+    /// they process complete, static ranges rather than incremental updates.
+    #[error("streaming query contains a cross-network join: {info}")]
+    CrossNetworkJoin {
+        info: crate::plan_visitors::CrossNetworkJoinInfo,
+    },
 
     /// Query references tables from multiple blockchain networks
     ///
@@ -341,6 +360,13 @@ impl StreamingQuery {
                 .fields()
                 .iter()
                 .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME);
+
+        // Prevent streaming cross-network joins (check runs before plan optimization).
+        if let Some(info) = find_cross_network_join(&plan, &catalog).map_err(|err| {
+            SpawnError::OptimizePlan(crate::context::plan::OptimizePlanError::Optimize(err))
+        })? {
+            return Err(SpawnError::CrossNetworkJoin { info });
+        }
 
         // This plan is the starting point of each microbatch execution. Transformations applied to it:œ
         // - Propagate the `_block_num` column.
