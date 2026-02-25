@@ -1,3 +1,3 @@
 mod pipeline;
 
-pub use pipeline::{Pipeline, PipelineProperties};
+pub use pipeline::{Pipeline, PipelineProperties, EncoderFactory};

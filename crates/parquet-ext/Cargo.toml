@@ -8,6 +8,19 @@ name = "parquet_ext"
 path = "src/lib.rs"
 bench = false
 
+[[bench]]
+name = "arrow_writer"
+harness = false
+
+[[bench]]
+name = "end_to_end_writer"
+harness = false
+
+[profile.bench]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
 [package.metadata.docs.rs]
 all-features = true
 
@@ -77,3 +90,14 @@ optional = false
 [dependencies.tokio]
 workspace = true
 optional = true
+
+[dev-dependencies.criterion]
+version = "0.5"
+features = ["async_tokio"]
+
+[dev-dependencies.arrow]
+version = "^57.3"
+features = ["test_utils"]
+
+[dev-dependencies.rand]
+workspace = true

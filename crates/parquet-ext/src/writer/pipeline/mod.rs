@@ -16,7 +16,7 @@ use parquet::{
     file::metadata::{KeyValue, ParquetMetaData, RowGroupMetaDataPtr},
 };
 
-pub use self::properties::PipelineProperties;
+pub use self::{properties::PipelineProperties, encoder::EncoderFactory};
 use self::{
     encoder::{EncodedRowGroup, EncoderExecutor, RowGroupEncoder},
     factory::PipelineFactoryBuilder,
