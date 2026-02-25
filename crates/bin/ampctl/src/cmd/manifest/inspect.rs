@@ -100,7 +100,7 @@ pub enum Error {
 
     /// Client error from ManifestsClient
     #[error("client error")]
-    ClientError(#[source] crate::client::manifests::GetError),
+    ClientError(#[source] amp_client_admin::manifests::GetError),
 
     /// Failed to format JSON for display
     #[error("failed to format manifest JSON")]

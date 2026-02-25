@@ -62,7 +62,7 @@ pub async fn run(
 #[derive(serde::Serialize)]
 struct GetOutput {
     #[serde(flatten)]
-    revision: crate::client::revisions::RevisionInfo,
+    revision: amp_client_admin::revisions::RevisionInfo,
 }
 
 impl std::fmt::Display for GetOutput {
@@ -121,7 +121,7 @@ pub enum Error {
     /// - Network or connection errors
     /// - Metadata database errors
     #[error("failed to get table revision")]
-    GetError(#[source] crate::client::revisions::GetByIdError),
+    GetError(#[source] amp_client_admin::revisions::GetByIdError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

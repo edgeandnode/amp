@@ -55,12 +55,12 @@ pub async fn run(
         .map_err(|err| {
             tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to register table revision");
             match err {
-                crate::client::revisions::RegisterError::DatasetNotFound(_) => {
+                amp_client_admin::revisions::RegisterError::DatasetNotFound(_) => {
                     Error::DatasetNotFound {
                         dataset: dataset.clone(),
                     }
                 }
-                crate::client::revisions::RegisterError::ResolveRevision(_) => {
+                amp_client_admin::revisions::RegisterError::ResolveRevision(_) => {
                     Error::ResolveRevision(err)
                 }
                 _ => Error::RegisterError(err),
@@ -119,7 +119,7 @@ pub enum Error {
     /// This occurs when the dataset reference cannot be resolved
     /// to a manifest hash.
     #[error("failed to resolve revision")]
-    ResolveRevision(#[source] crate::client::revisions::RegisterError),
+    ResolveRevision(#[source] amp_client_admin::revisions::RegisterError),
 
     /// Error registering revision via admin API
     ///
@@ -128,7 +128,7 @@ pub enum Error {
     /// - Metadata database errors
     /// - Failed to register the table revision record
     #[error("failed to register table revision")]
-    RegisterError(#[source] crate::client::revisions::RegisterError),
+    RegisterError(#[source] amp_client_admin::revisions::RegisterError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

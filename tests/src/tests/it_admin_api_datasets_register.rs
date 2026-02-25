@@ -1,4 +1,4 @@
-use ampctl::client::{self, datasets::RegisterError};
+use amp_client_admin::{self as client, datasets::RegisterError};
 use datasets_common::{
     fqn::FullyQualifiedName, name::Name, namespace::Namespace, version::Version,
 };

@@ -1,8 +1,8 @@
-use amp_worker_core::jobs::job_id::JobId;
-use ampctl::client::revisions::{
+use amp_client_admin::revisions::{
     ActivateError, DeactivateError, DeleteError, GetByIdError, ListError, RegisterError,
     RegisterResponse, RestoreError, RestoreResponse, RevisionInfo, TruncateError, TruncateResponse,
 };
+use amp_worker_core::jobs::job_id::JobId;
 use datasets_common::reference::Reference;
 use monitoring::logging;
 
@@ -1095,7 +1095,7 @@ impl TestCtx {
     }
 
     /// Restores the `eth_rpc` dataset and returns info about the restored tables.
-    async fn restore_dataset(&self) -> Vec<ampctl::client::datasets::RestoredTableInfo> {
+    async fn restore_dataset(&self) -> Vec<amp_client_admin::datasets::RestoredTableInfo> {
         let dataset_ref: Reference = "_/eth_rpc@0.0.0".parse().expect("valid reference");
         self.ampctl_client
             .restore_dataset(&dataset_ref)
@@ -1104,7 +1104,9 @@ impl TestCtx {
     }
 
     /// Extracts the `location_id` of the "blocks" table from the restored tables list.
-    fn blocks_location_id(restored_tables: &[ampctl::client::datasets::RestoredTableInfo]) -> i64 {
+    fn blocks_location_id(
+        restored_tables: &[amp_client_admin::datasets::RestoredTableInfo],
+    ) -> i64 {
         restored_tables
             .iter()
             .find(|t| t.table_name == "blocks")

@@ -12,7 +12,9 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use crate::{args::GlobalArgs, client::providers::DeleteError};
+use amp_client_admin::providers::DeleteError;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `provider rm` command.
 #[derive(Debug, clap::Args)]

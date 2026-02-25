@@ -73,13 +73,13 @@ pub async fn run(
                 "failed to delete table revision"
             );
             match err {
-                crate::client::revisions::DeleteError::RevisionNotFound(_) => {
+                amp_client_admin::revisions::DeleteError::RevisionNotFound(_) => {
                     Error::NotFound { location_id }
                 }
-                crate::client::revisions::DeleteError::RevisionIsActive(_) => {
+                amp_client_admin::revisions::DeleteError::RevisionIsActive(_) => {
                     Error::RevisionIsActive { location_id }
                 }
-                crate::client::revisions::DeleteError::WriterJobNotTerminal(_) => {
+                amp_client_admin::revisions::DeleteError::WriterJobNotTerminal(_) => {
                     Error::WriterJobNotTerminal { location_id }
                 }
                 other => Error::DeleteError(other),
@@ -145,7 +145,7 @@ pub enum Error {
     /// - Network or connection errors
     /// - Database errors
     #[error("failed to delete table revision")]
-    DeleteError(#[source] crate::client::revisions::DeleteError),
+    DeleteError(#[source] amp_client_admin::revisions::DeleteError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

@@ -10,10 +10,11 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin as client;
 use amp_worker_core::node_id::NodeId;
 use monitoring::logging;
 
-use crate::{args::GlobalArgs, client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `worker inspect` command.
 #[derive(Debug, clap::Args)]

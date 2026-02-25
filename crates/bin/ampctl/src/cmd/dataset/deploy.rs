@@ -15,7 +15,7 @@
 //! - End block: `--end-block` flag (optional) - "latest", block number, or negative offset
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use admin_client::datasets::NodeSelector;
+use amp_client_admin::datasets::NodeSelector;
 use amp_worker_core::jobs::job_id::JobId;
 use datasets_common::{end_block::EndBlock, reference::Reference};
 
@@ -146,7 +146,7 @@ pub enum Error {
 
     /// Deployment error from the client
     #[error("deployment failed")]
-    Deploy(#[source] crate::client::datasets::DeployError),
+    Deploy(#[source] amp_client_admin::datasets::DeployError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

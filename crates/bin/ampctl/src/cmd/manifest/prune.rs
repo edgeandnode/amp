@@ -13,7 +13,9 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use crate::{args::GlobalArgs, client};
+use amp_client_admin as client;
+
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest prune` command.
 #[derive(Debug, clap::Args)]
@@ -95,7 +97,7 @@ pub enum Error {
     /// - Database permissions prevent the query operation
     /// - SQL execution errors during the orphaned manifest lookup
     #[error("list orphaned manifests error")]
-    ListOrphanedManifestsError(#[source] crate::client::manifests::PruneError),
+    ListOrphanedManifestsError(#[source] amp_client_admin::manifests::PruneError),
 
     /// Network or connection error communicating with admin API
     ///
@@ -105,7 +107,7 @@ pub enum Error {
     /// - DNS resolution fails for the admin URL
     /// - TLS/SSL connection issues
     #[error("network error")]
-    Network(#[source] crate::client::manifests::PruneError),
+    Network(#[source] amp_client_admin::manifests::PruneError),
 
     /// Unexpected response from the admin API
     ///
@@ -115,7 +117,7 @@ pub enum Error {
     /// - API responds with an error not covered by specific error cases
     /// - Server returns malformed or incomplete response
     #[error("unexpected response")]
-    UnexpectedResponse(#[source] crate::client::manifests::PruneError),
+    UnexpectedResponse(#[source] amp_client_admin::manifests::PruneError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

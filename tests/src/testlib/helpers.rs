@@ -63,7 +63,7 @@ pub async fn wait_for_job_completion(
     is_continuous: bool,
     timeout: Duration,
     poll_interval: Duration,
-) -> Result<ampctl::client::jobs::JobInfo> {
+) -> Result<amp_client_admin::jobs::JobInfo> {
     let start = tokio::time::Instant::now();
 
     loop {
@@ -130,7 +130,7 @@ pub async fn deploy_and_wait(
     dataset_ref: &Reference,
     end_block: Option<u64>,
     timeout: Duration,
-) -> Result<ampctl::client::jobs::JobInfo> {
+) -> Result<amp_client_admin::jobs::JobInfo> {
     let is_continuous = end_block.is_none();
     let job_id = ampctl
         .dataset_deploy(

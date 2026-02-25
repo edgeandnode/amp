@@ -51,12 +51,12 @@ pub async fn run(
         .map_err(|err| {
             tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to deactivate table revisions");
             match err {
-                crate::client::revisions::DeactivateError::DatasetNotFound(_) => {
+                amp_client_admin::revisions::DeactivateError::DatasetNotFound(_) => {
                     Error::DatasetNotFound {
                         dataset: dataset.clone(),
                     }
                 }
-                crate::client::revisions::DeactivateError::TableNotFound(_) => {
+                amp_client_admin::revisions::DeactivateError::TableNotFound(_) => {
                     Error::TableNotFound {
                         table_name: table_name.clone(),
                         dataset: dataset.clone(),
@@ -122,7 +122,7 @@ pub enum Error {
     /// - Metadata database errors
     /// - Failed to resolve revision to manifest hash
     #[error("failed to deactivate table revisions")]
-    DeactivateError(#[source] crate::client::revisions::DeactivateError),
+    DeactivateError(#[source] amp_client_admin::revisions::DeactivateError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

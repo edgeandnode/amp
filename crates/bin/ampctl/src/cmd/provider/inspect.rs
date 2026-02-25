@@ -96,7 +96,7 @@ pub enum Error {
 
     /// Client error from the API
     #[error("client error")]
-    ClientError(#[source] crate::client::providers::GetError),
+    ClientError(#[source] amp_client_admin::providers::GetError),
 
     /// Failed to format JSON for display
     #[error("failed to format provider JSON")]

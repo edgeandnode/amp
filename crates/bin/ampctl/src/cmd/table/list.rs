@@ -12,9 +12,10 @@
 //! - Limit: `--limit` flag to limit the number of results
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin as client;
 use monitoring::logging;
 
-use crate::{args::GlobalArgs, client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `table list` command.
 #[derive(Debug, clap::Args)]

@@ -1,5 +1,5 @@
-use ampctl::client::{
-    self,
+use amp_client_admin::{
+    self as client,
     datasets::RestoreTableError,
     revisions::{RegisterError, RegisterResponse, RestoreError, RestoreResponse},
 };

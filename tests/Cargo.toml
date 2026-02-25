@@ -20,6 +20,7 @@ amp-datasets-registry = { path = "../crates/core/datasets-registry" }
 amp-object-store = { path = "../crates/core/object-store" }
 amp-providers-registry = { path = "../crates/core/providers-registry" }
 amp-worker-core = { path = "../crates/core/worker-core" }
+amp-client-admin = { package = "admin-client", path = "../crates/clients/admin" }
 ampctl = { path = "../crates/bin/ampctl" }
 anyhow.workspace = true
 arrow-flight.workspace = true

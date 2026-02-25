@@ -19,9 +19,10 @@
 //! - Status filter: Optional `--status` flag (terminal, completed, stopped, error)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin::Client;
 use monitoring::logging;
 
-use crate::{args::GlobalArgs, client::Client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `jobs prune` command.
 #[derive(Debug, clap::Args)]
@@ -30,8 +31,8 @@ pub struct Args {
     pub global: GlobalArgs,
 
     /// Optional status filter (terminal, complete, stopped, error)
-    #[arg(long, short = 's', value_parser = clap::value_parser!(crate::client::jobs::JobStatusFilter))]
-    pub status: Option<crate::client::jobs::JobStatusFilter>,
+    #[arg(long, short = 's', value_parser = clap::value_parser!(amp_client_admin::jobs::JobStatusFilter))]
+    pub status: Option<amp_client_admin::jobs::JobStatusFilter>,
 }
 
 /// Prune jobs via the admin API.
@@ -60,7 +61,7 @@ pub async fn run(Args { global, status }: Args) -> Result<(), Error> {
 #[tracing::instrument(skip_all)]
 async fn prune_jobs(
     client: &Client,
-    status: Option<&crate::client::jobs::JobStatusFilter>,
+    status: Option<&amp_client_admin::jobs::JobStatusFilter>,
 ) -> Result<(), Error> {
     tracing::debug!("Pruning jobs via admin API");
 
@@ -97,7 +98,7 @@ pub enum Error {
 
     /// Error for job pruning operations.
     #[error("failed to prune jobs")]
-    DeleteError(#[source] crate::client::jobs::DeleteByStatusError),
+    DeleteError(#[source] amp_client_admin::jobs::DeleteByStatusError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

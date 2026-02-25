@@ -13,11 +13,12 @@
 //! - Status: `--status` flag (default: "active" for non-terminal jobs, can be "all" or comma-separated statuses)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin as client;
 use amp_worker_core::jobs::job_id::JobId;
 use monitoring::logging;
 use worker::job::JobDescriptor;
 
-use crate::{args::GlobalArgs, client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `jobs list` command.
 #[derive(Debug, clap::Args)]
@@ -93,7 +94,7 @@ async fn get_jobs(
 #[derive(serde::Serialize)]
 struct ListResult {
     #[serde(flatten)]
-    data: crate::client::jobs::JobsResponse,
+    data: amp_client_admin::jobs::JobsResponse,
 }
 
 impl std::fmt::Display for ListResult {

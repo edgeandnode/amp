@@ -45,8 +45,8 @@ impl GlobalArgs {
     /// # Errors
     ///
     /// Returns an error if the token is invalid or the client cannot be built.
-    pub fn build_client(&self) -> Result<crate::client::Client, BuildClientError> {
-        let mut client_builder = crate::client::build(self.admin_url.clone());
+    pub fn build_client(&self) -> Result<amp_client_admin::Client, BuildClientError> {
+        let mut client_builder = amp_client_admin::build(self.admin_url.clone());
 
         if let Some(token) = self.auth_token.as_deref() {
             client_builder = client_builder
@@ -64,9 +64,9 @@ impl GlobalArgs {
 pub enum BuildClientError {
     /// Invalid authentication token
     #[error("invalid authentication token")]
-    InvalidAuthToken(#[source] crate::client::auth::BearerTokenError),
+    InvalidAuthToken(#[source] amp_client_admin::auth::BearerTokenError),
 
     /// Failed to build client
     #[error("failed to build admin API client")]
-    ClientBuildError(#[source] crate::client::BuildError),
+    ClientBuildError(#[source] amp_client_admin::BuildError),
 }

@@ -213,7 +213,7 @@ pub enum Error {
 
     /// Error from the provider client
     #[error("provider registration failed")]
-    ClientError(#[source] crate::client::providers::RegisterError),
+    ClientError(#[source] amp_client_admin::providers::RegisterError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

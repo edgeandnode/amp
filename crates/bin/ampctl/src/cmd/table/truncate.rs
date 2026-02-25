@@ -75,13 +75,13 @@ pub async fn run(
         .map_err(|err| {
             tracing::error!(error = %err, error_source = logging::error_source(&err), "failed to truncate table revision");
             match err {
-                crate::client::revisions::TruncateError::RevisionNotFound(_) => {
+                amp_client_admin::revisions::TruncateError::RevisionNotFound(_) => {
                     Error::NotFound { location_id }
                 }
-                crate::client::revisions::TruncateError::RevisionIsActive(_) => {
+                amp_client_admin::revisions::TruncateError::RevisionIsActive(_) => {
                     Error::RevisionIsActive { location_id }
                 }
-                crate::client::revisions::TruncateError::WriterJobNotTerminal(_) => {
+                amp_client_admin::revisions::TruncateError::WriterJobNotTerminal(_) => {
                     Error::WriterJobNotTerminal { location_id }
                 }
                 other => Error::TruncateError(other),
@@ -152,7 +152,7 @@ pub enum Error {
     /// - Network or connection errors
     /// - Database or object store errors
     #[error("failed to truncate table revision")]
-    TruncateError(#[source] crate::client::revisions::TruncateError),
+    TruncateError(#[source] amp_client_admin::revisions::TruncateError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]
