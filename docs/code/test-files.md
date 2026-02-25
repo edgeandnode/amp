@@ -13,7 +13,7 @@ This document defines where test files and modules go in the directory structure
 
 For test function authoring (naming, Given-When-Then structure, assertions), see [test-functions.md](test-functions.md).
 
-For the three-tier testing strategy overview, see [test-strategy.md](test-strategy.md).
+For test type selection and placement, see [test-organization.md](test-organization.md).
 
 ## Table of Contents
 
@@ -23,7 +23,8 @@ For the three-tier testing strategy overview, see [test-strategy.md](test-strate
 4. [Public API Integration Test Placement](#public-api-integration-test-placement)
 5. [The it_ Naming Convention](#the-it_-naming-convention)
 6. [Module Structure Within cfg(test)](#module-structure-within-cfgtest)
-7. [File Naming Rules](#file-naming-rules)
+7. [Progressive Test Complexity](#progressive-test-complexity)
+8. [File Naming Rules](#file-naming-rules)
 
 ---
 
@@ -43,7 +44,7 @@ For the three-tier testing strategy overview, see [test-strategy.md](test-strate
     it_api_workers.rs      # Public API integration tests (it_ prefix)
 ```
 
-**Critical Rule**: The `it_` prefix distinguishes integration tests (testing cross-component interaction, which may or may not require external dependencies) from unit tests (testing a single function in isolation). For nextest filtering of external-dependency tests, name/regex patterns are used — the `it_` prefix alone does not determine whether a test needs external services.
+**Critical Rule**: The `it_` prefix is the **sole mechanism** that distinguishes integration tests (external dependencies: DB, network) from unit tests (no external dependencies, milliseconds). See [test-organization.md](test-organization.md) for test type selection and placement.
 
 ---
 
@@ -225,7 +226,7 @@ mod tests {
         use crate::temp::temp_metadata_db;
 
         #[tokio::test]
-        async fn update_heartbeat_timestamp_updates_worker_record() {
+        async fn update_heartbeat_timestamp_with_existing_worker_succeeds() {
             //* Given
             let db = temp_metadata_db().await;
             let worker_id = WorkerId::new(1);
@@ -281,7 +282,7 @@ use crate::workers::*;
 use crate::temp::temp_metadata_db;
 
 #[tokio::test]
-async fn update_heartbeat_timestamp_updates_worker_record() {
+async fn update_heartbeat_timestamp_with_existing_worker_succeeds() {
     //* Given
     let db = temp_metadata_db().await;
     let worker_id = WorkerId::new(1);
@@ -402,12 +403,10 @@ The `it_` prefix is **CRITICAL** for distinguishing integration tests from unit 
 
 ### Why This Matters
 
-The `it_` prefix identifies integration tests (cross-component interaction) broadly, enabling:
-- Separation of unit tests (fast, isolated) from integration tests (multi-component)
-- Targeted test execution via `cargo test 'tests::it_'` or `-- --skip 'tests::it_'`
-- Organized test output with clear module path distinction
-
-For filtering tests that require **external dependencies** specifically (database, network), nextest profiles use name/regex patterns beyond just the `it_` prefix. The prefix provides the first level of categorization; nextest configuration provides fine-grained control.
+The `it_` prefix is the **sole mechanism** that distinguishes integration tests (external dependencies) from unit tests (no external dependencies), enabling:
+- Nextest profile filtering: `unit` excludes `test(/::it_/)`, `integration` includes it
+- Targeted execution via `cargo test 'tests::it_'` or `-- --skip 'tests::it_'`
+- Clear test output with module path distinction
 
 **Violating this convention breaks test filtering and causes local test failures.**
 
@@ -458,6 +457,112 @@ mod tests {
 - Reduces namespace pollution
 - Makes test output more organized
 - Allows shared test utilities per concern
+
+---
+
+## Progressive Test Complexity
+
+Structure tests from simple to complex within each category. This pattern helps maintain clarity and makes test failures easier to debug.
+
+### Progression Pattern
+
+Within a test module, organize tests in order of increasing complexity:
+
+1. **Basic functionality** — Happy path with minimal setup
+2. **With configuration** — Custom options and parameters
+3. **Error scenarios** — Invalid inputs, boundary cases
+4. **External dependencies** — Database, network, filesystem
+5. **Full integration** — Complete workflows, multiple resources
+
+### Example
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod feature_progression {
+        use super::*;
+
+        // 1. Basic functionality
+        #[test]
+        fn validate_input_with_defaults_succeeds() {
+            //* Given
+            let input = create_basic_input();
+
+            //* When
+            let result = validate_input(input);
+
+            //* Then
+            assert!(result.is_ok(), "validation with default input should succeed");
+        }
+
+        // 2. With configuration
+        #[test]
+        fn validate_input_with_custom_config_succeeds() {
+            //* Given
+            let config = CustomConfig { option: true };
+
+            //* When
+            let result = validate_input_with_config(config);
+
+            //* Then
+            assert_eq!(result, expected_configured_value);
+        }
+
+        // 3. Error scenarios
+        #[test]
+        fn validate_input_with_empty_string_fails() {
+            //* Given
+            let invalid_input = create_invalid_input();
+
+            //* When
+            let result = validate_input(invalid_input);
+
+            //* Then
+            assert!(result.is_err(), "validation with invalid input should fail");
+        }
+    }
+
+    mod it_feature_progression {
+        use super::*;
+        use crate::temp::temp_metadata_db;
+
+        // 4. External dependencies
+        #[tokio::test]
+        async fn insert_record_with_valid_data_succeeds() {
+            //* Given
+            let db = temp_metadata_db().await;
+            let test_data = create_test_data();
+
+            //* When
+            let result = insert_record(&db.pool, test_data).await;
+
+            //* Then
+            assert!(result.is_ok(), "inserting valid record should succeed");
+        }
+
+        // 5. Full integration
+        #[tokio::test]
+        async fn register_and_schedule_workflow_succeeds() {
+            //* Given
+            let db = temp_metadata_db().await;
+            let workflow_data = create_workflow_data();
+
+            //* When
+            let result = complete_workflow(&db, workflow_data).await;
+
+            //* Then
+            assert!(result.is_ok(), "complete workflow should succeed");
+            let completed = get_workflow_status(&db).await
+                .expect("should retrieve workflow status");
+            assert!(completed.is_finished, "workflow should be marked as finished");
+        }
+    }
+}
+```
+
+**Benefits**: This progression makes it easy to locate the right test when debugging failures, and it guides developers to write simple tests before complex ones.
 
 ---
 

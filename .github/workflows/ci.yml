@@ -18,7 +18,7 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  unit-tests:
+  test-unit:
     name: Unit tests
     runs-on: namespace-profile-linux-default
     timeout-minutes: 10
@@ -51,8 +51,59 @@ jobs:
       - name: Unit tests
         run: just test-unit --verbose
 
-  integration-tests:
+  test-integration:
     name: Integration tests
+    # Run on push to main, and on PRs only if they're not from a fork
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: namespace-profile-linux-default
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql
+
+          # Add PostgreSQL binaries to PATH
+          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
+
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+        with:
+          cache: true
+          rustflags: ""
+
+      - name: Install cargo-nextest
+        uses: baptiste0928/cargo-install@b687c656bda5733207e629b50a22bf68974a0305 # v3
+        with:
+          crate: cargo-nextest
+          version: ^0.9
+
+      - name: Integration tests
+        env:
+          FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
+          FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
+          FIREHOSE_ETH_BASE_URL: ${{ secrets.FIREHOSE_ETH_BASE_URL }}
+          FIREHOSE_ETH_BASE_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }} # Token is the same for both networks
+          ETH_MAINNET_RPC_URL: ${{ secrets.ETH_MAINNET_RPC_URL }}
+          ETH_MAINNET_RPC_AUTH_HEADER: ${{ secrets.ETH_MAINNET_RPC_AUTH_HEADER }}
+          ETH_MAINNET_RPC_AUTH_TOKEN: ${{ secrets.ETH_MAINNET_RPC_AUTH_TOKEN }}
+          ETH_BASE_RPC_URL: ${{ secrets.ETH_BASE_RPC_URL }}
+          ETH_BASE_RPC_AUTH_HEADER: ${{ secrets.ETH_BASE_RPC_AUTH_HEADER }}
+          ETH_BASE_RPC_AUTH_TOKEN: ${{ secrets.ETH_BASE_RPC_AUTH_TOKEN }}
+          SOLANA_MAINNET_HTTP_URL: ${{ secrets.SOLANA_MAINNET_HTTP_URL }} # TODO: Remove
+          SOLANA_MAINNET_RPC_URL: ${{ secrets.SOLANA_MAINNET_RPC_URL }}
+          SOLANA_MAINNET_RPC_AUTH_HEADER: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_HEADER }}
+          SOLANA_MAINNET_RPC_AUTH_TOKEN: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_TOKEN }}
+        run: just test-integration --verbose
+
+  test-e2e:
+    name: E2E tests
     # Run on push to main, and on PRs only if they're not from a fork
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: namespace-profile-linux-default
@@ -102,8 +153,8 @@ jobs:
           crate: cargo-nextest
           version: ^0.9
 
-      - name: Integration tests
-        run: just test-it --verbose
+      - name: E2E tests
+        run: just test-e2e --verbose
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
@@ -120,8 +171,8 @@ jobs:
           SOLANA_MAINNET_RPC_AUTH_HEADER: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_HEADER }}
           SOLANA_MAINNET_RPC_AUTH_TOKEN: ${{ secrets.SOLANA_MAINNET_RPC_AUTH_TOKEN }}
 
-  ampup-tests:
-    name: Test ampup
+  test-ampup:
+    name: Ampup tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

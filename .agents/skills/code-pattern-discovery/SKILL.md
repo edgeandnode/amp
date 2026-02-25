@@ -86,7 +86,7 @@ Read the full content of matched pattern docs using the Read tool.
 - Type design: "rust-types"
 - Logging: "logging", "logging-errors"
 - Documentation: "rust-documentation"
-- Testing: "test-functions", "test-files", "test-strategy"
+- Testing: "test-functions", "test-files", "test-organization"
 - CLI: "apps-cli"
 - Service pattern: "rust-service"
 
@@ -110,7 +110,7 @@ Read the full content of matched pattern docs using the Read tool.
 - User asks "how do I handle errors?" -> match `name: "errors-handling"`
 - User asks "module organization" -> match `name: "rust-modules"`
 - User working in `admin-api` crate -> match `scope: "crate:admin-api"`
-- User asks "how to write tests?" -> match "test-functions", "test-files", or "test-strategy"
+- User asks "how to write tests?" -> match "test-functions", "test-files", or "test-organization"
 
 ### Semantic Matches (Using "Load when" Triggers)
 
@@ -147,7 +147,7 @@ Load multiple pattern docs when:
 
 - **Before editing code**: Load relevant core patterns (error-handling, modules, types)
 - **Before adding logs**: Load logging pattern
-- **Before writing tests**: Load test-functions, test-files, test-strategy
+- **Before writing tests**: Load test-functions, test-files, test-organization
 - **Before documenting**: Load rust-documentation pattern
 - **When creating crates**: Load rust-workspace, rust-crate
 - **When creating services**: Load rust-service, services
@@ -190,7 +190,7 @@ Load multiple pattern docs when:
 
 1. Run the discovery command to extract pattern metadata
 2. Match "test" against pattern descriptions
-3. Find matches: test-functions, test-files, test-strategy
+3. Find matches: test-functions, test-files, test-organization
 4. Load `docs/code/test-functions.md` (and related test pattern docs as needed)
 5. Guide test implementation following patterns
 

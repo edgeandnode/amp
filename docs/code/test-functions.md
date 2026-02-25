@@ -15,7 +15,7 @@ This document covers the essential patterns for writing a single test function: 
 
 For test file organization (where tests go in the directory structure), see [Test File Organization](test-files.md).
 
-For understanding the three-tier testing strategy, see [Test Strategy](test-strategy.md).
+For test type selection and placement, see [Test Organization](test-organization.md).
 
 ---
 
@@ -573,4 +573,4 @@ Example: If you're testing `get_user()` but then uppercase the returned name to 
 
 ---
 
-This document covers all essential patterns for authoring individual test functions. For test file organization patterns, see [Test File Organization](test-files.md). For understanding the overall testing strategy, see [Test Strategy](test-strategy.md).
+This document covers all essential patterns for authoring individual test functions. For test file organization patterns, see [Test File Organization](test-files.md). For test type selection and placement, see [Test Organization](test-organization.md).
