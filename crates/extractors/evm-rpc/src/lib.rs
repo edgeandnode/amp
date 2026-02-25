@@ -125,7 +125,7 @@ pub async fn client(
             config.rpc_batch_size,
             config.rate_limit_per_minute,
             config.fetch_receipts_per_tx,
-            config.timeout_secs,
+            config.timeout,
             auth,
             meter,
         )?,

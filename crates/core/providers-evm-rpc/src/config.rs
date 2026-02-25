@@ -1,7 +1,8 @@
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, time::Duration};
 
 use amp_providers_common::{network_id::NetworkId, redacted::Redacted};
 use headers::{HeaderName, HeaderValue};
+use serde_with::{DurationSeconds, serde_as};
 use url::Url;
 
 use crate::kind::EvmRpcProviderKind;
@@ -11,6 +12,7 @@ use crate::kind::EvmRpcProviderKind;
 /// This struct contains only the fields needed for provider construction.
 /// The `kind` field validates that the config belongs to an `evm-rpc` provider
 /// at deserialization time.
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct EvmRpcProviderConfig {
@@ -63,8 +65,10 @@ pub struct EvmRpcProviderConfig {
     /// and treated as errors.
     ///
     /// Default: 30 seconds
-    #[serde(default = "default_timeout_secs")]
-    pub timeout_secs: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    #[serde(default = "default_timeout", rename = "timeout_secs")]
+    #[cfg_attr(feature = "schemars", schemars(with = "u64"))]
+    pub timeout: Duration,
 }
 
 /// Validated HTTP header name for custom authentication.
@@ -117,6 +121,6 @@ impl<'de> serde::Deserialize<'de> for AuthToken {
 }
 
 /// Default timeout for RPC requests (30 seconds)
-fn default_timeout_secs() -> u64 {
-    30
+fn default_timeout() -> Duration {
+    Duration::from_secs(30)
 }
