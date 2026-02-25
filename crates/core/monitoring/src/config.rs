@@ -3,7 +3,6 @@ use std::time::Duration;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct OpenTelemetryConfig {
     /// Remote OpenTelemetry metrics collector endpoint. Metrics are sent over binary HTTP.
     pub metrics_url: Option<String>,
@@ -15,7 +14,6 @@ pub struct OpenTelemetryConfig {
         rename = "metrics_export_interval_secs",
         deserialize_with = "deserialize_duration"
     )]
-    #[cfg_attr(feature = "schemars", schemars(with = "Option<f64>"))]
     pub metrics_export_interval: Option<Duration>,
     /// Remote OpenTelemetry traces collector endpoint. Traces are sent over HTTP.
     pub trace_url: Option<String>,

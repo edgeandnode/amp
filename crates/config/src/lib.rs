@@ -6,11 +6,11 @@ use std::{
 use amp_object_store::url::{ObjectStoreUrl, ObjectStoreUrlError};
 use amp_worker_core::{ConfigDuration, ParquetConfig};
 use fs_err as fs;
-use monitoring::config::OpenTelemetryConfig;
 
 mod config_file;
 pub mod controller;
 pub mod metadb;
+pub mod monitoring;
 mod redacted;
 pub mod server;
 
@@ -23,7 +23,7 @@ pub use self::{
     metadb::{DEFAULT_METADB_CONN_POOL_SIZE, DEFAULT_METADB_DIRNAME, MetadataDbConfig},
     redacted::Redacted,
 };
-use self::{controller::ControllerAddrs, server::ServerAddrs};
+use self::{controller::ControllerAddrs, monitoring::OpenTelemetryConfig, server::ServerAddrs};
 
 /// Default amp dir name (created inside the base directory)
 pub const DEFAULT_AMP_DIR_NAME: &str = ".amp";
