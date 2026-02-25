@@ -1,22 +1,30 @@
 #[macro_use]
 extern crate criterion;
 
-use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
-use parquet::arrow::arrow_writer::{ArrowRowGroupWriterFactory, compute_leaves};
-use parquet::basic::{Compression, ZstdLevel};
+use std::{hint::black_box, io::Empty, sync::Arc};
 
-use std::hint::black_box;
-use std::io::Empty;
-use std::sync::Arc;
-
-use arrow::datatypes::*;
-use arrow::util::bench_util::{create_f16_array, create_f32_array, create_f64_array};
-use arrow::{record_batch::RecordBatch, util::data_gen::*};
+use arrow::{
+    datatypes::*,
+    record_batch::RecordBatch,
+    util::{
+        bench_util::{create_f16_array, create_f32_array, create_f64_array},
+        data_gen::*,
+    },
+};
 use arrow_array::RecordBatchOptions;
-use parquet::arrow::ArrowSchemaConverter;
-use parquet::errors::Result;
-use parquet::file::properties::{WriterProperties, WriterVersion};
-use parquet::file::writer::SerializedFileWriter;
+use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
+use parquet::{
+    arrow::{
+        ArrowSchemaConverter,
+        arrow_writer::{ArrowRowGroupWriterFactory, compute_leaves},
+    },
+    basic::{Compression, ZstdLevel},
+    errors::Result,
+    file::{
+        properties::{WriterProperties, WriterVersion},
+        writer::SerializedFileWriter,
+    },
+};
 use parquet_ext::writer::EncoderFactory;
 
 fn create_primitive_bench_batch(

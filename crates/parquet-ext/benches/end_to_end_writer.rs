@@ -1,10 +1,9 @@
-use std::sync::Arc;
-use std::marker;
+use std::{marker, sync::Arc};
 
-use arrow_array::builder::{ArrayBuilder, Int32Builder, ListBuilder, StringBuilder};
 use arrow_array::{
     ArrayRef, BooleanArray, Float64Array, Int32Array, Int64Array, RecordBatch, StringArray,
     StructArray,
+    builder::{ArrayBuilder, Int32Builder, ListBuilder, StringBuilder},
 };
 use arrow_schema::{DataType, Field, Schema};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -551,9 +550,8 @@ fn writer_benchmarks(c: &mut Criterion) {
                             BenchmarkId::new("this_crate", &param),
                             &input,
                             |b, input| {
-                                b.to_async(&rt).iter(|| {
-                                    bench_our_writer(input.batches, &input.props)
-                                });
+                                b.to_async(&rt)
+                                    .iter(|| bench_our_writer(input.batches, &input.props));
                             },
                         );
 
@@ -564,9 +562,8 @@ fn writer_benchmarks(c: &mut Criterion) {
                             BenchmarkId::new("parquet_crate", &param),
                             &input,
                             |b, input| {
-                                b.to_async(&rt).iter(|| {
-                                    bench_parquet_writer(input.batches, &input.props)
-                                });
+                                b.to_async(&rt)
+                                    .iter(|| bench_parquet_writer(input.batches, &input.props));
                             },
                         );
                 }
