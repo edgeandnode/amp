@@ -247,7 +247,7 @@
       ]
     },
     "OpenTelemetryConfig": {
-      "description": "OpenTelemetry observability configuration for metrics and tracing.\n\nThis is the application-level config type used for TOML deserialization and JSON schema\ngeneration. It is converted to [`monitoring::config::OpenTelemetryConfig`] before being\npassed to the monitoring crate.",
+      "description": "OpenTelemetry observability configuration for metrics and tracing.\n\nControls export of metrics and traces to an OpenTelemetry-compatible collector\nvia OTLP/HTTP.",
       "type": "object",
       "properties": {
         "metrics_export_interval_secs": {

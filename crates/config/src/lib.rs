@@ -10,6 +10,7 @@ use fs_err as fs;
 mod config_file;
 pub mod controller;
 pub mod metadb;
+pub mod monitoring;
 mod redacted;
 pub mod server;
 
@@ -209,7 +210,7 @@ pub struct Config {
     /// Maximum interval for streaming server microbatches (in blocks).
     pub server_microbatch_max_interval: u64,
     /// OpenTelemetry observability configuration.
-    pub opentelemetry: Option<OpenTelemetryConfig>,
+    pub opentelemetry: Option<monitoring::OpenTelemetryConfig>,
     /// Network addresses for query server endpoints.
     pub server_addrs: ServerAddrs,
     /// Network address for the controller Admin API endpoint.
@@ -286,63 +287,6 @@ pub struct KafkaEventsConfig {
     /// When enabled, connections to Kafka brokers use TLS.
     #[serde(default)]
     pub tls_enabled: bool,
-}
-
-/// OpenTelemetry observability configuration for metrics and tracing.
-///
-/// This is the application-level config type used for TOML deserialization and JSON schema
-/// generation. It is converted to [`monitoring::config::OpenTelemetryConfig`] before being
-/// passed to the monitoring crate.
-#[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct OpenTelemetryConfig {
-    /// Remote OpenTelemetry metrics collector endpoint.
-    /// Metrics are sent over binary HTTP (OTLP/HTTP).
-    /// Example: `"http://localhost:4318"`
-    pub metrics_url: Option<String>,
-
-    /// Interval (in seconds) between metrics exports to the collector.
-    /// Only used when `metrics_url` is set. Uses the SDK default if omitted.
-    #[serde(
-        default,
-        rename = "metrics_export_interval_secs",
-        deserialize_with = "deserialize_otel_duration"
-    )]
-    #[cfg_attr(feature = "schemars", schemars(with = "Option<f64>"))]
-    pub metrics_export_interval: Option<Duration>,
-
-    /// Remote OpenTelemetry traces collector endpoint.
-    /// Traces are sent over HTTP (OTLP/HTTP).
-    /// Example: `"http://localhost:4318"`
-    pub trace_url: Option<String>,
-
-    /// Ratio of traces to sample, from 0.0 (none) to 1.0 (all).
-    /// Default: 1.0 (sample every trace).
-    #[serde(default = "default_trace_ratio")]
-    pub trace_ratio: f64,
-}
-
-fn default_trace_ratio() -> f64 {
-    1.0
-}
-
-fn deserialize_otel_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    <Option<f64> as serde::Deserialize>::deserialize(deserializer)
-        .map(|option| option.map(Duration::from_secs_f64))
-}
-
-impl From<&OpenTelemetryConfig> for monitoring::config::OpenTelemetryConfig {
-    fn from(config: &OpenTelemetryConfig) -> Self {
-        Self {
-            metrics_url: config.metrics_url.clone(),
-            metrics_export_interval: config.metrics_export_interval,
-            trace_url: config.trace_url.clone(),
-            trace_ratio: config.trace_ratio,
-        }
-    }
 }
 
 /// Ensures the `.amp/` base directory structure exists (for solo mode).

@@ -33,7 +33,7 @@ use figment::{
     providers::{Env, Format as _, Serialized, Toml},
 };
 
-use crate::OpenTelemetryConfig;
+use crate::monitoring::OpenTelemetryConfig;
 
 /// Default data directory name - stores Parquet files
 pub const DEFAULT_DATA_DIRNAME: &str = "data";
