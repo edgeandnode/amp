@@ -6,7 +6,7 @@ license-file.workspace = true
 
 [features]
 # JSON Schema generation support for configuration validation
-schemars = ["dep:schemars", "amp-worker-core/schemars", "monitoring/schemars"]
+schemars = ["dep:schemars", "amp-worker-core/schemars"]
 
 [dependencies]
 amp-object-store = { path = "../core/object-store" }
