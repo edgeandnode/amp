@@ -1,5 +1,5 @@
+use amp_client_admin::{self as client, datasets::ListJobsError};
 use amp_worker_core::jobs::job_id::JobId;
-use ampctl::client::{self, datasets::ListJobsError};
 use datasets_common::{
     fqn::FullyQualifiedName, name::Name, namespace::Namespace, reference::Reference,
     revision::Revision, version::Version,

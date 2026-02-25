@@ -10,9 +10,10 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin as client;
 use monitoring::logging;
 
-use crate::{args::GlobalArgs, client};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest list` command.
 #[derive(Debug, clap::Args)]
@@ -90,7 +91,7 @@ pub enum Error {
 
     /// Client error from the API
     #[error("client error")]
-    ClientError(#[source] crate::client::manifests::ListAllError),
+    ClientError(#[source] amp_client_admin::manifests::ListAllError),
 
     /// Failed to format JSON for display
     #[error("failed to format manifests JSON")]

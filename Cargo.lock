@@ -12713,6 +12713,7 @@ dependencies = [
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "admin-client",
  "alloy",
  "amp-client",
  "amp-config",

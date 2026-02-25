@@ -6,11 +6,11 @@
 //! - Idempotent behavior for jobs in terminal states (completed, failed)
 //! - Error handling for nonexistent jobs
 
-use amp_worker_core::jobs::job_id::JobId;
-use ampctl::client::{
-    self,
+use amp_client_admin::{
+    self as client,
     jobs::{JobInfo, StopError},
 };
+use amp_worker_core::jobs::job_id::JobId;
 use datasets_common::{
     end_block::EndBlock, fqn::FullyQualifiedName, name::Name, namespace::Namespace,
     reference::Reference, revision::Revision, version::Version,

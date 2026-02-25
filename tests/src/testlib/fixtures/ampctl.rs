@@ -4,8 +4,8 @@
 //! and provider configurations with the Admin API in test environments. It uses
 //! the ampctl admin API client for direct programmatic access.
 
+use amp_client_admin::{Client, datasets::NodeSelector};
 use amp_worker_core::jobs::job_id::JobId;
-use ampctl::client::datasets::NodeSelector;
 use anyhow::{Result, anyhow};
 use datasets_common::{end_block::EndBlock, hash::Hash, reference::Reference};
 use serde_json::value::RawValue;
@@ -18,7 +18,7 @@ use url::Url;
 /// make HTTP requests directly.
 #[derive(Clone, Debug)]
 pub struct Ampctl {
-    client: ampctl::client::Client,
+    client: Client,
 }
 
 impl Ampctl {
@@ -36,7 +36,7 @@ impl Ampctl {
             .unwrap_or_else(|err| panic!("Invalid admin URL '{}': {}", url_str, err));
 
         Self {
-            client: ampctl::client::Client::new(admin_url),
+            client: Client::new(admin_url),
         }
     }
 
@@ -159,7 +159,7 @@ impl Ampctl {
     pub async fn restore_dataset(
         &self,
         dataset_ref: &Reference,
-    ) -> Result<Vec<ampctl::client::datasets::RestoredTableInfo>> {
+    ) -> Result<Vec<amp_client_admin::datasets::RestoredTableInfo>> {
         self.client
             .datasets()
             .restore(dataset_ref)
@@ -172,7 +172,7 @@ impl Ampctl {
     ///
     /// This provides access to the jobs API for checking job status, stopping jobs,
     /// and other job management operations.
-    pub fn jobs(&self) -> ampctl::client::jobs::JobsClient<'_> {
+    pub fn jobs(&self) -> amp_client_admin::jobs::JobsClient<'_> {
         self.client.jobs()
     }
 
@@ -180,7 +180,7 @@ impl Ampctl {
     ///
     /// This provides access to the revisions API for activating, deactivating,
     /// and retrieving table revisions.
-    pub fn revisions(&self) -> ampctl::client::revisions::RevisionsClient<'_> {
+    pub fn revisions(&self) -> amp_client_admin::revisions::RevisionsClient<'_> {
         self.client.revisions()
     }
 

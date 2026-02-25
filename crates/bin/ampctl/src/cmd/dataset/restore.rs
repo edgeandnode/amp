@@ -17,9 +17,10 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin::datasets::RestoredTableInfo;
 use datasets_common::reference::Reference;
 
-use crate::{args::GlobalArgs, client::datasets::RestoredTableInfo};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `restore-dataset` command.
 #[derive(Debug, clap::Args)]
@@ -166,11 +167,11 @@ pub enum Error {
 
     /// Restore error from the client (all tables)
     #[error("restore failed")]
-    Restore(#[source] crate::client::datasets::RestoreError),
+    Restore(#[source] amp_client_admin::datasets::RestoreError),
 
     /// Restore table error from the client (single table)
     #[error("restore table failed")]
-    RestoreTable(#[source] crate::client::datasets::RestoreTableError),
+    RestoreTable(#[source] amp_client_admin::datasets::RestoreTableError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

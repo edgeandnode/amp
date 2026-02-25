@@ -174,7 +174,7 @@ pub enum Error {
 
     /// Error from the manifest registration API client
     #[error("manifest registration failed")]
-    RegisterError(#[source] crate::client::manifests::RegisterError),
+    RegisterError(#[source] amp_client_admin::manifests::RegisterError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

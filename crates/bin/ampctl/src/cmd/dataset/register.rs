@@ -34,6 +34,7 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_client_admin::datasets::HashOrManifestJson;
 use amp_object_store::{
     self as store, ObjectStoreCreationError,
     ext::{ObjectStoreExt as _, ObjectStoreExtError},
@@ -44,7 +45,7 @@ use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 use serde_json::value::RawValue;
 
-use crate::{args::GlobalArgs, client::datasets::HashOrManifestJson};
+use crate::args::GlobalArgs;
 
 /// Command-line arguments for the `manifest register` command.
 #[derive(Debug, clap::Args)]
@@ -194,7 +195,7 @@ pub enum Error {
 
     /// Client error during registration
     #[error("dataset registration failed")]
-    ClientError(#[source] crate::client::datasets::RegisterError),
+    ClientError(#[source] amp_client_admin::datasets::RegisterError),
 }
 
 /// Manifest file path supporting local and remote storage.

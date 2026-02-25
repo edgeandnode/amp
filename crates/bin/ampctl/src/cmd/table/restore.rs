@@ -50,7 +50,7 @@ pub async fn run(
         .map_err(|err| {
             tracing::error!(error = %err, error_source = logging::error_source(&err), "failed to restore table revision");
             match err {
-                crate::client::revisions::RestoreError::RevisionNotFound(_) => {
+                amp_client_admin::revisions::RestoreError::RevisionNotFound(_) => {
                     Error::NotFound { location_id }
                 }
                 other => Error::RestoreError(other),
@@ -105,7 +105,7 @@ pub enum Error {
     /// - Network or connection errors
     /// - File listing or metadata registration errors
     #[error("failed to restore table revision")]
-    RestoreError(#[source] crate::client::revisions::RestoreError),
+    RestoreError(#[source] amp_client_admin::revisions::RestoreError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

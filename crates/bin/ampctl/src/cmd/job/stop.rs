@@ -39,7 +39,7 @@ pub async fn run(Args { global, id }: Args) -> Result<(), Error> {
     client.jobs().stop(&id).await.map_err(|err| {
         tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to stop job");
         match err {
-            crate::client::jobs::StopError::NotFound(_) => Error::JobNotFound { id },
+            amp_client_admin::jobs::StopError::NotFound(_) => Error::JobNotFound { id },
             _ => Error::StopJobError(err),
         }
     })?;
@@ -90,7 +90,7 @@ pub enum Error {
     /// Note: The stop operation is idempotent - stopping a job that's already
     /// in a terminal state (Stopped, Completed, Failed) returns success.
     #[error("failed to stop job")]
-    StopJobError(#[source] crate::client::jobs::StopError),
+    StopJobError(#[source] amp_client_admin::jobs::StopError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

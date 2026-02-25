@@ -82,7 +82,7 @@ pub enum Error {
     ///
     /// Note: The delete operation is idempotent - deleting a non-existent job returns success.
     #[error("failed to remove job")]
-    DeleteError(#[source] crate::client::jobs::DeleteByIdError),
+    DeleteError(#[source] amp_client_admin::jobs::DeleteByIdError),
 
     /// Failed to serialize result to JSON
     #[error("failed to serialize result to JSON")]

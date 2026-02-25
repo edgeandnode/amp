@@ -14,7 +14,7 @@ name = "ampctl"
 path = "src/main.rs"
 
 [dependencies]
-admin-client = { path = "../../clients/admin" }
+amp-client-admin = { package = "admin-client", path = "../../clients/admin" }
 amp-object-store = { path = "../../core/object-store" }
 amp-worker-core = { path = "../../core/worker-core" }
 anyhow.workspace = true
