@@ -56,7 +56,7 @@ impl CardinalityGen<String> {
         match self {
             CardinalityGen::Low(_) => {
                 // Low cardinality: choose from a small set of strings
-                let choices = vec!["apple", "banana", "cherry", "date", "elderberry"];
+                let choices = ["apple", "banana", "cherry", "date", "elderberry"];
                 choices[rng.random_range(0..choices.len())].to_string()
             }
             CardinalityGen::High(_) => {
@@ -436,7 +436,7 @@ fn generate_array_for_type(
         DataType::Struct(fields) => {
             let arrays: Vec<ArrayRef> = fields
                 .iter()
-                .map(|f| generate_array_for_type(f.data_type(), &cardinality, num_rows, rng))
+                .map(|f| generate_array_for_type(f.data_type(), cardinality, num_rows, rng))
                 .collect();
 
             Arc::new(StructArray::new(fields.clone(), arrays, None)) as ArrayRef
@@ -524,7 +524,7 @@ fn writer_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("parquet_writer");
 
     for &num_cols in &columns {
-        for schema in vec![SchemaKind::Complex(num_cols), SchemaKind::Simple(num_cols)] {
+        for schema in [SchemaKind::Complex(num_cols), SchemaKind::Simple(num_cols)] {
             let schema_name = schema.as_str();
             let schema = schema.generate_schema();
             for &(num_rows, max_row_group_size) in &rows {
