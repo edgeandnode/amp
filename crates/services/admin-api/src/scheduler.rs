@@ -24,7 +24,7 @@
 //! - Worker status retrieval
 
 use amp_worker_core::{
-    jobs::job_id::JobId,
+    jobs::{job_id::JobId, status::JobStatus},
     node_id::{InvalidIdError, NodeId, validate_node_id},
 };
 use async_trait::async_trait;
@@ -33,7 +33,7 @@ use datasets_common::{
 };
 use metadata_db::workers::Worker;
 use serde_json::value::RawValue;
-use worker::job::{Job, JobStatus};
+use worker::job::Job;
 
 /// Combined trait for scheduler functionality
 ///
