@@ -100,7 +100,7 @@ check-ts:
 
 ## Testing
 
-# Run all tests (unit and integration)
+# Run all tests (profile: default)
 [group: 'test']
 test *EXTRA_FLAGS:
     #!/usr/bin/env bash
@@ -109,55 +109,70 @@ test *EXTRA_FLAGS:
     if command -v "cargo-nextest" &> /dev/null; then
         cargo nextest run {{EXTRA_FLAGS}} --workspace --all-features
     else
-        >&2 echo "================================================================="
-        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo "================================================="
+        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
         >&2 echo ""
-        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "Please install cargo-nextest to use this command:"
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
-        >&2 echo "================================================================="
-        sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --workspace --all-features
+        >&2 echo "================================================="
+        exit 1
     fi
 
-# Run unit tests (excludes tests requiring external services)
+# Run unit tests ( profile: unit)
 [group: 'test']
 test-unit *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features
+        cargo nextest run --profile unit {{EXTRA_FLAGS}} --workspace --all-features
     else
-        >&2 echo "================================================================="
-        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo "================================================="
+        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
         >&2 echo ""
-        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "Please install cargo-nextest to use this command:"
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
-        >&2 echo "================================================================="
-        sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests --exclude ampup --all-features -- --nocapture
+        >&2 echo "================================================="
+        exit 1
     fi
 
-# Run integration tests
+# Run integration tests (profile: integration)
 [group: 'test']
-test-it *EXTRA_FLAGS:
+test-integration *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --package tests
+        cargo nextest run --profile integration {{EXTRA_FLAGS}} --workspace --all-features
     else
-        >&2 echo "================================================================="
-        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo "================================================="
+        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
         >&2 echo ""
-        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "Please install cargo-nextest to use this command:"
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
-        >&2 echo "================================================================="
-        sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
+        >&2 echo "================================================="
+        exit 1
     fi
 
-# Run only tests without external dependencies
+# Run e2e tests (profile: e2e)
+[group: 'test']
+test-e2e *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run --profile e2e {{EXTRA_FLAGS}} --workspace --all-features
+    else
+        >&2 echo "================================================="
+        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
+        >&2 echo ""
+        >&2 echo "Please install cargo-nextest to use this command:"
+        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
+        >&2 echo "================================================="
+        exit 1
+    fi
+
+# Run only tests without external dependencies (profile: local)
 [group: 'test']
 test-local *EXTRA_FLAGS:
     #!/usr/bin/env bash
@@ -175,23 +190,22 @@ test-local *EXTRA_FLAGS:
         exit 1
     fi
 
-# Run ampup tests
+# Run ampup tests (profile: ampup)
 [group: 'test']
 test-ampup *EXTRA_FLAGS:
     #!/usr/bin/env bash
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --package ampup
+        cargo nextest run --profile ampup {{EXTRA_FLAGS}} --workspace --all-features
     else
-        >&2 echo "================================================================="
-        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo "================================================="
+        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
         >&2 echo ""
-        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "Please install cargo-nextest to use this command:"
         >&2 echo "  cargo install --locked cargo-nextest@^0.9"
-        >&2 echo "================================================================="
-        sleep 1 # Give the user a moment to read the warning
-        cargo test {{EXTRA_FLAGS}} --package ampup --test it_ampup -- --nocapture
+        >&2 echo "================================================="
+        exit 1
     fi
 
 
@@ -422,4 +436,9 @@ remove-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
 
     # Remove all Git hooks (see PRECOMMIT_HOOKS for default hooks)
     pre-commit uninstall --config {{PRECOMMIT_CONFIG}} {{replace_regex(HOOKS, "\\s*([a-z-]+)\\s*", "--hook-type $1 ")}}
+
+# Install cargo-nextest
+[group: 'misc']
+install-cargo-nextest:
+    cargo install --locked cargo-nextest@^0.9
 

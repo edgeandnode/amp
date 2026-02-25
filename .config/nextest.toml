@@ -1,33 +1,39 @@
-[[profile.default.overrides]]
-filter = 'test(postgres)'
-threads-required = "num-test-threads"
+## Nextest configuration
+# See docs/code/test-organization.md for test organization and filtering details.
 
-[[profile.default.overrides]]
-filter = 'package(ampsync)'
-threads-required = "num-test-threads"
+# Unit tests: #[cfg(test)] tests in lib and bin targets (excluding it_* modules)
+[profile.unit]
+default-filter = '(kind(lib) + kind(bin)) - test(/::it_/) - package(tests) - package(ampup)'
 
-[[profile.default.overrides]]
-filter = 'package(metadata-db)'
-threads-required = "num-test-threads"
+# Integration tests: <crate>/tests/ directories and it_* modules in lib/bin sources
+[profile.integration]
+default-filter = '(kind(test) + test(/::it_/)) - package(tests) - package(ampup)'
+
+# E2E tests: top-level tests/ package
+[profile.e2e]
+default-filter = 'package(tests)'
+
+[profile.ampup]
+default-filter = 'package(ampup)'
 
 [profile.local]
-# Exclude tests that require external dependencies
+# Local development: all tests except ampup, external deps, and flaky tests
 default-filter = '''
-  all() -
-  test(eth_firehose_single_dump) -
-  test(evm_rpc_single_dump) -
-  test(evm_rpc_base_single_dump) -
-  test(sql_tests) -
-  test(sql_dataset_input_batch_size) -
-  test(intra_deps_test) -
-  test(multi_version_test) -
-  test(streaming_tests_with_sql_datasets) -
-  test(base_firehose_single_dump) -
-  test(install_already_installed_version_switches_to_it) -
-  test(install_latest_version) -
-  test(install_specific_version) -
-  test(tests::it_solana_historical_to_json_rpc_transition::historical_to_json_rpc_transition) -
-  test(tests::it_admin_api_datasets_stop_job::stop_running_job_succeeds) -
-  test(tests::it_admin_api_datasets_stop_job::stop_already_stopped_job_is_idempotent) -
-  test(tests::it_admin_api_datasets_stop_job::stop_completed_job_is_idempotent)
+  all()
+  - package(ampup)
+  - test(tests::it_admin_api_datasets_stop_job::stop_already_stopped_job_is_idempotent)
+  - test(tests::it_admin_api_datasets_stop_job::stop_completed_job_is_idempotent)
+  - test(tests::it_admin_api_datasets_stop_job::stop_running_job_succeeds)
+  - test(tests::it_dependencies::intra_deps_test)
+  - test(tests::it_dependencies::multi_version_test)
+  - test(tests::it_dump::base_firehose_single_dump)
+  - test(tests::it_dump::eth_firehose_single_dump)
+  - test(tests::it_dump::evm_rpc_base_single_dump)
+  - test(tests::it_dump::evm_rpc_base_single_dump_fetch_receipts_per_tx)
+  - test(tests::it_dump::evm_rpc_single_dump)
+  - test(tests::it_dump::evm_rpc_single_dump_fetch_receipts_per_tx)
+  - test(tests::it_solana_historical_to_json_rpc_transition::historical_to_json_rpc_transition)
+  - test(tests::it_sql::sql_tests)
+  - test(tests::it_sql_dataset_batch_size::sql_dataset_input_batch_size)
+  - test(tests::it_streaming::streaming_tests_with_sql_datasets)
 '''

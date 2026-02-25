@@ -96,7 +96,7 @@ Fundamental coding standards applicable across the entire codebase.
 - `rust-service` - Two-phase handle+fut service pattern
 - `logging` - Structured logging (tracing)
 - `logging-errors` - Error logging patterns
-- `test-strategy` - Three-tier testing strategy
+- `test-organization` - Test type selection and placement
 - `test-files` - Test file placement
 - `test-functions` - Test naming and structure
 - `apps-cli` - CLI output formatting
@@ -196,7 +196,7 @@ rust-*                              # Rust language patterns (core/arch)
 └── rust-workspace                  # Workspace organization (arch)
 
 test-*                              # Testing patterns (core)
-├── test-strategy                   # Three-tier testing strategy
+├── test-organization               # Test type selection and placement
 ├── test-files                      # Test file placement
 └── test-functions                  # Test naming and structure
 

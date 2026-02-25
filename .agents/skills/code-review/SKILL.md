@@ -108,7 +108,7 @@ Examples of current groups:
 
 - `errors` — errors-handling, errors-reporting
 - `rust` — rust-modules, rust-modules-members, rust-types, rust-documentation, rust-service, rust-crate, rust-workspace
-- `test` — test-strategy, test-files, test-functions
+- `test` — test-organization, test-files, test-functions
 - `logging` — logging, logging-errors
 - `apps` — apps-cli
 - `services` — services
