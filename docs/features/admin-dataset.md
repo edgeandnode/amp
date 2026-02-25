@@ -136,6 +136,33 @@ ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks
 ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks --location-id 42
 ```
 
+**Restore from custom storage path:**
+
+When table data exists at non-default storage paths (e.g., after migration, custom storage layout, or importing data from another system), use this multi-step flow to register, restore, and activate each table individually.
+
+```bash
+# Step 1: Register the dataset manifest (if not already registered)
+ampctl dataset register my_namespace/my_dataset ./manifest.json --tag 1.0.0
+
+# Step 2: Register each table revision with a custom storage path
+#   Creates an inactive revision record and returns a location_id
+ampctl table register my_namespace/my_dataset@1.0.0 blocks custom/path/to/blocks
+# → location_id: 42
+ampctl table register my_namespace/my_dataset@1.0.0 transactions custom/path/to/transactions
+# → location_id: 43
+
+# Step 3: Restore file metadata from storage for each table
+#   Scans the storage path and indexes Parquet file metadata into the metadata DB
+ampctl table restore 42
+ampctl table restore 43
+
+# Step 4: Activate each restored table revision via dataset restore
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks --location-id 42
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table transactions --location-id 43
+```
+
+See [Table Revision Management](admin-table.md) for details on `ampctl table register` and `ampctl table restore`.
+
 **JSON output for scripting:**
 
 ```bash
