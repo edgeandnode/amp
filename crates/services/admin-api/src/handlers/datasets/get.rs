@@ -1,12 +1,10 @@
-use amp_datasets_registry::{
-    error::{GetManifestError, ResolveRevisionError},
-    manifests::ManifestParseError,
-};
+use amp_datasets_registry::error::ResolveRevisionError;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
+use common::dataset_store::GetDatasetError;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use monitoring::logging;
 
@@ -34,9 +32,7 @@ use crate::{
 /// - `INVALID_PATH`: Invalid namespace, name, or revision in path parameters
 /// - `DATASET_NOT_FOUND`: The specified dataset or revision does not exist
 /// - `RESOLVE_REVISION_ERROR`: Failed to resolve revision to manifest hash
-/// - `GET_MANIFEST_PATH_ERROR`: Failed to query manifest path from metadata database
-/// - `READ_MANIFEST_ERROR`: Failed to read manifest file from object store
-/// - `PARSE_MANIFEST_ERROR`: Failed to parse manifest JSON
+/// - `GET_DATASET_ERROR`: Failed to get dataset from dataset store
 ///
 /// ## Behavior
 /// This endpoint retrieves detailed information about a specific dataset revision.
@@ -47,7 +43,8 @@ use crate::{
 /// - "dev" - resolves to the development version
 ///
 /// The endpoint first resolves the revision to a manifest hash, then returns
-/// basic dataset information including namespace, name, revision, manifest hash, and kind.
+/// dataset information including namespace, name, revision, manifest hash, kind,
+/// start block, finalized blocks setting, and table names.
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -99,32 +96,30 @@ pub async fn handler(
             revision: revision.clone(),
         })?;
 
-    // Load manifest content
-    let manifest_content = ctx
-        .datasets_registry
-        .get_manifest(reference.hash())
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(&reference)
         .await
-        .map_err(|err| match err {
-            GetManifestError::MetadataDbQueryPath(_) => Error::GetManifestPath(err),
-            GetManifestError::ObjectStoreError(_) => Error::ReadManifest(err),
-        })?
-        .ok_or_else(|| Error::NotFound {
-            namespace: namespace.clone(),
-            name: name.clone(),
-            revision: revision.clone(),
-        })?;
+        .map_err(Error::GetDataset)?;
 
-    // Parse manifest to determine kind
-    let manifest = manifest_content
-        .try_into_manifest::<datasets_common::manifest::Manifest>()
-        .map_err(Error::ParseManifest)?;
+    let tables = dataset
+        .tables()
+        .iter()
+        .map(|table| table.name().to_string())
+        .collect();
+    let finalized_blocks_only = dataset.finalized_blocks_only();
+    let kind = dataset.kind().to_string();
+    let start_block = dataset.start_block().unwrap_or(0);
 
     Ok(Json(DatasetInfo {
         namespace,
         name,
         revision,
         manifest_hash: reference.hash().to_string(),
-        kind: manifest.kind.to_string(),
+        kind,
+        start_block,
+        finalized_blocks_only,
+        tables,
     }))
 }
 
@@ -145,7 +140,12 @@ pub struct DatasetInfo {
     pub manifest_hash: String,
     /// Dataset kind
     pub kind: String,
-    // TODO: Add tables and other dataset details
+    /// Starting block
+    pub start_block: u64,
+    /// Finalized blocks only
+    pub finalized_blocks_only: bool,
+    /// Tables
+    pub tables: Vec<String>,
 }
 
 /// Errors that can occur when getting a dataset
@@ -178,31 +178,15 @@ pub enum Error {
     /// - Internal database errors during revision resolution
     #[error("Failed to resolve revision: {0}")]
     ResolveRevision(#[source] ResolveRevisionError),
-    /// Failed to query manifest path from metadata database
+    /// Failed to get dataset from dataset store
     ///
     /// This occurs when:
-    /// - Failed to query manifest file path from metadata database
-    /// - Database connection issues
-    /// - Internal database errors
-    #[error("Failed to query manifest path: {0}")]
-    GetManifestPath(#[source] GetManifestError),
-    /// Failed to read manifest from object store
-    ///
-    /// This occurs when:
-    /// - Failed to read manifest file from object storage
-    /// - Object store connection issues
-    /// - Permissions issues accessing object store
+    /// - Failed to get dataset from dataset store
+    /// - Dataset store connection issues
+    /// - Permissions issues accessing dataset store
     /// - Network errors
-    #[error("Failed to read manifest from object store: {0}")]
-    ReadManifest(#[source] GetManifestError),
-    /// Failed to parse manifest JSON
-    ///
-    /// This occurs when:
-    /// - Manifest file contains invalid JSON
-    /// - Manifest structure doesn't match expected schema
-    /// - Required fields are missing
-    #[error("Failed to parse manifest: {0}")]
-    ParseManifest(#[source] ManifestParseError),
+    #[error("Failed to get dataset from dataset store: {0}")]
+    GetDataset(#[source] GetDatasetError),
 }
 
 impl IntoErrorResponse for Error {
@@ -211,9 +195,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPath(_) => "INVALID_PATH",
             Error::NotFound { .. } => "DATASET_NOT_FOUND",
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
-            Error::GetManifestPath(_) => "GET_MANIFEST_PATH_ERROR",
-            Error::ReadManifest(_) => "READ_MANIFEST_ERROR",
-            Error::ParseManifest(_) => "PARSE_MANIFEST_ERROR",
+            Error::GetDataset(_) => "GET_DATASET_ERROR",
         }
     }
 
@@ -222,9 +204,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidPath(_) => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::GetManifestPath(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::ReadManifest(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::ParseManifest(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
