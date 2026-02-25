@@ -1,4 +1,4 @@
-use datasets_common::{name::Name, table_name::TableName};
+use datasets_common::{name::Name, namespace::Namespace, table_name::TableName};
 use metadata_db::physical_table_revision;
 use object_store::path::Path;
 use url::Url;
@@ -11,19 +11,20 @@ use uuid::Uuid;
 ///
 /// ## URL Format
 ///
-/// `<store_base_url>/<dataset_name>/<table_name>/<revision_id>/`
+/// `<store_base_url>/<namespace>/<dataset_name>/<table_name>/<revision_id>/`
 ///
 /// Where:
 /// - `store_base_url`: Object store base URL, may include path prefix after bucket
 ///   (e.g., `s3://bucket/prefix`, `file:///data/subdir`)
-/// - `dataset_name`: Dataset name (without namespace)
+/// - `namespace`: Dataset namespace
+/// - `dataset_name`: Dataset name
 /// - `table_name`: Table name
 /// - `revision_id`: Unique identifier for this table revision (typically UUIDv7)
 ///
 /// ## Example
 ///
 /// ```text
-/// s3://my-bucket/prefix/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
+/// s3://my-bucket/prefix/default/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef/
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PhyTableUrl(Url);
@@ -76,7 +77,7 @@ impl std::fmt::Display for PhyTableUrl {
 /// Path to a table directory in object storage (without revision).
 ///
 /// Represents the parent directory containing all revisions of a table.
-/// Format: `<dataset_name>/<table_name>`
+/// Format: `<namespace>/<dataset_name>/<table_name>`
 ///
 /// **NOTE**: The underlying [`object_store::Path`] type automatically strips leading and
 /// trailing slashes, so the string representation will not contain a trailing slash.
@@ -84,15 +85,29 @@ impl std::fmt::Display for PhyTableUrl {
 /// ## Example
 ///
 /// ```text
-/// ethereum_mainnet/logs
+/// edgeandnode/ethereum_mainnet/logs
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhyTablePath(Path);
 
 impl PhyTablePath {
-    /// Constructs the path to a table directory (without revision).
-    pub fn new(dataset_name: impl AsRef<Name>, table_name: impl AsRef<TableName>) -> Self {
-        Self(format!("{}/{}", dataset_name.as_ref(), table_name.as_ref()).into())
+    /// Constructs the path to a table directory including namespace.
+    ///
+    /// Format: `<namespace>/<dataset_name>/<table_name>`
+    pub fn new(
+        namespace: impl AsRef<Namespace>,
+        dataset_name: impl AsRef<Name>,
+        table_name: impl AsRef<TableName>,
+    ) -> Self {
+        Self(
+            format!(
+                "{}/{}/{}",
+                namespace.as_ref(),
+                dataset_name.as_ref(),
+                table_name.as_ref()
+            )
+            .into(),
+        )
     }
 
     /// Create a revision path by appending the given revision ID to this table path.
@@ -129,7 +144,7 @@ impl std::ops::Deref for PhyTablePath {
 /// Path to a table revision directory in object storage.
 ///
 /// Represents a specific revision of a table, identified by a UUID.
-/// Format: `<dataset_name>/<table_name>/<revision_uuid>`
+/// Format: `<namespace>/<dataset_name>/<table_name>/<revision_uuid>`
 ///
 /// **NOTE**: The underlying [`object_store::Path`] type automatically strips leading and
 /// trailing slashes, so the string representation will not contain a trailing slash.
@@ -137,7 +152,7 @@ impl std::ops::Deref for PhyTablePath {
 /// ## Example
 ///
 /// ```text
-/// ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef
+/// edgeandnode/ethereum_mainnet/logs/01234567-89ab-cdef-0123-456789abcdef
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhyTableRevisionPath(Path);
@@ -145,13 +160,15 @@ pub struct PhyTableRevisionPath(Path);
 impl PhyTableRevisionPath {
     /// Constructs the path to a table revision directory.
     pub fn new(
+        dataset_namespace: impl AsRef<Namespace>,
         dataset_name: impl AsRef<Name>,
         table_name: impl AsRef<TableName>,
         revision_id: impl AsRef<Uuid>,
     ) -> Self {
         Self(
             format!(
-                "{}/{}/{}",
+                "{}/{}/{}/{}",
+                dataset_namespace.as_ref(),
                 dataset_name.as_ref(),
                 table_name.as_ref(),
                 revision_id.as_ref()

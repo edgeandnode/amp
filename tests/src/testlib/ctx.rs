@@ -15,7 +15,8 @@
 //!     ├── manifests/                # Dataset manifests directory (initially empty, registered via Admin API)
 //!     ├── providers/                # Provider configs directory (initially empty, registered via Admin API)
 //!     ├── data/                     # Output directory (dataset snapshots copied if requested)
-//!     │   └── eth_mainnet/          # Dataset snapshot reference data with complete structure
+//!     │   └── _/                    # Default namespace prefix
+//!     │       └── eth_rpc/          # Dataset snapshot reference data with complete structure
 //!     └── metadb/                   # PostgreSQL metadata database files (isolated per test)
 //! ```
 //!

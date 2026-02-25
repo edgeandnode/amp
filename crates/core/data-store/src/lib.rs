@@ -186,7 +186,8 @@ impl DataStore {
         table_name: &TableName,
     ) -> Result<PhyTableRevision, CreateNewTableRevisionError> {
         let revision_id = Uuid::now_v7();
-        let path = PhyTableRevisionPath::new(dataset.name(), table_name, revision_id);
+        let path =
+            PhyTableRevisionPath::new(dataset.namespace(), dataset.name(), table_name, revision_id);
         let url = PhyTableUrl::new(self.url(), &path);
 
         let location_id = self
@@ -251,7 +252,7 @@ impl DataStore {
         dataset: &HashReference,
         table_name: &TableName,
     ) -> Result<Option<PhyTableRevision>, RestoreLatestTableRevisionError> {
-        let table_path = PhyTablePath::new(dataset.name(), table_name);
+        let table_path = PhyTablePath::new(dataset.namespace(), dataset.name(), table_name);
 
         let Some(path) = self
             .find_latest_table_revision_in_object_store(&table_path)

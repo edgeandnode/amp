@@ -190,8 +190,9 @@ impl DaemonAmpDir {
     /// Copy dataset snapshots to the amp dir's data directory.
     ///
     /// This copies pre-validated reference datasets from the `tests/config/snapshots` directory
-    /// to the amp dir's data directory. Only the specifically requested datasets
-    /// are copied, maintaining the complete directory structure including revision folders.
+    /// to the amp dir's data directory under the default namespace (`_`). Only the specifically
+    /// requested datasets are copied, maintaining the complete directory structure including
+    /// revision folders. For example, snapshot `eth_rpc` is copied to `<data_dir>/_/eth_rpc/`.
     ///
     /// Dataset snapshots are used as baseline reference data for test comparisons.
     pub async fn preload_dataset_snapshots(
@@ -214,7 +215,7 @@ impl DaemonAmpDir {
             let source_dir_path = config::resolve_snapshot_source_dir(&path).ok_or_else(|| {
                 anyhow!("Could not find dataset snapshot '{name}' source directory")
             })?;
-            let target_dir_path = target_dir.join(&path);
+            let target_dir_path = target_dir.join("_").join(&path);
 
             tracing::debug!(
                 "Copying dataset snapshots: {} -> {}",
