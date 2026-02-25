@@ -1,6 +1,14 @@
+<div align="center">
+
+<img src="https://ampup.sh/logo.svg" alt="Amp" width="80" />
+
 # Amp
 
-The blockchain native database.
+**The blockchain native database.**
+
+[Explore the docs](https://ampup.sh/docs) · [Report Bug](https://github.com/edgeandnode/amp/issues/new?labels=bug) · [Request Feature](https://github.com/edgeandnode/amp/issues/new?labels=enhancement)
+
+</div>
 
 ## Installation
 
