@@ -57,6 +57,13 @@
       "default": 0,
       "minimum": 0
     },
+    "timeout_secs": {
+      "description": "Request timeout in seconds.\n\nMaximum time to wait for an RPC request to complete (including connection\nestablishment and response). Requests exceeding this duration will be cancelled\nand treated as errors.\n\nDefault: 30 seconds",
+      "type": "integer",
+      "format": "uint64",
+      "default": 30,
+      "minimum": 0
+    },
     "url": {
       "description": "The URL of the EVM RPC endpoint (HTTP, HTTPS, or IPC).",
       "type": "string"

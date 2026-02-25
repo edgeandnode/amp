@@ -5,6 +5,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use alloy::{
@@ -69,6 +70,7 @@ pub async fn create(
             Url::clone(&typed_config.url),
             auth,
             typed_config.rate_limit_per_minute,
+            typed_config.timeout_secs,
         )),
         "ws" | "wss" => new_ws(
             Url::clone(&typed_config.url),
@@ -147,6 +149,7 @@ pub fn new_http(
     url: Url,
     auth: Option<Auth>,
     rate_limit: Option<NonZeroU32>,
+    timeout_secs: u64,
 ) -> EvmRpcAlloyProvider {
     let mut http_client_builder = Client::builder();
     http_client_builder = if let Some(auth) = auth {
@@ -172,6 +175,7 @@ pub fn new_http(
         http_client_builder
     };
     let http_client = http_client_builder
+        .timeout(Duration::from_secs(timeout_secs))
         .build()
         .expect("http client with auth header");
 
