@@ -3,7 +3,7 @@
 //! This module provides fine-grained error types for each major operation,
 //! enabling better error tracing and debugging without losing context.
 
-use crate::{job::JobId, node_id::NodeId};
+use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 
 /// Errors that can occur during worker initialization (Phase 1).
 ///

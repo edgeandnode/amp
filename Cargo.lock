@@ -32,6 +32,7 @@ dependencies = [
  "amp-datasets-registry",
  "amp-providers-common",
  "amp-providers-registry",
+ "amp-worker-core",
  "amp-worker-datasets-derived",
  "amp-worker-datasets-raw",
  "async-trait",
@@ -69,6 +70,7 @@ dependencies = [
 name = "admin-client"
 version = "0.1.0"
 dependencies = [
+ "amp-worker-core",
  "datasets-common",
  "monitoring",
  "reqwest 0.13.2",
@@ -78,7 +80,6 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
- "worker",
 ]
 
 [[package]]
@@ -1210,6 +1211,7 @@ version = "0.1.0"
 dependencies = [
  "admin-client",
  "alloy",
+ "amp-worker-core",
  "anyhow",
  "arboard",
  "base64 0.22.1",
@@ -1233,7 +1235,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "url",
- "worker",
 ]
 
 [[package]]
@@ -1242,6 +1243,7 @@ version = "0.1.0"
 dependencies = [
  "admin-client",
  "amp-object-store",
+ "amp-worker-core",
  "anyhow",
  "clap",
  "console",
@@ -1275,6 +1277,7 @@ dependencies = [
  "amp-datasets-registry",
  "amp-object-store",
  "amp-providers-registry",
+ "amp-worker-core",
  "clap",
  "common",
  "console-subscriber",
@@ -3173,6 +3176,7 @@ dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
  "amp-providers-registry",
+ "amp-worker-core",
  "async-trait",
  "axum",
  "common",

@@ -3,10 +3,10 @@ use std::{
     future::Future,
 };
 
+use amp_worker_core::jobs::job_id::JobId;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet};
 
 use super::job_impl::JobError;
-use crate::job::JobId;
 
 /// A collection of jobs that are spawned and managed by a [`Worker`].
 ///

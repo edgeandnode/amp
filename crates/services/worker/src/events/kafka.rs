@@ -2,15 +2,13 @@
 
 use std::sync::Arc;
 
+use amp_worker_core::node_id::NodeId;
 use async_trait::async_trait;
 use monitoring::logging;
 use prost::Message;
 
 use super::emitter::EventEmitter;
-use crate::{
-    kafka::{KafkaProducer, proto},
-    node_id::NodeId,
-};
+use crate::kafka::{KafkaProducer, proto};
 
 /// Kafka-based event emitter.
 ///

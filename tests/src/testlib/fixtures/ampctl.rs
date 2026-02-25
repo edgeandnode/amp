@@ -4,6 +4,7 @@
 //! and provider configurations with the Admin API in test environments. It uses
 //! the ampctl admin API client for direct programmatic access.
 
+use amp_worker_core::jobs::job_id::JobId;
 use ampctl::client::datasets::NodeSelector;
 use anyhow::{Result, anyhow};
 use datasets_common::{end_block::EndBlock, hash::Hash, reference::Reference};
@@ -193,7 +194,7 @@ impl Ampctl {
         end_block: Option<u64>,
         parallelism: Option<u16>,
         worker_id: Option<NodeSelector>,
-    ) -> Result<worker::job::JobId> {
+    ) -> Result<JobId> {
         let reference: Reference = dataset_ref.parse().map_err(|err| {
             anyhow!(
                 "Failed to parse dataset reference '{}': {}",

@@ -14,15 +14,16 @@ console-subscriber = ["dep:console-subscriber"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
-amp-data-store = { path = "../../core/data-store" }
-amp-object-store = { path = "../../core/object-store" }
-clap.workspace = true
 amp-config = { path = "../../config" }
+amp-data-store = { path = "../../core/data-store" }
+amp-datasets-registry = { path = "../../core/datasets-registry" }
+amp-object-store = { path = "../../core/object-store" }
+amp-providers-registry = { path = "../../core/providers-registry" }
+amp-worker-core = { path = "../../core/worker-core" }
+clap.workspace = true
 common = { path = "../../core/common" }
 console-subscriber = { version = "0.5.0", default-features = false, optional = true }
 controller = { path = "../../services/controller" }
-amp-datasets-registry = { path = "../../core/datasets-registry" }
-amp-providers-registry = { path = "../../core/providers-registry" }
 metadata-db = { path = "../../core/metadata-db" }
 metadata-db-postgres = { path = "../../services/metadata-db-postgres" }
 monitoring = { path = "../../core/monitoring" }

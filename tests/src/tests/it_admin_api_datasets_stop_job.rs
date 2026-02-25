@@ -6,6 +6,7 @@
 //! - Idempotent behavior for jobs in terminal states (completed, failed)
 //! - Error handling for nonexistent jobs
 
+use amp_worker_core::jobs::job_id::JobId;
 use ampctl::client::{
     self,
     jobs::{JobInfo, StopError},
@@ -16,7 +17,6 @@ use datasets_common::{
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
 use serde_json::value::RawValue;
-use worker::job::JobId;
 
 use crate::testlib::ctx::TestCtxBuilder;
 

@@ -1,3 +1,4 @@
+use amp_worker_core::jobs::job_id::JobId;
 use ampctl::client::{self, datasets::ListJobsError};
 use datasets_common::{
     fqn::FullyQualifiedName, name::Name, namespace::Namespace, reference::Reference,
@@ -202,7 +203,7 @@ impl TestCtx {
         namespace: &Namespace,
         name: &Name,
         version: &Version,
-    ) -> Result<worker::job::JobId, client::datasets::DeployError> {
+    ) -> Result<JobId, client::datasets::DeployError> {
         let reference = Reference::new(
             namespace.clone(),
             name.clone(),

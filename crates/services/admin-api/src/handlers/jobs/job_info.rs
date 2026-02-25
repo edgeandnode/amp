@@ -1,6 +1,7 @@
 //! Job information types for API responses
 
-use worker::job::{Job, JobId};
+use amp_worker_core::jobs::job_id::JobId;
+use worker::job::Job;
 
 /// Represents job information for the API response
 ///

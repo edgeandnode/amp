@@ -1,12 +1,12 @@
 //! Jobs get by ID handler
 
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
 use monitoring::logging;
-use worker::job::JobId;
 
 use super::job_info::JobInfo;
 use crate::{

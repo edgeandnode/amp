@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 use amp_datasets_registry::error::{ListVersionTagsError, ResolveRevisionError};
+use amp_worker_core::jobs::job_id::JobId;
 use amp_worker_datasets_derived::job_descriptor::JobDescriptor as MaterializeDerivedDatasetJobDescriptor;
 use amp_worker_datasets_raw::job_descriptor::JobDescriptor as MaterializeRawDatasetJobDescriptor;
 use axum::{
@@ -15,7 +16,6 @@ use common::dataset_store::GetDatasetError;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use datasets_derived::DerivedDatasetKind;
 use monitoring::logging;
-use worker::job::JobId;
 
 use crate::{
     ctx::Ctx,

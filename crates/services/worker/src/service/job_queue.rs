@@ -4,14 +4,12 @@
 //! all job queue operations. The Worker service interacts with the queue through this
 //! abstraction rather than directly accessing the metadata database.
 
+use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use backon::{ExponentialBuilder, Retryable};
 use metadata_db::{Error as MetadataDbError, MetadataDb};
 use monitoring::logging;
 
-use crate::{
-    job::{Job, JobId},
-    node_id::NodeId,
-};
+use crate::job::Job;
 
 /// A job queue abstraction that wraps `MetadataDb` operations.
 ///

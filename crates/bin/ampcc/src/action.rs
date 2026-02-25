@@ -7,7 +7,7 @@ use admin_client::{
     jobs::JobInfo,
     workers::{WorkerDetailResponse, WorkerInfo},
 };
-use worker::job::JobId;
+use amp_worker_core::jobs::job_id::JobId;
 
 use crate::{amp_registry::DerivedManifest, app::DataSource, auth::AuthStorage};
 

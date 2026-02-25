@@ -29,6 +29,7 @@ mod util;
 
 use action::Action;
 use amp_registry::AmpRegistryClient;
+use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use app::{ActivePane, App, ContentView, DataSource, DeviceFlowStatus, InputMode};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -606,8 +607,6 @@ fn spawn_fetch_workers(app: &App) {
 }
 
 fn spawn_fetch_worker_detail(app: &App, node_id: &str) {
-    use worker::node_id::NodeId;
-
     let tx = app.action_tx.clone();
     let client = app.local_client.clone();
     let node_id: NodeId = match node_id.parse() {
@@ -639,7 +638,7 @@ fn spawn_fetch_worker_detail(app: &App, node_id: &str) {
     });
 }
 
-fn spawn_stop_job(app: &App, job_id: worker::job::JobId) {
+fn spawn_stop_job(app: &App, job_id: JobId) {
     let tx = app.action_tx.clone();
     let client = app.local_client.clone();
 
@@ -658,7 +657,7 @@ fn spawn_stop_job(app: &App, job_id: worker::job::JobId) {
     });
 }
 
-fn spawn_delete_job(app: &App, job_id: worker::job::JobId) {
+fn spawn_delete_job(app: &App, job_id: JobId) {
     let tx = app.action_tx.clone();
     let client = app.local_client.clone();
 

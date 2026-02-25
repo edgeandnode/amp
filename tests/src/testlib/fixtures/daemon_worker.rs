@@ -7,15 +7,13 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
+use amp_worker_core::node_id::NodeId;
 use anyhow::Result;
 use common::dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
-use worker::{
-    config::Config, events::EventEmitter, node_id::NodeId,
-    service::RuntimeError as WorkerRuntimeError,
-};
+use worker::{config::Config, events::EventEmitter, service::RuntimeError as WorkerRuntimeError};
 
 use crate::testlib::build_info::BuildInfo;
 

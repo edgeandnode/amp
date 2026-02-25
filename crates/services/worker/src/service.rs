@@ -19,6 +19,8 @@ mod job_impl;
 mod job_queue;
 mod job_set;
 
+use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
+
 pub use self::error::{
     AbortJobError, HeartbeatLoopInitError, HeartbeatTaskError, InitError, JobCreationError,
     JobResultError, NotificationError, ReconcileError, RuntimeError, SpawnJobError,
@@ -32,8 +34,7 @@ use crate::{
     build_info::BuildInfo,
     config::Config,
     events::{EventEmitter, KafkaEventEmitter, NoOpEmitter},
-    job::{Job, JobAction, JobId, JobNotification, JobStatus},
-    node_id::NodeId,
+    job::{Job, JobAction, JobNotification, JobStatus},
 };
 
 /// Frequency on which to send a heartbeat.

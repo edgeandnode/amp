@@ -13,8 +13,9 @@
 //! - Status: `--status` flag (default: "active" for non-terminal jobs, can be "all" or comma-separated statuses)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
+use amp_worker_core::jobs::job_id::JobId;
 use monitoring::logging;
-use worker::job::{JobDescriptor, JobId};
+use worker::job::JobDescriptor;
 
 use crate::{args::GlobalArgs, client};
 

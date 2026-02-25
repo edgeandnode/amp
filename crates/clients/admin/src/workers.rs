@@ -2,8 +2,8 @@
 //!
 //! Provides methods for interacting with the `/workers` endpoints of the admin API.
 
+use amp_worker_core::node_id::NodeId;
 use monitoring::logging;
-use worker::node_id::NodeId;
 
 use super::{
     Client,

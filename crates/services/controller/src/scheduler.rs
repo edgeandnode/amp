@@ -31,6 +31,7 @@ use admin_api::scheduler::{
     ListJobsByDatasetError, ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError,
     SchedulerJobs, SchedulerWorkers, StopJobError,
 };
+use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use async_trait::async_trait;
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
@@ -40,10 +41,7 @@ use metadata_db::{
 };
 use monitoring::logging;
 use rand::seq::IndexedRandom as _;
-use worker::{
-    job::{Job, JobId, JobNotification, JobStatus},
-    node_id::NodeId,
-};
+use worker::job::{Job, JobNotification, JobStatus};
 
 /// A worker is considered active if it has sent a heartbeat in this period
 ///

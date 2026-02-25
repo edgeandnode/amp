@@ -7,11 +7,10 @@
 
 use std::sync::Arc;
 
-use amp_worker_core::{ProgressReporter, ProgressUpdate};
+use amp_worker_core::{ProgressReporter, ProgressUpdate, jobs::job_id::JobId};
 use monitoring::logging;
 use worker::{
     events::{EventEmitter, WorkerProgressReporter},
-    job::JobId,
     kafka::proto,
 };
 

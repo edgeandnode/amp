@@ -1,8 +1,8 @@
 //! Workers get all handler
 
+use amp_worker_core::node_id::NodeId;
 use axum::{Json, extract::State, http::StatusCode};
 use monitoring::logging;
-use worker::node_id::NodeId;
 
 use crate::{
     ctx::Ctx,

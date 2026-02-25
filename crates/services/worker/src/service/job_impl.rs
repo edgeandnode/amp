@@ -2,15 +2,12 @@
 
 use std::{future::Future, sync::Arc};
 
-use amp_worker_core::{Ctx, ProgressReporter, metrics::MetricsRegistry};
+use amp_worker_core::{Ctx, ProgressReporter, jobs::job_id::JobId, metrics::MetricsRegistry};
 use datasets_common::hash_reference::HashReference;
 use tracing::{Instrument, info_span};
 
 use crate::{
-    events::WorkerProgressReporter,
-    job::{JobDescriptor, JobId},
-    kafka::proto,
-    service::WorkerJobCtx,
+    events::WorkerProgressReporter, job::JobDescriptor, kafka::proto, service::WorkerJobCtx,
 };
 
 /// Create and run a worker job that materializes tables from a dataset.

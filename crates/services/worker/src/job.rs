@@ -1,15 +1,12 @@
 pub use amp_worker_core::Ctx;
+use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use chrono::{DateTime, Utc};
 use metadata_db::jobs::JobDescriptorRawOwned;
 
-use crate::node_id::NodeId;
-
-mod id;
 mod notif;
 mod status;
 
 pub use self::{
-    id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
     notif::{Action as JobAction, Notification as JobNotification},
     status::JobStatus,
 };

@@ -4,8 +4,8 @@
 
 use std::collections::BTreeMap;
 
+use amp_worker_core::jobs::job_id::JobId;
 use monitoring::logging;
-use worker::job::JobId;
 
 use super::{
     Client,
