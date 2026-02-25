@@ -55,6 +55,16 @@ pub struct EvmRpcProviderConfig {
     /// or `eth_getBlockReceipts` to fetch all receipts for a block in one call.
     #[serde(default)]
     pub fetch_receipts_per_tx: bool,
+
+    /// Request timeout in seconds.
+    ///
+    /// Maximum time to wait for an RPC request to complete (including connection
+    /// establishment and response). Requests exceeding this duration will be cancelled
+    /// and treated as errors.
+    ///
+    /// Default: 30 seconds
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 /// Validated HTTP header name for custom authentication.
@@ -104,4 +114,9 @@ impl<'de> serde::Deserialize<'de> for AuthToken {
         HeaderValue::try_from(&s).map_err(serde::de::Error::custom)?;
         Ok(AuthToken(Redacted::from(s)))
     }
+}
+
+/// Default timeout for RPC requests (30 seconds)
+fn default_timeout_secs() -> u64 {
+    30
 }

@@ -131,11 +131,12 @@ impl Client {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
+        timeout_secs: u64,
         auth: Option<Auth>,
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
-        let client = amp_providers_evm_rpc::provider::new_http(url, auth, rate_limit);
+        let client = amp_providers_evm_rpc::provider::new_http(url, auth, rate_limit, timeout_secs);
         let client =
             RootProviderWithMetrics::new(client, meter, provider_name.to_string(), network.clone());
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
