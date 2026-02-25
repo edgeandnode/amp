@@ -6,10 +6,12 @@
 
 use std::sync::Arc;
 
-use amp_worker_core::{ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo};
+use amp_worker_core::{
+    ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo, jobs::job_id::JobId,
+};
 
 use super::EventEmitter;
-use crate::{job::JobId, kafka::proto};
+use crate::kafka::proto;
 
 /// Adapter that bridges worker core progress reporting to worker event emission.
 ///

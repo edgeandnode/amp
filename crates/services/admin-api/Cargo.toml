@@ -9,6 +9,7 @@ amp-data-store = { path = "../../core/data-store" }
 amp-datasets-registry = { path = "../../core/datasets-registry" }
 amp-providers-common = { path = "../../core/providers-common" }
 amp-providers-registry = { path = "../../core/providers-registry" }
+amp-worker-core = { path = "../../core/worker-core" }
 amp-worker-datasets-derived = { path = "../../core/worker-datasets-derived" }
 amp-worker-datasets-raw = { path = "../../core/worker-datasets-raw" }
 async-trait.workspace = true

@@ -1,6 +1,6 @@
 //! Job notification types for worker coordination
 
-use super::id::JobId;
+use amp_worker_core::jobs::job_id::JobId;
 
 /// The payload of a job notification (without `node_id`, which is in the wrapper)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

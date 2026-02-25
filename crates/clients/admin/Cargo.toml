@@ -5,6 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
+amp-worker-core = { path = "../../core/worker-core" }
 datasets-common = { path = "../../core/datasets-common" }
 monitoring = { path = "../../core/monitoring" }
 reqwest.workspace = true
@@ -14,4 +15,3 @@ thiserror.workspace = true
 tracing.workspace = true
 url.workspace = true
 urlencoding = "2.1"
-worker = { path = "../../services/worker" }

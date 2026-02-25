@@ -2,6 +2,7 @@ use amp_data_store::{
     DeleteTableRevisionError, PhyTableRevision, TruncateError,
     physical_table::{PhyTableRevisionPath, PhyTableUrl},
 };
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     Json,
     extract::{
@@ -121,7 +122,7 @@ pub async fn handler(
     }
 
     if let Some(writer_job_id) = revision.writer {
-        let worker_job_id: worker::job::JobId = writer_job_id.into();
+        let worker_job_id: JobId = writer_job_id.into();
         let job = ctx
             .scheduler
             .get_job(worker_job_id)

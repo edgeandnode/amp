@@ -1,3 +1,4 @@
+use amp_worker_core::jobs::job_id::JobId;
 use ampctl::client::revisions::{
     ActivateError, DeactivateError, DeleteError, GetByIdError, ListError, RegisterError,
     RegisterResponse, RestoreError, RestoreResponse, RevisionInfo, TruncateError, TruncateResponse,
@@ -1195,7 +1196,7 @@ impl TestCtx {
     /// Polls until a job reaches the `Stopped` terminal state.
     ///
     /// Panics if the job does not reach `Stopped` within 30 seconds.
-    async fn wait_for_job_stopped(&self, job_id: &worker::job::JobId) {
+    async fn wait_for_job_stopped(&self, job_id: &JobId) {
         let start = tokio::time::Instant::now();
         let timeout = tokio::time::Duration::from_secs(30);
         loop {

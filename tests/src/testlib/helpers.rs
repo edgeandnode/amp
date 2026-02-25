@@ -10,7 +10,7 @@ pub mod git;
 use std::{sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
-use amp_worker_core::consistency_check;
+use amp_worker_core::{consistency_check, jobs::job_id::JobId};
 use anyhow::{Result, anyhow};
 use common::{
     BlockRange,
@@ -22,7 +22,6 @@ use common::{
     physical_table::PhysicalTable,
 };
 use datasets_common::reference::Reference;
-use worker::job::JobId;
 
 /// Wait for a job to reach a completion state.
 ///

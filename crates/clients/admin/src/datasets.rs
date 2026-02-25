@@ -2,13 +2,16 @@
 //!
 //! Provides methods for interacting with the `/datasets` endpoints of the admin API.
 
+use amp_worker_core::{
+    jobs::job_id::JobId,
+    node_id::{InvalidIdError, NodeId, validate_node_id},
+};
 use datasets_common::{
     end_block::EndBlock, fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace,
     reference::Reference, revision::Revision, version::Version,
 };
 use monitoring::logging;
 use serde_json::value::RawValue;
-use worker::job::JobId;
 
 use super::{
     Client,
@@ -2057,8 +2060,6 @@ pub enum ListJobsError {
     #[error("unexpected response with status {status_code}")]
     UnexpectedResponse { status_code: u16 },
 }
-
-use worker::node_id::{InvalidIdError, NodeId, validate_node_id};
 
 /// A glob pattern for matching worker node IDs by prefix
 ///

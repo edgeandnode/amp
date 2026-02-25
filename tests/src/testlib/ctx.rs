@@ -32,10 +32,11 @@
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use amp_data_store::DataStore;
+use amp_worker_core::node_id::NodeId;
 use anyhow::{Result, anyhow};
 use common::dataset_store::DatasetStore;
 use datasets_common::reference::Reference;
-use worker::{events::EventEmitter, node_id::NodeId};
+use worker::events::EventEmitter;
 
 use super::fixtures::{
     AmpCli, Ampctl, Anvil, DaemonAmpDir, DaemonConfig, DaemonConfigBuilder, DaemonController,

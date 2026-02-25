@@ -23,16 +23,17 @@
 //! - Worker information queries
 //! - Worker status retrieval
 
+use amp_worker_core::{
+    jobs::job_id::JobId,
+    node_id::{InvalidIdError, NodeId, validate_node_id},
+};
 use async_trait::async_trait;
 use datasets_common::{
     hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };
 use metadata_db::workers::Worker;
 use serde_json::value::RawValue;
-use worker::{
-    job::{Job, JobId, JobStatus},
-    node_id::{InvalidIdError, NodeId, validate_node_id},
-};
+use worker::job::{Job, JobStatus};
 
 /// Combined trait for scheduler functionality
 ///

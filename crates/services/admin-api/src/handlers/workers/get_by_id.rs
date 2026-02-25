@@ -1,12 +1,13 @@
 //! Workers get by ID handler
 
+use amp_worker_core::node_id::NodeId;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
 use monitoring::logging;
-use worker::{build_info::BuildInfo, node_id::NodeId};
+use worker::build_info::BuildInfo;
 
 use crate::{
     ctx::Ctx,

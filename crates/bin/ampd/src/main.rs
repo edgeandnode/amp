@@ -1,6 +1,7 @@
 use std::{env, path::PathBuf};
 
 use amp_config::{DEFAULT_AMP_DIR_NAME, DEFAULT_CONFIG_FILENAME};
+use amp_worker_core::node_id::InvalidIdError as NodeIdParseError;
 
 mod build_info;
 mod config;
@@ -331,7 +332,7 @@ pub enum Error {
 
     /// Failed to parse worker node ID.
     #[error("Invalid worker node ID: {0}")]
-    ParseNodeId(#[source] worker::node_id::InvalidIdError),
+    ParseNodeId(#[source] NodeIdParseError),
 
     /// Solo command failed.
     #[error("Solo command failed: {0}")]

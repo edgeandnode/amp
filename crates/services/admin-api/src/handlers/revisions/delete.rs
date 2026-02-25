@@ -1,4 +1,5 @@
 use amp_data_store::{DeleteTableRevisionError, GetRevisionByLocationIdError};
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
@@ -96,7 +97,7 @@ pub async fn handler(
     }
 
     if let Some(writer_job_id) = revision.writer {
-        let worker_job_id: worker::job::JobId = writer_job_id.into();
+        let worker_job_id: JobId = writer_job_id.into();
         let job = ctx
             .scheduler
             .get_job(worker_job_id)

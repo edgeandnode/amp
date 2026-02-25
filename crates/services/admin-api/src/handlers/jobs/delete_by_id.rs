@@ -1,11 +1,12 @@
 //! Jobs delete by ID handler
 
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
 use monitoring::logging;
-use worker::job::{JobId, JobStatus};
+use worker::job::JobStatus;
 
 use crate::{
     ctx::Ctx,

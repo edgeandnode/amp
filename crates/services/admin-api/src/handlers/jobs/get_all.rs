@@ -1,5 +1,6 @@
 //! Jobs get all handler
 
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     Json,
     extract::{Query, State, rejection::QueryRejection},
@@ -7,7 +8,6 @@ use axum::{
 };
 use monitoring::logging;
 use serde::{Deserialize, Serialize};
-use worker::job::JobId;
 
 use super::job_info::JobInfo;
 use crate::{

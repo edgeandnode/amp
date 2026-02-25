@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -10,7 +11,6 @@ use axum::{
 use common::physical_table::PhysicalTable;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use monitoring::logging;
-use worker::job::JobId;
 
 use crate::{
     ctx::Ctx,
