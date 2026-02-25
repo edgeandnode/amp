@@ -23,7 +23,7 @@ pub use self::{
     metadb::{DEFAULT_METADB_CONN_POOL_SIZE, DEFAULT_METADB_DIRNAME, MetadataDbConfig},
     redacted::Redacted,
 };
-use self::{controller::ControllerAddrs, server::ServerAddrs};
+use self::{controller::ControllerAddrs, monitoring::OpenTelemetryConfig, server::ServerAddrs};
 
 /// Default amp dir name (created inside the base directory)
 pub const DEFAULT_AMP_DIR_NAME: &str = ".amp";
@@ -210,7 +210,7 @@ pub struct Config {
     /// Maximum interval for streaming server microbatches (in blocks).
     pub server_microbatch_max_interval: u64,
     /// OpenTelemetry observability configuration.
-    pub opentelemetry: Option<monitoring::OpenTelemetryConfig>,
+    pub opentelemetry: Option<OpenTelemetryConfig>,
     /// Network addresses for query server endpoints.
     pub server_addrs: ServerAddrs,
     /// Network address for the controller Admin API endpoint.

@@ -45,7 +45,7 @@ where
         .map(|option| option.map(Duration::from_secs_f64))
 }
 
-impl From<&OpenTelemetryConfig> for monitoring_crate::config::OpenTelemetryConfig {
+impl From<&OpenTelemetryConfig> for amp_monitoring::config::OpenTelemetryConfig {
     fn from(config: &OpenTelemetryConfig) -> Self {
         Self {
             metrics_url: config.metrics_url.clone(),
