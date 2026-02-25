@@ -67,6 +67,7 @@ pub struct EvmRpcProviderConfig {
     /// Default: 30 seconds
     #[serde_as(as = "DurationSeconds<u64>")]
     #[serde(default = "default_timeout", rename = "timeout_secs")]
+    #[cfg_attr(feature = "schemars", schemars(with = "u64"))]
     pub timeout: Duration,
 }
 
