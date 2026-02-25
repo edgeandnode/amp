@@ -92,6 +92,13 @@ clippy *EXTRA_FLAGS:
 clippy-crate CRATE *EXTRA_FLAGS:
     cargo clippy --package {{CRATE}} --all-targets --no-deps {{EXTRA_FLAGS}}
 
+alias check-deps := check-unused-deps
+
+# Check for unused Rust dependencies (cargo machete)
+[group: 'check']
+check-unused-deps:
+    cargo machete
+
 # Check typescript code (pnpm check)
 [group: 'check']
 check-ts:
@@ -442,3 +449,7 @@ remove-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
 install-cargo-nextest:
     cargo install --locked cargo-nextest@^0.9
 
+# Install cargo-machete (unused dependency checker)
+[group: 'misc']
+install-cargo-machete:
+    cargo install --locked cargo-machete

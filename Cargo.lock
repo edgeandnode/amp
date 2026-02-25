@@ -5001,7 +5001,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -7900,7 +7899,6 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "arrow-array",
- "arrow-buffer",
  "arrow-schema",
  "bytes",
  "criterion",
@@ -14693,7 +14691,6 @@ dependencies = [
  "chrono",
  "common",
  "datasets-common",
- "datasets-derived",
  "futures",
  "metadata-db",
  "monitoring",

@@ -36,6 +36,13 @@ repos:
     stages: [pre-push, manual]
     pass_filenames: false
     require_serial: true
+  - id: check-unused-deps
+    name: Check for unused Rust dependencies
+    language: system
+    entry: just check-unused-deps
+    types_or: [rust, cargo, cargo-lock]
+    stages: [pre-push, manual]
+    pass_filenames: false
 
   ## TypeScript hooks
   - id: fmt-ts

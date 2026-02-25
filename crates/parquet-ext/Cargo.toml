@@ -57,10 +57,6 @@ serde = ["parquet/serde"]
 version = "^57.3"
 optional = false
 
-[dependencies.arrow-buffer]
-version = "^57.3"
-optional = true
-
 [dependencies.arrow-schema]
 version = "^57.3"
 optional = false
