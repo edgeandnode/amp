@@ -23,4 +23,3 @@ serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-url.workspace = true
