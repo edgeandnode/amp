@@ -37,9 +37,16 @@ pub struct Cursor(pub BTreeMap<NetworkId, NetworkCursor>);
 /// Error when extracting a cursor for a specific network from a multi-network Cursor
 ///
 /// This occurs when the Cursor does not contain an entry for the requested network.
+/// The error includes both the expected network and the networks actually present
+/// in the cursor, making network name mismatches easy to diagnose.
 #[derive(Debug, thiserror::Error)]
-#[error("expected cursor for network '{0}'")]
-pub struct CursorNetworkNotFoundError(pub NetworkId);
+#[error("expected cursor for network '{expected}', but cursor only contains networks: {available}")]
+pub struct CursorNetworkNotFoundError {
+    /// The network that was requested but not found in the cursor.
+    pub expected: NetworkId,
+    /// The networks that are present in the cursor.
+    pub available: NetworkIdList,
+}
 
 impl Cursor {
     /// Create a Cursor from a slice of BlockRanges.
@@ -56,11 +63,15 @@ impl Cursor {
         self,
         network: &NetworkId,
     ) -> Result<NetworkCursor, CursorNetworkNotFoundError> {
+        let available: Vec<NetworkId> = self.0.keys().cloned().collect();
         self.0
             .into_iter()
             .find(|(n, _)| n == network)
             .map(|(_, c)| c)
-            .ok_or_else(|| CursorNetworkNotFoundError(network.clone()))
+            .ok_or_else(|| CursorNetworkNotFoundError {
+                expected: network.clone(),
+                available: NetworkIdList(available),
+            })
     }
 }
 
@@ -85,5 +96,83 @@ impl From<BTreeMap<NetworkId, (BlockNum, [u8; 32])>> for Cursor {
             })
             .collect();
         Self(inner)
+    }
+}
+
+/// A wrapper around an array of network identifiers for displaying in error messages.
+#[derive(Debug)]
+pub struct NetworkIdList(pub Vec<NetworkId>);
+
+impl std::fmt::Display for NetworkIdList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.0.iter().map(|n| n.as_str()).collect();
+        write!(f, "[{}]", names.join(","))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_single_network_with_matching_network_succeeds() {
+        //* Given
+        let network: NetworkId = "mainnet".parse().expect("should parse mainnet network ID");
+        let expected_cursor = NetworkCursor {
+            number: 100,
+            hash: BlockHash::ZERO,
+        };
+        let cursor = Cursor(BTreeMap::from([(network.clone(), expected_cursor.clone())]));
+
+        //* When
+        let result = cursor.to_single_network(&network);
+
+        //* Then
+        assert_eq!(
+            result.expect("should return cursor for matching network"),
+            expected_cursor,
+            "cursor should match expected network cursor"
+        );
+    }
+
+    #[test]
+    fn to_single_network_with_mismatched_network_shows_available() {
+        //* Given
+        let mut map = BTreeMap::new();
+        map.insert(
+            "ethereum-mainnet"
+                .parse::<NetworkId>()
+                .expect("should parse ethereum-mainnet network ID"),
+            NetworkCursor {
+                number: 100,
+                hash: BlockHash::ZERO,
+            },
+        );
+        let cursor = Cursor(map);
+
+        //* When
+        let result =
+            cursor.to_single_network(&"mainnet".parse().expect("should parse mainnet network ID"));
+
+        //* Then
+        let err = result.expect_err("should fail when network not found in cursor");
+        assert_eq!(
+            err.expected, "mainnet",
+            "error should report expected network"
+        );
+        assert_eq!(
+            err.available.0.len(),
+            1,
+            "error should list one available network"
+        );
+        assert_eq!(
+            err.available.0[0], "ethereum-mainnet",
+            "error should list ethereum-mainnet as available"
+        );
+        assert_eq!(
+            err.to_string(),
+            "expected cursor for network 'mainnet', but cursor only contains networks: [ethereum-mainnet]",
+            "error message should include both expected and available networks"
+        );
     }
 }
