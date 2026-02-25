@@ -1,6 +1,6 @@
 //! Jobs get all handler
 
-use amp_worker_core::jobs::job_id::JobId;
+use amp_worker_core::jobs::{job_id::JobId, status::JobStatus};
 use axum::{
     Json,
     extract::{Query, State, rejection::QueryRejection},
@@ -103,10 +103,10 @@ pub async fn handler(
     // Convert status filter to job statuses
     let statuses = match query.status {
         StatusFilter::Active => Some(vec![
-            worker::job::JobStatus::Scheduled,
-            worker::job::JobStatus::Running,
-            worker::job::JobStatus::StopRequested,
-            worker::job::JobStatus::Stopping,
+            JobStatus::Scheduled,
+            JobStatus::Running,
+            JobStatus::StopRequested,
+            JobStatus::Stopping,
         ]),
         StatusFilter::All => None,
         StatusFilter::Specific(statuses) => Some(statuses),
@@ -153,7 +153,7 @@ pub enum StatusFilter {
     /// Show all jobs regardless of status
     All,
     /// Show jobs with specific statuses
-    Specific(Vec<worker::job::JobStatus>),
+    Specific(Vec<JobStatus>),
 }
 
 impl<'de> Deserialize<'de> for StatusFilter {
@@ -171,7 +171,7 @@ impl<'de> Deserialize<'de> for StatusFilter {
                 .split(',')
                 .map(|s| s.trim())
                 .map(|s| {
-                    s.parse::<worker::job::JobStatus>()
+                    s.parse::<JobStatus>()
                         .map_err(|e| serde::de::Error::custom(format!("invalid status: {}", e)))
                 })
                 .collect::<Result<Vec<_>, _>>()?;

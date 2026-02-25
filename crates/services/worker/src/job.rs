@@ -4,12 +4,10 @@ use chrono::{DateTime, Utc};
 use metadata_db::jobs::JobDescriptorRawOwned;
 
 mod notif;
-mod status;
 
-pub use self::{
-    notif::{Action as JobAction, Notification as JobNotification},
-    status::JobStatus,
-};
+use amp_worker_core::jobs::status::JobStatus;
+
+pub use self::notif::{Action as JobAction, Notification as JobNotification};
 
 /// Job data transfer object for the Worker service.
 ///

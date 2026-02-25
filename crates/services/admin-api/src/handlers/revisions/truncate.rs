@@ -2,7 +2,7 @@ use amp_data_store::{
     DeleteTableRevisionError, PhyTableRevision, TruncateError,
     physical_table::{PhyTableRevisionPath, PhyTableUrl},
 };
-use amp_worker_core::jobs::job_id::JobId;
+use amp_worker_core::jobs::{job_id::JobId, status::JobStatus};
 use axum::{
     Json,
     extract::{
@@ -16,7 +16,6 @@ use metadata_db::{
     physical_table_revision::LocationId,
 };
 use monitoring::logging;
-use worker::job::JobStatus;
 
 use crate::{
     ctx::Ctx,
