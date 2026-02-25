@@ -10,7 +10,7 @@ async fn main() {
         .expect("Failed to install default crypto provider");
 
     // Initialize tracing for debug logs
-    let _ = monitoring::init_logging_only();
+    let _ = monitoring::init(None::<monitoring::config::OpenTelemetryConfig>);
 
     if let Err(err) = run().await {
         ampctl::error!(err);

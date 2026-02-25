@@ -22,11 +22,6 @@ pub type TelemetryKit = (
     Option<Meter>,
 );
 
-/// Initialize logging only, without telemetry export.
-pub fn init_logging_only() -> Result<TelemetryKit, telemetry::ExporterBuildError> {
-    init(None::<OpenTelemetryConfig>)
-}
-
 pub fn init(
     config: Option<impl Into<OpenTelemetryConfig>>,
 ) -> Result<TelemetryKit, telemetry::ExporterBuildError> {
