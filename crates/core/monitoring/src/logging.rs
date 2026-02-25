@@ -96,6 +96,7 @@ const AMP_CRATES: &[&str] = &[
     "metadata_db",
     "metadata_db_postgres",
     "monitoring",
+    "parquet_ext",
     "server",
     "solana_datasets",
     "solana_storage_proto",
