@@ -2,10 +2,7 @@
 //!
 //! The client is designed to work in two stages:
 //!     1. Download historical data from the Old Faithful archive
-//!     2. Stream new data using the Solana JSON-RPC subscription API (not implemented yet)
-//!
-//! The second stage pulls blocks from the subscription ring buffer, which is populated by the
-//! [crate::subscription_task].
+//!     2. Download recent data using a Solana JSON-RPC endpoint
 //!
 //! Learn more about the Old Faithful archive here: <https://docs.old-faithful.net/>.
 

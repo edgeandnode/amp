@@ -7,10 +7,11 @@
 //! block; some slots may be skipped due to various reasons such as network issues or validator
 //! performance. Therefore, the slot number does not always correspond directly to a block number.
 //!
-//! Since [`datasets_raw::client::BlockStreamer`] and related infrastructure generally operate on the concept of block numbers,
-//! this implementation treats Solana slots as block numbers. Skipped slots do not produce any rows,
-//! resulting in gaps in the block number sequence. Chain integrity is maintained through hash-based
-//! validation where each block's parent_hash must match the previous block's hash.
+//! Since [`datasets_raw::client::BlockStreamer`] and related infrastructure generally operate
+//! on the concept of block numbers, the implementation treats Solana slots as block numbers.
+//! Skipped slots do not produce any rows, resulting in gaps in the block number sequence. Chain
+//! integrity is maintained through hash-based validation where each block's parent_hash must
+//! match the previous block's hash.
 
 use std::collections::BTreeMap;
 
