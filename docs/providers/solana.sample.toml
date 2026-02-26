@@ -10,27 +10,17 @@ kind = "solana"
 # Blockchain network identifier (e.g., "solana-mainnet")
 network = "solana-mainnet"
 
-# Solana RPC endpoint URL
-rpc_provider_url = "${SOLANA_RPC_URL}"
-
 # Directory for storing Old Faithful ONE CAR files
 # This directory is used to cache downloaded archive data
 of1_car_directory = "/data/solana/car"
 
+# Solana main RPC endpoint URL (required)
+[rpc_provider_info]
+url = "${SOLANA_RPC_URL}"
+
 # ============================
 # Optional Fields
 # ============================
-
-# Authentication token for RPC requests (optional)
-# Default: sent as `Authorization: Bearer <token>`.
-# With `auth_header`: sent as `<auth_header>: <token>`.
-# auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"
-
-# Custom header name for authentication (optional)
-# When set alongside `auth_token`, sends `<auth_header>: <auth_token>` instead of
-# the default `Authorization: Bearer <auth_token>`.
-# Ignored if `auth_token` is not set.
-# auth_header = "X-Api-Key"
 
 # Controls when to use the Solana archive for historical data (optional)
 # - "auto": Automatically determine based on block age
@@ -49,3 +39,22 @@ of1_car_directory = "/data/solana/car"
 # - false: Delete CAR files after processing to save disk space
 # Default: false
 # keep_of1_car_files = false
+
+# Authentication token main RPC endpoint requests (optional)
+# [rpc_provider_info]
+# Default: sent as `Authorization: Bearer <token>`.
+# With `auth_header`: sent as `<auth_header>: <token>`.
+# auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"
+
+# Custom header name for authentication (optional)
+# When set alongside `auth_token`, sends `<auth_header>: <auth_token>` instead of
+# the default `Authorization: Bearer <auth_token>`.
+# Ignored if `auth_token` is not set.
+# auth_header = "X-Api-Key"
+
+# Fallback RPC endpoint for filling truncated log messages (optional)
+# Default: no fallback RPC provider.
+# [fallback_rpc_provider_info]
+# url = "${FALLBACK_SOLANA_RPC_URL}" (required if fallback is used)
+# auth_token = "${FALLBACK_SOLANA_RPC_AUTH_TOKEN}"
+# auth_header = "X-Fallback-Api-Key"

@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use amp_providers_common::provider_name::ProviderName;
+use amp_providers_solana::config::AuthHeaderName;
 use datasets_common::{
     block_num::BlockNum, hash_reference::HashReference, manifest::TableSchema,
     network_id::NetworkId,
@@ -103,40 +104,73 @@ pub fn client(
         return Err(ClientError(err));
     }
 
-    let commitment = commitment_config(config.commitment);
-
-    // Resolve authentication configuration
-    let auth = config.auth_token.map(|token| match config.auth_header {
-        Some(header) => rpc_client::Auth::CustomHeader {
-            name: header.into_inner(),
-            value: token.into_inner(),
-        },
-        None => rpc_client::Auth::Bearer(token.into_inner()),
-    });
-
-    let client = match config.rpc_provider_url.scheme() {
-        "http" | "https" => Client::new(
-            config.rpc_provider_url,
-            auth,
-            config.max_rpc_calls_per_second,
-            config.network,
-            name,
-            config.of1_car_directory,
-            config.keep_of1_car_files,
-            config.use_archive,
-            meter,
-            commitment,
-        ),
+    match config.rpc_provider_info.url.scheme() {
+        "http" | "https" => {}
         scheme => {
             let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
             return Err(ClientError(err));
         }
+    }
+    match config
+        .fallback_rpc_provider_info
+        .as_ref()
+        .map(|info| info.url.scheme())
+    {
+        Some("http") | Some("https") | None => {}
+        Some(scheme) => {
+            let err = format!(
+                "unsupported Solana fallback RPC provider URL scheme: {}",
+                scheme
+            );
+            return Err(ClientError(err));
+        }
+    }
+
+    let commitment = commitment_config(config.commitment);
+
+    // Resolve authentication configuration
+    let main_rpc_provider_auth = config.rpc_provider_info.auth_token.map(|token| {
+        let token = token.into_inner();
+        let header = config
+            .rpc_provider_info
+            .auth_header
+            .map(AuthHeaderName::into_inner);
+        rpc_client::Auth::new(token, header)
+    });
+
+    let main_rpc_connection_info = rpc_client::RpcProviderConnectionInfo {
+        url: config.rpc_provider_info.url,
+        auth: main_rpc_provider_auth,
     };
+    let fallback_rpc_connection_info = config.fallback_rpc_provider_info.map(|info| {
+        let auth = info.auth_token.map(|token| {
+            let token = token.into_inner();
+            let header = info.auth_header.map(AuthHeaderName::into_inner);
+            rpc_client::Auth::new(token, header)
+        });
+        rpc_client::RpcProviderConnectionInfo {
+            url: info.url,
+            auth,
+        }
+    });
+
+    let client = Client::new(
+        main_rpc_connection_info,
+        fallback_rpc_connection_info,
+        config.max_rpc_calls_per_second,
+        config.network,
+        name,
+        config.of1_car_directory,
+        config.keep_of1_car_files,
+        config.use_archive,
+        meter,
+        commitment,
+    );
 
     Ok(client)
 }
 
-/// Convert a [`CommitmentLevel`] config value into a Solana [`CommitmentConfig`].
+/// Convert a [`config::CommitmentLevel`] config value into a Solana [`CommitmentConfig`].
 pub fn commitment_config(level: config::CommitmentLevel) -> CommitmentConfig {
     match level {
         config::CommitmentLevel::Processed => CommitmentConfig::processed(),
