@@ -35,7 +35,7 @@ pub use amp_providers_solana::config::{self, SolanaProviderConfig, UseArchive};
 use solana_client::rpc_config::CommitmentConfig;
 
 pub use self::{
-    client::{Client, non_empty_of1_slot, non_empty_rpc_slot},
+    client::{Client, TRUNCATED_LOG_MESSAGES_MARKER, non_empty_of1_slot, non_empty_rpc_slot},
     dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
 };
