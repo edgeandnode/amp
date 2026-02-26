@@ -8,60 +8,51 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 
 **If you're an AI agent working on this codebase, here's what you need to know immediately:**
 
-1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`, `/feature-discovery`, `/feature-fmt-check`, `/feature-validate`) instead of running commands directly
+1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`, `/feature-discovery`, `/docs-features-fmt-check`, `/feature-validate`) instead of running commands directly
 2. **Skills wrap justfile tasks** → Skills provide the interface to `just` commands with proper guidance
 3. **Follow the workflow** → Format → Check → Clippy → Targeted Tests (when needed)
 4. **Fix ALL warnings** → Zero tolerance for clippy warnings
-5. **Check patterns** → Use `/code-pattern-discovery` before implementing code
+5. **Check patterns** → Use `/code-discovery` before implementing code
 
 **Your first action**: If you need to run a command, invoke the relevant Skill! If you need to implement code, invoke
-`/code-pattern-discovery` to load relevant patterns!
+`/code-discovery` to load relevant guidelines!
 
 **Testing default**: Run the smallest relevant test slice. Only broaden to `just test-local` for cross-cutting/high-risk changes or when you need broader confidence.
 
 ## Table of Contents
 
-1. [Feature Discovery](#1-feature-discovery) - Understanding project features via `/feature-discovery` skill
-2. [Coding Patterns](#2-coding-patterns) - Understanding coding standards via `/code-pattern-discovery` skill
+1. [Principles](#1-principles) - Core design principles guiding this codebase
+2. [Code Guidelines](#2-coding-patterns) - Understanding coding standards via `/code-discovery` skill
 3. [Development Workflow](#3-development-workflow) - How to develop with this codebase
-4. [Additional Resources](#4-additional-resources) - Links to documentation
-
-## 1. Feature Discovery
-
-Feature documentation lives in `docs/features/` with YAML frontmatter for dynamic discovery.
-
-**Feature docs are authoritative**: If a feature doc exists, it is the ground truth. Implementation MUST align with documentation. If there's a mismatch, either fix the code or update the doc to reflect the correct state.
-
-| When User Asks                                              | Invoke This Skill    |
-|-------------------------------------------------------------|----------------------|
-| "What is X?", "How does X work?", "Explain the Y feature"   | `/feature-discovery` |
-| "What features does Amp have?", "What can this project do?" | `/feature-discovery` |
-| Questions about project functionality or capabilities       | `/feature-discovery` |
-| Need context before implementing a feature                  | `/feature-discovery` |
-| Creating or editing files in `docs/features/`               | `/feature-fmt-check` |
-| Reviewing PRs that modify feature docs (format check)       | `/feature-fmt-check` |
-| "What's the status of feature X implementation?"            | `/feature-validate`  |
-| Verify feature doc matches implementation                   | `/feature-validate`  |
-| Check if documented functionality exists in code            | `/feature-validate`  |
-| Audit feature docs for accuracy and test coverage           | `/feature-validate`  |
-
-**Navigation:**
-
-- Need to understand a feature? → `/feature-discovery`
-- Writing feature docs? → `/feature-fmt-check` + [docs/__meta__/feature-docs.md](docs/__meta__/feature-docs.md)
-- Validate implementation aligns with feature claims? → `/feature-validate`
+4. [Feature Discovery](#4-feature-discovery) - Understanding project features via `/feature-discovery` skill
+5. [Additional Resources](#5-additional-resources) - Links to documentation
 
 
-## 2. Coding Patterns
+## 1. Principles
 
-Coding pattern documentation lives in `docs/code/` with YAML frontmatter for dynamic discovery.
+**MANDATORY**: Before writing any code, read and internalize these 4 core design principles. Full details, examples, and checklists are in the linked docs — read them every time.
 
-**Pattern docs are authoritative**: Pattern docs define how code should be written. All implementations MUST follow the patterns. If code doesn't follow a pattern, either fix the code or update the pattern (with team approval).
+| Principle | One-liner | Full doc |
+|-----------|-----------|----------|
+| **Single Responsibility** | One struct = one reason to change | @docs/code/principle-single-responsibility.md |
+| **Open/Closed** | Extend via new types/trait impls, don't modify existing code | @docs/code/principle-open-closed.md |
+| **Law of Demeter** | Only talk to immediate collaborators — no `a.b().c().d()` chains | @docs/code/principle-law-of-demeter.md |
+| **Validate at the Edge** | Hard shell (boundary validates), soft core (domain trusts) | @docs/code/principle-validate-at-edge.md |
 
-### Pattern Types
+Additional design principles (Type-Driven Design, Idempotency, Inversion of Control, etc.) are documented in `docs/code/principle-*.md`. Use `/code-discovery principles` to load them when relevant to your task.
+
+
+## 2. Code Guidelines
+
+Code guideline documentation lives in `docs/code/` with YAML frontmatter for dynamic discovery.
+
+**Guideline docs are authoritative**: Guideline docs define how code should be written. All implementations MUST follow the patterns. If code doesn't follow a pattern, either fix the code or update the pattern (with team approval).
+
+### Guideline Types
 
 | Type               | Scope          | Purpose                                                       |
 |--------------------|----------------|---------------------------------------------------------------|
+| **Principle**      | `global`       | Universal software principles and best practices              |
 | **Core**           | `global`       | Fundamental coding standards (error handling, modules, types) |
 | **Architectural**  | `global`       | High-level patterns (services, workspace structure)           |
 | **Crate-specific** | `crate:<name>` | Patterns for specific crates (admin-api, metadata-db)         |
@@ -71,16 +62,16 @@ Coding pattern documentation lives in `docs/code/` with YAML frontmatter for dyn
 
 | When You Need To                                              | Invoke This Skill         |
 |---------------------------------------------------------------|---------------------------|
-| Understand coding patterns before implementing                | `/code-pattern-discovery` |
-| "How should I handle errors?", "What's the pattern for X?"    | `/code-pattern-discovery` |
-| Load crate-specific patterns for admin-api, metadata-db, etc. | `/code-pattern-discovery` |
-| Creating or editing files in `docs/code/`                     | `/code-pattern-fmt-check` |
-| Reviewing PRs that modify pattern docs                        | `/code-pattern-fmt-check` |
+| Understand code guidelines before implementing                | `/code-discovery` |
+| "How should I handle errors?", "What's the pattern for X?"    | `/code-discovery` |
+| Load crate-specific guidelines for admin-api, metadata-db, etc. | `/code-discovery` |
+| Creating or editing files in `docs/code/`                     | `/docs-code-fmt-check` |
+| Reviewing PRs that modify guideline docs                        | `/docs-code-fmt-check` |
 
 **Navigation:**
 
-- Need to understand patterns? → `/code-pattern-discovery`
-- Writing pattern docs? → `/code-pattern-fmt-check` + [docs/__meta__/code-pattern-docs.md](docs/__meta__/code-pattern-docs.md)
+- Need to understand patterns? → `/code-discovery`
+- Writing guideline docs? → `/docs-code-fmt-check` + [docs/__meta__/code.md](docs/__meta__/code.md)
 - All patterns located in `docs/code/`
 
 
@@ -96,13 +87,13 @@ This project uses three complementary documentation systems. Understanding their
 |--------------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **AGENTS.md** (this file)      | **WHY** and **WHAT**     | Project architecture, policies, goals, and principles. Answers "What is this project?" and "Why do we do things this way?"                                                   |
 | **Skills** (`.claude/skills/`) | **HOW** and **WHEN**     | Command-line operations and justfile usage. Answers "How do I run commands?" and "When should I use each command?"                                                           |
-| **Patterns** (`docs/code/`)    | **HOW** (implementation) | Code implementation patterns, standards, and guidelines (see [Coding Patterns](#2-coding-patterns)). Answers "How do I write quality code that follows project conventions?" |
+| **Patterns** (`docs/code/`)    | **HOW** (implementation) | Code implementation guidelines, standards, and guidelines (see [Code Guidelines](#2-coding-patterns)). Answers "How do I write quality code that follows project conventions?" |
 
 **Navigation Guide for AI Agents:**
 
 - Need to understand the project? → Read this file (AGENTS.md)
 - Need to run a command? → Invoke the appropriate Skill (`/code-format`, `/code-check`, `/code-test`, `/code-gen`)
-- Need to write code? → Use `/code-pattern-discovery` skill to load relevant patterns
+- Need to write code? → Use `/code-discovery` skill to load relevant guidelines
 
 ### Core Operating Principle
 
@@ -191,8 +182,8 @@ Each Skill provides:
 **BEFORE writing ANY code, you MUST:**
 
 1. **Understand the task** - Research the codebase and identify affected crate(s)
-2. **Load implementation patterns** - Use `/code-pattern-discovery` skill (see [Coding Patterns](#2-coding-patterns))
-3. **Follow crate-specific patterns** - Pattern discovery loads crate-specific and security patterns automatically
+2. **Load implementation guidelines** - Use `/code-discovery` skill (see [Code Guidelines](#2-coding-patterns))
+3. **Follow crate-specific guidelines** - Pattern discovery loads crate-specific and security guidelines automatically
 
 ### Typical Development Workflow
 
@@ -200,15 +191,15 @@ Each Skill provides:
 
 #### 1. Research Phase
 
-- Understand the codebase and existing patterns
+- Understand the codebase and existing guidelines
 - Identify related modules and dependencies
 - Review test files and usage examples
-- Use `/code-pattern-discovery` to load relevant implementation patterns
+- Use `/code-discovery` to load relevant implementation guidelines
 
 #### 2. Planning Phase
 
-- **First**: Use `/code-pattern-discovery` to load relevant patterns for the affected crate(s)
-- Create detailed implementation plan based on the loaded patterns
+- **First**: Use `/code-discovery` to load relevant guidelines for the affected crate(s)
+- Create detailed implementation plan based on the loaded guidelines
 - Ensure plan follows required patterns (error handling, type design, module structure, etc.)
 - Identify validation checkpoints
 - Consider edge cases and error handling according to pattern guidelines
@@ -222,7 +213,7 @@ Each Skill provides:
 
 ```
 Development Progress:
-- [ ] Step 1: Write code following patterns from Coding Patterns section (use /code-pattern-discovery)
+- [ ] Step 1: Write code following patterns from Code Guidelines section (use /code-discovery)
 - [ ] Step 2: Format code (use /code-format skill)
 - [ ] Step 3: Check compilation (use /code-check skill)
 - [ ] Step 4: Fix all compilation errors
@@ -235,7 +226,7 @@ Development Progress:
 
 **Detailed workflow for each work chunk (and before committing):**
 
-1. **Write code** following patterns from [Coding Patterns](#2-coding-patterns) (loaded via `/code-pattern-discovery`)
+1. **Write code** following patterns from [Code Guidelines](#2-coding-patterns) (loaded via `/code-discovery`)
 
 2. **Format before checks/commit**:
    - **Use**: `/code-format` skill when you finish a coherent chunk of work
@@ -286,7 +277,7 @@ Edit File → /code-format skill
 **ALL AI agents MUST follow these principles:**
 
 - **Research → Plan → Implement**: Never jump straight to coding
-- **Pattern compliance**: Follow patterns from [Coding Patterns](#2-coding-patterns)
+- **Guideline compliance**: Follow patterns from [Code Guidelines](#2-coding-patterns)
 - **Zero tolerance for errors**: All automated checks must pass
 - **Clarity over cleverness**: Choose clear, maintainable solutions
 - **Security first**: Never skip security guidelines for security-sensitive crates
@@ -306,9 +297,9 @@ Edit File → /code-format skill
 
 | What             | Where                                 | When                                |
 |------------------|---------------------------------------|-------------------------------------|
-| **Plan work**    | `/code-pattern-discovery`             | BEFORE creating any plan            |
+| **Plan work**    | `/code-discovery`             | BEFORE creating any plan            |
 | **Run commands** | `.claude/skills/`                     | Check Skills BEFORE any command     |
-| **Write code**   | [Coding Patterns](#2-coding-patterns) | Load patterns before implementation |
+| **Write code**   | [Code Guidelines](#2-coding-patterns) | Load patterns before implementation |
 | **Format**       | `/code-format`                        | Before checks or before committing  |
 | **Check**        | `/code-check`                         | After formatting                    |
 | **Lint**         | `/code-check`                         | Fix ALL warnings                    |
@@ -324,7 +315,32 @@ Edit File → /code-format skill
 
 **Remember**: When in doubt, invoke the appropriate Skill!
 
-## 4. Additional Resources
+## 4. Feature Discovery
+
+Feature documentation lives in `docs/features/` with YAML frontmatter for dynamic discovery.
+
+**Feature docs are authoritative**: If a feature doc exists, it is the ground truth. Implementation MUST align with documentation. If there's a mismatch, either fix the code or update the doc to reflect the correct state.
+
+| When User Asks                                              | Invoke This Skill    |
+|-------------------------------------------------------------|----------------------|
+| "What is X?", "How does X work?", "Explain the Y feature"   | `/feature-discovery` |
+| "What features does Amp have?", "What can this project do?" | `/feature-discovery` |
+| Questions about project functionality or capabilities       | `/feature-discovery` |
+| Need context before implementing a feature                  | `/feature-discovery` |
+| Creating or editing files in `docs/features/`               | `/docs-features-fmt-check` |
+| Reviewing PRs that modify feature docs (format check)       | `/docs-features-fmt-check` |
+| "What's the status of feature X implementation?"            | `/feature-validate`  |
+| Verify feature doc matches implementation                   | `/feature-validate`  |
+| Check if documented functionality exists in code            | `/feature-validate`  |
+| Audit feature docs for accuracy and test coverage           | `/feature-validate`  |
+
+**Navigation:**
+
+- Need to understand a feature? → `/feature-discovery`
+- Writing feature docs? → `/docs-features-fmt-check` + [docs/__meta__/features.md](docs/__meta__/features.md)
+- Validate implementation aligns with feature claims? → `/feature-validate`
+
+## 5. Additional Resources
 
 For more detailed information about the project:
 

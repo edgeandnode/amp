@@ -1,23 +1,23 @@
 ---
-name: code-pattern-fmt-check
-description: Validate pattern doc format against the specification. Use when reviewing PRs, after editing pattern docs, or before commits
+name: docs-code-fmt-check
+description: Validate guideline doc format against the specification. Use when reviewing PRs, after editing guideline docs, or before commits
 ---
 
-# Code Pattern Format Check Skill
+# Code Guideline Format Check Skill
 
-This skill validates that code pattern documentation **format** follows the established patterns in `docs/__meta__/code-pattern-docs.md`.
+This skill validates that code guideline documentation **format** follows the established patterns in `docs/__meta__/code.md`.
 
 ## When to Use This Skill
 
 Use this skill when:
-- Reviewing a PR that includes pattern doc changes
-- After creating or editing a pattern doc
+- Reviewing a PR that includes guideline doc changes
+- After creating or editing a guideline doc
 - Before committing changes to `docs/code/`
-- User requests a pattern doc format review
+- User requests a guideline doc format review
 
 ## Review Process
 
-### Step 1: Identify Changed Pattern Docs
+### Step 1: Identify Changed Guideline Docs
 
 For recent commits:
 ```bash
@@ -34,25 +34,32 @@ For unstaged changes:
 git diff --name-only | grep 'docs/code/.*\.md$'
 ```
 
-### Step 2: Validate Each Pattern Doc
+### Step 2: Validate Each Guideline Doc
 
-For each changed pattern doc, verify:
+For each changed guideline doc, verify:
 1. Frontmatter format
 2. Content structure
 3. Discovery compatibility
 
 ## Format Reference
 
-All format requirements are defined in [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md). Read that file for:
+All format requirements are defined in [docs/__meta__/code.md](../../docs/__meta__/code.md). Read that file for:
 - Frontmatter field requirements (`name`, `description`, `type`, `scope`)
 - Description guidelines ("Load when" triggers, discovery optimization)
-- Pattern type definitions (`core`, `arch`, `crate`, `meta`)
+- Pattern type definitions (`principle`, `core`, `arch`, `crate`, `meta`)
 - Scope format rules (`global`, `crate:<name>`)
-- Naming conventions (kebab-case, flattened crate-specific patterns)
+- Naming conventions (kebab-case, flattened crate-specific guidelines)
 - Required and optional sections (main content, Checklist)
+- Cross-reference rules (relationship types and direction rules)
 - No subdirectories rule (all files at `docs/code/` root)
 
-Use the **Checklist** section in `docs/__meta__/code-pattern-docs.md` to validate pattern docs.
+For `principle-*` guideline docs, also read [docs/__meta__/code-principle.md](../../docs/__meta__/code-principle.md) for:
+- Required sections specific to principle docs (Rule, Examples, Why It Matters, Pragmatism Caveat, Checklist)
+- Example format (Bad/Good code pairs)
+- Header format (title with parenthetical clarification)
+- Optional sections (References, External References)
+
+Use the **Checklist** section in `docs/__meta__/code.md` to validate guideline docs. For principle docs, additionally verify against the structure in `docs/__meta__/code-principle.md`.
 
 ### Discovery Validation
 
@@ -77,16 +84,16 @@ awk '/^---$/{p=!p; print; next} p' docs/code/<pattern-name>.md
 ## Validation Process
 
 1. **Identify changed files**: `git diff --name-only HEAD~1 | grep 'docs/code/.*\.md$'`
-2. **Read the pattern doc** and **Read** [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md)
+2. **Read the guideline doc** and **Read** [docs/__meta__/code.md](../../docs/__meta__/code.md)
 3. **Validate** using the checklist in the format specification
 4. **Report** findings using format below
 
 ## Review Report Format
 
-After validation, provide a structured report listing issues found. Use the checklist from [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md) as the validation criteria.
+After validation, provide a structured report listing issues found. Use the checklist from [docs/__meta__/code.md](../../docs/__meta__/code.md) as the validation criteria.
 
 ```markdown
-## Pattern Doc Format Review: <filename>
+## Guideline Doc Format Review: <filename>
 
 ### Issues Found
 1. <issue description with line number>
@@ -94,20 +101,20 @@ After validation, provide a structured report listing issues found. Use the chec
 
 ### Verdict: PASS/FAIL
 
-<If FAIL, provide specific fixes needed referencing docs/__meta__/code-pattern-docs.md>
+<If FAIL, provide specific fixes needed referencing docs/__meta__/code.md>
 ```
 
 ## Common Issues
 
-When validation fails, refer to [docs/__meta__/code-pattern-docs.md](../../docs/__meta__/code-pattern-docs.md) for detailed requirements. Common issues include:
+When validation fails, refer to [docs/__meta__/code.md](../../docs/__meta__/code.md) for detailed requirements. Common issues include:
 
 - Invalid frontmatter YAML syntax
 - `name` not in kebab-case or doesn't match filename (minus `.md`)
 - `description` missing "Load when" trigger clause
-- `type` not one of: `core`, `arch`, `crate`, `meta`
+- `type` not one of: `principle`, `core`, `arch`, `crate`, `meta`
 - `scope` invalid format (not `global` or `crate:<name>`)
 - Crate-specific patterns not following `<crate>-<type>.md` naming
-- Pattern files in subdirectories (should be flat at `docs/code/` root)
+- Guideline files in subdirectories (should be flat at `docs/code/` root)
 - Missing required sections (main content, Checklist)
 - Empty optional sections
 
@@ -116,7 +123,7 @@ When validation fails, refer to [docs/__meta__/code-pattern-docs.md](../../docs/
 ### Required Fields
 - [ ] `name` field present and matches filename (minus `.md`)
 - [ ] `description` field present with "Load when" trigger
-- [ ] `type` field present and valid (`core`, `arch`, `crate`, `meta`)
+- [ ] `type` field present and valid (`principle`, `core`, `arch`, `crate`, `meta`)
 - [ ] `scope` field present and valid (`global` or `crate:<name>`)
 
 ### Name Field
@@ -130,20 +137,20 @@ When validation fails, refer to [docs/__meta__/code-pattern-docs.md](../../docs/
 - [ ] Optimized for AI agent discovery
 
 ### Type Field
-- [ ] Valid value: `core`, `arch`, `crate`, or `meta`
-- [ ] Appropriate for pattern category
+- [ ] Valid value: `principle`, `core`, `arch`, `crate`, or `meta`
+- [ ] Appropriate for guideline category
 
 ### Scope Field
 - [ ] Valid format: `global` or `crate:<name>`
-- [ ] `core`, `arch`, `meta` patterns use `global`
+- [ ] `principle`, `core`, `arch`, `meta` patterns use `global`
 - [ ] Crate-specific patterns use `crate:<name>` format
 
 ## Content Structure Validation
 
 ### Required Sections
-- [ ] Title with pattern name
+- [ ] Title with guideline name
 - [ ] Applicability statement (bold mandatory line)
-- [ ] Main content sections with pattern details
+- [ ] Main content sections with guideline details
 - [ ] **Checklist** section for verification
 
 ### Naming and Organization

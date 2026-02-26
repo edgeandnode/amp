@@ -1,5 +1,5 @@
 ---
-name: "feature-docs"
+name: "features"
 description: "Feature documentation format specification. Load when creating or editing feature docs in docs/features/"
 type: meta
 scope: "global"
@@ -546,4 +546,4 @@ Before committing feature documentation:
 
 ### Review
 
-Use the `/feature-fmt-check` skill to validate feature docs before committing.
+Use the `/docs-features-fmt-check` skill to validate feature docs before committing.

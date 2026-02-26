@@ -175,7 +175,7 @@ Closes #123
 
 ## Coding Standards
 
-Follow the coding patterns and standards documented in [`docs/code/`](docs/code/). Key patterns include:
+Follow the code guidelines and standards documented in [`docs/code/`](docs/code/). Key patterns include:
 
 - **Error handling**: Proper use of `Result<T, E>` and error types
 - **Module structure**: Correct module organization and visibility
@@ -200,7 +200,7 @@ Contributors using [Claude Code](https://claude.ai/claude-code) can leverage pro
 | `/code-test` | Run unit and integration tests |
 | `/code-review` | Review code changes |
 | `/commit` | Generate commit messages |
-| `/code-pattern-discovery` | Load coding patterns |
+| `/code-discovery` | Load code guidelines |
 | `/feature-discovery` | Load feature documentation |
 
 ## License

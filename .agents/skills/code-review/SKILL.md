@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review code changes for bugs, pattern violations, security, and quality. Use when reviewing PRs, code changes, or before commits.
+description: Review code changes for bugs, guideline violations, security, and quality. Use when reviewing PRs, code changes, or before commits.
 ---
 
 # Code Review Skill
@@ -19,7 +19,31 @@ Use this skill when you need to:
 
 Please review this code change and provide feedback on:
 
-### 1. Potential Bugs
+### 1. Security Concerns
+
+Review for security vulnerabilities:
+- Exposed secrets or credentials
+- Input validation and sanitization
+- SQL injection, XSS, or other OWASP Top 10 vulnerabilities
+- Authentication and authorization bypasses
+- For security-sensitive crates (admin-api, metadata-db), verify compliance with crate-specific security guidelines in `docs/code/`
+
+### 2. Principles Violations
+
+Check for violations of the core design principles. These are foundational rules that take priority over stylistic concerns.
+
+**Core principles** (read the full docs for details, examples, and checklists):
+
+| Principle | One-liner | Full doc |
+|-----------|-----------|----------|
+| **Single Responsibility** | One struct = one reason to change | `docs/code/principle-single-responsibility.md` |
+| **Open/Closed** | Extend via new types/trait impls, don't modify existing code | `docs/code/principle-open-closed.md` |
+| **Law of Demeter** | Only talk to immediate collaborators — no `a.b().c().d()` chains | `docs/code/principle-law-of-demeter.md` |
+| **Validate at the Edge** | Hard shell (boundary validates), soft core (domain trusts) | `docs/code/principle-validate-at-edge.md` |
+
+Additional design principles (Type-Driven Design, Idempotency, Inversion of Control, etc.) are documented in `docs/code/principle-*.md`. Use `/code-discovery principles` to load them when relevant.
+
+### 3. Potential Bugs
 
 Look for common programming errors such as:
 - Off-by-one errors
@@ -28,7 +52,7 @@ Look for common programming errors such as:
 - `min` vs `max`, `first` vs `last`, flipped ordering
 - Iterating over hashmap/hashset in order-sensitive operations
 
-### 2. Panic Branches
+### 4. Panic Branches
 
 Identify panic branches that cannot be locally proven to be unreachable:
 - `unwrap` or `expect` calls
@@ -37,28 +61,7 @@ Identify panic branches that cannot be locally proven to be unreachable:
 
 **Note**: This overlaps with the error handling patterns documented in `docs/code/errors-handling.md`. Verify compliance with the project's error handling standards.
 
-### 3. Dead Code
-
-Find dead code that is not caught by warnings:
-- Overriding values that should be read first
-- Silently dead code due to `pub`
-- `todo!()` or `dbg!()` macros left in production code
-
-### 4. Performance
-
-Check for performance issues:
-- Blocking operations in async code
-- DB connection with lifetimes that exceed a local scope
-- Inefficient algorithms or data structures
-
-### 5. Inconsistencies
-
-Look for inconsistencies between comments and code:
-- Documentation that doesn't match implementation
-- Misleading variable names or comments
-- Outdated comments after refactoring
-
-### 6. Backwards Compatibility
+### 5. Backwards Compatibility
 
 Verify backwards compatibility is maintained:
 - Changes to `Deserialize` structs that break existing data
@@ -68,35 +71,9 @@ Verify backwards compatibility is maintained:
   - Check if migration can be made friendly to rollbacks
 - Breaking changes to HTTP APIs or CLIs
 
-### 7. Documentation
+### 6. Coding Guideline Violations
 
-Ensure documentation is up-to-date:
-- The `config.sample.toml` should be kept up-to-date
-- API changes are reflected in OpenAPI specs
-- README and architectural docs reflect current behavior
-
-### 8. Security Concerns
-
-Review for security vulnerabilities:
-- Exposed secrets or credentials
-- Input validation and sanitization
-- SQL injection, XSS, or other OWASP Top 10 vulnerabilities
-- Authentication and authorization bypasses
-- For security-sensitive crates (admin-api, metadata-db), verify compliance with crate-specific security patterns in `docs/code/`
-
-### 9. Testing
-
-Evaluate test coverage and quality:
-- Reduced test coverage without justification
-- Tests that don't actually test the intended behavior
-- Tests with race conditions or non-deterministic behavior
-- Integration tests that should be unit tests (or vice versa)
-- Changes to existing tests that weaken assertions
-- Changes to tests that are actually a symptom of breaking changes to user-visible behaviour
-
-### 10. Coding Pattern Violations
-
-Review the changeset against coding pattern groups. Follow these three steps in order.
+Review the changeset against code guideline groups. Follow these three steps in order.
 
 #### Step 1: Discover pattern groups
 
@@ -107,7 +84,8 @@ Always include all non-crate groups. Only include `crate-<crate-name>` groups wh
 Examples of current groups:
 
 - `errors` — errors-handling, errors-reporting
-- `rust` — rust-modules, rust-modules-members, rust-types, rust-documentation, rust-service, rust-crate, rust-workspace
+- `rust` — rust-modules, rust-modules-members, rust-documentation, rust-crate, rust-workspace
+- `pattern` — pattern-builder, pattern-service, pattern-typestate
 - `test` — test-organization, test-files, test-functions
 - `logging` — logging, logging-errors
 - `apps` — apps-cli
@@ -121,28 +99,28 @@ For **every** applicable group from Step 1, spawn a `general-purpose` Task agent
 
 Each agent's prompt MUST include:
 
-1. **Which pattern files to read** — list the full paths (e.g., `docs/code/errors-handling.md`, `docs/code/errors-reporting.md`).
+1. **Which guideline files to read** — list the full paths (e.g., `docs/code/errors-handling.md`, `docs/code/errors-reporting.md`).
 2. **How to obtain the diff** — instruct the agent to run `git diff main...HEAD` (or the appropriate base) via the Bash tool.
 3. **What to do** — read every pattern file in the group, then review the diff for violations of any rule described in those patterns.
 4. **What to return** — a list of violations, each with: file path, line number or range, the violated rule (quote or paraphrase), and a brief explanation. If no violations are found, return `No violations found for group: <group>`.
 
 Example prompt for the `errors` group:
 
-> You are a code-review agent. Your job is to check a code diff for violations of the coding patterns in your assigned group.
+> You are a code-review agent. Your job is to check a code diff for violations of the code guidelines in your assigned group.
 >
 > **Your group**: errors
 >
-> **Step 1**: Read these pattern docs using the Read tool:
+> **Step 1**: Read these guideline docs using the Read tool:
 > - `docs/code/errors-handling.md`
 > - `docs/code/errors-reporting.md`
 >
 > **Step 2**: Get the diff by running: `git diff main...HEAD`
 >
-> **Step 3**: Review every changed line in the diff against every rule in the pattern docs you read. Only flag actual violations — do not flag code that is compliant.
+> **Step 3**: Review every changed line in the diff against every rule in the guideline docs you read. Only flag actual violations — do not flag code that is compliant.
 >
 > **Step 4**: Return your findings as a list. Each item must include:
 > - File path and line number(s)
-> - The specific rule violated (quote or paraphrase from the pattern doc)
+> - The specific rule violated (quote or paraphrase from the guideline doc)
 > - Brief explanation of why it is a violation
 >
 > If no violations are found, return: `No violations found for group: errors`
@@ -151,14 +129,52 @@ Example prompt for the `errors` group:
 
 After all Task agents complete, compile their results into the review output. Deduplicate any overlapping findings. Omit groups that reported no violations.
 
-### 11. Documentation Validation
+### 7. Testing
+
+Evaluate test coverage and quality:
+- Reduced test coverage without justification
+- Tests that don't actually test the intended behavior
+- Tests with race conditions or non-deterministic behavior
+- Integration tests that should be unit tests (or vice versa)
+- Changes to existing tests that weaken assertions
+- Changes to tests that are actually a symptom of breaking changes to user-visible behaviour
+
+### 8. Performance
+
+Check for performance issues:
+- Blocking operations in async code
+- DB connection with lifetimes that exceed a local scope
+- Inefficient algorithms or data structures
+
+### 9. Documentation
+
+Ensure documentation is up-to-date:
+- The `config.sample.toml` should be kept up-to-date
+- API changes are reflected in OpenAPI specs
+- README and architectural docs reflect current behavior
+
+### 10. Dead Code
+
+Find dead code that is not caught by warnings:
+- Overriding values that should be read first
+- Silently dead code due to `pub`
+- `todo!()` or `dbg!()` macros left in production code
+
+### 11. Inconsistencies
+
+Look for inconsistencies between comments and code:
+- Documentation that doesn't match implementation
+- Misleading variable names or comments
+- Outdated comments after refactoring
+
+### 12. Documentation Validation
 
 When reviewing PRs, validate documentation alignment:
 
 #### Format Validation
 
-- **Feature docs** (`docs/features/*.md`): Invoke `/feature-fmt-check` to validate format compliance
-- **Pattern docs** (`docs/code/*.md`): Invoke `/code-pattern-fmt-check` to validate format compliance
+- **Feature docs** (`docs/features/*.md`): Invoke `/docs-features-fmt-check` to validate format compliance
+- **Guideline docs** (`docs/code/*.md`): Invoke `/docs-code-fmt-check` to validate format compliance
 
 #### Implementation Alignment
 
@@ -168,8 +184,8 @@ When reviewing PRs, validate documentation alignment:
 
 **Process:**
 1. Check if PR modifies files in `docs/features/` or `docs/code/`
-2. If feature docs changed: Run `/feature-fmt-check` skill for format validation
-3. If pattern docs changed: Run `/code-pattern-fmt-check` skill for format validation
+2. If feature docs changed: Run `/docs-features-fmt-check` skill for format validation
+3. If guideline docs changed: Run `/docs-code-fmt-check` skill for format validation
 4. If PR changes feature-related code OR feature docs: Run `/feature-validate` to verify alignment
 5. Report any format violations or implementation mismatches in the review
 
@@ -182,26 +198,27 @@ When reviewing PRs, validate documentation alignment:
 - Reference specific file paths and line numbers
 - Suggest concrete improvements
 
-### Pattern Compliance is Critical
+### Guideline Compliance is Critical
 
-Pattern violations should be treated seriously as they:
+Guideline violations should be treated seriously as they:
 - Reduce codebase consistency
 - Make maintenance harder
 - May introduce security vulnerabilities (in security-sensitive crates)
 - Conflict with established architectural decisions
 
-Always run the pattern violation review (section 10) as part of every code review.
+Always run the pattern violation review (section 6) as part of every code review.
 
 ### Review Priority
 
-Review items in this priority order:
-1. **Security concerns** (highest priority)
-2. **Potential bugs** and **panic branches**
-3. **Backwards compatibility** issues
-4. **Coding pattern violations**
-5. **Testing** gaps
-6. **Performance** issues
-7. **Documentation** and **dead code**
+Sections are ordered by priority — review from top to bottom:
+1. **Security concerns** (§1, highest priority)
+2. **Principles violations** (§2)
+3. **Potential bugs** and **panic branches** (§3–4)
+4. **Backwards compatibility** (§5)
+5. **Code guideline violations** (§6)
+6. **Testing** (§7)
+7. **Performance** (§8)
+8. **Documentation**, **dead code**, and **inconsistencies** (§9–11)
 
 ## Next Steps
 
