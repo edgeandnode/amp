@@ -18,7 +18,9 @@ use crate::metrics;
 
 /// Runtime connection details for a Solana RPC endpoint.
 pub struct RpcProviderConnectionInfo {
+    /// The URL of the Solana RPC endpoint.
     pub url: Redacted<Url>,
+    /// Optional authentication credentials for the RPC endpoint.
     pub auth: Option<Auth>,
 }
 
