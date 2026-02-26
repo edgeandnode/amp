@@ -83,7 +83,7 @@ Do NOT use this skill for:
 - "How does feature X work?" → Use `/feature-discovery`
 - "What features are available?" → Use `/feature-discovery`
 - "Validate feature implementation" → Use `/feature-validate`
-- "Check feature doc format" → Use `/feature-fmt-check`
+- "Check feature doc format" → Use `/docs-features-fmt-check`
 
 ## Important Guidelines
 

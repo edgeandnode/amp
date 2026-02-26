@@ -71,4 +71,4 @@ When implementing or modifying a service in `crates/services/`:
 
 ## References
 
-- [rust-service](rust-service.md) - Foundation: Two-phase handle+fut coding pattern
+- [pattern-service](pattern-service.md) - Foundation: Two-phase handle+fut coding pattern
