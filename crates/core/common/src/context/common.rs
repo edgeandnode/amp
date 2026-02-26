@@ -6,6 +6,7 @@ use datafusion::{
 };
 
 use crate::{
+    block_num_udf::BlockNumUdf,
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
         EvmEncodeType, EvmTopic, ShiftUnits,
@@ -16,6 +17,7 @@ use crate::{
 /// Returns the built-in scalar UDFs registered in every session context.
 pub fn builtin_udfs() -> Vec<ScalarUDF> {
     vec![
+        BlockNumUdf::new().into(),
         EvmDecodeLog::new().into(),
         EvmDecodeLog::new().with_deprecated_name().into(),
         EvmTopic::new().into(),

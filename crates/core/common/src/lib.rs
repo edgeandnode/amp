@@ -5,6 +5,7 @@ use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use datafusion::{arrow, parquet};
 pub use datasets_common::{block_num::BlockNum, block_range::BlockRange, end_block::EndBlock};
 
+pub mod block_num_udf;
 pub mod catalog;
 pub mod context;
 pub mod cursor;
