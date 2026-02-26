@@ -969,6 +969,7 @@ version = "0.1.0"
 dependencies = [
  "amp-object-store",
  "amp-worker-core",
+ "common",
  "figment",
  "fs-err",
  "metadata-db",
@@ -1159,7 +1160,6 @@ dependencies = [
  "opentelemetry",
  "parking_lot",
  "parquet-ext",
- "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2989,7 +2989,6 @@ dependencies = [
  "parking_lot",
  "rand 0.9.2",
  "regex",
- "schemars 1.2.1",
  "serde",
  "serde_json",
  "solana-datasets",

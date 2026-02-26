@@ -35,16 +35,11 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ParquetConfig {
     /// Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
     #[serde(
         default = "default_compression",
         deserialize_with = "deserialize_compression"
-    )]
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(with = "String", default = "default_compression_str")
     )]
     pub compression: Compression,
     /// Enable bloom filters (default: false)
@@ -63,7 +58,6 @@ pub struct ParquetConfig {
         default = "SizeLimitConfig::default_upper_limit",
         deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
     )]
-    #[cfg_attr(feature = "schemars", schemars(with = "SizeLimitConfig"))]
     pub target_size: SizeLimitConfig,
     #[serde(default)]
     pub compactor: CompactorConfig,
@@ -90,7 +84,6 @@ impl Default for ParquetConfig {
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct CollectorConfig {
     /// Enable or disable the collector (default: false)
@@ -102,7 +95,6 @@ pub struct CollectorConfig {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct CompactorConfig {
     /// Enable or disable the compactor (default: false)
@@ -115,7 +107,6 @@ pub struct CompactorConfig {
     pub min_interval: ConfigDuration<1>,
     /// Compaction algorithm configuration (flattened fields: cooldown_duration, overflow, bytes, rows)
     #[serde(flatten)]
-    #[cfg_attr(feature = "schemars", schemars(with = "CompactionAlgorithmConfig"))]
     pub algorithm: CompactionAlgorithmConfig,
 }
 
@@ -132,7 +123,6 @@ impl Default for CompactorConfig {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct CompactionAlgorithmConfig {
     /// Base cooldown duration in seconds (default: 1024.0)
@@ -143,7 +133,6 @@ pub struct CompactionAlgorithmConfig {
         default = "SizeLimitConfig::default_eager_limit",
         deserialize_with = "SizeLimitConfig::deserialize_eager_limit"
     )]
-    #[cfg_attr(feature = "schemars", schemars(with = "SizeLimitConfig"))]
     pub eager_compaction_limit: SizeLimitConfig,
 }
 
@@ -157,7 +146,6 @@ impl Default for CompactionAlgorithmConfig {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct SizeLimitConfig {
     pub file_count: u32,
     pub generation: u64,
@@ -256,6 +244,12 @@ impl<const DEFAULT_SECS: u64> From<ConfigDuration<DEFAULT_SECS>> for Duration {
     }
 }
 
+impl<const DEFAULT_SECS: u64> From<Duration> for ConfigDuration<DEFAULT_SECS> {
+    fn from(d: Duration) -> Self {
+        Self(d)
+    }
+}
+
 impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DEFAULT_SECS> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -265,27 +259,15 @@ impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DE
     }
 }
 
-#[cfg(feature = "schemars")]
-impl<const DEFAULT_SECS: u64> schemars::JsonSchema for ConfigDuration<DEFAULT_SECS> {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "ConfigDuration".into()
-    }
-
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "number",
-            "description": "Duration in seconds (floating-point)"
-        })
-    }
+/// Parse a compression algorithm string into a [`Compression`] value.
+///
+/// Supported formats: `zstd(N)`, `lz4`, `gzip`, `brotli`, `snappy`, `uncompressed`.
+pub fn parse_compression(s: &str) -> Result<Compression, <Compression as std::str::FromStr>::Err> {
+    s.parse()
 }
 
 fn default_compression() -> Compression {
     Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
-}
-
-#[cfg(feature = "schemars")]
-fn default_compression_str() -> String {
-    "zstd(1)".to_string()
 }
 
 fn default_cache_size_mb() -> u64 {

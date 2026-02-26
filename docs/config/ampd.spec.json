@@ -106,74 +106,78 @@
   },
   "$defs": {
     "CollectorConfig": {
+      "description": "Garbage collection configuration for expired Parquet segment files.",
       "type": "object",
       "properties": {
         "active": {
-          "description": "Enable or disable the collector (default: false)",
+          "description": "Enable or disable the garbage collector (default: false).",
           "type": "boolean",
           "default": false
         },
         "deletion_lock_duration": {
-          "description": "Duration in seconds to hold deletion lock on compacted files (default: 1800.0 = 30 minutes)",
+          "description": "Duration in seconds to hold a deletion lock on compacted files (default: 1800 = 30 min).",
           "$ref": "#/$defs/ConfigDuration"
         },
         "min_interval": {
-          "description": "Interval in seconds to run the garbage collector (default: 30.0)",
+          "description": "Interval in seconds between garbage collection runs (default: 30).",
           "$ref": "#/$defs/ConfigDuration"
         }
       }
     },
     "CompactorConfig": {
+      "description": "File compaction configuration.\n\nControls concurrency, intervals, and algorithm parameters for merging\nsmall Parquet segments into larger files.",
       "type": "object",
       "properties": {
         "active": {
-          "description": "Enable or disable the compactor (default: false)",
+          "description": "Enable or disable the compactor (default: false).",
           "type": "boolean",
           "default": false
         },
         "bytes": {
-          "description": "Target bytes per file (default: 2147483648 = 2GB for target_size, 0 for eager limits)",
+          "description": "Target bytes per file (default: 2147483648 = 2 GB for target_size, 0 for eager limits).",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "cooldown_duration": {
-          "description": "Base cooldown duration in seconds (default: 1024.0)",
+          "description": "Base cooldown duration in seconds between compaction runs (default: 1024).",
           "$ref": "#/$defs/ConfigDuration"
         },
         "file_count": {
+          "description": "Number of files to target per partition.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "generation": {
+          "description": "Compaction generation tracking.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "metadata_concurrency": {
-          "description": "Max concurrent metadata operations (default: 2)",
+          "description": "Maximum concurrent metadata operations (default: 2).",
           "type": "integer",
           "format": "uint",
           "default": 2,
           "minimum": 0
         },
         "min_interval": {
-          "description": "Interval in seconds to run the compactor (default: 1.0)",
+          "description": "Interval in seconds between compactor runs (default: 1).",
           "$ref": "#/$defs/ConfigDuration"
         },
         "overflow": {
-          "description": "Overflow multiplier: 1x target size (default: \"1\"), can use \"1.5\" for 1.5x, etc.",
+          "description": "Overflow multiplier: 1x target size (default: `\"1\"`), can use `\"1.5\"` for 1.5x, etc.\n\nAccepts an integer, float, or fraction string (e.g. `1`, `1.5`, `\"3/2\"`).",
           "$ref": "#/$defs/Overflow"
         },
         "rows": {
-          "description": "Target rows per file, 0 means no limit (default: 0)",
+          "description": "Target rows per file, 0 means no limit (default: 0).",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "write_concurrency": {
-          "description": "Max concurrent compaction write operations (default: 2)",
+          "description": "Maximum concurrent compaction write operations (default: 2).",
           "type": "integer",
           "format": "uint",
           "default": 2,
@@ -298,66 +302,71 @@
       ]
     },
     "ParquetConfig": {
+      "description": "Parquet writer and file configuration.\n\nControls compression, caching, segment sizing, compaction, and garbage collection\nfor Parquet files produced by the worker.",
       "type": "object",
       "properties": {
         "bloom_filters": {
-          "description": "Enable bloom filters (default: false)",
+          "description": "Enable Parquet bloom filters (default: false).",
           "type": "boolean",
           "default": false
         },
         "bytes": {
-          "description": "Target bytes per file (default: 2147483648 = 2GB for target_size, 0 for eager limits)",
+          "description": "Target bytes per file (default: 2147483648 = 2 GB for target_size, 0 for eager limits).",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "cache_size_mb": {
-          "description": "Parquet metadata cache size in MB (default: 1024)",
+          "description": "Parquet metadata cache size in MB (default: 1024).",
           "type": "integer",
           "format": "uint64",
           "default": 1024,
           "minimum": 0
         },
         "collector": {
+          "description": "Garbage collection settings.",
           "$ref": "#/$defs/CollectorConfig"
         },
         "compactor": {
+          "description": "Compaction settings.",
           "$ref": "#/$defs/CompactorConfig"
         },
         "compression": {
-          "description": "Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))",
+          "description": "Compression algorithm (default: `zstd(1)`).\n\nSupported: `zstd(N)`, `lz4`, `gzip`, `brotli`, `snappy`, `uncompressed`.",
           "type": "string",
           "default": "zstd(1)"
         },
         "file_count": {
+          "description": "Number of files to target per partition.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "generation": {
+          "description": "Compaction generation tracking.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "max_row_group_mb": {
-          "description": "Max row group size in MB (default: 512)",
+          "description": "Maximum row group size in MB (default: 512).",
           "type": "integer",
           "format": "uint64",
           "default": 512,
           "minimum": 0
         },
         "overflow": {
-          "description": "Overflow multiplier: 1x target size (default: \"1\"), can use \"1.5\" for 1.5x, etc.",
+          "description": "Overflow multiplier: 1x target size (default: `\"1\"`), can use `\"1.5\"` for 1.5x, etc.\n\nAccepts an integer, float, or fraction string (e.g. `1`, `1.5`, `\"3/2\"`).",
           "$ref": "#/$defs/Overflow"
         },
         "rows": {
-          "description": "Target rows per file, 0 means no limit (default: 0)",
+          "description": "Target rows per file, 0 means no limit (default: 0).",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "segment_flush_interval_secs": {
-          "description": "Max wall-clock time before closing a segment, in seconds (default: 600 = 10 min)",
+          "description": "Maximum wall-clock time before closing a segment, in seconds (default: 600 = 10 min).",
           "$ref": "#/$defs/ConfigDuration"
         }
       },

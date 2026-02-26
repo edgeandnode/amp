@@ -27,13 +27,15 @@
 
 use std::path::{Path, PathBuf};
 
-use amp_worker_core::{ConfigDuration, ParquetConfig};
 use figment::{
     Figment,
     providers::{Env, Format as _, Serialized, Toml},
 };
 
-use crate::monitoring::OpenTelemetryConfig;
+use crate::{
+    monitoring::OpenTelemetryConfig,
+    worker_core::{ConfigDuration, ParquetConfig},
+};
 
 /// Default data directory name - stores Parquet files
 pub const DEFAULT_DATA_DIRNAME: &str = "data";
