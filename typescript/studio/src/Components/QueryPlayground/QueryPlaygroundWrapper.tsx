@@ -340,6 +340,12 @@ export function QueryPlaygroundWrapper() {
                 >
                   <AmpConfigBrowser
                     onTableSelected={(dataset, table) => {
+                      if (!/^[a-zA-Z0-9_]+$/.test(dataset)) {
+                        throw new Error('Invalid input')
+                      }
+                      if (!/^[a-zA-Z0-9_]+$/.test(table)) {
+                        throw new Error('Invalid input')
+                      }
                       const query = `SELECT * FROM "${dataset}"."${table}"`
                       const tab = `SELECT ... ${dataset}.${table}`
                       setQueryTabFromSelected(tab, query)
@@ -347,6 +353,9 @@ export function QueryPlaygroundWrapper() {
                   />
                   <SchemaBrowser
                     onEventSelected={(event) => {
+                      if (!/^[a-zA-Z0-9_]+$/.test(event.name)) {
+                        throw new Error('Invalid input')
+                      }
                       const query =
                         `SELECT tx_hash, block_num, evm_decode_log(topic1, topic2, topic3, data, '${event.signature}') as event
 FROM anvil.logs
@@ -357,6 +366,12 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
                   />
                   <SourcesBrowser
                     onSourceSelected={(source) => {
+                      if (!source.metadata_columns.every(col => /^[a-zA-Z0-9_]+$/.test(col.name))) {
+                        throw new Error('Invalid input')
+                      }
+                      if (!/^[a-zA-Z0-9_]+$/.test(source.source)) {
+                        throw new Error('Invalid input')
+                      }
                       const columns = source.metadata_columns
                         .map((col) => {
                           if (RESERVED_FIELDS.has(col.name)) {
