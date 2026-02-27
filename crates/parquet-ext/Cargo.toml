@@ -2,10 +2,9 @@
 name = "parquet-ext"
 edition.workspace = true
 version.workspace = true
+license-file.workspace = true
 
 [lib]
-name = "parquet_ext"
-path = "src/lib.rs"
 bench = false
 
 [[bench]]
@@ -16,84 +15,62 @@ harness = false
 name = "end_to_end_writer"
 harness = false
 
-[profile.bench]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-
-[package.metadata.docs.rs]
-all-features = true
-
 [features]
+# Default features enabled unless default-features = false
 default = ["default-parquet", "tokio"]
-default-parquet = ["parquet/default"]
-
-tokio = ["async", "object_store", "parquet/arrow"]
-
-# Pass-through features to parquet
+# NOTE: Feature names with underscores (object_store, lz4_flex, etc.) mirror
+# upstream parquet crate feature names and are kept as-is for pass-through consistency.
+#
+# Arrow canonical extension type support
+arrow_canonical_extension_types = ["parquet/arrow_canonical_extension_types"]
+# CSV support via Arrow
+arrow-csv = ["parquet/arrow-csv"]
+# Async I/O support with tokio and futures
 async = ["parquet/async", "dep:tokio", "dep:futures"]
-object_store = ["parquet/object_store", "async"]
-
-# Compression codecs
-snap = ["parquet/snap"]
+# Brotli compression codec
 brotli = ["parquet/brotli"]
+# CRC checksum validation
+crc = ["parquet/crc"]
+# Enable parquet default feature set
+default-parquet = ["parquet/default"]
+# Parquet encryption support
+encryption = ["parquet/encryption"]
+# Experimental parquet features
+experimental = ["parquet/experimental"]
+# Flate2 (gzip/deflate) compression codec
 flate2 = ["parquet/flate2"]
+# Flate2 with pure-Rust backend
 flate2-rust_backend = ["parquet/flate2-rust_backened"]
+# Flate2 with zlib-rs backend
 flate2-zlib-rs = ["parquet/flate2-zlib-rs"]
+# JSON serialization support
+json = ["parquet/json"]
+# LZ4 compression codec
 lz4 = ["parquet/lz4"]
+# LZ4 compression via pure-Rust lz4_flex
 lz4_flex = ["parquet/lz4_flex"]
+# Object store integration for reading/writing parquet files
+object_store = ["parquet/object_store", "async"]
+# Serde serialization/deserialization support
+serde = ["parquet/serde"]
+# Snappy compression codec
+snap = ["parquet/snap"]
+# Tokio async runtime with object store and Arrow support
+tokio = ["async", "object_store", "parquet/arrow"]
+# Zstandard compression codec
 zstd = ["parquet/zstd"]
 
-# Other features
-arrow_canonical_extension_types = ["parquet/arrow_canonical_extension_types"]
-arrow-csv = ["parquet/arrow-csv"]
-json = ["parquet/json"]
-crc = ["parquet/crc"]
-encryption = ["parquet/encryption"]
-experimental = ["parquet/experimental"]
-serde = ["parquet/serde"]
+[dependencies]
+arrow-array = "57"
+arrow-schema = "57"
+bytes.workspace = true
+flume = "0.11"
+futures = { workspace = true, features = ["std"], optional = true }
+parking_lot.workspace = true
+parquet = { version = "57", features = ["arrow"] }
+tokio = { workspace = true, optional = true }
 
-[dependencies.arrow-array]
-version = "^57.3"
-optional = false
-
-[dependencies.arrow-schema]
-version = "^57.3"
-optional = false
-
-[dependencies.bytes]
-workspace = true
-optional = false
-
-[dependencies.flume]
-version = "0.11"
-optional = false
-
-[dependencies.futures]
-workspace = true
-features = ["std"]
-optional = true
-
-[dependencies.parking_lot]
-workspace = true
-optional = false
-
-[dependencies.parquet]
-version = "^57.3"
-features = ["arrow"]
-optional = false
-
-[dependencies.tokio]
-workspace = true
-optional = true
-
-[dev-dependencies.criterion]
-version = "0.5"
-features = ["async_tokio"]
-
-[dev-dependencies.arrow]
-version = "^57.3"
-features = ["test_utils"]
-
-[dev-dependencies.rand]
-workspace = true
+[dev-dependencies]
+arrow = { workspace = true, features = ["test_utils"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
+rand.workspace = true
