@@ -143,18 +143,6 @@
           "description": "Base cooldown duration in seconds between compaction runs (default: 1024).",
           "$ref": "#/$defs/ConfigDuration"
         },
-        "file_count": {
-          "description": "Number of files to target per partition.",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "generation": {
-          "description": "Compaction generation tracking.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
         "metadata_concurrency": {
           "description": "Maximum concurrent metadata operations (default: 2).",
           "type": "integer",
@@ -185,8 +173,6 @@
         }
       },
       "required": [
-        "file_count",
-        "generation",
         "overflow",
         "bytes",
         "rows"
@@ -348,18 +334,6 @@
           "description": "Compression algorithm (default: `zstd(1)`).",
           "$ref": "#/$defs/Compression"
         },
-        "file_count": {
-          "description": "Number of files to target per partition.",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "generation": {
-          "description": "Compaction generation tracking.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
         "max_row_group_mb": {
           "description": "Maximum row group size in MB (default: 512).",
           "type": "integer",
@@ -383,8 +357,6 @@
         }
       },
       "required": [
-        "file_count",
-        "generation",
         "overflow",
         "bytes",
         "rows"

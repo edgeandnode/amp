@@ -2,7 +2,6 @@ use std::{path::PathBuf, time::Duration};
 
 use common::metadata::Overflow;
 use datafusion::parquet::basic::{Compression, ZstdLevel};
-use serde::Deserialize as _;
 
 /// Configuration specific to dump operations
 ///
@@ -34,37 +33,21 @@ pub struct Config {
     pub progress_interval: Duration,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ParquetConfig {
     /// Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
-    #[serde(
-        default = "default_compression",
-        deserialize_with = "deserialize_compression"
-    )]
     pub compression: Compression,
     /// Enable bloom filters (default: false)
-    #[serde(default)]
     pub bloom_filters: bool,
     /// Parquet metadata cache size in MB (default: 1024)
-    #[serde(default = "default_cache_size_mb")]
     pub cache_size_mb: u64,
     /// Max row group size in MB (default: 512)
-    #[serde(default = "default_max_row_group_mb")]
     pub max_row_group_mb: u64,
-    /// Target partition size configuration (flattened fields: overflow, bytes, rows)
-    #[serde(
-        alias = "file_size",
-        flatten,
-        default = "SizeLimitConfig::default_upper_limit",
-        deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
-    )]
+    /// Target partition size configuration
     pub target_size: SizeLimitConfig,
-    #[serde(default)]
     pub compactor: CompactorConfig,
-    #[serde(alias = "garbage_collector", default)]
     pub collector: CollectorConfig,
     /// Max wall-clock time before closing a segment, in seconds (default: 600 = 10 min)
-    #[serde(default)]
     pub segment_flush_interval_secs: ConfigDuration<600>,
 }
 
@@ -75,7 +58,7 @@ impl Default for ParquetConfig {
             bloom_filters: false,
             cache_size_mb: default_cache_size_mb(),
             max_row_group_mb: default_max_row_group_mb(),
-            target_size: SizeLimitConfig::default_upper_limit(),
+            target_size: SizeLimitConfig::default(),
             compactor: CompactorConfig::default(),
             collector: CollectorConfig::default(),
             segment_flush_interval_secs: ConfigDuration::default(),
@@ -83,8 +66,7 @@ impl Default for ParquetConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-#[serde(default)]
+#[derive(Debug, Default, Clone)]
 pub struct CollectorConfig {
     /// Enable or disable the collector (default: false)
     pub active: bool,
@@ -94,8 +76,7 @@ pub struct CollectorConfig {
     pub deletion_lock_duration: ConfigDuration<1800>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone)]
 pub struct CompactorConfig {
     /// Enable or disable the compactor (default: false)
     pub active: bool,
@@ -105,8 +86,7 @@ pub struct CompactorConfig {
     pub write_concurrency: usize,
     /// Interval in seconds to run the compactor (default: 1.0)
     pub min_interval: ConfigDuration<1>,
-    /// Compaction algorithm configuration (flattened fields: cooldown_duration, overflow, bytes, rows)
-    #[serde(flatten)]
+    /// Compaction algorithm configuration
     pub algorithm: CompactionAlgorithmConfig,
 }
 
@@ -122,17 +102,11 @@ impl Default for CompactorConfig {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone)]
 pub struct CompactionAlgorithmConfig {
     /// Base cooldown duration in seconds (default: 1024.0)
     pub cooldown_duration: ConfigDuration<1024>,
-    /// Eager compaction limits (flattened fields: overflow, bytes, rows)
-    #[serde(
-        flatten,
-        default = "SizeLimitConfig::default_eager_limit",
-        deserialize_with = "SizeLimitConfig::deserialize_eager_limit"
-    )]
+    /// Eager compaction limits
     pub eager_compaction_limit: SizeLimitConfig,
 }
 
@@ -140,18 +114,21 @@ impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
             cooldown_duration: ConfigDuration::default(),
-            eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
+            eager_compaction_limit: SizeLimitConfig {
+                bytes: 0,
+                blocks: 0,
+                ..Default::default()
+            },
         }
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SizeLimitConfig {
     pub file_count: u32,
     pub generation: u64,
     /// Overflow multiplier: 1x target size (default: "1"), can use "1.5" for 1.5x, etc.
     pub overflow: Overflow,
-    #[serde(skip)]
     pub blocks: u64,
     /// Target bytes per file (default: 2147483648 = 2GB for target_size, 0 for eager limits)
     pub bytes: u64,
@@ -169,63 +146,6 @@ impl Default for SizeLimitConfig {
             bytes: 2 * 1024 * 1024 * 1024, // 2GB
             rows: 0,
         }
-    }
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SizeLimitHelper {
-    pub overflow: Option<Overflow>,
-    pub bytes: Option<u64>,
-    pub rows: Option<u64>,
-}
-
-impl SizeLimitConfig {
-    fn default_eager_limit() -> Self {
-        Self {
-            bytes: 0,
-            blocks: 0,
-            ..Default::default()
-        }
-    }
-
-    fn deserialize_eager_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let helper = SizeLimitHelper::deserialize(deserializer)?;
-
-        let mut this = Self::default_eager_limit();
-
-        helper
-            .overflow
-            .inspect(|overflow| this.overflow = *overflow);
-        helper.bytes.inspect(|bytes| this.bytes = *bytes);
-        helper.rows.inspect(|rows| this.rows = *rows);
-
-        Ok(this)
-    }
-
-    fn default_upper_limit() -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
-
-    fn deserialize_upper_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let helper = SizeLimitHelper::deserialize(deserializer)?;
-
-        let mut this = Self::default_upper_limit();
-
-        helper
-            .overflow
-            .inspect(|overflow| this.overflow = *overflow);
-        helper.bytes.inspect(|bytes| this.bytes = *bytes);
-        helper.rows.inspect(|rows| this.rows = *rows);
-
-        Ok(this)
     }
 }
 
@@ -250,17 +170,8 @@ impl<const DEFAULT_SECS: u64> From<Duration> for ConfigDuration<DEFAULT_SECS> {
     }
 }
 
-impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DEFAULT_SECS> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserialize_duration(deserializer).map(|opt| opt.map_or_else(Self::default, Self))
-    }
-}
-
 fn default_compression() -> Compression {
-    Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
+    Compression::ZSTD(ZstdLevel::default())
 }
 
 fn default_cache_size_mb() -> u64 {
@@ -269,19 +180,4 @@ fn default_cache_size_mb() -> u64 {
 
 fn default_max_row_group_mb() -> u64 {
     512 // 512MB default row group size
-}
-
-fn deserialize_compression<'de, D>(deserializer: D) -> Result<Compression, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s: String = serde::Deserialize::deserialize(deserializer)?;
-    s.parse().map_err(serde::de::Error::custom)
-}
-
-fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    <Option<f64>>::deserialize(deserializer).map(|option| option.map(Duration::from_secs_f64))
 }

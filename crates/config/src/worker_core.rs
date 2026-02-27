@@ -1,12 +1,12 @@
-//! Worker-core configuration types duplicated for JSON Schema generation.
+//! Worker-core configuration types for deserialization and JSON Schema generation.
 //!
-//! These types mirror `amp_worker_core::config` structs with `schemars` support,
-//! so that only `amp-config` carries the `schemars` dependency. Each type has a
-//! `From` impl to convert into its `amp_worker_core` counterpart.
+//! These are the authoritative configuration types that own serde deserialization,
+//! validation, defaults, and JSON Schema generation (`schemars`). Worker-core's
+//! config types are plain domain structs constructed from these via `From` impls.
 
 use std::time::Duration;
 
-use amp_common::{metadata::Overflow, parquet::basic as parquet_basic};
+use amp_common::metadata::Overflow;
 use serde::Deserialize as _;
 
 // ---------------------------------------------------------------------------
@@ -88,21 +88,65 @@ impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
 
 /// Parquet compression algorithm.
 ///
+/// Parsed from a case-insensitive string with the following accepted values:
+///
+/// | Input              | Result                                          |
+/// |--------------------|-------------------------------------------------|
+/// | `zstd`             | Zstandard at the default level (1)              |
+/// | `zstd(N)`          | Zstandard at level N (1–22)                     |
+/// | `lz4`              | LZ4 raw                                         |
+/// | `gzip`             | Gzip at the parquet-default level                |
+/// | `brotli`           | Brotli at the parquet-default level              |
+/// | `snappy`           | Snappy                                          |
+/// | `uncompressed`     | No compression                                  |
+///
+/// Only `zstd` supports an explicit level. `gzip` and `brotli` always use
+/// parquet's default compression level; per-level configuration for those
+/// algorithms is not exposed.
+///
 /// Default: `zstd(1)`.
 #[derive(Debug, Clone)]
 pub enum Compression {
     /// Zstandard compression with a configurable level (1–22). Default level: 1.
-    Zstd(parquet_basic::ZstdLevel),
+    Zstd(ZstdLevel),
     /// LZ4 raw compression.
     Lz4,
-    /// Gzip / deflate compression.
+    /// Gzip compression at parquet's default level (not configurable).
     Gzip,
-    /// Brotli compression.
+    /// Brotli compression at parquet's default level (not configurable).
     Brotli,
     /// Snappy compression.
     Snappy,
     /// No compression.
     Uncompressed,
+}
+
+/// Zstandard compression level.
+///
+/// Wraps parquet's [`ZstdLevel`](amp_common::parquet::basic::ZstdLevel) so that
+/// validation happens once at parse time against parquet's own constraints. The
+/// inner parquet type is an implementation detail — callers interact with this
+/// newtype only.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ZstdLevel(amp_common::parquet::basic::ZstdLevel);
+
+impl ZstdLevel {
+    /// Create a new `ZstdLevel`, validated against parquet's accepted range.
+    pub fn try_new(level: i32) -> Result<Self, String> {
+        amp_common::parquet::basic::ZstdLevel::try_new(level)
+            .map(Self)
+            .map_err(|err| format!("invalid zstd level: {err}"))
+    }
+
+    /// Return the raw compression level.
+    pub fn compression_level(self) -> i32 {
+        self.0.compression_level()
+    }
+
+    /// Return the inner parquet `ZstdLevel`.
+    fn parquet_level(self) -> amp_common::parquet::basic::ZstdLevel {
+        self.0
+    }
 }
 
 #[cfg(feature = "schemars")]
@@ -123,7 +167,7 @@ impl schemars::JsonSchema for Compression {
 
 impl Default for Compression {
     fn default() -> Self {
-        Self::Zstd(parquet_basic::ZstdLevel::default())
+        Self::Zstd(ZstdLevel::default())
     }
 }
 
@@ -151,7 +195,7 @@ impl std::str::FromStr for Compression {
             "snappy" => Ok(Self::Snappy),
             "uncompressed" => Ok(Self::Uncompressed),
             // Accept "zstd", "zstd(1)", "zstd(3)", etc.
-            "zstd" => Ok(Self::Zstd(parquet_basic::ZstdLevel::default())),
+            "zstd" => Ok(Self::Zstd(ZstdLevel::default())),
             s if s.starts_with("zstd(") => {
                 let inner = s
                     .strip_prefix("zstd(")
@@ -160,8 +204,7 @@ impl std::str::FromStr for Compression {
                 let raw: i32 = inner
                     .parse()
                     .map_err(|_| format!("invalid zstd level: {inner}"))?;
-                let level = parquet_basic::ZstdLevel::try_new(raw)
-                    .map_err(|e| format!("invalid zstd level {raw}: {e}"))?;
+                let level = ZstdLevel::try_new(raw)?;
                 Ok(Self::Zstd(level))
             }
             _ => Err(format!(
@@ -185,19 +228,17 @@ impl std::fmt::Display for Compression {
     }
 }
 
-impl From<&Compression> for parquet_basic::Compression {
+impl From<&Compression> for amp_common::parquet::basic::Compression {
     fn from(c: &Compression) -> Self {
+        use amp_common::parquet::basic as pq;
+
         match c {
-            Compression::Zstd(level) => parquet_basic::Compression::ZSTD(*level),
-            Compression::Lz4 => parquet_basic::Compression::LZ4_RAW,
-            Compression::Gzip => {
-                parquet_basic::Compression::GZIP(parquet_basic::GzipLevel::default())
-            }
-            Compression::Brotli => {
-                parquet_basic::Compression::BROTLI(parquet_basic::BrotliLevel::default())
-            }
-            Compression::Snappy => parquet_basic::Compression::SNAPPY,
-            Compression::Uncompressed => parquet_basic::Compression::UNCOMPRESSED,
+            Compression::Zstd(level) => pq::Compression::ZSTD(level.parquet_level()),
+            Compression::Lz4 => pq::Compression::LZ4_RAW,
+            Compression::Gzip => pq::Compression::GZIP(pq::GzipLevel::default()),
+            Compression::Brotli => pq::Compression::BROTLI(pq::BrotliLevel::default()),
+            Compression::Snappy => pq::Compression::SNAPPY,
+            Compression::Uncompressed => pq::Compression::UNCOMPRESSED,
         }
     }
 }
@@ -327,22 +368,16 @@ impl From<&CollectorConfig> for amp_worker_core::CollectorConfig {
 
 /// Size-based limits for Parquet file partitioning and compaction.
 ///
-/// Controls when files are considered "full" and when compaction should trigger.
+/// Contains only user-configurable fields. Runtime-internal fields (`file_count`,
+/// `generation`, `blocks`) are set to defaults during conversion to the worker-core type.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct SizeLimitConfig {
-    /// Number of files to target per partition.
-    pub file_count: u32,
-    /// Compaction generation tracking.
-    pub generation: u64,
     /// Overflow multiplier: 1x target size (default: `"1"`), can use `"1.5"` for 1.5x, etc.
     ///
     /// Accepts an integer, float, or fraction string (e.g. `1`, `1.5`, `"3/2"`).
     #[cfg_attr(feature = "schemars", schemars(with = "OverflowSchema"))]
     pub overflow: Overflow,
-    /// Internal tracking only — not exposed in config files.
-    #[serde(skip)]
-    pub blocks: u64,
     /// Target bytes per file (default: 2147483648 = 2 GB for target_size, 0 for eager limits).
     pub bytes: u64,
     /// Target rows per file, 0 means no limit (default: 0).
@@ -352,10 +387,7 @@ pub struct SizeLimitConfig {
 impl Default for SizeLimitConfig {
     fn default() -> Self {
         Self {
-            file_count: 0,
-            generation: 0,
             overflow: Overflow::default(),
-            blocks: 0,
             bytes: 2 * 1024 * 1024 * 1024, // 2GB
             rows: 0,
         }
@@ -365,10 +397,10 @@ impl Default for SizeLimitConfig {
 impl From<&SizeLimitConfig> for amp_worker_core::SizeLimitConfig {
     fn from(config: &SizeLimitConfig) -> Self {
         Self {
-            file_count: config.file_count,
-            generation: config.generation,
+            file_count: 0,
+            generation: 0,
             overflow: config.overflow,
-            blocks: config.blocks,
+            blocks: 0,
             bytes: config.bytes,
             rows: config.rows,
         }
@@ -439,53 +471,47 @@ struct SizeLimitHelper {
     rows: Option<u64>,
 }
 
+impl SizeLimitHelper {
+    /// Apply optional overrides onto a base `SizeLimitConfig`.
+    fn apply_to(self, mut base: SizeLimitConfig) -> SizeLimitConfig {
+        self.overflow.inspect(|overflow| base.overflow = *overflow);
+        self.bytes.inspect(|bytes| base.bytes = *bytes);
+        self.rows.inspect(|rows| base.rows = *rows);
+        base
+    }
+}
+
 impl SizeLimitConfig {
     fn default_eager_limit() -> Self {
         Self {
             bytes: 0,
-            blocks: 0,
             ..Default::default()
         }
+    }
+
+    fn deserialize_with_base<'de, D>(deserializer: D, base: Self) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        SizeLimitHelper::deserialize(deserializer).map(|helper| helper.apply_to(base))
     }
 
     fn deserialize_eager_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let helper = SizeLimitHelper::deserialize(deserializer)?;
-
-        let mut this = Self::default_eager_limit();
-
-        helper
-            .overflow
-            .inspect(|overflow| this.overflow = *overflow);
-        helper.bytes.inspect(|bytes| this.bytes = *bytes);
-        helper.rows.inspect(|rows| this.rows = *rows);
-
-        Ok(this)
+        Self::deserialize_with_base(deserializer, Self::default_eager_limit())
     }
 
     fn default_upper_limit() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Self::default()
     }
 
     fn deserialize_upper_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let helper = SizeLimitHelper::deserialize(deserializer)?;
-
-        let mut this = Self::default_upper_limit();
-
-        helper
-            .overflow
-            .inspect(|overflow| this.overflow = *overflow);
-        helper.bytes.inspect(|bytes| this.bytes = *bytes);
-        helper.rows.inspect(|rows| this.rows = *rows);
-
-        Ok(this)
+        Self::deserialize_with_base(deserializer, Self::default())
     }
 }
 
@@ -529,5 +555,7 @@ fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::
 where
     D: serde::Deserializer<'de>,
 {
-    <Option<f64>>::deserialize(deserializer).map(|option| option.map(Duration::from_secs_f64))
+    <Option<f64>>::deserialize(deserializer)?
+        .map(|secs| Duration::try_from_secs_f64(secs).map_err(serde::de::Error::custom))
+        .transpose()
 }

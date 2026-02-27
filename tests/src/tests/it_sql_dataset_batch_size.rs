@@ -158,7 +158,8 @@ impl TestCtx {
             .unwrap();
 
         let config = self.ctx.daemon_worker().config();
-        let mut opts = parquet_opts(&config.parquet);
+        let wc_parquet: amp_worker_core::ParquetConfig = (&config.parquet).into();
+        let mut opts = parquet_opts(&wc_parquet);
         opts.compactor.active.swap(true, Ordering::SeqCst);
         opts.collector.active.swap(false, Ordering::SeqCst);
         let opts_mut = Arc::make_mut(&mut opts);
@@ -187,7 +188,8 @@ impl TestCtx {
             .find(|t| t.table_name() == table)
             .unwrap();
         let config = self.ctx.daemon_worker().config();
-        let mut opts = parquet_opts(&config.parquet);
+        let wc_parquet: amp_worker_core::ParquetConfig = (&config.parquet).into();
+        let mut opts = parquet_opts(&wc_parquet);
         opts.compactor.active.swap(false, Ordering::SeqCst);
         opts.collector.active.swap(true, Ordering::SeqCst);
         let opts_mut = Arc::make_mut(&mut opts);
