@@ -6,6 +6,7 @@ pub use solana_client::rpc_config;
 use solana_clock::Slot;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 pub use solana_rpc_client_api::client_error;
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 pub use solana_transaction_status_client_types::{
     EncodedTransaction, EncodedTransactionWithStatusMeta, Reward, TransactionStatusMeta,
     TransactionTokenBalance, UiConfirmedBlock, UiInstruction, UiMessage, UiRawMessage,
@@ -14,6 +15,28 @@ pub use solana_transaction_status_client_types::{
 use url::Url;
 
 use crate::metrics;
+
+/// Runtime connection details for a Solana RPC endpoint.
+pub struct RpcProviderConnectionInfo {
+    /// The URL of the Solana RPC endpoint.
+    pub url: Redacted<Url>,
+    /// Optional authentication credentials for the RPC endpoint.
+    pub auth: Option<Auth>,
+}
+
+impl RpcProviderConnectionInfo {
+    /// Creates a new connection info from a URL and optional authentication credentials.
+    ///
+    /// When `auth_token` is provided without an `auth_header`, a `Bearer` token is used.
+    /// When both are provided, a custom header is used instead.
+    pub fn new(url: Url, auth_token: Option<String>, auth_header: Option<String>) -> Self {
+        let auth = auth_token.map(|token| Auth::new(token, auth_header));
+        Self {
+            url: Redacted::from(url),
+            auth,
+        }
+    }
+}
 
 /// A Solana JSON-RPC client.
 ///
@@ -28,12 +51,12 @@ pub struct SolanaRpcClient {
 
 impl SolanaRpcClient {
     pub fn new(
-        url: Redacted<Url>,
-        auth: Option<Auth>,
+        rpc_connection_info: RpcProviderConnectionInfo,
         max_calls_per_second: Option<NonZeroU32>,
         provider: String,
         network: NetworkId,
     ) -> Self {
+        let RpcProviderConnectionInfo { url, auth } = rpc_connection_info;
         let inner = if let Some(auth) = auth {
             // Build a reqwest 0.12 client (the version used by solana-rpc-client) with
             // auth in default_headers so credentials are never embedded in URLs.
@@ -116,6 +139,28 @@ impl SolanaRpcClient {
         Ok(block)
     }
 
+    /// Get the confirmed transaction for a given signature.
+    ///
+    /// ### RPC Reference
+    ///
+    /// [getTransaction](https://solana.com/docs/rpc/http/gettransaction)
+    pub async fn get_transaction(
+        &self,
+        signature: solana_transaction::Signature,
+        config: rpc_config::RpcTransactionConfig,
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
+    ) -> client_error::Result<EncodedConfirmedTransactionWithStatusMeta> {
+        let transaction = self
+            .rpc_call(
+                "getTransaction",
+                metrics,
+                self.inner.get_transaction_with_config(&signature, config),
+            )
+            .await?;
+
+        Ok(transaction)
+    }
+
     /// Use the [SolanaRpcClient] to execute a JSON-RPC call with the following additional behavior:
     ///   - Record metrics if enabled.
     ///   - Perform rate limiting if enabled.
@@ -164,6 +209,19 @@ pub enum Auth {
         /// Header value (raw token, no `Bearer` prefix).
         value: String,
     },
+}
+
+impl Auth {
+    /// Creates a new `Auth` value.
+    ///
+    /// When `header` is `Some`, a [`CustomHeader`](Auth::CustomHeader) is used.
+    /// When `header` is `None`, a standard [`Bearer`](Auth::Bearer) token is used.
+    pub fn new(token: String, header: Option<String>) -> Self {
+        match header {
+            Some(name) => Auth::CustomHeader { name, value: token },
+            None => Auth::Bearer(token),
+        }
+    }
 }
 
 /// Returns `true` if the given error indicates that the block is missing for the requested slot.

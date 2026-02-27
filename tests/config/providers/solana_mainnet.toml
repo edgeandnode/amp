@@ -1,8 +1,17 @@
 kind = "solana"
 network = "mainnet"
-rpc_provider_url = "${SOLANA_MAINNET_RPC_URL}"
-auth_header = "${SOLANA_MAINNET_RPC_AUTH_HEADER}"
-auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"
+
 # Optionally, rate limit RPC calls
 # max_rpc_calls_per_second = 50
+
 of1_car_directory = "${SOLANA_OF1_CAR_DIRECTORY}"
+
+[rpc_provider_info]
+url = "${SOLANA_MAINNET_RPC_URL}"
+# auth_header = "${SOLANA_MAINNET_RPC_AUTH_HEADER}"
+# auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"
+
+# [fallback_rpc_provider_info]
+# url = "${FALLBACK_SOLANA_MAINNET_RPC_URL}"
+# auth_header = "${FALLBACK_SOLANA_MAINNET_RPC_AUTH_HEADER}"
+# auth_token = "${FALLBACK_SOLANA_MAINNET_RPC_AUTH_TOKEN}"

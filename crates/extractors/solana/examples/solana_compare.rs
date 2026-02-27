@@ -63,9 +63,13 @@ async fn main() -> anyhow::Result<()> {
         None,
     ));
 
+    let rpc_connection_info = rpc_client::RpcProviderConnectionInfo {
+        url: provider_cfg.rpc_provider_info.url,
+        auth: None,
+    };
+
     let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
-        provider_cfg.rpc_provider_url,
-        None,
+        rpc_connection_info,
         provider_cfg.max_rpc_calls_per_second,
         cli.provider_name,
         provider_cfg.network.clone(),
@@ -439,9 +443,12 @@ fn known_tx_reward_mismatch(
     rpc_rewards.is_empty() && !of1_rewards.is_empty()
 }
 
-/// Checks for a known mismatch where OF1 has no log messages for a transaction but
-/// RPC shows log messages for the same transaction (because some OF1 versions have
-/// missing log messages for older transactions).
+/// Checks for a known mismatch between OF1 and JSON-RPC log messages. There are two
+/// known mismatches at the moment:
+///   - some OF1 transactions have empty log messages while the same transactions via
+///     JSON-RPC show log messages
+///   - some transactions have truncated log messages, and it can happen on either
+///     OF1 or JSON-RPC
 fn known_log_message_mismatch(
     of1_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
     rpc_tx_meta: Option<&tables::transactions::TransactionStatusMeta>,
@@ -453,5 +460,10 @@ fn known_log_message_mismatch(
         return false;
     };
 
-    of1_log_messages.is_empty() && !rpc_log_messages.is_empty()
+    let is_known_mismatch1 = of1_log_messages.is_empty() && !rpc_log_messages.is_empty();
+    let truncated_log_marker = String::from(solana_datasets::TRUNCATED_LOG_MESSAGES_MARKER);
+    let is_known_mismatch2 = of1_log_messages.contains(&truncated_log_marker)
+        || rpc_log_messages.contains(&truncated_log_marker);
+
+    is_known_mismatch1 || is_known_mismatch2
 }
