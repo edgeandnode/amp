@@ -116,7 +116,6 @@ impl Default for CompactionAlgorithmConfig {
             cooldown_duration: ConfigDuration::default(),
             eager_compaction_limit: SizeLimitConfig {
                 bytes: 0,
-                blocks: 0,
                 ..Default::default()
             },
         }
