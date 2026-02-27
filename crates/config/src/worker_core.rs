@@ -161,7 +161,7 @@ impl std::str::FromStr for Compression {
                     .parse()
                     .map_err(|_| format!("invalid zstd level: {inner}"))?;
                 let level = parquet_basic::ZstdLevel::try_new(raw)
-                    .map_err(|_| format!("zstd level must be between 1 and 22, got {raw}"))?;
+                    .map_err(|e| format!("invalid zstd level {raw}: {e}"))?;
                 Ok(Self::Zstd(level))
             }
             _ => Err(format!(
@@ -434,9 +434,9 @@ impl<const N: u64> From<&ConfigDuration<N>> for amp_worker_core::ConfigDuration<
 /// Deserialization helper for partial `SizeLimitConfig` overrides.
 #[derive(Debug, serde::Deserialize)]
 struct SizeLimitHelper {
-    pub overflow: Option<Overflow>,
-    pub bytes: Option<u64>,
-    pub rows: Option<u64>,
+    overflow: Option<Overflow>,
+    bytes: Option<u64>,
+    rows: Option<u64>,
 }
 
 impl SizeLimitConfig {
