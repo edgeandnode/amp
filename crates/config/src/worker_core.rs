@@ -92,7 +92,7 @@ impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
 #[derive(Debug, Clone)]
 pub enum Compression {
     /// Zstandard compression with a configurable level (1–22). Default level: 1.
-    Zstd(i32),
+    Zstd(parquet_basic::ZstdLevel),
     /// LZ4 raw compression.
     Lz4,
     /// Gzip / deflate compression.
@@ -123,7 +123,7 @@ impl schemars::JsonSchema for Compression {
 
 impl Default for Compression {
     fn default() -> Self {
-        Self::Zstd(1)
+        Self::Zstd(parquet_basic::ZstdLevel::default())
     }
 }
 
@@ -151,18 +151,17 @@ impl std::str::FromStr for Compression {
             "snappy" => Ok(Self::Snappy),
             "uncompressed" => Ok(Self::Uncompressed),
             // Accept "zstd", "zstd(1)", "zstd(3)", etc.
-            "zstd" => Ok(Self::Zstd(1)),
+            "zstd" => Ok(Self::Zstd(parquet_basic::ZstdLevel::default())),
             s if s.starts_with("zstd(") => {
                 let inner = s
                     .strip_prefix("zstd(")
                     .and_then(|s| s.strip_suffix(')'))
                     .ok_or_else(|| format!("invalid compression: {s}"))?;
-                let level: i32 = inner
+                let raw: i32 = inner
                     .parse()
                     .map_err(|_| format!("invalid zstd level: {inner}"))?;
-                if !(1..=22).contains(&level) {
-                    return Err(format!("zstd level must be between 1 and 22, got {level}"));
-                }
+                let level = parquet_basic::ZstdLevel::try_new(raw)
+                    .map_err(|_| format!("zstd level must be between 1 and 22, got {raw}"))?;
                 Ok(Self::Zstd(level))
             }
             _ => Err(format!(
@@ -176,7 +175,7 @@ impl std::str::FromStr for Compression {
 impl std::fmt::Display for Compression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Zstd(level) => write!(f, "zstd({level})"),
+            Self::Zstd(level) => write!(f, "zstd({})", level.compression_level()),
             Self::Lz4 => write!(f, "lz4"),
             Self::Gzip => write!(f, "gzip"),
             Self::Brotli => write!(f, "brotli"),
@@ -186,17 +185,10 @@ impl std::fmt::Display for Compression {
     }
 }
 
-/// # Panics
-/// Panics if `Zstd` level is outside the valid range accepted by `ZstdLevel::try_new`.
 impl From<&Compression> for parquet_basic::Compression {
     fn from(c: &Compression) -> Self {
         match c {
-            Compression::Zstd(level) => {
-                // SAFETY: FromStr validates level is 1..=22, which is within ZstdLevel's valid range.
-                let level =
-                    parquet_basic::ZstdLevel::try_new(*level).expect("level validated by FromStr");
-                parquet_basic::Compression::ZSTD(level)
-            }
+            Compression::Zstd(level) => parquet_basic::Compression::ZSTD(*level),
             Compression::Lz4 => parquet_basic::Compression::LZ4_RAW,
             Compression::Gzip => {
                 parquet_basic::Compression::GZIP(parquet_basic::GzipLevel::default())
