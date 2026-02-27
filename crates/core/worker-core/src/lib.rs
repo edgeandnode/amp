@@ -25,7 +25,7 @@ pub use self::{
     check::consistency_check,
     config::{
         CollectorConfig, CompactionAlgorithmConfig, CompactorConfig, ConfigDuration, ParquetConfig,
-        SizeLimitConfig, parse_compression,
+        SizeLimitConfig,
     },
     metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL,
     progress::{

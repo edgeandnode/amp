@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use amp_common::metadata::Overflow;
+use amp_common::{metadata::Overflow, parquet::basic as parquet_basic};
 use serde::Deserialize as _;
 
 // ---------------------------------------------------------------------------
@@ -15,30 +15,21 @@ use serde::Deserialize as _;
 
 /// Parquet compression algorithm.
 ///
-/// Supported values: `zstd(N)`, `lz4`, `gzip`, `brotli`, `snappy`, `uncompressed`.
-/// Default: `zstd(1)`.
-///
-/// The level parameter `N` is optional for algorithms that support it (e.g. `zstd`, `gzip`).
-/// The string is validated during deserialization.
+/// Default: `Zstd(1)`.
 #[derive(Debug, Clone)]
-pub struct Compression(String);
-
-impl Default for Compression {
-    fn default() -> Self {
-        Self("zstd(1)".to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Compression {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s: String = serde::Deserialize::deserialize(deserializer)?;
-        // Validate by parsing through worker-core's compression parser.
-        amp_worker_core::parse_compression(&s).map_err(serde::de::Error::custom)?;
-        Ok(Self(s))
-    }
+pub enum Compression {
+    /// Zstandard compression with a configurable level (1–22). Default level: 1.
+    Zstd(i32),
+    /// LZ4 raw compression.
+    Lz4,
+    /// Gzip / deflate compression.
+    Gzip,
+    /// Brotli compression.
+    Brotli,
+    /// Snappy compression.
+    Snappy,
+    /// No compression.
+    Uncompressed,
 }
 
 #[cfg(feature = "schemars")]
@@ -50,16 +41,97 @@ impl schemars::JsonSchema for Compression {
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "type": "string",
-            "description": "Compression algorithm: zstd(N), lz4, gzip, brotli, snappy, uncompressed",
-            "default": "zstd(1)"
+            "description": "Compression algorithm. Supported: zstd(N), lz4, gzip, brotli, snappy, uncompressed.",
+            "default": "zstd(1)",
+            "examples": ["zstd(1)", "zstd(3)", "lz4", "gzip", "snappy", "uncompressed"]
         })
     }
 }
 
-impl Compression {
-    /// Returns the compression algorithm string.
-    pub fn as_str(&self) -> &str {
-        &self.0
+impl Default for Compression {
+    fn default() -> Self {
+        Self::Zstd(1)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Compression {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s: String = serde::Deserialize::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl std::str::FromStr for Compression {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lower = s.trim().to_lowercase();
+        if lower == "lz4" {
+            Ok(Self::Lz4)
+        } else if lower == "gzip" {
+            Ok(Self::Gzip)
+        } else if lower == "brotli" {
+            Ok(Self::Brotli)
+        } else if lower == "snappy" {
+            Ok(Self::Snappy)
+        } else if lower == "uncompressed" {
+            Ok(Self::Uncompressed)
+        } else if lower.starts_with("zstd") {
+            // Accept "zstd", "zstd(1)", "zstd(3)", etc.
+            if lower == "zstd" {
+                return Ok(Self::Zstd(1));
+            }
+            let inner = lower
+                .strip_prefix("zstd(")
+                .and_then(|s| s.strip_suffix(')'))
+                .ok_or_else(|| format!("invalid compression: {s}"))?;
+            let level: i32 = inner
+                .parse()
+                .map_err(|_| format!("invalid zstd level: {inner}"))?;
+            Ok(Self::Zstd(level))
+        } else {
+            Err(format!(
+                "unknown compression algorithm: {s}. \
+                 Supported: zstd(N), lz4, gzip, brotli, snappy, uncompressed"
+            ))
+        }
+    }
+}
+
+impl std::fmt::Display for Compression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Zstd(level) => write!(f, "zstd({level})"),
+            Self::Lz4 => write!(f, "lz4"),
+            Self::Gzip => write!(f, "gzip"),
+            Self::Brotli => write!(f, "brotli"),
+            Self::Snappy => write!(f, "snappy"),
+            Self::Uncompressed => write!(f, "uncompressed"),
+        }
+    }
+}
+
+impl From<&Compression> for parquet_basic::Compression {
+    fn from(c: &Compression) -> Self {
+        match c {
+            Compression::Zstd(level) => {
+                let level = parquet_basic::ZstdLevel::try_new(*level)
+                    .expect("zstd level should be valid");
+                parquet_basic::Compression::ZSTD(level)
+            }
+            Compression::Lz4 => parquet_basic::Compression::LZ4_RAW,
+            Compression::Gzip => {
+                parquet_basic::Compression::GZIP(parquet_basic::GzipLevel::default())
+            }
+            Compression::Brotli => {
+                parquet_basic::Compression::BROTLI(parquet_basic::BrotliLevel::default())
+            }
+            Compression::Snappy => parquet_basic::Compression::SNAPPY,
+            Compression::Uncompressed => parquet_basic::Compression::UNCOMPRESSED,
+        }
     }
 }
 
@@ -384,17 +456,8 @@ impl From<&CompactorConfig> for amp_worker_core::CompactorConfig {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ParquetConfig {
-    /// Compression algorithm (default: `zstd(1)`).
-    ///
-    /// Supported: `zstd(N)`, `lz4`, `gzip`, `brotli`, `snappy`, `uncompressed`.
-    #[serde(
-        default = "default_compression",
-        deserialize_with = "deserialize_compression"
-    )]
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(with = "String", default = "default_compression_str")
-    )]
+    /// Compression algorithm (default: `Zstd(1)`).
+    #[serde(default = "default_compression")]
     pub compression: Compression,
     /// Enable Parquet bloom filters (default: false).
     #[serde(default)]
@@ -442,11 +505,8 @@ impl Default for ParquetConfig {
 
 impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
     fn from(config: &ParquetConfig) -> Self {
-        // Safe: compression string was validated during deserialization.
-        let compression = amp_worker_core::parse_compression(config.compression.as_str())
-            .expect("compression was validated during deserialization");
         Self {
-            compression,
+            compression: (&config.compression).into(),
             bloom_filters: config.bloom_filters,
             cache_size_mb: config.cache_size_mb,
             max_row_group_mb: config.max_row_group_mb,
@@ -461,18 +521,6 @@ impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
-
-#[cfg(feature = "schemars")]
-fn default_compression_str() -> String {
-    "zstd(1)".to_string()
-}
-
-fn deserialize_compression<'de, D>(deserializer: D) -> Result<Compression, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Compression::deserialize(deserializer)
-}
 
 fn default_cache_size_mb() -> u64 {
     1024 // 1 GB default cache size

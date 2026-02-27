@@ -192,6 +192,19 @@
         "rows"
       ]
     },
+    "Compression": {
+      "description": "Compression algorithm. Supported: zstd(N), lz4, gzip, brotli, snappy, uncompressed.",
+      "type": "string",
+      "default": "zstd(1)",
+      "examples": [
+        "zstd(1)",
+        "zstd(3)",
+        "lz4",
+        "gzip",
+        "snappy",
+        "uncompressed"
+      ]
+    },
     "ConfigDuration": {
       "description": "Duration in seconds (floating-point)",
       "type": "number"
@@ -332,9 +345,8 @@
           "$ref": "#/$defs/CompactorConfig"
         },
         "compression": {
-          "description": "Compression algorithm (default: `zstd(1)`).\n\nSupported: `zstd(N)`, `lz4`, `gzip`, `brotli`, `snappy`, `uncompressed`.",
-          "type": "string",
-          "default": "zstd(1)"
+          "description": "Compression algorithm (default: `Zstd(1)`).",
+          "$ref": "#/$defs/Compression"
         },
         "file_count": {
           "description": "Number of files to target per partition.",

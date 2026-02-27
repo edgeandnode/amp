@@ -259,13 +259,6 @@ impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DE
     }
 }
 
-/// Parse a compression algorithm string into a [`Compression`] value.
-///
-/// Supported formats: `zstd(N)`, `lz4`, `gzip`, `brotli`, `snappy`, `uncompressed`.
-pub fn parse_compression(s: &str) -> Result<Compression, <Compression as std::str::FromStr>::Err> {
-    s.parse()
-}
-
 fn default_compression() -> Compression {
     Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
 }
