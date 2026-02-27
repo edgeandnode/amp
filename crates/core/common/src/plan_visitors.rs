@@ -285,7 +285,11 @@ impl TreeNodeRewriter for BlockNumPropagator {
                     }
                 })?;
                 let was = r.transformed;
-                let node = if was { r.data.recompute_schema()? } else { r.data };
+                let node = if was {
+                    r.data.recompute_schema()?
+                } else {
+                    r.data
+                };
                 (was, node)
             }
         };
@@ -847,7 +851,9 @@ mod tests {
     }
 
     fn assert_nested_block_num_is_bare_col(expr: &Expr) {
-        let Expr::Alias(outer) = expr else { panic!("expected Alias, got {:?}", expr) };
+        let Expr::Alias(outer) = expr else {
+            panic!("expected Alias, got {:?}", expr)
+        };
         assert_eq!(outer.name, "offset");
         let Expr::BinaryExpr(bin) = outer.expr.as_ref() else {
             panic!("expected BinaryExpr inside alias")
@@ -875,7 +881,9 @@ mod tests {
 
         let result = propagate_block_num(plan).unwrap();
 
-        let LogicalPlan::Projection(p) = &result else { panic!("expected Projection") };
+        let LogicalPlan::Projection(p) = &result else {
+            panic!("expected Projection")
+        };
         assert_nested_block_num_is_bare_col(&p.expr[1]);
     }
 
@@ -1244,9 +1252,19 @@ mod tests {
         let LogicalPlan::Distinct(datafusion::logical_expr::Distinct::On(on)) = &result else {
             panic!("expected DistinctOn")
         };
-        assert!(!is_block_num_udf(&on.on_expr[0]), "UDF must be replaced in on_expr");
-        assert!(expr_outputs_block_num(&on.on_expr[0]), "on_expr references _block_num");
-        assert_eq!(on.select_expr.len(), 3, "_block_num prepended: _block_num + id + value");
+        assert!(
+            !is_block_num_udf(&on.on_expr[0]),
+            "UDF must be replaced in on_expr"
+        );
+        assert!(
+            expr_outputs_block_num(&on.on_expr[0]),
+            "on_expr references _block_num"
+        );
+        assert_eq!(
+            on.select_expr.len(),
+            3,
+            "_block_num prepended: _block_num + id + value"
+        );
         assert!(expr_outputs_block_num(&on.select_expr[0]));
     }
 
@@ -1369,7 +1387,10 @@ mod tests {
             panic!("expected DistinctOn")
         };
         assert!(!is_block_num_udf(&on.on_expr[0]));
-        assert!(expr_outputs_block_num(&on.on_expr[0]), "on_expr references _block_num");
+        assert!(
+            expr_outputs_block_num(&on.on_expr[0]),
+            "on_expr references _block_num"
+        );
         assert_eq!(
             on.select_expr.len(),
             3,
