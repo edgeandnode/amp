@@ -6,9 +6,10 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Admin from "../../api/Admin.ts"
+import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile } from "../common.ts"
+import { adminUrl, bearerToken, configFile } from "../common.ts"
 
 export const register = Command.make("register", {
   args: {
@@ -19,6 +20,7 @@ export const register = Command.make("register", {
     ),
     configFile: configFile.pipe(Options.optional),
     adminUrl,
+    bearerToken,
   },
 }).pipe(
   Command.withDescription("Register a dataset definition from config"),
@@ -37,6 +39,20 @@ export const register = Command.make("register", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.configFile).pipe(Layer.provideMerge(Admin.layer(`${args.adminUrl}`)))
+    ManifestContext.layerFromConfigFile(args.configFile).pipe(Layer.provideMerge(
+      Layer.unwrapEffect(Effect.gen(function*() {
+        const token = yield* args.bearerToken.pipe(
+          Option.match({
+            onSome: (passed) => Effect.succeed(Option.some(Model.AccessToken.make(passed))),
+            onNone: () =>
+              Auth.AuthService.pipe(
+                Effect.flatMap((auth) => auth.getCache()),
+                Effect.map(Option.map((auth) => auth.accessToken)),
+              ),
+          }),
+        )
+        return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token))
+      })).pipe(Layer.provide(Auth.layer)),
+    ))
   ),
 )

@@ -1,4 +1,4 @@
-import { Toast } from "@base-ui-components/react/toast"
+import { Toast } from "@base-ui/react/toast"
 import { GDSProvider } from "@graphprotocol/gds-react"
 import type { QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, Outlet } from "@tanstack/react-router"

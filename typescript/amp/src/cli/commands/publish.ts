@@ -10,7 +10,7 @@ import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { configFile, ExitCode } from "../common.ts"
+import { bearerToken, configFile, ExitCode } from "../common.ts"
 
 const CLUSTER_ADMIN_URL = new URL("https://gateway.amp.staging.thegraph.com/controller")
 
@@ -30,6 +30,7 @@ export const publish = Command.make("publish", {
       Options.optional,
     ),
     configFile: configFile.pipe(Options.optional),
+    bearerToken,
   },
 }).pipe(
   Command.withDescription("Publish a Dataset to the public registry"),
@@ -40,12 +41,18 @@ export const publish = Command.make("publish", {
       const ampRegistry = yield* AmpRegistry.AmpRegistryService
       const client = yield* Admin.Admin
 
-      const maybeAuthStorage = yield* auth.getCache()
-      if (Option.isNone(maybeAuthStorage)) {
+      // Check authentication:
+      // 1. if a user passed in a bearer token, or has one in their env, use it
+      // 2. check the auth cache
+      const verifiedAuth = yield* args.bearerToken.pipe(Option.match({
+        onSome: (bearerToken) => auth.verifyTokenWithJWKS(bearerToken),
+        onNone: () => auth.getCache().pipe(Effect.map(Option.getOrUndefined)),
+      }))
+
+      if (verifiedAuth == null) {
         yield* Console.error("Must be authenticated to publish your dataset. Run `amp auth login`")
         return yield* ExitCode.NonZero
       }
-      const authStorage = maybeAuthStorage.value
 
       const metadata = context.metadata
 
@@ -72,7 +79,7 @@ export const publish = Command.make("publish", {
 
       yield* Console.info("Publishing your Dataset to the registry")
       const publishResult = yield* ampRegistry.publishFlow({
-        auth: authStorage,
+        auth: verifiedAuth,
         context,
         versionTag: args.tag,
         changelog: Option.getOrUndefined(args.changelog)?.trim(),
@@ -111,8 +118,17 @@ export const publish = Command.make("publish", {
       ManifestContext.layerFromConfigFile(args.configFile),
     ).pipe(
       Layer.provideMerge(Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
-        return Admin.layer(`${CLUSTER_ADMIN_URL}`, Option.getOrUndefined(token)?.accessToken)
+        const token = yield* args.bearerToken.pipe(
+          Option.match({
+            onSome: (passed) => Effect.succeed(Option.some(Model.AccessToken.make(passed))),
+            onNone: () =>
+              Auth.AuthService.pipe(
+                Effect.flatMap((auth) => auth.getCache()),
+                Effect.map(Option.map((auth) => auth.accessToken)),
+              ),
+          }),
+        )
+        return Admin.layer(`${CLUSTER_ADMIN_URL}`, Option.getOrUndefined(token))
       }))),
       Layer.provideMerge(Auth.layer),
     )
