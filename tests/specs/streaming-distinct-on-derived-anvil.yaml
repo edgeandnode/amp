@@ -1,0 +1,102 @@
+# Streaming DISTINCT ON and GROUP BY tests over derived dataset tables using Anvil
+#
+# Tests that DISTINCT ON and GROUP BY work when used in derived dataset table
+# SQL definitions (not just inline streaming queries). The derived dataset
+# distinct_block_num_ds defines tables whose SQL uses these patterns, and we
+# stream from those materialized tables.
+
+- anvil: {}
+
+- name: mine_initial
+  anvil_mine: 3
+
+- name: dump_anvil_rpc_initial
+  dataset: _/anvil_rpc@0.0.0
+  end: 3
+
+- name: register_distinct_block_num_ds
+  dataset: distinct_block_num_ds
+  tag: "0.0.0"
+
+- name: dump_distinct_block_num_ds_initial
+  dataset: _/distinct_block_num_ds@0.0.0
+  end: 3
+
+- name: register_distinct_blocks_stream
+  stream: SELECT * FROM distinct_block_num_ds.distinct_blocks SETTINGS stream = true
+
+- name: register_group_by_blocks_stream
+  stream: SELECT * FROM distinct_block_num_ds.group_by_blocks SETTINGS stream = true
+
+- name: register_distinct_join_blocks_stream
+  stream: SELECT * FROM distinct_block_num_ds.distinct_join_blocks SETTINGS stream = true
+
+- name: take_initial_distinct_blocks
+  stream: register_distinct_blocks_stream
+  take: 4
+  results: |
+    [
+      {"_block_num": 0, "block_num": 0, "gas_used": 0},
+      {"_block_num": 1, "block_num": 1, "gas_used": 0},
+      {"_block_num": 2, "block_num": 2, "gas_used": 0},
+      {"_block_num": 3, "block_num": 3, "gas_used": 0}
+    ]
+
+- name: take_initial_group_by_blocks
+  stream: register_group_by_blocks_stream
+  take: 4
+  results: |
+    [
+      {"_block_num": 0, "cnt": 2},
+      {"_block_num": 1, "cnt": 2},
+      {"_block_num": 2, "cnt": 2},
+      {"_block_num": 3, "cnt": 2}
+    ]
+
+- name: take_initial_distinct_join_blocks
+  stream: register_distinct_join_blocks_stream
+  take: 3
+  results: |
+    [
+      {"_block_num": 1, "block_num()": 1, "parent_num": 0},
+      {"_block_num": 2, "block_num()": 2, "parent_num": 1},
+      {"_block_num": 3, "block_num()": 3, "parent_num": 2}
+    ]
+
+- name: mine_more
+  anvil_mine: 2
+
+- name: dump_anvil_rpc_more
+  dataset: _/anvil_rpc@0.0.0
+  end: 5
+
+- name: dump_distinct_block_num_ds_more
+  dataset: _/distinct_block_num_ds@0.0.0
+  end: 5
+
+- name: take_incremental_distinct_blocks
+  stream: register_distinct_blocks_stream
+  take: 2
+  results: |
+    [
+      {"_block_num": 4, "block_num": 4, "gas_used": 0},
+      {"_block_num": 5, "block_num": 5, "gas_used": 0}
+    ]
+
+- name: take_incremental_group_by_blocks
+  stream: register_group_by_blocks_stream
+  take: 2
+  results: |
+    [
+      {"_block_num": 4, "cnt": 2},
+      {"_block_num": 5, "cnt": 2}
+    ]
+
+- name: take_incremental_distinct_join_blocks
+  stream: register_distinct_join_blocks_stream
+  take: 2
+  results: |
+    [
+      {"_block_num": 4, "block_num()": 4, "parent_num": 3},
+      {"_block_num": 5, "block_num()": 5, "parent_num": 4}
+    ]
