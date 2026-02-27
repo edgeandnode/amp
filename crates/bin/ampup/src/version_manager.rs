@@ -123,6 +123,12 @@ impl VersionManager {
         if ampd_active_path.exists() || ampd_active_path.is_symlink() {
             fs::remove_file(&ampd_active_path).context("Failed to remove existing ampd symlink")?;
         }
+        // Prevent path traversal attacks by rejecting paths containing '..'
+        if ampd_binary_path.components().any(|c| c == std::path::Component::ParentDir) || 
+           ampd_active_path.components().any(|c| c == std::path::Component::ParentDir) {
+            return Err(anyhow::anyhow!("Invalid input: {}, {}", 
+                ampd_binary_path.display(), ampd_active_path.display()));
+        }
         symlink(&ampd_binary_path, &ampd_active_path).context("Failed to create ampd symlink")?;
 
         // Handle ampctl symlink
