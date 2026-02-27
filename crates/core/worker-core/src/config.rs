@@ -54,10 +54,10 @@ pub struct ParquetConfig {
 impl Default for ParquetConfig {
     fn default() -> Self {
         Self {
-            compression: default_compression(),
+            compression: Compression::ZSTD(ZstdLevel::default()),
             bloom_filters: false,
-            cache_size_mb: default_cache_size_mb(),
-            max_row_group_mb: default_max_row_group_mb(),
+            cache_size_mb: 1024,   // 1 GB
+            max_row_group_mb: 512, // 512 MB
             target_size: SizeLimitConfig::default(),
             compactor: CompactorConfig::default(),
             collector: CollectorConfig::default(),
@@ -167,16 +167,4 @@ impl<const DEFAULT_SECS: u64> From<Duration> for ConfigDuration<DEFAULT_SECS> {
     fn from(d: Duration) -> Self {
         Self(d)
     }
-}
-
-fn default_compression() -> Compression {
-    Compression::ZSTD(ZstdLevel::default())
-}
-
-fn default_cache_size_mb() -> u64 {
-    1024 // 1GB default cache size
-}
-
-fn default_max_row_group_mb() -> u64 {
-    512 // 512MB default row group size
 }

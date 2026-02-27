@@ -36,7 +36,7 @@ pub struct ParquetConfig {
     #[serde(
         alias = "file_size",
         flatten,
-        default = "SizeLimitConfig::default_upper_limit",
+        default,
         deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
     )]
     #[cfg_attr(feature = "schemars", schemars(with = "SizeLimitConfig"))]
@@ -59,7 +59,7 @@ impl Default for ParquetConfig {
             bloom_filters: false,
             cache_size_mb: default_cache_size_mb(),
             max_row_group_mb: default_max_row_group_mb(),
-            target_size: SizeLimitConfig::default_upper_limit(),
+            target_size: SizeLimitConfig::default(),
             compactor: CompactorConfig::default(),
             collector: CollectorConfig::default(),
             segment_flush_interval_secs: ConfigDuration::default(),
@@ -501,10 +501,6 @@ impl SizeLimitConfig {
         D: serde::Deserializer<'de>,
     {
         Self::deserialize_with_base(deserializer, Self::default_eager_limit())
-    }
-
-    fn default_upper_limit() -> Self {
-        Self::default()
     }
 
     fn deserialize_upper_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
