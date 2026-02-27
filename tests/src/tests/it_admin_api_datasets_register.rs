@@ -76,6 +76,44 @@ async fn register_with_missing_dependency_fails() {
 }
 
 #[tokio::test]
+async fn register_with_missing_function_dependency_fails() {
+    //* Given
+    let ctx = TestCtx::setup("test_register_invalid_fn_dependency").await;
+    let namespace = "_".parse::<Namespace>().expect("valid namespace");
+    let name = "missing_fn_dep"
+        .parse::<Name>()
+        .expect("valid dataset name");
+    let version = "1.0.0".parse::<Version>().expect("valid version");
+
+    // SQL references eth_firehose for tables (valid) but nonexistent_dep for a function call
+    let manifest_str = create_manifest_with_sql(
+        "SELECT block_num, nonexistent_dep.some_func(hash) FROM eth_firehose.blocks",
+    );
+
+    //* When
+    let result = ctx
+        .register_dataset(&namespace, &name, &version, &manifest_str)
+        .await;
+
+    //* Then
+    assert!(
+        result.is_err(),
+        "registration should fail with missing function dependency"
+    );
+    let err = result.unwrap_err();
+    match err {
+        RegisterError::ManifestValidationError(api_err) => {
+            assert_eq!(api_err.error_code, "MANIFEST_VALIDATION_ERROR");
+            assert_eq!(
+                api_err.error_message,
+                r#"Manifest validation error: Dependency alias not found: In table 'test_table': Dependency alias 'nonexistent_dep' referenced in table but not provided in dependencies"#,
+            );
+        }
+        _ => panic!("Expected ManifestValidationError, got: {:?}", err),
+    }
+}
+
+#[tokio::test]
 async fn register_existing_dataset_is_idempotent() {
     //* Given
     let ctx = TestCtx::setup("test_register_dataset_idempotent").await;

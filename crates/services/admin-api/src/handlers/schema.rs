@@ -16,8 +16,8 @@ use common::{
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
     sql::{
-        ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
-        resolve_table_references,
+        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
+        TableReference, resolve_function_references, resolve_table_references,
     },
     sql_str::SqlStr,
 };
@@ -233,6 +233,19 @@ pub async fn handler(
                     },
                 })?;
 
+            // Validate dependency aliases in table references before catalog creation
+            for table_ref in &table_refs {
+                if let TableReference::Partial { schema, .. } = table_ref
+                    && !dependencies.contains_key(schema.as_ref())
+                {
+                    return Err(Error::DependencyAliasNotFound {
+                        table_name: table_name.clone(),
+                        alias: schema.to_string(),
+                    }
+                    .into());
+                }
+            }
+
             // Extract function references from the statement (supports both external deps and self-references)
             let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(
                 |err| match &err {
@@ -255,6 +268,20 @@ pub async fn handler(
                 },
             )?;
 
+            // Validate dependency aliases in function references before catalog creation
+            for func_ref in &func_refs {
+                if let FunctionReference::Qualified { schema, .. } = func_ref
+                    && let DepAliasOrSelfRef::DepAlias(dep_alias) = schema.as_ref()
+                    && !dependencies.contains_key(dep_alias)
+                {
+                    return Err(Error::DependencyAliasNotFound {
+                        table_name: table_name.clone(),
+                        alias: dep_alias.to_string(),
+                    }
+                    .into());
+                }
+            }
+
             statements.insert(table_name.clone(), stmt);
             references.insert(table_name, (table_refs, func_refs));
         }
@@ -274,9 +301,6 @@ pub async fn handler(
     .map_err(|err| match &err {
         CreateLogicalCatalogError::ResolveTables(inner) => match inner {
             ResolveTablesError::UnqualifiedTable { .. } => Error::UnqualifiedTable(err),
-            ResolveTablesError::DependencyAliasNotFound { .. } => {
-                Error::DependencyAliasNotFound(err)
-            }
             ResolveTablesError::GetDataset {
                 source: GetDatasetError::DatasetNotFound(_),
                 ..
@@ -285,7 +309,6 @@ pub async fn handler(
             ResolveTablesError::TableNotFoundInDataset { .. } => Error::TableNotFoundInDataset(err),
         },
         CreateLogicalCatalogError::ResolveUdfs(inner) => match inner {
-            ResolveUdfsError::DependencyAliasNotFound { .. } => Error::DependencyAliasNotFound(err),
             ResolveUdfsError::GetDataset {
                 source: GetDatasetError::DatasetNotFound(_),
                 ..
@@ -647,8 +670,15 @@ enum Error {
     /// Dependency alias not found
     ///
     /// A table or function reference uses an alias that was not provided in the dependencies map.
-    #[error(transparent)]
-    DependencyAliasNotFound(CreateLogicalCatalogError),
+    #[error(
+        "Dependency alias not found: In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
+    )]
+    DependencyAliasNotFound {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The dependency alias that was not found
+        alias: String,
+    },
 
     /// Failed to create DataFusion session configuration
     #[error("failed to create session config")]
@@ -718,7 +748,7 @@ impl IntoErrorResponse for Error {
             Error::TableNotFoundInDataset(_) => "TABLE_NOT_FOUND_IN_DATASET",
             Error::FunctionNotFoundInDataset(_) => "FUNCTION_NOT_FOUND_IN_DATASET",
             Error::EthCallNotAvailable(_) => "ETH_CALL_NOT_AVAILABLE",
-            Error::DependencyAliasNotFound(_) => "DEPENDENCY_ALIAS_NOT_FOUND",
+            Error::DependencyAliasNotFound { .. } => "DEPENDENCY_ALIAS_NOT_FOUND",
             Error::SessionConfig(_) => "SESSION_CONFIG_ERROR",
             Error::SchemaInference { .. } => "SCHEMA_INFERENCE",
         }
@@ -747,7 +777,7 @@ impl IntoErrorResponse for Error {
             Error::TableNotFoundInDataset(_) => StatusCode::NOT_FOUND,
             Error::FunctionNotFoundInDataset(_) => StatusCode::NOT_FOUND,
             Error::EthCallNotAvailable(_) => StatusCode::NOT_FOUND,
-            Error::DependencyAliasNotFound(_) => StatusCode::BAD_REQUEST,
+            Error::DependencyAliasNotFound { .. } => StatusCode::BAD_REQUEST,
             Error::SessionConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SchemaInference { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }

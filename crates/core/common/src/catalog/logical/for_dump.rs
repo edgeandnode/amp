@@ -35,6 +35,11 @@ pub type ResolvedReferences = (
 /// This function builds a logical catalog with schemas only, enabling query plan generation
 /// and schema inference without accessing physical parquet files.
 ///
+/// ## Precondition
+///
+/// All dependency aliases referenced in `refs` (table and function references) must exist as keys
+/// in `manifest_deps`. Callers must validate this before calling `create`; violation will panic.
+///
 /// ## Where Used
 ///
 /// This function is used during derived dataset dump execution when only logical validation
@@ -95,11 +100,9 @@ async fn resolve_tables(
             }
             TableReference::Partial { schema, table } => {
                 // Schema is already parsed as DepAlias, lookup in dependencies map
-                let dataset_ref = manifest_deps.get(schema.as_ref()).ok_or_else(|| {
-                    ResolveTablesError::DependencyAliasNotFound {
-                        alias: schema.as_ref().clone(),
-                    }
-                })?;
+                let dataset_ref = manifest_deps
+                    .get(schema.as_ref())
+                    .expect("dep alias validated before catalog creation");
 
                 // Skip if table reference is already resolved (optimization to avoid redundant dataset loading)
                 let Entry::Vacant(entry) = tables
@@ -179,11 +182,9 @@ async fn resolve_udfs(
                 match schema.as_ref() {
                     DepAliasOrSelfRef::DepAlias(dep_alias) => {
                         // External dependency reference - lookup in dependencies map
-                        let dataset_ref = manifest_deps.get(dep_alias).ok_or_else(|| {
-                            ResolveUdfsError::DependencyAliasNotFound {
-                                alias: dep_alias.clone(),
-                            }
-                        })?;
+                        let dataset_ref = manifest_deps
+                            .get(dep_alias)
+                            .expect("dep alias validated before catalog creation");
 
                         // Check vacancy BEFORE loading dataset
                         let Entry::Vacant(entry) = udfs
@@ -307,18 +308,6 @@ pub enum ResolveTablesError {
         table_ref: String,
     },
 
-    /// Dependency alias not found when processing table reference.
-    ///
-    /// This occurs when a table reference uses an alias that was not provided
-    /// in the dependencies map.
-    #[error(
-        "Dependency alias '{alias}' referenced in table reference but not provided in dependencies"
-    )]
-    DependencyAliasNotFound {
-        /// The dependency alias that was not found in the dependencies map
-        alias: DepAlias,
-    },
-
     /// Failed to retrieve dataset from store when loading dataset for table reference.
     ///
     /// This occurs when loading a dataset definition fails:
@@ -350,18 +339,6 @@ pub enum ResolveTablesError {
 /// Errors that can occur when resolving UDF references with dependencies.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveUdfsError {
-    /// Dependency alias not found when processing function reference.
-    ///
-    /// This occurs when a function reference uses an alias that was not provided
-    /// in the dependencies map.
-    #[error(
-        "Dependency alias '{alias}' referenced in function reference but not provided in dependencies"
-    )]
-    DependencyAliasNotFound {
-        /// The dependency alias that was not found in the dependencies map
-        alias: DepAlias,
-    },
-
     /// Failed to retrieve dataset from store when loading dataset for function.
     ///
     /// This occurs when loading a dataset definition for a function fails:
