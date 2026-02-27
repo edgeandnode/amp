@@ -198,8 +198,7 @@ fn test_propagate_nested_block_num_udf_still_auto_prepends() {
     // SELECT (block_num() + 1) AS offset, id FROM t
     // → block_num() is replaced inside the expression but the top-level
     //   output is "offset", not "_block_num", so _block_num is still prepended
-    let block_num_plus_one =
-        (block_num_call() + datafusion::prelude::lit(1u64)).alias("offset");
+    let block_num_plus_one = (block_num_call() + datafusion::prelude::lit(1u64)).alias("offset");
     let plan = LogicalPlanBuilder::from(simple_scan("t"))
         .project(vec![block_num_plus_one, col("id")])
         .unwrap()
@@ -449,8 +448,7 @@ async fn test_propagate_aggregate_block_num_udf_in_select_and_group_key() {
     // in-place replacement keeps the "block_num()" output name.
     //   Projection [ _block_num, _block_num AS "block_num()", cnt ]
     //     Aggregate group=[ _block_num ]
-    let plan =
-        sql_plan("SELECT block_num(), COUNT(id) AS cnt FROM t GROUP BY block_num()").await;
+    let plan = sql_plan("SELECT block_num(), COUNT(id) AS cnt FROM t GROUP BY block_num()").await;
 
     let result = propagate_block_num(plan).unwrap();
 
@@ -816,17 +814,15 @@ async fn test_propagate_block_num_with_qualified_wildcard() {
     let bar_table = MemTable::try_new(bar_schema.clone(), vec![vec![bar_batch]]).unwrap();
 
     // Build a logical plan with `SELECT foo.* FROM foo JOIN bar ON foo.id = bar.id`
-    let foo_scan =
-        LogicalPlanBuilder::scan("foo", provider_as_source(Arc::new(foo_table)), None)
-            .unwrap()
-            .build()
-            .unwrap();
+    let foo_scan = LogicalPlanBuilder::scan("foo", provider_as_source(Arc::new(foo_table)), None)
+        .unwrap()
+        .build()
+        .unwrap();
 
-    let bar_scan =
-        LogicalPlanBuilder::scan("bar", provider_as_source(Arc::new(bar_table)), None)
-            .unwrap()
-            .build()
-            .unwrap();
+    let bar_scan = LogicalPlanBuilder::scan("bar", provider_as_source(Arc::new(bar_table)), None)
+        .unwrap()
+        .build()
+        .unwrap();
 
     // Create a join
     let join_plan = LogicalPlanBuilder::from(foo_scan)
