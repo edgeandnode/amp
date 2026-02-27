@@ -44,7 +44,13 @@ pub type TableReferencesMap = BTreeMap<
 /// Builds a unified logical catalog from table and function references across multiple tables,
 /// resolving dependency aliases to datasets for schema-only validation (no physical data access).
 ///
-/// Delegates to specialized helpers:
+/// ## Precondition
+///
+/// All dependency aliases referenced in `refs` (table and function references) must exist as keys
+/// in `manifest_deps`. Callers must validate this before calling `create`; violation will panic.
+///
+/// ## Delegates to
+///
 /// - [`resolve_tables`] - Resolves table references to `LogicalTable` instances
 /// - [`resolve_udfs`] - Resolves function references to UDFs
 pub async fn create(
@@ -112,12 +118,9 @@ async fn resolve_tables<'a>(
                 });
             }
             TableReference::Partial { schema, table } => {
-                let dataset_ref = manifest_deps.get(schema.as_ref()).ok_or_else(|| {
-                    ResolveTablesError::DependencyAliasNotFound {
-                        table_name: table_name.clone(),
-                        alias: schema.as_ref().clone(),
-                    }
-                })?;
+                let dataset_ref = manifest_deps
+                    .get(schema.as_ref())
+                    .expect("dep alias validated before catalog creation");
 
                 let Entry::Vacant(entry) = tables
                     .entry(dataset_ref.hash().clone())
@@ -182,12 +185,9 @@ async fn resolve_udfs<'a>(
             }
             FunctionReference::Qualified { schema, function } => match schema.as_ref() {
                 DepAliasOrSelfRef::DepAlias(dep_alias) => {
-                    let dataset_ref = manifest_deps.get(dep_alias).ok_or_else(|| {
-                        ResolveUdfsError::DependencyAliasNotFound {
-                            table_name: table_name.clone(),
-                            alias: dep_alias.clone(),
-                        }
-                    })?;
+                    let dataset_ref = manifest_deps
+                        .get(dep_alias)
+                        .expect("dep alias validated before catalog creation");
 
                     // Check vacancy BEFORE loading dataset
                     let Entry::Vacant(entry) = udfs
@@ -292,17 +292,6 @@ pub enum ResolveTablesError {
         table_ref: String,
     },
 
-    /// Dependency alias not found when processing table reference
-    #[error(
-        "In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
-    )]
-    DependencyAliasNotFound {
-        /// The table being processed when the error occurred
-        table_name: TableName,
-        /// The dependency alias that was not found in the dependencies map
-        alias: DepAlias,
-    },
-
     /// Failed to retrieve dataset from store when loading dataset for table reference
     #[error("In table '{table_name}': Failed to retrieve dataset '{reference}'")]
     GetDataset {
@@ -330,17 +319,6 @@ pub enum ResolveTablesError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveUdfsError {
-    /// Dependency alias not found when processing function reference
-    #[error(
-        "In table '{table_name}': Dependency alias '{alias}' referenced in function but not provided in dependencies"
-    )]
-    DependencyAliasNotFound {
-        /// The table being processed when the error occurred
-        table_name: TableName,
-        /// The dependency alias that was not found in the dependencies map
-        alias: DepAlias,
-    },
-
     /// Failed to retrieve dataset from store when loading dataset for function
     #[error("In table '{table_name}': Failed to retrieve dataset '{reference}' for function")]
     GetDataset {

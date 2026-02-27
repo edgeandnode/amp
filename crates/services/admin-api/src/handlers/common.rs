@@ -14,8 +14,8 @@ use common::{
     exec_env::default_session_config,
     metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
     sql::{
-        ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
-        resolve_table_references,
+        FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
+        TableReference, resolve_function_references, resolve_table_references,
     },
 };
 use datafusion::sql::parser::Statement;
@@ -288,6 +288,18 @@ pub async fn validate_derived_manifest(
             },
         })?;
 
+        // Validate dependency aliases in table references before catalog creation
+        for table_ref in &table_refs {
+            if let TableReference::Partial { schema, .. } = table_ref
+                && !dependencies.contains_key(schema.as_ref())
+            {
+                return Err(ManifestValidationError::DependencyAliasNotFound {
+                    table_name: table_name.clone(),
+                    alias: schema.to_string(),
+                });
+            }
+        }
+
         // Extract function references (supports both external deps and self-references)
         let func_refs = resolve_function_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| {
             ManifestValidationError::FunctionReferenceResolution {
@@ -295,6 +307,19 @@ pub async fn validate_derived_manifest(
                 source: err,
             }
         })?;
+
+        // Validate dependency aliases in function references before catalog creation
+        for func_ref in &func_refs {
+            if let FunctionReference::Qualified { schema, .. } = func_ref
+                && let DepAliasOrSelfRef::DepAlias(dep_alias) = schema.as_ref()
+                && !dependencies.contains_key(dep_alias)
+            {
+                return Err(ManifestValidationError::DependencyAliasNotFound {
+                    table_name: table_name.clone(),
+                    alias: dep_alias.to_string(),
+                });
+            }
+        }
 
         references.insert(table_name.clone(), (table_refs, func_refs));
         statements.insert(table_name.clone(), stmt);
@@ -323,18 +348,12 @@ pub async fn validate_derived_manifest(
             ResolveTablesError::UnqualifiedTable { .. } => {
                 ManifestValidationError::UnqualifiedTable(err)
             }
-            ResolveTablesError::DependencyAliasNotFound { .. } => {
-                ManifestValidationError::DependencyAliasNotFound(err)
-            }
             ResolveTablesError::GetDataset { .. } => ManifestValidationError::GetDataset(err),
             ResolveTablesError::TableNotFoundInDataset { .. } => {
                 ManifestValidationError::TableNotFoundInDataset(err)
             }
         },
         CreateLogicalCatalogError::ResolveUdfs(resolve_error) => match resolve_error {
-            ResolveUdfsError::DependencyAliasNotFound { .. } => {
-                ManifestValidationError::DependencyAliasNotFound(err)
-            }
             ResolveUdfsError::GetDataset { .. } => ManifestValidationError::GetDataset(err),
             ResolveUdfsError::EthCallUdfCreation { .. } => {
                 ManifestValidationError::EthCallUdfCreation(err)
@@ -512,9 +531,16 @@ pub enum ManifestValidationError {
 
     /// Dependency alias not found
     ///
-    /// A table reference uses an alias that was not provided in the dependencies map.
-    #[error("Dependency alias not found: {0}")]
-    DependencyAliasNotFound(#[source] CreateLogicalCatalogError),
+    /// A table or function reference uses an alias that was not provided in the dependencies map.
+    #[error(
+        "Dependency alias not found: In table '{table_name}': Dependency alias '{alias}' referenced in table but not provided in dependencies"
+    )]
+    DependencyAliasNotFound {
+        /// The table being processed when the error occurred
+        table_name: TableName,
+        /// The dependency alias that was not found
+        alias: String,
+    },
 
     /// Non-incremental SQL operation in table query
     ///
