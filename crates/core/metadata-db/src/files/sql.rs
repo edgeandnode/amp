@@ -96,8 +96,8 @@ where
 {
     let query = indoc::indoc! {r#"
         WITH inserted AS (
-            INSERT INTO file_metadata (location_id, url, file_name, object_size, object_e_tag, object_version, metadata, footer)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO file_metadata (location_id, url, file_name, object_size, object_e_tag, object_version, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT DO NOTHING
             RETURNING id
         )
