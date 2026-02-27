@@ -345,7 +345,7 @@
           "$ref": "#/$defs/CompactorConfig"
         },
         "compression": {
-          "description": "Compression algorithm (default: `Zstd(1)`).",
+          "description": "Compression algorithm (default: `zstd(1)`).",
           "$ref": "#/$defs/Compression"
         },
         "file_count": {

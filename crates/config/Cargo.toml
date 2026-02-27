@@ -10,11 +10,11 @@ schemars = ["dep:schemars"]
 
 [dependencies]
 amp-common = { package = "common", path = "../core/common" }
+amp-monitoring = { package = "monitoring", path = "../core/monitoring" }
 amp-object-store = { path = "../core/object-store" }
 amp-worker-core = { path = "../core/worker-core" }
 figment.workspace = true
 fs-err.workspace = true
-amp-monitoring = { package = "monitoring", path = "../core/monitoring" }
 metadata-db = { path = "../core/metadata-db" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
