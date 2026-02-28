@@ -359,20 +359,13 @@ pub async fn handler(
         // Prepend the special block number field
         let schema = prepend_special_block_num_field(&schema);
 
-        // Extract networks from all tables in the catalog
-        let mut networks: Vec<NetworkId> = planning_ctx
-            .logical_tables()
-            .iter()
-            .map(|t| t.table().network().clone())
-            .collect();
-        networks.sort();
-        networks.dedup();
-
         schemas.insert(
             table_name,
             TableSchemaWithNetworks {
                 schema: schema.into(),
-                networks,
+                // TODO: Remove this dummy network once the TS manifest builder no longer requires
+                //  exactly one network from the schema endpoint.
+                networks: vec!["derived".parse().expect("valid network id")],
             },
         );
     }
