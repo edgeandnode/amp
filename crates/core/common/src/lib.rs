@@ -20,6 +20,7 @@ pub mod metadata;
 pub mod physical_table;
 pub mod plan_table;
 pub mod plan_visitors;
+pub mod retryable;
 pub mod sql;
 pub mod stream_helpers;
 pub mod streaming_query;

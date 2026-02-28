@@ -1,3 +1,4 @@
+use amp_providers_common::network_id::NetworkId;
 use datasets_raw::{client::BlockStreamError, rows::TableRowError};
 pub use yellowstone_faithful_car_parser as car_parser;
 use yellowstone_faithful_car_parser::node::{NodeError, ReassableError};
@@ -181,5 +182,27 @@ impl From<Of1StreamError> for BlockStreamError {
 
 /// Error during Solana client initialization or operation.
 #[derive(Debug, thiserror::Error)]
-#[error("Client error: {0}")]
-pub struct ClientError(pub String);
+pub enum ClientError {
+    /// The requested Solana network is not supported.
+    ///
+    /// This occurs when the configured Solana network identifier does not match
+    /// the only supported network ('mainnet').
+    #[error("unsupported Solana network: {network}. Only 'mainnet' is supported.")]
+    UnsupportedNetwork { network: NetworkId },
+
+    /// The RPC provider URL uses an unsupported scheme.
+    ///
+    /// This occurs when the RPC provider URL uses a scheme other than
+    /// `http` or `https`.
+    #[error("unsupported Solana RPC provider URL scheme: {scheme}")]
+    UnsupportedUrlScheme { scheme: String },
+}
+
+impl amp_providers_common::retryable::RetryableErrorExt for ClientError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::UnsupportedNetwork { .. } => false,
+            Self::UnsupportedUrlScheme { .. } => false,
+        }
+    }
+}

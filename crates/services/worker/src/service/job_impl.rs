@@ -2,7 +2,10 @@
 
 use std::{future::Future, sync::Arc};
 
-use amp_worker_core::{Ctx, ProgressReporter, jobs::job_id::JobId, metrics::MetricsRegistry};
+use amp_worker_core::{
+    Ctx, ProgressReporter, jobs::job_id::JobId, metrics::MetricsRegistry,
+    retryable::RetryableErrorExt,
+};
 use datasets_common::hash_reference::HashReference;
 use tracing::{Instrument, info_span};
 
@@ -126,11 +129,11 @@ pub(crate) enum JobError {
     MaterializeDerived(#[source] amp_worker_datasets_derived::Error),
 }
 
-impl JobError {
-    pub fn is_fatal(&self) -> bool {
+impl RetryableErrorExt for JobError {
+    fn is_retryable(&self) -> bool {
         match self {
-            Self::MaterializeRaw(err) => err.is_fatal(),
-            Self::MaterializeDerived(err) => err.is_fatal(),
+            Self::MaterializeRaw(err) => err.is_retryable(),
+            Self::MaterializeDerived(err) => err.is_retryable(),
         }
     }
 }

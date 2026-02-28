@@ -218,8 +218,8 @@ async fn stop_failed_job_is_idempotent() {
 
     //* Then
     assert_eq!(
-        job_info_before.status, "FAILED_RECOVERABLE",
-        "job should be in FAILED_RECOVERABLE state, got: {}",
+        job_info_before.status, "FAILED_FATAL",
+        "job should be in FAILED_FATAL state, got: {}",
         job_info_before.status
     );
     assert!(
@@ -228,8 +228,8 @@ async fn stop_failed_job_is_idempotent() {
         result.err()
     );
     assert_eq!(
-        job_info_after.status, "FAILED_RECOVERABLE",
-        "job should remain in FAILED_RECOVERABLE state after stop attempt"
+        job_info_after.status, "FAILED_FATAL",
+        "job should remain in FAILED_FATAL state after stop attempt"
     );
 }
 

@@ -276,6 +276,20 @@ pub enum GetDatasetError {
     },
 }
 
+impl crate::retryable::RetryableErrorExt for GetDatasetError {
+    fn is_retryable(&self) -> bool {
+        use amp_datasets_registry::retryable::RetryableErrorExt as _;
+        match self {
+            Self::DatasetNotFound(_) => false,
+            Self::LoadManifestContent { source, .. } => source.is_retryable(),
+            Self::ParseManifestForKind { .. } => false,
+            Self::UnsupportedKind { .. } => false,
+            Self::ParseManifest { .. } => false,
+            Self::CreateDerivedDataset { .. } => false,
+        }
+    }
+}
+
 /// Errors that occur when retrieving derived dataset manifests by hash.
 #[derive(Debug, thiserror::Error)]
 pub enum GetDerivedManifestError {
@@ -302,6 +316,17 @@ pub enum GetDerivedManifestError {
     /// in the manifest store.
     #[error("Manifest {0} not found in the manifest store")]
     ManifestNotFound(Hash),
+}
+
+impl crate::retryable::RetryableErrorExt for GetDerivedManifestError {
+    fn is_retryable(&self) -> bool {
+        use amp_datasets_registry::retryable::RetryableErrorExt;
+        match self {
+            Self::LoadManifestContent(err) => err.is_retryable(),
+            Self::ManifestParseError(_) => false,
+            Self::ManifestNotFound(_) => false,
+        }
+    }
 }
 
 /// Errors that occur when creating eth_call user-defined functions for EVM RPC datasets.

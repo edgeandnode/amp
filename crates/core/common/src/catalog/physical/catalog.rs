@@ -86,6 +86,15 @@ pub enum EarliestBlockError {
     MultiNetworkSegments(#[source] MultiNetworkSegmentsError),
 }
 
+impl crate::retryable::RetryableErrorExt for EarliestBlockError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Snapshot(err) => err.is_retryable(),
+            Self::MultiNetworkSegments(_) => false,
+        }
+    }
+}
+
 /// A catalog entry that pairs a physical table with SQL naming information.
 ///
 /// `PhysicalTable` represents pure physical storage (revision, segments, canonical chains,

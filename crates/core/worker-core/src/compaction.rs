@@ -21,7 +21,7 @@ use metadata_db::MetadataDb;
 use parking_lot::RwLock;
 use tokio::task::{JoinError, JoinHandle};
 
-use crate::{WriterProperties, metrics::MetricsRegistry};
+use crate::{WriterProperties, metrics::MetricsRegistry, retryable::RetryableErrorExt};
 
 pub type TaskResult<T> = Result<T, AmpCompactorTaskError>;
 
@@ -48,6 +48,16 @@ impl Error for AmpCompactorTaskError {
             AmpCompactorTaskError::Compaction(e) => e.source(),
             AmpCompactorTaskError::Collection(e) => e.source(),
             AmpCompactorTaskError::Join(e) => e.source(),
+        }
+    }
+}
+
+impl RetryableErrorExt for AmpCompactorTaskError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Compaction(err) => err.is_retryable(),
+            Self::Collection(err) => err.is_retryable(),
+            Self::Join(_) => false,
         }
     }
 }

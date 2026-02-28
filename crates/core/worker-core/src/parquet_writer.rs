@@ -25,6 +25,8 @@ use object_store::{ObjectMeta, buffered::BufWriter};
 use parquet_ext::arrow::async_writer::AsyncArrowWriter;
 use url::Url;
 
+use crate::retryable::RetryableErrorExt;
+
 pub async fn commit_metadata(
     metadata_db: &MetadataDb,
     parquet_meta: ParquetMeta,
@@ -103,6 +105,16 @@ pub enum CommitMetadataError {
     /// - Payload too large
     #[error("Failed to notify location change")]
     Notify(#[source] metadata_db::Error),
+}
+
+impl RetryableErrorExt for CommitMetadataError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Register(_) => true,
+            Self::SerializeParquetMetadata(_) => false,
+            Self::Notify(_) => true,
+        }
+    }
 }
 
 pub struct ParquetFileWriter {
@@ -327,4 +339,16 @@ pub enum ParquetFileWriterCloseError {
     /// - Invalid parquet file structure
     #[error("Failed to extract footer bytes")]
     ExtractFooter(#[source] ParquetError),
+}
+
+impl RetryableErrorExt for ParquetFileWriterCloseError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Flush(_) => true,
+            Self::SerializeKeyValueMetadata(_) => false,
+            Self::Close(_) => true,
+            Self::HeadObject(_) => true,
+            Self::ExtractFooter(_) => true,
+        }
+    }
 }

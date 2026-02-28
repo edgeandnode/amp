@@ -6,3 +6,4 @@ pub mod kind;
 pub mod network_id;
 pub mod provider_name;
 pub mod redacted;
+pub mod retryable;

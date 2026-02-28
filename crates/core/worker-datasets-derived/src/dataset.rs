@@ -96,7 +96,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
-use amp_data_store::file_name::FileName;
+use amp_data_store::{file_name::FileName, retryable::RetryableErrorExt as _};
 use amp_worker_core::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
     block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
@@ -110,6 +110,7 @@ use amp_worker_core::{
     progress::{
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     },
+    retryable::RetryableErrorExt,
     tasks::{self, TryWaitAllError},
 };
 use common::{
@@ -126,6 +127,7 @@ use common::{
     metadata::Generation,
     parquet::errors::ParquetError,
     physical_table::{CanonicalChainError, PhysicalTable},
+    retryable::RetryableErrorExt as _,
     sql::{
         ParseSqlError, ResolveFunctionReferencesError, ResolveTableReferencesError,
         resolve_function_references, resolve_table_references,
@@ -401,11 +403,32 @@ pub enum Error {
     ParallelTasksFailed(#[source] TryWaitAllError<DumpTableError>),
 }
 
-impl Error {
-    // TODO: Determine which errors are fatal (non-retryable) vs transient (retryable)
-    // for more efficient job scheduling.
-    pub fn is_fatal(&self) -> bool {
-        false
+impl RetryableErrorExt for Error {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Delegate to inner error classification
+            Self::GetDataset(err) => err.is_retryable(),
+
+            // Transient DB/store lookup failures
+            Self::GetActivePhysicalTable(err) => err.is_retryable(),
+            Self::RegisterNewPhysicalTable(_) => true,
+            Self::LockRevisionsForWriter(err) => err.is_retryable(),
+
+            // Query environment setup failure — fatal (invalid config)
+            Self::CreateQueryEnv(_) => false,
+
+            // Data integrity violation — fatal
+            Self::ConsistencyCheck { .. } => false,
+
+            // Delegate to inner error classification
+            Self::GetDerivedManifest(err) => err.is_retryable(),
+
+            // Delegate to DumpTableError classification
+            Self::DumpTable { source, .. } => source.is_retryable(),
+
+            // Parallel tasks — delegate to TryWaitAllError classification
+            Self::ParallelTasksFailed(err) => err.is_retryable(),
+        }
     }
 }
 
@@ -696,6 +719,27 @@ pub enum DumpTableError {
     ParallelTaskFailed(#[source] TryWaitAllError<DumpTableSpawnError>),
 }
 
+impl RetryableErrorExt for DumpTableError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Config/definition errors — fatal
+            Self::TableNotFound(_) => false,
+            Self::ParseSql(_) => false,
+            Self::DependencyNotFound { .. } => false,
+            Self::ResolveTableReferences(_) => false,
+            Self::ResolveFunctionReferences(_) => false,
+            Self::CreateCatalog(_) => false,
+            Self::CreatePhysicalCatalog(_) => false,
+
+            // Transient DB failure — recoverable
+            Self::ResolveRevision(err) => err.0.is_retryable(),
+
+            // Parallel tasks — delegate to TryWaitAllError classification
+            Self::ParallelTaskFailed(err) => err.is_retryable(),
+        }
+    }
+}
+
 /// Errors that occur in the spawned async task for table dumping
 ///
 /// This error type is used by the async task spawned in `dump_table()`.
@@ -745,6 +789,26 @@ pub enum DumpTableSpawnError {
     /// This occurs when the inner `dump_sql_query` function fails.
     #[error("failed to dump SQL query: {0}")]
     DumpSqlQuery(#[source] DumpSqlQueryError),
+}
+
+impl RetryableErrorExt for DumpTableSpawnError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // SQL/query structure errors — fatal
+            Self::PlanSql(_) => false,
+            Self::NonIncrementalQuery { .. } => false,
+
+            // Delegate to inner error classification
+            Self::EarliestBlock(err) => err.is_retryable(),
+            Self::CanonicalChain(err) => err.is_retryable(),
+
+            // Block range resolution — inspect the source variant
+            Self::ResolveEndBlock(err) => err.is_retryable(),
+
+            // Delegate to DumpSqlQueryError classification
+            Self::DumpSqlQuery(err) => err.is_retryable(),
+        }
+    }
 }
 
 #[instrument(skip_all, err)]
@@ -974,4 +1038,109 @@ pub enum DumpSqlQueryError {
     /// while producing result batches.
     #[error("failed to get next message: {0}")]
     StreamingQuery(#[source] MessageStreamError),
+}
+
+impl RetryableErrorExt for DumpSqlQueryError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Query spawn failure — fatal (likely invalid SQL or schema mismatch)
+            Self::StreamingQuerySpawn(_) => false,
+
+            // Transient I/O failures — recoverable
+            Self::CreateParquetFileWriter(_) => true,
+            Self::WriteBatch(_) => true,
+
+            // Delegate to inner error classification
+            Self::CloseFile(err) => err.is_retryable(),
+            Self::CommitMetadata(err) => err.is_retryable(),
+            Self::Compactor(err) => err.is_retryable(),
+
+            // Transient query execution failure — recoverable
+            Self::StreamingQuery(_) => true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use amp_worker_core::block_ranges::ResolutionError;
+    use common::sql::ParseSqlError;
+
+    use super::*;
+
+    mod dump_table_error_is_fatal {
+        use super::*;
+
+        #[test]
+        fn is_fatal_table_not_found_returns_true() {
+            //* Given
+            let err = DumpTableError::TableNotFound("missing".to_string());
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(result, "TableNotFound should be fatal");
+        }
+
+        #[test]
+        fn is_fatal_parse_sql_returns_true() {
+            //* Given
+            let err = DumpTableError::ParseSql(ParseSqlError::NoStatements);
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(result, "ParseSql should be fatal");
+        }
+
+        #[test]
+        fn is_fatal_dependency_not_found_returns_true() {
+            //* Given
+            let err = DumpTableError::DependencyNotFound {
+                alias: "dep".to_string(),
+                reference: "ref".to_string(),
+            };
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(result, "DependencyNotFound should be fatal");
+        }
+    }
+
+    mod dump_table_spawn_error_is_fatal {
+        use super::*;
+
+        #[test]
+        fn is_fatal_resolve_end_block_invalid_returns_true() {
+            //* Given
+            let err = DumpTableSpawnError::ResolveEndBlock(ResolutionError::InvalidEndBlock {
+                start_block: 100,
+                end_block: 5,
+            });
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(result, "InvalidEndBlock should be fatal");
+        }
+
+        #[test]
+        fn is_fatal_resolve_end_block_fetch_failed_returns_false() {
+            //* Given
+            let err = DumpTableSpawnError::ResolveEndBlock(ResolutionError::FetchLatestFailed(
+                "timeout".to_string(),
+            ));
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(!result, "FetchLatestFailed should not be fatal");
+        }
+    }
 }

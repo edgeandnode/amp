@@ -22,3 +22,16 @@ pub enum ClientError {
     #[error("invalid auth token")]
     Utf8(#[source] InvalidMetadataValue),
 }
+
+impl amp_providers_common::retryable::RetryableErrorExt for ClientError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Connection(_) => true,
+            Self::Call(_) => true,
+            Self::PbDecodeError(_) => false,
+            Self::AssertFail(_) => false,
+            Self::UriParse(_) => false,
+            Self::Utf8(_) => false,
+        }
+    }
+}

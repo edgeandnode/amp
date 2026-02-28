@@ -96,11 +96,9 @@ pub fn client(
     meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<Client, ClientError> {
     if config.network != "mainnet" {
-        let err = format!(
-            "unsupported Solana network: {}. Only 'mainnet' is supported.",
-            config.network
-        );
-        return Err(ClientError(err));
+        return Err(ClientError::UnsupportedNetwork {
+            network: config.network,
+        });
     }
 
     let commitment = commitment_config(config.commitment);
@@ -128,8 +126,9 @@ pub fn client(
             commitment,
         ),
         scheme => {
-            let err = format!("unsupported Solana RPC provider URL scheme: {}", scheme);
-            return Err(ClientError(err));
+            return Err(ClientError::UnsupportedUrlScheme {
+                scheme: scheme.to_string(),
+            });
         }
     };
 

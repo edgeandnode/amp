@@ -27,6 +27,7 @@ use object_store::ObjectStore;
 use rand::seq::SliceRandom as _;
 
 mod client;
+pub mod retryable;
 mod store;
 
 pub use amp_providers_evm_rpc::provider::{

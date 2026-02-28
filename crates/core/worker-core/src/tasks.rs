@@ -5,6 +5,8 @@ use std::future::Future;
 use monitoring::logging;
 use tokio::task::{JoinError, JoinSet};
 
+use crate::retryable::RetryableErrorExt;
+
 /// A wrapper around [`JoinSet`] that implements fail-fast semantics.
 ///
 /// When any task fails (or panics), all remaining tasks are immediately aborted.
@@ -108,4 +110,13 @@ pub enum TryWaitAllError<E> {
     /// the panic payload if available. Unlike explicit errors, panics
     /// cannot be easily recovered from and usually indicate a bug.
     Panic(JoinError),
+}
+
+impl<E: RetryableErrorExt> RetryableErrorExt for TryWaitAllError<E> {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Error(err) => err.is_retryable(),
+            Self::Panic(_) => false,
+        }
+    }
 }
