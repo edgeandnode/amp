@@ -4,19 +4,35 @@ use datasets_common::{block_num::BlockNum, block_range::BlockRange};
 use metadata_db::files::FileId;
 use object_store::ObjectMeta;
 
+use crate::cursor::Watermark;
+
 /// A block range associated with the metadata from a file in object storage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Segment {
     id: FileId,
     object: ObjectMeta,
     ranges: Vec<BlockRange>,
+    /// For single-network segments, this is `None` as the watermark equals the end block number.
+    /// For multi-network segments, this represents the cumulative watermark at the end of
+    /// this segment.
+    watermark: Option<Watermark>,
 }
 
 impl Segment {
     /// Returns a Segment, where the ranges are ordered by network.
-    pub fn new(id: FileId, object: ObjectMeta, mut ranges: Vec<BlockRange>) -> Self {
+    pub fn new(
+        id: FileId,
+        object: ObjectMeta,
+        mut ranges: Vec<BlockRange>,
+        watermark: Option<Watermark>,
+    ) -> Self {
         ranges.sort_unstable_by(|a, b| a.network.cmp(&b.network));
-        Self { id, object, ranges }
+        Self {
+            id,
+            object,
+            ranges,
+            watermark,
+        }
     }
 
     /// Returns the file ID of this segment.
@@ -32,6 +48,14 @@ impl Segment {
     /// Returns a slice of all block ranges in this segment.
     pub fn ranges(&self) -> &[BlockRange] {
         &self.ranges
+    }
+
+    /// Returns the watermark for this segment.
+    pub fn watermark(&self) -> Watermark {
+        match self.watermark {
+            Some(watermark) => watermark,
+            None => self.single_range().end(),
+        }
     }
 
     /// Returns the single block range for single-network segments.
@@ -444,6 +468,7 @@ mod test {
             FileId::try_from(1i64).expect("FileId::MIN is 1"),
             test_object(timestamp),
             vec![range],
+            None,
         )
     }
 
@@ -459,6 +484,7 @@ mod test {
                 test_range("a", network_a.0, network_a.1),
                 test_range("b", network_b.0, network_b.1),
             ],
+            None,
         )
     }
 

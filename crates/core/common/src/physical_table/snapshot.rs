@@ -175,6 +175,7 @@ mod tests {
             FileId::try_from(1i64).expect("FileId 1 is valid"),
             test_object(),
             vec![range],
+            None,
         )
     }
 
@@ -197,6 +198,7 @@ mod tests {
             FileId::try_from(1i64).expect("FileId 1 is valid"),
             test_object(),
             vec![range_a, range_b],
+            None,
         )
     }
 
