@@ -2,6 +2,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use amp_config::WorkerEventsConfig;
 use amp_data_store::DataStore;
+use amp_providers_registry::ProvidersRegistry;
 use backon::{ExponentialBuilder, Retryable};
 use common::dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
@@ -69,6 +70,7 @@ pub async fn new(
     metadata_db: MetadataDb,
     data_store: DataStore,
     dataset_store: DatasetStore,
+    providers_registry: ProvidersRegistry,
     meter: Option<Meter>,
     node_id: NodeId,
     event_emitter: Option<Arc<dyn EventEmitter>>,
@@ -126,6 +128,7 @@ pub async fn new(
             config,
             metadata_db: metadata_db.clone(),
             dataset_store,
+            providers_registry,
             data_store,
             notification_multiplexer,
             meter,
@@ -243,6 +246,7 @@ pub(crate) struct WorkerJobCtx {
     pub config: Config,
     pub metadata_db: MetadataDb,
     pub dataset_store: DatasetStore,
+    pub providers_registry: ProvidersRegistry,
     pub data_store: DataStore,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,

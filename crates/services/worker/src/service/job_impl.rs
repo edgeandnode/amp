@@ -58,6 +58,7 @@ pub(super) fn new(
         config: job_ctx.config.dump_config(),
         metadata_db: job_ctx.metadata_db.clone(),
         dataset_store: job_ctx.dataset_store.clone(),
+        providers_registry: job_ctx.providers_registry.clone(),
         data_store: job_ctx.data_store.clone(),
         notification_multiplexer: job_ctx.notification_multiplexer.clone(),
         metrics,

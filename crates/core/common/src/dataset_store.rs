@@ -20,13 +20,8 @@ use datasets_common::{
     manifest::Manifest as CommonManifest, network_id::NetworkId, reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
-use datasets_raw::{
-    client::{BlockStreamer, BlockStreamerExt as _},
-    manifest::RawDatasetManifest,
-};
 use evm_rpc_datasets::{Dataset as EvmRpcDataset, EvmRpcDatasetKind, Manifest as EvmRpcManifest};
 use firehose_datasets::{FirehoseDatasetKind, Manifest as FirehoseManifest};
-use monitoring::telemetry::metrics::Meter;
 use parking_lot::RwLock;
 use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
 
@@ -151,46 +146,6 @@ impl DatasetStore {
             .map_err(GetDerivedManifestError::ManifestParseError)?;
 
         Ok(manifest)
-    }
-
-    /// Creates a block streaming client for a raw dataset with automatic retry on failures.
-    #[tracing::instrument(skip(self), err)]
-    pub async fn get_client(
-        &self,
-        hash: &Hash,
-        meter: Option<&Meter>,
-    ) -> Result<impl BlockStreamer, GetClientError> {
-        // Load the manifest content using the path
-        let Some(manifest_content) = self
-            .datasets_registry
-            .get_manifest(hash)
-            .await
-            .map_err(GetClientError::LoadManifestContent)?
-        else {
-            return Err(GetClientError::ManifestNotFound(hash.clone()));
-        };
-
-        let manifest = manifest_content
-            .try_into_manifest::<RawDatasetManifest>()
-            .map_err(GetClientError::RawManifestParseError)?;
-
-        // Check it's a raw dataset kind (not derived)
-        if manifest.kind == DerivedDatasetKind {
-            return Err(GetClientError::UnsupportedKind {
-                kind: manifest.kind.to_string(),
-            });
-        }
-
-        let kind = manifest.kind;
-        let network = manifest.network;
-
-        let client = self
-            .providers_registry
-            .create_block_stream_client(kind, &network, meter)
-            .await
-            .map_err(GetClientError::ClientCreation)?;
-
-        Ok(client.with_retry())
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
@@ -340,52 +295,6 @@ pub enum GetDerivedManifestError {
     /// - Required fields are missing or have incorrect types
     #[error("Failed to parse manifest")]
     ManifestParseError(#[source] ManifestParseError),
-
-    /// Manifest not found in the manifest store.
-    ///
-    /// This occurs when the manifest hash does not correspond to any manifest
-    /// in the manifest store.
-    #[error("Manifest {0} not found in the manifest store")]
-    ManifestNotFound(Hash),
-}
-
-/// Errors that occur when creating block streaming clients for raw datasets.
-#[derive(Debug, thiserror::Error)]
-pub enum GetClientError {
-    /// Failed to load manifest content from object store
-    ///
-    /// This occurs when the object store operation to fetch the manifest file fails,
-    /// which could be due to network issues, permissions, or storage backend problems.
-    #[error("Failed to load manifest content from object store")]
-    LoadManifestContent(#[source] amp_datasets_registry::error::GetManifestError),
-
-    /// Failed to parse the raw manifest file content.
-    ///
-    /// This occurs when:
-    /// - The manifest file contains invalid JSON or TOML syntax
-    /// - The manifest is missing the required 'network' field
-    /// - The manifest structure doesn't match the expected raw dataset schema
-    #[error("Failed to parse manifest for raw dataset")]
-    RawManifestParseError(#[source] ManifestParseError),
-
-    /// The dataset kind is not a raw dataset type.
-    ///
-    /// This occurs when trying to get a client for a dataset that is not a raw data source.
-    /// Only raw dataset kinds (evm-rpc, firehose) can have clients retrieved.
-    /// SQL and Derived datasets cannot have clients as they are views over other datasets.
-    #[error(
-        "Dataset has unsupported kind '{kind}' for client retrieval (expected raw dataset: evm-rpc or firehose)"
-    )]
-    UnsupportedKind { kind: String },
-
-    /// Failed to create client for the dataset.
-    ///
-    /// This occurs during client creation for the provider, which may fail due to:
-    /// - No provider found for the kind-network combination
-    /// - Invalid provider configuration
-    /// - Client initialization failures (connection issues, invalid URLs, etc.)
-    #[error("Failed to create client")]
-    ClientCreation(#[source] amp_providers_registry::CreateClientError),
 
     /// Manifest not found in the manifest store.
     ///

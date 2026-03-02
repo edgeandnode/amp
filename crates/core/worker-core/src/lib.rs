@@ -3,6 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
+use amp_providers_registry::ProvidersRegistry;
 use common::{
     dataset_store::DatasetStore,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
@@ -45,6 +46,7 @@ pub struct Ctx {
     pub config: Config,
     pub metadata_db: MetadataDb,
     pub dataset_store: DatasetStore,
+    pub providers_registry: ProvidersRegistry,
     pub data_store: DataStore,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
