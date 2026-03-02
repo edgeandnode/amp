@@ -343,7 +343,7 @@ impl StreamingQuery {
     ) -> Result<StreamingQueryHandle, SpawnError> {
         let (tx, rx) = mpsc::channel(10);
 
-        // Preserve `_block_num` for SQL materializaiton or if explicitly selected in the schema.
+        // Preserve `_block_num` for SQL materialization or if explicitly selected in the schema.
         let preserve_block_num = destination.is_some()
             || plan
                 .schema()

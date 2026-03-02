@@ -21,6 +21,7 @@ mod it_solana_historical_to_json_rpc_transition;
 mod it_sql;
 mod it_sql_dataset_batch_size;
 mod it_streaming;
+mod it_streaming_distinct;
 mod it_streaming_join;
 mod it_typescript;
 mod it_verification;

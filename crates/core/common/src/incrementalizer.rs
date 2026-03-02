@@ -4,7 +4,7 @@ use datafusion::{
     catalog::TableProvider,
     common::{
         DFSchemaRef, JoinType,
-        tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter},
+        tree_node::{Transformed, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter},
     },
     datasource::{TableType, source_as_provider},
     error::DataFusionError,
@@ -19,7 +19,8 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    BlockNum, catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
+    BlockNum, block_num::expr_outputs_block_num,
+    catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
 };
 
 /// Assuming that output table has been synced up to `start - 1`, and that the input tables are immutable (all of our tables currently are), this will return the _incremental version_ of `plan` that computes the microbatch `[start, end]`.
@@ -296,8 +297,39 @@ pub fn incremental_op_kind(
 
         // Operations that are supported only in batch queries
         Limit(_) => Err(NonIncremental(NonIncrementalOp::Limit)),
-        Aggregate(_) => Err(NonIncremental(NonIncrementalOp::Aggregate)),
-        Distinct(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+
+        Aggregate(agg) => {
+            // An aggregate is incrementally valid when _block_num is the first group-by key.
+            // This also handles DISTINCT ON (_block_num, ...) which DataFusion's optimizer
+            // rewrites to an Aggregate with _block_num as the first group-by key.
+            //
+            // We accept any expression whose physical (output) name is `_block_num`, which is safe given that
+            // `forbid_underscore_prefixed_aliases` has already run.
+            let first_group_ok = agg.group_expr.first().is_some_and(expr_outputs_block_num);
+            if first_group_ok {
+                Ok(Linear)
+            } else {
+                Err(NonIncremental(NonIncrementalOp::Aggregate))
+            }
+        }
+        Distinct(distinct) => {
+            use datafusion::logical_expr::Distinct as DistinctEnum;
+            match distinct {
+                // SELECT DISTINCT ON (_block_num, ...) is locally incrementalizable:
+                // since on_expr starts with _block_num and microbatches never overlap in
+                // _block_num values, deduplication can be applied per microbatch.
+                // Also accepts block_num() UDF which will be replaced during propagation.
+                DistinctEnum::On(on) => {
+                    let first_on_ok = on.on_expr.first().is_some_and(expr_outputs_block_num);
+                    if first_on_ok {
+                        Ok(Linear)
+                    } else {
+                        Err(NonIncremental(NonIncrementalOp::Distinct))
+                    }
+                }
+                DistinctEnum::All(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+            }
+        }
         Sort(_) => Err(NonIncremental(NonIncrementalOp::Sort)),
         Window(_) => Err(NonIncremental(NonIncrementalOp::Window)),
         RecursiveQuery(_) => Err(NonIncremental(NonIncrementalOp::RecursiveQuery)),
