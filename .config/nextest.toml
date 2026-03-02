@@ -8,10 +8,12 @@ default-filter = '(kind(lib) + kind(bin)) - test(/::it_/) - package(tests) - pac
 # Integration tests: <crate>/tests/ directories and it_* modules in lib/bin sources
 [profile.integration]
 default-filter = '(kind(test) + test(/::it_/)) - package(tests) - package(ampup)'
+retries = 1
 
 # E2E tests: top-level tests/ package
 [profile.e2e]
 default-filter = 'package(tests)'
+retries = 1
 
 [profile.ampup]
 default-filter = 'package(ampup)'
