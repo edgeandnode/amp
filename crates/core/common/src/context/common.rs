@@ -6,7 +6,7 @@ use datafusion::{
 };
 
 use crate::{
-    block_num_udf::BlockNumUdf,
+    block_num::BlockNumUdf,
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
         EvmEncodeType, EvmTopic, ShiftUnits,

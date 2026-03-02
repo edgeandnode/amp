@@ -19,7 +19,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    BlockNum, block_num_udf::expr_outputs_block_num,
+    BlockNum, block_num::expr_outputs_block_num,
     catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
 };
 

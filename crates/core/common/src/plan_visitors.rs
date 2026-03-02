@@ -22,7 +22,7 @@ use datafusion::{
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
 use crate::{
-    block_num_udf::{
+    block_num::{
         BLOCK_NUM_UDF_SCHEMA_NAME, expr_outputs_block_num, is_block_num_udf_or_normalized,
     },
     incrementalizer::{NonIncrementalQueryError, incremental_op_kind},

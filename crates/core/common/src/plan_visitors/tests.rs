@@ -10,7 +10,7 @@ use datafusion::{
 };
 
 use super::*;
-use crate::block_num_udf::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf};
+use crate::block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf};
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ fn simple_scan(name: &str) -> LogicalPlan {
 fn block_num_call() -> Expr {
     use datafusion::logical_expr::ScalarUDF;
 
-    use crate::block_num_udf::BlockNumUdf;
+    use crate::block_num::BlockNumUdf;
     Expr::ScalarFunction(datafusion::logical_expr::expr::ScalarFunction::new_udf(
         Arc::new(ScalarUDF::from(BlockNumUdf::new())),
         vec![],
@@ -47,7 +47,7 @@ fn block_num_call() -> Expr {
 async fn sql_plan(sql: &str) -> LogicalPlan {
     use datafusion::{logical_expr::ScalarUDF, prelude::SessionContext};
 
-    use crate::block_num_udf::BlockNumUdf;
+    use crate::block_num::BlockNumUdf;
 
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int32, false),
@@ -73,7 +73,7 @@ async fn sql_plan(sql: &str) -> LogicalPlan {
 async fn execute_propagated(sql: &str) -> Vec<array::RecordBatch> {
     use datafusion::{logical_expr::ScalarUDF, prelude::SessionContext};
 
-    use crate::block_num_udf::BlockNumUdf;
+    use crate::block_num::BlockNumUdf;
 
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int32, false),
