@@ -71,9 +71,15 @@ pub(super) fn new(
     async move {
         match job_desc {
             JobDescriptor::MaterializeRaw(desc) => {
+                let dataset = ctx
+                    .dataset_store
+                    .get_raw_dataset(&reference)
+                    .await
+                    .map_err(JobError::GetRawDataset)?;
+
                 amp_worker_datasets_raw::dump(
                     ctx,
-                    &reference,
+                    dataset,
                     desc.max_writers,
                     desc.end_block,
                     writer,
@@ -111,6 +117,10 @@ pub(super) fn new(
 /// to provide a unified error type for the worker job system.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum JobError {
+    /// Failed to load the raw dataset from the dataset store.
+    #[error("Failed to get raw dataset")]
+    GetRawDataset(#[source] common::dataset_store::GetRawDatasetError),
+
     /// Raw dataset materialization operation failed
     ///
     /// This occurs when the raw dataset extraction and Parquet file writing
@@ -132,6 +142,7 @@ pub(crate) enum JobError {
 impl RetryableErrorExt for JobError {
     fn is_retryable(&self) -> bool {
         match self {
+            Self::GetRawDataset(_) => true,
             Self::MaterializeRaw(err) => err.is_retryable(),
             Self::MaterializeDerived(err) => err.is_retryable(),
         }

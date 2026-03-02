@@ -12,6 +12,7 @@ use ::arrow::{
 
 pub mod arrow;
 pub mod client;
+pub mod dataset;
 pub mod evm;
 pub mod manifest;
 pub mod rows;

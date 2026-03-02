@@ -5,7 +5,6 @@ use amp_providers_evm_rpc::{config::EvmRpcProviderConfig, provider::Auth};
 use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
 
 mod client;
-mod dataset;
 mod dataset_kind;
 pub mod error;
 pub mod metrics;
@@ -13,10 +12,10 @@ pub mod tables;
 
 // Reuse types from datasets-common for consistency
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
+use datasets_raw::dataset::Dataset as RawDataset;
 
 pub use self::{
     client::Client,
-    dataset::Dataset,
     dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
 };
 use crate::error::ClientError;
@@ -62,15 +61,16 @@ pub struct Manifest {
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> crate::dataset::Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> RawDataset {
     let network = manifest.network;
-    crate::dataset::Dataset {
+    RawDataset::new(
         reference,
-        kind: manifest.kind,
-        start_block: Some(manifest.start_block),
-        finalized_blocks_only: manifest.finalized_blocks_only,
-        tables: tables::all(&network),
-    }
+        manifest.kind.into(),
+        network.clone(),
+        tables::all(&network),
+        Some(manifest.start_block),
+        manifest.finalized_blocks_only,
+    )
 }
 
 pub async fn client(

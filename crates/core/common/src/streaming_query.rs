@@ -14,6 +14,7 @@ use datasets_common::{
     network_id::NetworkId,
 };
 use datasets_derived::dataset::Dataset as DerivedDataset;
+use datasets_raw::dataset::Dataset as RawDataset;
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{NotificationMultiplexerHandle, physical_table_revision::LocationId};
@@ -380,11 +381,12 @@ impl StreamingQuery {
                 .map(|t| t.dataset_reference().clone())
                 .collect();
 
-            let (network, raw_dataset) =
+            let raw_dataset =
                 resolve_raw_dataset_from_dependencies(dataset_store, unique_refs.iter())
                     .await
                     .map_err(SpawnError::ResolveRawDataset)?;
 
+            let network = raw_dataset.network().clone();
             let blocks_table = resolve_blocks_table(raw_dataset, exec_env.store.clone())
                 .await
                 .map_err(SpawnError::ResolveBlocksTable)?;
@@ -1148,7 +1150,7 @@ pub fn keep_alive_stream<'a>(
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
 async fn resolve_blocks_table(
-    dataset: Arc<dyn Dataset>,
+    dataset: Arc<RawDataset>,
     data_store: DataStore,
 ) -> Result<CatalogTable, ResolveBlocksTableError> {
     let table = dataset
@@ -1212,9 +1214,10 @@ pub enum ResolveBlocksTableError {
 async fn resolve_raw_dataset_from_dependencies(
     dataset_store: &DatasetStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
-) -> Result<(NetworkId, Arc<dyn Dataset>), ResolveRawDatasetError> {
-    let mut found: Option<(NetworkId, Arc<dyn Dataset>)> = None;
-    let mut queue: VecDeque<Arc<dyn datasets_common::dataset::Dataset>> = VecDeque::new();
+) -> Result<Arc<RawDataset>, ResolveRawDatasetError> {
+    let mut found: Option<Arc<RawDataset>> = None;
+    let mut queue: VecDeque<Arc<dyn Dataset>> = VecDeque::new();
+
     for hash_ref in root_dataset_refs {
         let dataset = dataset_store
             .get_dataset(hash_ref)
@@ -1231,18 +1234,18 @@ async fn resolve_raw_dataset_from_dependencies(
         }
 
         // Raw dataset: record its network, fail if a second network appears
-        if !dataset.is::<DerivedDataset>()
-            && let Some(table) = dataset.tables().first()
+        if let Ok(raw) = dataset_store
+            .get_raw_dataset(&dataset.reference().clone())
+            .await
         {
-            let network = table.network().clone();
             match &found {
                 None => {
-                    found = Some((network, dataset.clone()));
+                    found = Some(raw);
                 }
-                Some((first, _)) if *first != network => {
+                Some(first) if *first.network() != *raw.network() => {
                     return Err(ResolveRawDatasetError::MultipleNetworks {
-                        first: first.clone(),
-                        second: network,
+                        first: first.network().clone(),
+                        second: raw.network().clone(),
                     });
                 }
                 Some(_) => {} // same network, continue BFS
