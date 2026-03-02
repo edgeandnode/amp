@@ -4,6 +4,7 @@ pub use datafusion::{arrow, parquet};
 pub use datasets_common::{block_num::BlockNum, block_range::BlockRange, end_block::EndBlock};
 
 pub mod amp_catalog_provider;
+pub mod block_num;
 pub mod catalog;
 pub mod context;
 pub mod cursor;

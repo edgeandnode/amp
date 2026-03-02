@@ -19,7 +19,8 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    BlockNum, catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
+    BlockNum, block_num::expr_outputs_block_num,
+    catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
 };
 
 /// Assuming that output table has been synced up to `start - 1`, and that the input tables are immutable (all of our tables currently are), this will return the _incremental version_ of `plan` that computes the microbatch `[start, end]`.
