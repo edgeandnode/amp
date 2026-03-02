@@ -23,7 +23,7 @@ use futures::{Stream, StreamExt as _};
 use super::{catalog::CatalogTable, reader};
 use crate::{
     BlockRange,
-    catalog::logical::LogicalCatalog,
+    catalog::logical::LogicalTable,
     physical_table::{
         MultiNetworkSegmentsError, SnapshotError, resolved::ResolvedFile,
         snapshot::TableSnapshot as PhyTableSnapshot, table::PhysicalTable,
@@ -38,8 +38,10 @@ use crate::{
 /// execution layer (via `QueryableSnapshot`).
 #[derive(Debug, Clone)]
 pub struct CatalogSnapshot {
-    /// The logical catalog describing dataset schemas and metadata.
-    logical: LogicalCatalog,
+    /// Logical tables describing dataset schemas and metadata.
+    tables: Vec<LogicalTable>,
+    /// UDFs specific to the datasets corresponding to the resolved tables.
+    udfs: Vec<ScalarUDF>,
     /// Each snapshot is paired with its SQL table ref schema string.
     table_snapshots: Vec<(Arc<PhyTableSnapshot>, String)>,
 }
@@ -50,7 +52,8 @@ impl CatalogSnapshot {
     /// When `ignore_canonical_segments` is `true`, canonical chain filtering is
     /// skipped during snapshot creation.
     pub async fn from_catalog(
-        logical: LogicalCatalog,
+        tables: Vec<LogicalTable>,
+        udfs: Vec<ScalarUDF>,
         entries: &[CatalogTable],
         ignore_canonical_segments: bool,
     ) -> Result<Self, FromCatalogError> {
@@ -65,14 +68,15 @@ impl CatalogSnapshot {
         }
 
         Ok(Self {
-            logical,
+            tables,
+            udfs,
             table_snapshots,
         })
     }
 
-    /// Returns a reference to the logical catalog.
-    pub fn logical(&self) -> &LogicalCatalog {
-        &self.logical
+    /// Returns the logical tables.
+    pub fn tables(&self) -> &[LogicalTable] {
+        &self.tables
     }
 
     /// Returns the table snapshots paired with their SQL table ref schema strings.
@@ -82,9 +86,9 @@ impl CatalogSnapshot {
             .map(|(s, sql)| (s, sql.as_str()))
     }
 
-    /// Returns the user-defined functions registered in the logical catalog.
+    /// Returns the user-defined functions.
     pub fn udfs(&self) -> &[ScalarUDF] {
-        &self.logical.udfs
+        &self.udfs
     }
 
     /// Reconstructs `CatalogTable` entries from the snapshotted data.

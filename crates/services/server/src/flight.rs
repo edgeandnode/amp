@@ -21,39 +21,29 @@ use axum::{Router, http::StatusCode, response::IntoResponse};
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     BlockNum, BlockRange,
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
     arrow::{
         self,
         array::RecordBatch,
         datatypes::SchemaRef,
         ipc::writer::{CompressionContext, DictionaryTracker, IpcDataGenerator, IpcWriteOptions},
     },
-    catalog::{
-        logical::{
-            self,
-            for_query::{
-                CreateCatalogError as CreateLogicalCatalogError, create as create_logical_catalog,
-            },
-        },
-        physical::{
-            Catalog, EarliestBlockError,
-            for_query::{
-                CreateCatalogError as PhysicalCreateCatalogError,
-                create as create_physical_table_catalog,
-            },
+    catalog::physical::{
+        Catalog, EarliestBlockError,
+        for_query::{
+            CreateCatalogError as PhysicalCreateCatalogError,
+            create as create_physical_table_catalog,
         },
     },
     context::{
-        exec::{self, ExecContext},
-        plan::{self, PlanContext},
+        exec::{self, ExecContextBuilder},
+        plan::{self, PlanContextBuilder},
     },
     cursor::Cursor,
     dataset_store::{DatasetStore, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
     exec_env::ExecEnv,
-    sql::{
-        ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_function_references,
-        resolve_table_references,
-    },
+    sql::{ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_table_references},
     sql_str::SqlStr,
     streaming_query::{QueryMessage, StreamingQuery},
 };
@@ -68,7 +58,6 @@ use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
-use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 use prost::Message as _;
@@ -88,7 +77,6 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: ExecEnv,
-    dataset_store: DatasetStore,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
 }
@@ -106,6 +94,7 @@ impl Service {
             config.query_max_mem_mb,
             &config.spill_location,
             data_store,
+            dataset_store,
         )
         .map_err(InitError::ExecEnv)?;
         let notification_multiplexer =
@@ -115,7 +104,6 @@ impl Service {
         Ok(Self {
             config,
             env,
-            dataset_store,
             notification_multiplexer,
             metrics,
         })
@@ -128,31 +116,32 @@ impl Service {
         cursor: Option<Cursor>,
     ) -> Result<QueryResultStream, Error> {
         let query = common::sql::parse(sql.as_ref()).map_err(Error::SqlParse)?;
-        let catalog = {
-            let table_refs = resolve_table_references::<PartialReference>(&query)
-                .map_err(Error::TableReferenceResolution)?;
-            let func_refs = resolve_function_references::<PartialReference>(&query)
-                .map_err(Error::FunctionReferenceResolution)?;
-            let logical = create_logical_catalog(
-                &self.dataset_store,
-                &self.env.isolate_pool,
-                (table_refs, func_refs),
-            )
-            .await
-            .map_err(Error::CreateLogicalCatalogError)?;
-            create_physical_table_catalog(&self.dataset_store, &self.env.store, logical)
-                .await
-                .map_err(Error::PhysicalCatalogError)
-        }?;
+        let physical_table_refs = resolve_table_references::<PartialReference>(&query)
+            .map_err(Error::TableReferenceResolution)?;
+        let catalog = create_physical_table_catalog(
+            &self.env.dataset_store,
+            &self.env.store,
+            physical_table_refs,
+        )
+        .await
+        .map_err(Error::PhysicalCatalogError)?;
 
-        let ctx = PlanContext::new(self.env.session_config.clone(), catalog.logical().clone());
-        let plan = ctx.plan_sql(query.clone()).await.map_err(Error::PlanSql)?;
+        let amp_catalog = Arc::new(AmpCatalogProvider::new(
+            self.env.dataset_store.clone(),
+            self.env.isolate_pool.clone(),
+        ));
+        let ctx = PlanContextBuilder::new(self.env.session_config.clone())
+            .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
+            .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
+            .build();
+        let plan = ctx
+            .statement_to_plan(query.clone())
+            .await
+            .map_err(Error::PlanSql)?;
 
         let is_streaming =
             is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
-        let result = self
-            .execute_plan(catalog, &self.dataset_store, plan, is_streaming, cursor)
-            .await;
+        let result = self.execute_plan(catalog, plan, is_streaming, cursor).await;
 
         // Record execution error
         if result.is_err()
@@ -173,7 +162,6 @@ impl Service {
     pub async fn execute_plan(
         &self,
         catalog: Catalog,
-        dataset_store: &DatasetStore,
         plan: DetachedLogicalPlan,
         is_streaming: bool,
         cursor: Option<Cursor>,
@@ -187,7 +175,8 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            let ctx = ExecContext::for_catalog(self.env.clone(), catalog, false)
+            let ctx = ExecContextBuilder::new(self.env.clone())
+                .for_catalog(catalog, false)
                 .await
                 .map_err(Error::CreateExecContext)?;
             let plan = plan.attach_to(&ctx).map_err(Error::AttachPlan)?;
@@ -249,7 +238,6 @@ impl Service {
             let query = StreamingQuery::spawn(
                 self.env.clone(),
                 catalog,
-                dataset_store,
                 plan,
                 earliest_block,
                 None,
@@ -313,19 +301,14 @@ impl Service {
 
                     let query = common::sql::parse(&sql_str).map_err(Error::SqlParse)?;
                     let plan_ctx = {
-                        let table_refs = resolve_table_references::<PartialReference>(&query)
-                            .map_err(Error::TableReferenceResolution)?;
-                        let func_refs = resolve_function_references::<PartialReference>(&query)
-                            .map_err(Error::FunctionReferenceResolution)?;
-
-                        let catalog = create_logical_catalog(
-                            &self.dataset_store,
-                            &IsolatePool::dummy(),
-                            (table_refs, func_refs),
-                        )
-                        .await
-                        .map_err(Error::CreateLogicalCatalogError)?;
-                        PlanContext::new(self.env.session_config.clone(), catalog)
+                        let amp_catalog = Arc::new(AmpCatalogProvider::new(
+                            self.env.dataset_store.clone(),
+                            self.env.isolate_pool.clone(),
+                        ));
+                        PlanContextBuilder::new(self.env.session_config.clone())
+                            .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
+                            .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
+                            .build()
                     };
 
                     let is_streaming = streaming_override
@@ -333,7 +316,7 @@ impl Service {
                     let schema = plan_ctx
                         .sql_output_schema(query)
                         .await
-                        .map_err(Error::PlanSql)?;
+                        .map_err(Error::SqlToSchema)?;
                     let ticket = AmpTicket {
                         query: sql_query.query,
                         is_streaming,
@@ -938,63 +921,129 @@ fn split_batch_for_grpc_response(
 #[derive(Error, Debug)]
 #[expect(clippy::enum_variant_names)]
 pub enum Error {
+    /// Failed to decode a Protocol Buffers message from the client request.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),
 
+    /// Client sent a flight descriptor with an unrecognized descriptor type.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("unsupported flight descriptor type: {0}")]
     UnsupportedFlightDescriptorType(String),
 
+    /// Client sent a flight descriptor with an unsupported `Any`-typed command.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("unsupported flight descriptor command: {0}")]
     UnsupportedFlightDescriptorCommand(String),
 
+    /// DataFusion execution engine error during query processing.
+    ///
+    /// Maps to gRPC status based on the underlying DataFusion error kind
+    /// (e.g., `resource_exhausted` for memory limits).
     #[error("query execution error")]
     ExecutionError(#[source] DataFusionError),
 
+    /// Failed to look up datasets required for query planning.
+    ///
+    /// Indicates a dataset store backend failure.
     #[error("error looking up datasets")]
     DatasetStoreError(#[source] GetDatasetError),
 
-    #[error("error creating logical catalog")]
-    CreateLogicalCatalogError(#[source] CreateLogicalCatalogError),
-
+    /// Failed to create the physical catalog for query execution.
+    ///
+    /// Indicates a backend failure during catalog snapshot construction.
     #[error("error creating physical catalog")]
     PhysicalCatalogError(#[source] PhysicalCreateCatalogError),
 
+    /// SQL text contains table references that cannot be parsed as dataset identifiers.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("Failed to resolve table references from SQL")]
     TableReferenceResolution(#[source] ResolveTableReferencesError<PartialReferenceError>),
 
+    /// SQL text contains function references that cannot be parsed as dataset identifiers.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("Failed to resolve function references from SQL")]
     FunctionReferenceResolution(#[source] ResolveFunctionReferencesError<PartialReferenceError>),
 
+    /// Client SQL text failed to parse as a valid SQL statement.
+    ///
+    /// Returned as `BAD_REQUEST` / `invalid_argument` to the client.
     #[error("SQL parse error")]
     SqlParse(#[source] common::sql::ParseSqlError),
 
+    /// SQL logical planning failed.
+    ///
+    /// When [`is_user_input_error`](plan::is_user_input_error) is true the
+    /// error is surfaced as `invalid_argument`; otherwise it is treated as
+    /// an internal failure.
     #[error("failed to plan SQL query")]
-    PlanSql(#[source] plan::SqlError),
+    PlanSql(#[source] DataFusionError),
 
+    /// Failed to infer the output schema from a SQL statement.
+    ///
+    /// When [`is_user_input_error`](plan::is_user_input_error) is true the
+    /// error is surfaced as `invalid_argument`; otherwise it is treated as
+    /// an internal failure.
+    #[error("failed to infer SQL output schema")]
+    SqlToSchema(#[source] DataFusionError),
+
+    /// Failed to construct the execution context (catalog snapshot assembly).
+    ///
+    /// Indicates a backend failure during exec context creation.
     #[error("failed to create exec context")]
     CreateExecContext(#[source] exec::CreateContextError),
 
+    /// Failed to attach a detached logical plan to an execution context.
+    ///
+    /// Occurs when the plan's table providers cannot be re-bound.
     #[error("failed to attach plan to query context")]
     AttachPlan(#[source] AttachPlanError),
 
+    /// Failed to compute the common block ranges across query tables.
+    ///
+    /// Transport mapping per sub-error:
+    /// - `TableNotFound` → `NOT_FOUND` / `not_found` (table absent from catalog at execution time)
+    /// - `ExtractTableReferences` → `INTERNAL_SERVER_ERROR` / `internal` (plan traversal failure)
+    /// - `TableReferenceConversion` → `INTERNAL_SERVER_ERROR` / `internal` (post-plan reference conversion failure)
     #[error("failed to compute common ranges")]
     QueryCommonRanges(#[source] exec::CommonRangesError),
 
+    /// Physical plan execution failed (table registration or DataFusion execution).
+    ///
+    /// Sub-errors distinguish registration failures from core execution failures.
     #[error("failed to execute plan")]
     QueryExecutePlan(#[source] exec::ExecutePlanError),
 
+    /// Client query is structurally invalid (e.g., missing required clauses).
+    ///
+    /// Returned as `BAD_REQUEST` / `invalid_argument` to the client.
     #[error("invalid query: {0}")]
     InvalidQuery(String),
 
+    /// Error during streaming query execution.
+    ///
+    /// Wraps errors from the streaming query pipeline
+    /// (microbatch iteration, reorg handling).
     #[error("streaming query execution error: {0}")]
     StreamingExecutionError(String),
 
     #[error("failed to determine streaming start block")]
     StreamingEarliestBlock(#[source] EarliestBlockError),
 
+    /// Failed to encode a Flight ticket for the client.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("ticket encoding error")]
     TicketEncodingError(#[source] DataFusionError),
 
+    /// Failed to decode a Flight ticket received from the client.
+    ///
+    /// Returned as `invalid_argument` to the client.
     #[error("ticket decoding error")]
     TicketDecodingError(#[source] DataFusionError),
 }
@@ -1007,13 +1056,14 @@ impl Error {
             Error::UnsupportedFlightDescriptorCommand(_) => "UNSUPPORTED_FLIGHT_DESCRIPTOR_COMMAND",
             Error::ExecutionError(_) => "EXECUTION_ERROR",
             Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
-            Error::CreateLogicalCatalogError(_) => "CREATE_LOGICAL_CATALOG_ERROR",
             Error::PhysicalCatalogError(_) => "PHYSICAL_CATALOG_ERROR",
             Error::TableReferenceResolution(_) => "TABLE_REFERENCE_RESOLUTION",
             Error::FunctionReferenceResolution(_) => "FUNCTION_REFERENCE_RESOLUTION",
             Error::SqlParse(_) => "SQL_PARSE_ERROR",
-            Error::PlanSql(e) if e.is_invalid_plan() => "INVALID_PLAN",
+            Error::PlanSql(e) if plan::is_user_input_error(e) => "INVALID_PLAN",
             Error::PlanSql(_) => "PLANNING_ERROR",
+            Error::SqlToSchema(e) if plan::is_user_input_error(e) => "INVALID_PLAN",
+            Error::SqlToSchema(_) => "PLANNING_ERROR",
             Error::CreateExecContext(exec::CreateContextError::CatalogSnapshot(_)) => {
                 "CATALOG_SNAPSHOT_ERROR"
             }
@@ -1063,23 +1113,26 @@ impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         let status_code = match &self {
             Error::SqlParse(_) => StatusCode::BAD_REQUEST,
-            Error::PlanSql(e) if e.is_invalid_plan() => StatusCode::BAD_REQUEST,
+            Error::PlanSql(e) if plan::is_user_input_error(e) => StatusCode::BAD_REQUEST,
             Error::PlanSql(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SqlToSchema(e) if plan::is_user_input_error(e) => StatusCode::BAD_REQUEST,
+            Error::SqlToSchema(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::CreateExecContext(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::AttachPlan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(_)) => {
                 StatusCode::NOT_FOUND
             }
-            Error::QueryCommonRanges(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::QueryCommonRanges(exec::CommonRangesError::ExtractTableReferences(_)) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Error::QueryCommonRanges(exec::CommonRangesError::TableReferenceConversion(_)) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             Error::QueryExecutePlan(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingEarliestBlock(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::CreateLogicalCatalogError(CreateLogicalCatalogError::ResolveTables(
-                logical::for_query::ResolveTablesError::TableNotFoundInDataset { .. },
-            )) => StatusCode::NOT_FOUND,
-            Error::CreateLogicalCatalogError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PhysicalCatalogError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::TableReferenceResolution(_) => StatusCode::BAD_REQUEST,
             Error::FunctionReferenceResolution(_) => StatusCode::BAD_REQUEST,
@@ -1108,19 +1161,27 @@ impl From<Error> for Status {
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(message),
             Error::DatasetStoreError(_) => Status::internal(message),
             Error::SqlParse(_) => Status::invalid_argument(message),
-            Error::PlanSql(e) if e.is_invalid_plan() => Status::invalid_argument(message),
+            Error::PlanSql(e) if plan::is_user_input_error(e) => Status::invalid_argument(message),
             Error::PlanSql(_) => Status::internal(message),
+            Error::SqlToSchema(e) if plan::is_user_input_error(e) => {
+                Status::invalid_argument(message)
+            }
+            Error::SqlToSchema(_) => Status::internal(message),
             Error::CreateExecContext(_) => Status::internal(message),
             Error::AttachPlan(_) => Status::internal(message),
             Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(_)) => {
                 Status::not_found(message)
             }
-            Error::QueryCommonRanges(_) => Status::internal(message),
+            Error::QueryCommonRanges(exec::CommonRangesError::ExtractTableReferences(_)) => {
+                Status::internal(message)
+            }
+            Error::QueryCommonRanges(exec::CommonRangesError::TableReferenceConversion(_)) => {
+                Status::internal(message)
+            }
             Error::QueryExecutePlan(_) => Status::internal(message),
             Error::ExecutionError(df) => datafusion_error_to_status(df, message),
             Error::StreamingExecutionError(_) => Status::internal(message),
             Error::StreamingEarliestBlock(_) => Status::internal(message),
-            Error::CreateLogicalCatalogError(_) => Status::internal(message),
             Error::PhysicalCatalogError(_) => Status::internal(message),
             Error::TableReferenceResolution(_) => Status::invalid_argument(message),
             Error::FunctionReferenceResolution(_) => Status::invalid_argument(message),
@@ -1161,11 +1222,14 @@ fn error_with_causes(err: &dyn std::error::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use axum::{http::StatusCode, response::IntoResponse};
     use common::{
         catalog::physical::EarliestBlockError,
         context::exec,
         physical_table::{CanonicalChainError, MultiNetworkSegmentsError, SnapshotError},
     };
+    use datafusion::error::DataFusionError;
+    use tonic::Code;
 
     use super::*;
 
@@ -1218,5 +1282,206 @@ mod tests {
 
         //* Then
         assert_eq!(code, "STREAMING_EXECUTION_ERROR");
+    }
+
+    #[test]
+    fn from_error_with_plan_sql_user_input_error_returns_invalid_argument() {
+        //* Given
+        let error = Error::PlanSql(
+            DataFusionError::Plan(
+                "failed to extract table references: Catalog-qualified table references are not supported: amp.public.blocks"
+                    .to_string(),
+            )
+            .context("amp::invalid_input"),
+        );
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    #[test]
+    fn into_response_with_sql_to_schema_user_input_error_returns_bad_request() {
+        //* Given
+        let error = Error::SqlToSchema(
+            DataFusionError::Plan(
+                "failed to extract function references: Catalog-qualified function references are not supported: amp.public.identity_udf"
+                    .to_string(),
+            )
+            .context("amp::invalid_input"),
+        );
+
+        //* When
+        let response = error.into_response();
+
+        //* Then
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Regression: classification is based on context tag, not message text.
+    /// Changing the diagnostic message must not affect the status code.
+    #[test]
+    fn from_error_with_plan_sql_user_input_different_message_returns_invalid_argument() {
+        //* Given
+        let error = Error::PlanSql(
+            DataFusionError::Plan("completely different diagnostic text".to_string())
+                .context("amp::invalid_input"),
+        );
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    /// Regression: internal resolution errors remain internal, regardless of message.
+    #[test]
+    fn from_error_with_plan_sql_internal_error_returns_internal() {
+        //* Given
+        let error = Error::PlanSql(DataFusionError::Plan(
+            "failed to resolve async catalog provider".to_string(),
+        ));
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::Internal);
+    }
+
+    /// Regression (T29): user-input tag inside a nested context wrapper must
+    /// still map to `invalid_argument`. A future caller that adds an outer
+    /// `.context("…")` to an already-tagged error must not accidentally
+    /// produce an `internal` gRPC status.
+    #[test]
+    fn from_error_with_plan_sql_nested_user_input_tag_returns_invalid_argument() {
+        //* Given — amp::invalid_input is wrapped by an outer context layer
+        let tagged = DataFusionError::Plan("invalid table reference".to_string())
+            .context("amp::invalid_input");
+        let error =
+            Error::PlanSql(tagged.context("failed to convert SQL statement to logical plan"));
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    /// Regression (T29): same as above, but for the HTTP transport path and
+    /// `SqlToSchema` errors.
+    #[test]
+    fn into_response_with_sql_to_schema_nested_user_input_tag_returns_bad_request() {
+        //* Given — amp::invalid_input is wrapped by an outer context layer
+        let tagged = DataFusionError::Plan("invalid function reference".to_string())
+            .context("amp::invalid_input");
+        let error = Error::SqlToSchema(tagged.context("failed to infer output schema"));
+
+        //* When
+        let response = error.into_response();
+
+        //* Then
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    fn query_common_ranges_table_not_found_error() -> Error {
+        use common::sql::TableReference;
+        let table_name = "blocks".parse().expect("should parse valid table name");
+        let table_ref = TableReference::<String>::Bare {
+            table: Arc::new(table_name),
+        };
+        Error::QueryCommonRanges(exec::CommonRangesError::TableNotFound(
+            exec::TableNotFoundError(table_ref),
+        ))
+    }
+
+    fn query_common_ranges_extract_table_references_error() -> Error {
+        Error::QueryCommonRanges(exec::CommonRangesError::ExtractTableReferences(
+            DataFusionError::Plan("failed to traverse plan tree".to_string()),
+        ))
+    }
+
+    fn query_common_ranges_table_reference_conversion_error() -> Error {
+        use common::sql::TableReferenceConversionError;
+        Error::QueryCommonRanges(exec::CommonRangesError::TableReferenceConversion(
+            TableReferenceConversionError::CatalogQualifiedTable {
+                table_ref: "catalog.schema.table".to_string(),
+            },
+        ))
+    }
+
+    #[test]
+    fn into_response_with_query_common_ranges_table_not_found_returns_not_found() {
+        //* Given
+        let error = query_common_ranges_table_not_found_error();
+
+        //* When
+        let response = error.into_response();
+
+        //* Then
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn from_error_with_query_common_ranges_table_not_found_returns_not_found() {
+        //* Given
+        let error = query_common_ranges_table_not_found_error();
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::NotFound);
+    }
+
+    #[test]
+    fn into_response_with_query_common_ranges_extract_table_references_returns_internal() {
+        //* Given
+        let error = query_common_ranges_extract_table_references_error();
+
+        //* When
+        let response = error.into_response();
+
+        //* Then
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn from_error_with_query_common_ranges_extract_table_references_returns_internal() {
+        //* Given
+        let error = query_common_ranges_extract_table_references_error();
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::Internal);
+    }
+
+    #[test]
+    fn into_response_with_query_common_ranges_table_reference_conversion_returns_internal() {
+        //* Given
+        let error = query_common_ranges_table_reference_conversion_error();
+
+        //* When
+        let response = error.into_response();
+
+        //* Then
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn from_error_with_query_common_ranges_table_reference_conversion_returns_internal() {
+        //* Given
+        let error = query_common_ranges_table_reference_conversion_error();
+
+        //* When
+        let status = Status::from(error);
+
+        //* Then
+        assert_eq!(status.code(), Code::Internal);
     }
 }

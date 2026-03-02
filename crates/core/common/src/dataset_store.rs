@@ -48,6 +48,12 @@ pub struct DatasetStore {
     dataset_cache: Arc<RwLock<HashMap<HashReference, Arc<dyn datasets_common::dataset::Dataset>>>>,
 }
 
+impl std::fmt::Debug for DatasetStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatasetStore").finish_non_exhaustive()
+    }
+}
+
 impl DatasetStore {
     /// Creates a new dataset store with in-memory caching for datasets and eth_call UDFs.
     pub fn new(datasets_registry: DatasetsRegistry, providers_registry: ProvidersRegistry) -> Self {

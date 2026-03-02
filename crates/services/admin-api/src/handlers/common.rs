@@ -1,18 +1,16 @@
 //! Common utilities for HTTP handlers
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
 use common::{
-    catalog::logical::for_manifest_validation::{
-        self as catalog, CreateLogicalCatalogError, ResolveTablesError, ResolveUdfsError,
-        TableReferencesMap,
-    },
-    context::plan::{PlanContext, SqlError as PlanSqlError},
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
+    context::plan::PlanContextBuilder,
     dataset_store::{DatasetStore, GetDatasetError},
     exec_env::default_session_config,
     metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
+    self_schema_provider::SelfSchemaProvider,
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
         TableReference, resolve_function_references, resolve_table_references,
@@ -27,6 +25,15 @@ use datasets_derived::{
 };
 use futures::{StreamExt as _, stream};
 use js_runtime::isolate_pool::IsolatePool;
+
+/// Map of table names to their SQL references (table refs and function refs) using dependency aliases or self-references.
+type TableReferencesMap = BTreeMap<
+    TableName,
+    (
+        Vec<TableReference<DepAlias>>,
+        Vec<FunctionReference<DepAliasOrSelfRef>>,
+    ),
+>;
 
 /// A string wrapper that ensures the value is not empty or whitespace-only
 ///
@@ -232,7 +239,7 @@ pub async fn validate_derived_manifest(
 ) -> Result<(), ManifestValidationError> {
     // Step 1: Resolve all dependencies to HashReference
     // This must happen first to ensure all dependencies exist before parsing SQL
-    let mut dependencies: BTreeMap<DepAlias, HashReference> = BTreeMap::new();
+    let mut dependencies: BTreeMap<DepAlias, HashReference> = Default::default();
 
     for (alias, dep_reference) in &manifest.dependencies {
         // Convert DepReference to Reference for resolution
@@ -258,8 +265,8 @@ pub async fn validate_derived_manifest(
 
     // Step 2: Parse all SQL queries and extract references
     // Store parsed statements to avoid re-parsing in Step 4
-    let mut statements: BTreeMap<TableName, Statement> = BTreeMap::new();
-    let mut references: TableReferencesMap = BTreeMap::new();
+    let mut statements: BTreeMap<TableName, Statement> = Default::default();
+    let mut references: TableReferencesMap = Default::default();
 
     for (table_name, table) in &manifest.tables {
         let TableInput::View(View { sql }) = &table.input;
@@ -334,41 +341,25 @@ pub async fn validate_derived_manifest(
     // - Schema compatibility across dependencies
     let session_config =
         default_session_config().map_err(ManifestValidationError::SessionConfig)?;
-    let planning_ctx = catalog::create(
-        store,
-        IsolatePool::dummy(), // For manifest validation only (no JS execution)
-        dependencies,
-        manifest.functions.clone(),
-        references,
-    )
-    .await
-    .map(|catalog| PlanContext::new(session_config, catalog))
-    .map_err(|err| match &err {
-        CreateLogicalCatalogError::ResolveTables(resolve_error) => match resolve_error {
-            ResolveTablesError::UnqualifiedTable { .. } => {
-                ManifestValidationError::UnqualifiedTable(err)
-            }
-            ResolveTablesError::GetDataset { .. } => ManifestValidationError::GetDataset(err),
-            ResolveTablesError::TableNotFoundInDataset { .. } => {
-                ManifestValidationError::TableNotFoundInDataset(err)
-            }
-        },
-        CreateLogicalCatalogError::ResolveUdfs(resolve_error) => match resolve_error {
-            ResolveUdfsError::GetDataset { .. } => ManifestValidationError::GetDataset(err),
-            ResolveUdfsError::EthCallUdfCreation { .. } => {
-                ManifestValidationError::EthCallUdfCreation(err)
-            }
-            ResolveUdfsError::EthCallNotAvailable { .. } => {
-                ManifestValidationError::EthCallNotAvailable(err)
-            }
-            ResolveUdfsError::FunctionNotFoundInDataset { .. } => {
-                ManifestValidationError::FunctionNotFoundInDataset(err)
-            }
-            ResolveUdfsError::SelfReferencedFunctionNotFound { .. } => {
-                ManifestValidationError::FunctionNotFoundInDataset(err)
-            }
-        },
-    })?;
+    let dep_aliases: BTreeMap<String, HashReference> = dependencies
+        .iter()
+        .map(|(alias, hash_ref)| (alias.to_string(), hash_ref.clone()))
+        .collect();
+    let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
+        Arc::new(SelfSchemaProvider::from_manifest_udfs(
+            datasets_derived::deps::SELF_REF_KEYWORD.to_string(),
+            IsolatePool::dummy(),
+            &manifest.functions,
+        ));
+    let amp_catalog = Arc::new(
+        AmpCatalogProvider::new(store.clone(), IsolatePool::dummy())
+            .with_dep_aliases(dep_aliases)
+            .with_self_schema(self_schema),
+    );
+    let planning_ctx = PlanContextBuilder::new(session_config)
+        .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
+        .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
+        .build();
 
     // Step 4: Validate that all table SQL queries are incremental.
     // Incremental processing is required for derived datasets to efficiently update
@@ -376,7 +367,7 @@ pub async fn validate_derived_manifest(
     // Use cached parsed statements from Step 2 to avoid re-parsing.
     for (table_name, stmt) in statements {
         // Plan the SQL query to a logical plan
-        let plan = planning_ctx.plan_sql(stmt).await.map_err(|err| {
+        let plan = planning_ctx.statement_to_plan(stmt).await.map_err(|err| {
             ManifestValidationError::SqlPlanningError {
                 table_name: table_name.clone(),
                 source: err,
@@ -482,52 +473,12 @@ pub enum ManifestValidationError {
         source: ResolveTableReferencesError<DepAliasError>,
     },
 
-    /// Unqualified table reference
-    ///
-    /// All tables must be qualified with a dataset reference in the schema portion.
-    /// Unqualified tables (e.g., just `table_name`) are not allowed.
-    #[error("Unqualified table reference: {0}")]
-    UnqualifiedTable(#[source] CreateLogicalCatalogError),
-
     /// Invalid table name
     ///
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
     #[error("Invalid table name in SQL query: {0}")]
     InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
-
-    /// Failed to retrieve dataset from store
-    ///
-    /// This occurs when loading a dataset definition fails due to:
-    /// - Invalid or corrupted manifest
-    /// - Unsupported dataset kind
-    /// - Storage backend errors
-    #[error("Failed to retrieve dataset from store: {0}")]
-    GetDataset(#[source] CreateLogicalCatalogError),
-
-    /// Failed to create ETH call UDF
-    ///
-    /// This occurs when creating the eth_call user-defined function fails.
-    #[error("Failed to create ETH call UDF: {0}")]
-    EthCallUdfCreation(#[source] CreateLogicalCatalogError),
-
-    /// Table not found in dataset
-    ///
-    /// The referenced table does not exist in the dataset.
-    #[error("Table not found in dataset: {0}")]
-    TableNotFoundInDataset(#[source] CreateLogicalCatalogError),
-
-    /// Function not found in dataset
-    ///
-    /// The referenced function does not exist in the dataset.
-    #[error("Function not found in dataset: {0}")]
-    FunctionNotFoundInDataset(#[source] CreateLogicalCatalogError),
-
-    /// eth_call function not available
-    ///
-    /// The eth_call function is not available for the referenced dataset.
-    #[error("eth_call function not available: {0}")]
-    EthCallNotAvailable(#[source] CreateLogicalCatalogError),
 
     /// Dependency alias not found
     ///
@@ -587,7 +538,7 @@ pub enum ManifestValidationError {
         /// The table whose SQL query failed to plan
         table_name: TableName,
         #[source]
-        source: PlanSqlError,
+        source: datafusion::error::DataFusionError,
     },
 
     /// Failed to create DataFusion session configuration

@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
     /// Core storage information from data-store
-    pub(crate) revision: PhyTableRevision,
+    revision: PhyTableRevision,
 
     /// Dataset reference (namespace, name, hash).
     dataset_reference: HashReference,
@@ -37,7 +37,7 @@ pub struct PhysicalTable {
     network: NetworkId,
 
     /// Data store for accessing metadata database and object storage.
-    pub(crate) store: DataStore,
+    store: DataStore,
 
     /// Table definition (schema, network, sorted_by).
     table: Table,

@@ -13,7 +13,7 @@ use datasets_common::{
     block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, dataset::Dataset, hash_reference::HashReference,
     network_id::NetworkId,
 };
-use datasets_derived::dataset::Dataset as DerivedDataset;
+use datasets_derived::{dataset::Dataset as DerivedDataset, deps::SELF_REF_KEYWORD};
 use futures::stream::{self, BoxStream, StreamExt};
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{NotificationMultiplexerHandle, physical_table_revision::LocationId};
@@ -29,15 +29,19 @@ use tracing::{Instrument, instrument};
 use self::message_stream_with_block_complete::MessageStreamError;
 use crate::{
     BlockNum, BlockRange,
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider, AsyncSchemaProvider},
     arrow::{
         array::{RecordBatch, TimestampNanosecondArray},
         datatypes::SchemaRef,
     },
     catalog::{
-        logical::{LogicalCatalog, LogicalTable},
+        logical::LogicalTable,
         physical::{Catalog, CatalogTable},
     },
-    context::{exec::ExecContext, plan::PlanContext},
+    context::{
+        exec::{ExecContext, ExecContextBuilder},
+        plan::PlanContextBuilder,
+    },
     cursor::{Cursor, CursorNetworkNotFoundError, NetworkCursor, Watermark},
     dataset_store::{DatasetStore, ResolveRevisionError},
     detached_logical_plan::DetachedLogicalPlan,
@@ -47,6 +51,8 @@ use crate::{
     plan_visitors::{
         find_cross_network_join, order_by_block_num, unproject_special_block_num_column,
     },
+    self_schema_provider::SelfSchemaProvider,
+    sql::TableReference,
     sql_str::SqlStr,
 };
 
@@ -89,7 +95,7 @@ pub enum SpawnError {
     /// Optimization failures prevent the streaming query from starting with an
     /// efficient execution plan.
     #[error("failed to optimize query plan")]
-    OptimizePlan(#[source] crate::context::plan::OptimizePlanError),
+    OptimizePlan(#[source] DataFusionError),
 
     /// Query contains a join across tables from different blockchain networks
     ///
@@ -331,7 +337,6 @@ impl StreamingQuery {
     pub async fn spawn(
         exec_env: ExecEnv,
         catalog: Catalog,
-        dataset_store: &DatasetStore,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
@@ -352,9 +357,9 @@ impl StreamingQuery {
                 .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME);
 
         // Prevent streaming cross-network joins (check runs before plan optimization).
-        if let Some(info) = find_cross_network_join(&plan, &catalog).map_err(|err| {
-            SpawnError::OptimizePlan(crate::context::plan::OptimizePlanError::Optimize(err))
-        })? {
+        if let Some(info) =
+            find_cross_network_join(&plan, &catalog).map_err(SpawnError::OptimizePlan)?
+        {
             return Err(SpawnError::CrossNetworkJoin { info });
         }
 
@@ -366,10 +371,28 @@ impl StreamingQuery {
                 .propagate_block_num()
                 .map_err(SpawnError::PropagateBlockNum)?;
 
-            let ctx = PlanContext::new(exec_env.session_config.clone(), catalog.logical().clone());
-            ctx.optimize_plan(&plan)
-                .await
-                .map_err(SpawnError::OptimizePlan)?
+            // Use dep alias map from the catalog so AmpCatalogProvider
+            // resolves dep aliases to pinned hash references.
+            let dep_alias_map = catalog.dep_aliases().clone();
+
+            let self_schema: Arc<dyn AsyncSchemaProvider> = Arc::new(SelfSchemaProvider::new(
+                SELF_REF_KEYWORD.to_string(),
+                catalog.tables().to_vec(),
+                catalog.udfs().to_vec(),
+            ));
+            let amp_catalog = Arc::new(
+                AmpCatalogProvider::new(
+                    exec_env.dataset_store.clone(),
+                    exec_env.isolate_pool.clone(),
+                )
+                .with_dep_aliases(dep_alias_map)
+                .with_self_schema(self_schema),
+            );
+            let ctx = PlanContextBuilder::new(exec_env.session_config.clone())
+                .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
+                .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
+                .build();
+            ctx.optimize(&plan).map_err(SpawnError::OptimizePlan)?
         };
 
         // Resolve the network by walking dataset dependencies to find a raw dataset,
@@ -381,7 +404,7 @@ impl StreamingQuery {
                 .collect();
 
             let (network, raw_dataset) =
-                resolve_raw_dataset_from_dependencies(dataset_store, unique_refs.iter())
+                resolve_raw_dataset_from_dependencies(&exec_env.dataset_store, unique_refs.iter())
                     .await
                     .map_err(SpawnError::ResolveRawDataset)?;
 
@@ -431,7 +454,8 @@ impl StreamingQuery {
             self.table_updates.changed().await;
 
             // The table snapshots to execute the microbatch against.
-            let ctx = ExecContext::for_catalog(self.exec_env.clone(), self.catalog.clone(), false)
+            let ctx = ExecContextBuilder::new(self.exec_env.clone())
+                .for_catalog(self.catalog.clone(), false)
                 .await
                 .map_err(StreamingQueryExecutionError::CreateExecContext)?;
 
@@ -531,10 +555,15 @@ impl StreamingQuery {
                     table.physical_table().dataset_reference().clone(),
                     table.physical_table().table().clone(),
                 );
-                let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
-                Catalog::new(logical, vec![self.blocks_table.clone()])
+                Catalog::new(
+                    vec![resolved_table],
+                    vec![],
+                    vec![self.blocks_table.clone()],
+                    Default::default(),
+                )
             };
-            ExecContext::for_catalog(self.exec_env.clone(), catalog, false)
+            ExecContextBuilder::new(self.exec_env.clone())
+                .for_catalog(catalog, false)
                 .await
                 .map_err(NextMicrobatchRangeError::CreateExecContext)?
         };
@@ -699,10 +728,13 @@ impl StreamingQuery {
         // context for querying forked blocks
         let fork_ctx = {
             let catalog = Catalog::new(
-                ctx.physical_table().logical().clone(),
+                ctx.physical_table().tables().to_vec(),
+                ctx.physical_table().udfs().to_vec(),
                 ctx.physical_table().catalog_entries(),
+                Default::default(),
             );
-            ExecContext::for_catalog(ctx.env.clone(), catalog, true)
+            ExecContextBuilder::new(ctx.env.clone())
+                .for_catalog(catalog, true)
                 .await
                 .map_err(ReorgBaseError::CreateExecContext)?
         };
@@ -806,7 +838,11 @@ impl StreamingQuery {
             .unwrap_or_default();
         let sql = format!(
             "SELECT hash, parent_hash, timestamp FROM {} WHERE block_num = {} {} LIMIT 1",
-            self.blocks_table.table_ref().to_quoted_string(),
+            TableReference::Partial {
+                schema: Arc::new(self.blocks_table.sql_schema_name().to_owned()),
+                table: Arc::new(self.blocks_table.physical_table().table_name().clone()),
+            }
+            .to_quoted_string(),
             number,
             hash_constraint,
         );
@@ -816,7 +852,7 @@ impl StreamingQuery {
         let sql_str = SqlStr::new_unchecked(sql);
         let query = crate::sql::parse(&sql_str).map_err(BlocksTableFetchError::ParseSql)?;
         let plan = ctx
-            .plan_sql(query)
+            .statement_to_plan(query)
             .await
             .map_err(BlocksTableFetchError::PlanSql)?;
         let results = ctx

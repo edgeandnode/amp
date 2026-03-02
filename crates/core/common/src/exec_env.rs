@@ -14,7 +14,10 @@ use datafusion::{
 };
 use js_runtime::isolate_pool::IsolatePool;
 
-use crate::memory_pool::{MemoryPoolKind, make_memory_pool};
+use crate::{
+    dataset_store::DatasetStore,
+    memory_pool::{MemoryPoolKind, make_memory_pool},
+};
 
 /// Returns the default DataFusion catalog name used across all session contexts.
 fn default_catalog_name() -> ScalarValue {
@@ -74,6 +77,9 @@ pub struct ExecEnv {
 
     /// The data store used for query execution.
     pub store: DataStore,
+
+    /// The dataset store used for dataset resolution and loading.
+    pub dataset_store: DatasetStore,
 }
 
 /// Creates a ExecEnv with specified memory and cache configuration
@@ -85,6 +91,7 @@ pub fn create(
     query_max_mem_mb: usize,
     spill_location: &[PathBuf],
     store: DataStore,
+    dataset_store: DatasetStore,
 ) -> Result<ExecEnv, datafusion::error::DataFusionError> {
     let spill_allowed = !spill_location.is_empty();
     let disk_manager_mode = if spill_allowed {
@@ -120,5 +127,6 @@ pub fn create(
         isolate_pool,
         query_max_mem_mb,
         store,
+        dataset_store,
     })
 }
