@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
+use amp_providers_registry::ProvidersRegistry;
 use amp_worker_core::node_id::NodeId;
 use anyhow::Result;
 use common::dataset_store::DatasetStore;
@@ -37,12 +38,14 @@ impl DaemonWorker {
     ///
     /// Starts a Amp worker with the provided configuration, metadata database, and worker ID.
     /// The worker will be automatically shut down when the fixture is dropped.
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         build_info: BuildInfo,
         config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
         data_store: DataStore,
         dataset_store: DatasetStore,
+        providers_registry: ProvidersRegistry,
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self> {
@@ -52,6 +55,7 @@ impl DaemonWorker {
             metadata_db,
             data_store,
             dataset_store,
+            providers_registry,
             meter,
             node_id,
             None,
@@ -75,6 +79,7 @@ impl DaemonWorker {
         metadata_db: MetadataDb,
         data_store: DataStore,
         dataset_store: DatasetStore,
+        providers_registry: ProvidersRegistry,
         meter: Option<Meter>,
         node_id: NodeId,
         event_emitter: Option<Arc<dyn EventEmitter>>,
@@ -86,6 +91,7 @@ impl DaemonWorker {
             metadata_db.clone(),
             data_store.clone(),
             dataset_store.clone(),
+            providers_registry,
             meter,
             node_id.clone(),
             event_emitter,

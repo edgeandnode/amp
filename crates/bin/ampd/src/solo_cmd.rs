@@ -120,7 +120,7 @@ pub async fn run(
             build_info.clone(),
             metadata_db.clone(),
             datasets_registry,
-            providers_registry,
+            providers_registry.clone(),
             data_store.clone(),
             dataset_store.clone(),
             meter.clone(),
@@ -181,6 +181,7 @@ pub async fn run(
         metadata_db,
         data_store,
         dataset_store,
+        providers_registry.clone(),
         meter,
         worker_id,
         None, // Use config-based event emitter

@@ -7,6 +7,7 @@ license-file.workspace = true
 [dependencies]
 amp-config = { path = "../../config" }
 amp-data-store = { path = "../../core/data-store" }
+amp-providers-registry = { path = "../../core/providers-registry" }
 amp-worker-core = { path = "../../core/worker-core" }
 amp-worker-datasets-derived = { path = "../../core/worker-datasets-derived" }
 amp-worker-datasets-raw = { path = "../../core/worker-datasets-raw" }

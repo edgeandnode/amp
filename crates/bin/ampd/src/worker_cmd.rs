@@ -64,6 +64,7 @@ pub async fn run(
         metadata_db,
         data_store,
         dataset_store,
+        providers_registry,
         meter,
         node_id,
         None, // Use config-based event emitter

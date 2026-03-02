@@ -211,7 +211,7 @@ async fn main() {
                 config.clone(),
                 sysdb.conn_pool().clone(),
                 datasets_registry,
-                providers_registry,
+                providers_registry.clone(),
                 data_store.clone(),
                 dataset_store.clone(),
                 None,
@@ -226,6 +226,7 @@ async fn main() {
                 sysdb.conn_pool().clone(),
                 data_store.clone(),
                 dataset_store.clone(),
+                providers_registry,
                 None,
                 "bless".parse().expect("valid worker node id"),
             )

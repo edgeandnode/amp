@@ -111,7 +111,9 @@ use common::{
     physical_table::{MissingRangesError, PhysicalTable, segments::merge_ranges},
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
-use datasets_raw::client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError};
+use datasets_raw::client::{
+    BlockStreamError, BlockStreamer, BlockStreamerExt as _, CleanupError, LatestBlockError,
+};
 use futures::TryStreamExt as _;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, physical_table_revision::LocationId};
 use monitoring::logging;
@@ -236,14 +238,18 @@ pub async fn dump(
     let metrics = ctx.metrics.clone();
     let finalized_blocks_only = dataset.finalized_blocks_only();
 
+    let kind = dataset.kind();
+    let network = dataset
+        .tables()
+        .first()
+        .expect("raw dataset must have tables")
+        .network();
     let mut client = ctx
-        .dataset_store
-        .get_client(
-            dataset_reference.hash(),
-            metrics.as_ref().map(|m| m.meter()),
-        )
+        .providers_registry
+        .create_block_stream_client(kind, network, metrics.as_ref().map(|m| m.meter()))
         .await
-        .map_err(Error::GetClient)?;
+        .map_err(Error::CreateBlockStreamClient)?
+        .with_retry();
 
     let provider_name = client.provider_name().to_string();
     tracing::info!("connected to provider: {provider_name}");
@@ -467,16 +473,15 @@ pub enum Error {
         source: amp_worker_core::check::ConsistencyError,
     },
 
-    /// Failed to get blockchain client for dataset
+    /// Failed to create block stream client for dataset
     ///
-    /// This occurs when the dump implementation cannot obtain a blockchain client
+    /// This occurs when the dump implementation cannot create a blockchain client
     /// for the dataset's provider. Common causes:
     /// - Provider configuration not found
     /// - Invalid provider configuration
-    /// - Manifest not registered in metadata database
     /// - Network connectivity issues to provider
-    #[error("Failed to get blockchain client for dataset")]
-    GetClient(#[source] common::dataset_store::GetClientError),
+    #[error("Failed to create block stream client for dataset")]
+    CreateBlockStreamClient(#[source] amp_providers_registry::CreateClientError),
 
     /// Failed to resolve end block number
     ///
