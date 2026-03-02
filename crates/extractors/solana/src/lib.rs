@@ -21,7 +21,6 @@ use datasets_common::{
 };
 
 mod client;
-mod dataset;
 mod dataset_kind;
 pub mod error;
 pub mod metrics;
@@ -30,11 +29,11 @@ pub mod rpc_client;
 pub mod tables;
 
 pub use amp_providers_solana::config::{self, SolanaProviderConfig, UseArchive};
+use datasets_raw::dataset::Dataset as RawDataset;
 use solana_client::rpc_config::CommitmentConfig;
 
 pub use self::{
     client::{Client, non_empty_of1_slot, non_empty_rpc_slot},
-    dataset::Dataset,
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
 };
 use crate::error::ClientError;
@@ -79,14 +78,16 @@ pub struct Manifest {
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
-    Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> RawDataset {
+    let network = manifest.network;
+    RawDataset::new(
         reference,
-        kind: manifest.kind,
-        start_block: Some(manifest.start_block),
-        finalized_blocks_only: manifest.finalized_blocks_only,
-        tables: tables::all(&manifest.network),
-    }
+        manifest.kind.into(),
+        network.clone(),
+        tables::all(&network),
+        Some(manifest.start_block),
+        manifest.finalized_blocks_only,
+    )
 }
 
 /// Create a Solana client based on the provided configuration.

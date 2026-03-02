@@ -11,7 +11,6 @@ use datasets_common::{
 };
 
 mod client;
-mod dataset;
 mod dataset_kind;
 pub mod error;
 pub mod evm;
@@ -20,9 +19,10 @@ pub mod metrics;
 mod proto;
 pub mod tables;
 
+use datasets_raw::dataset::Dataset as RawDataset;
+
 pub use self::{
     client::Client,
-    dataset::Dataset,
     dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError},
 };
 
@@ -67,15 +67,16 @@ pub struct Manifest {
 ///
 /// Dataset identity (namespace, name, version, hash reference) must be provided externally as they
 /// are not part of the manifest.
-pub fn dataset(reference: HashReference, manifest: Manifest) -> Dataset {
+pub fn dataset(reference: HashReference, manifest: Manifest) -> RawDataset {
     let network = manifest.network;
-    Dataset {
+    RawDataset::new(
         reference,
-        kind: manifest.kind,
-        start_block: Some(manifest.start_block),
-        finalized_blocks_only: manifest.finalized_blocks_only,
-        tables: tables::all(&network),
-    }
+        manifest.kind.into(),
+        network.clone(),
+        tables::all(&network),
+        Some(manifest.start_block),
+        manifest.finalized_blocks_only,
+    )
 }
 
 /// Create a Firehose client based on the provided configuration.

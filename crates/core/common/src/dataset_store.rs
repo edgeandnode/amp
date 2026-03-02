@@ -16,11 +16,13 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
-    manifest::Manifest as CommonManifest, network_id::NetworkId, reference::Reference,
+    dataset::Dataset as _, dataset_kind_str::DatasetKindStr, hash::Hash,
+    hash_reference::HashReference, manifest::Manifest as CommonManifest, network_id::NetworkId,
+    reference::Reference,
 };
 use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
-use evm_rpc_datasets::{Dataset as EvmRpcDataset, EvmRpcDatasetKind, Manifest as EvmRpcManifest};
+use datasets_raw::dataset::Dataset as RawDataset;
+use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
 use firehose_datasets::{FirehoseDatasetKind, Manifest as FirehoseManifest};
 use parking_lot::RwLock;
 use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
@@ -125,6 +127,25 @@ impl DatasetStore {
         Ok(dataset)
     }
 
+    /// Retrieves a raw dataset by hash reference.
+    ///
+    /// This loads the dataset via [`get_dataset`](Self::get_dataset) and downcasts it to
+    /// [`datasets_raw::dataset::Dataset`].
+    #[tracing::instrument(skip(self), err)]
+    pub async fn get_raw_dataset(
+        &self,
+        reference: &HashReference,
+    ) -> Result<Arc<RawDataset>, GetRawDatasetError> {
+        let dataset = self
+            .get_dataset(reference)
+            .await
+            .map_err(GetRawDatasetError::GetDataset)?;
+
+        dataset
+            .downcast_arc::<RawDataset>()
+            .map_err(|_| GetRawDatasetError::NotARawDataset(reference.clone()))
+    }
+
     /// Retrieves a derived dataset manifest by hash without creating a dataset instance or caching.
     #[tracing::instrument(skip(self), err)]
     pub async fn get_derived_manifest(
@@ -161,7 +182,11 @@ impl DatasetStore {
         sql_schema_name: &str,
         dataset: &dyn datasets_common::dataset::Dataset,
     ) -> Result<Option<ScalarUDF>, EthCallForDatasetError> {
-        if !dataset.is::<EvmRpcDataset>() {
+        let Some(raw) = dataset.downcast_ref::<RawDataset>() else {
+            return Ok(None);
+        };
+
+        if raw.kind() != EvmRpcDatasetKind {
             return Ok(None);
         }
 
@@ -171,23 +196,18 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        // SAFETY: EVM RPC datasets always have at least one table, guaranteed by dataset construction.
-        let network = dataset
-            .tables()
-            .first()
-            .expect("EVM RPC Datasets MUST have tables")
-            .network();
+        let network = raw.network();
 
         let provider = match self.providers_registry.create_evm_rpc_client(network).await {
             Ok(Some(provider)) => provider,
             Ok(None) => {
                 tracing::warn!(
-                    provider_kind = %evm_rpc_datasets::EvmRpcDatasetKind,
+                    provider_kind = %EvmRpcDatasetKind,
                     provider_network = %network,
                     "no provider found for requested kind-network configuration"
                 );
                 return Err(EthCallForDatasetError::ProviderNotFound {
-                    dataset_kind: evm_rpc_datasets::EvmRpcDatasetKind.into(),
+                    dataset_kind: EvmRpcDatasetKind.into(),
                     network: network.clone(),
                 });
             }
@@ -329,6 +349,18 @@ impl crate::retryable::RetryableErrorExt for GetDerivedManifestError {
     }
 }
 
+/// Errors that occur when retrieving a raw dataset.
+#[derive(Debug, thiserror::Error)]
+pub enum GetRawDatasetError {
+    /// Failed to load the underlying dataset.
+    #[error("failed to get dataset")]
+    GetDataset(#[source] GetDatasetError),
+
+    /// The dataset is not a raw dataset (e.g., it is a derived dataset).
+    #[error("Dataset '{0}' is not a raw dataset")]
+    NotARawDataset(HashReference),
+}
+
 /// Errors that occur when creating eth_call user-defined functions for EVM RPC datasets.
 #[derive(Debug, thiserror::Error)]
 pub enum EthCallForDatasetError {
@@ -364,7 +396,7 @@ fn create_dataset_from_manifest(
                 .try_into_manifest::<EvmRpcManifest>()
                 .map_err(|source| GetDatasetError::ParseManifest {
                     reference: reference.clone(),
-                    kind: evm_rpc_datasets::EvmRpcDatasetKind.into(),
+                    kind: EvmRpcDatasetKind.into(),
                     source,
                 })?;
             Arc::new(evm_rpc_datasets::dataset(reference.clone(), manifest))
@@ -374,7 +406,7 @@ fn create_dataset_from_manifest(
                 .try_into_manifest::<SolanaManifest>()
                 .map_err(|source| GetDatasetError::ParseManifest {
                     reference: reference.clone(),
-                    kind: solana_datasets::SolanaDatasetKind.into(),
+                    kind: SolanaDatasetKind.into(),
                     source,
                 })?;
             Arc::new(solana_datasets::dataset(reference.clone(), manifest))
@@ -384,7 +416,7 @@ fn create_dataset_from_manifest(
                 .try_into_manifest::<FirehoseManifest>()
                 .map_err(|source| GetDatasetError::ParseManifest {
                     reference: reference.clone(),
-                    kind: firehose_datasets::FirehoseDatasetKind.into(),
+                    kind: FirehoseDatasetKind.into(),
                     source,
                 })?;
             Arc::new(firehose_datasets::dataset(reference.clone(), manifest))
