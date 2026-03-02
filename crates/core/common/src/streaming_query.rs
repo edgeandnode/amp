@@ -150,6 +150,17 @@ pub enum SpawnError {
     /// require starting from scratch or using a different resume point.
     #[error("failed to convert cursor")]
     ConvertCursor(#[source] CursorNetworkNotFoundError),
+
+    /// Streaming query spans multiple networks
+    ///
+    /// Multi-network streaming queries are not yet supported. This error is
+    /// returned when the query's catalog contains tables from more than one
+    /// blockchain network.
+    ///
+    /// This is a temporary guard that will be removed once multi-network
+    /// streaming query support is fully implemented.
+    #[error("multi-network streaming queries are not yet supported: found networks {0:?}")]
+    MultiNetwork(Vec<NetworkId>),
 }
 
 /// Awaits any update for tables in a query context catalog.
@@ -315,14 +326,25 @@ pub struct StreamingQuery {
     destination: Option<Arc<PhysicalTable>>,
     preserve_block_num: bool,
     network: NetworkId,
-    /// `blocks` table for the network associated with the catalog.
-    blocks_table: CatalogTable,
+    /// `blocks` tables for all networks in the catalog, keyed by network ID.
+    blocks_tables: BTreeMap<NetworkId, CatalogTable>,
     /// The single-network cursor for the previously processed range. This may be provided by the
     /// consumer (as a multi-network cursor) and converted to this single-network cursor.
     prev_cursor: Option<NetworkCursor>,
 }
 
 impl StreamingQuery {
+    /// Returns the single blocks table for single-network queries.
+    ///
+    /// # Panics
+    /// Panics if the query does not have exactly one network. This is a temporary
+    /// method to support the transition to multi-network streaming. For now, it is safe
+    /// because we guard against multi-network queries in `spawn()`.
+    fn single_blocks_table(&self) -> &CatalogTable {
+        assert_eq!(self.blocks_tables.len(), 1);
+        self.blocks_tables.values().next().unwrap()
+    }
+
     /// Creates a new streaming query. It is assumed that the `ctx` was built such that it contains
     /// only the tables relevant for the query.
     ///
@@ -373,25 +395,42 @@ impl StreamingQuery {
                 .map_err(SpawnError::OptimizePlan)?
         };
 
-        // Resolve the network by walking dataset dependencies to find a raw dataset,
-        // then resolve the blocks table for that network.
-        let (network, blocks_table) = {
+        // Resolve all networks by walking dataset dependencies to find raw datasets,
+        // then resolve the blocks table for each network.
+        let (network, blocks_tables) = {
             let unique_refs: BTreeSet<HashReference> = catalog
                 .physical_tables()
                 .map(|t| t.dataset_reference().clone())
                 .collect();
 
-            let raw_dataset =
-                resolve_raw_dataset_from_dependencies(dataset_store, unique_refs.iter())
+            let raw_datasets =
+                resolve_raw_datasets_from_dependencies(dataset_store, unique_refs.iter())
                     .await
                     .map_err(SpawnError::ResolveRawDataset)?;
 
-            let network = raw_dataset.network().clone();
-            let blocks_table = resolve_blocks_table(raw_dataset, exec_env.store.clone())
-                .await
-                .map_err(SpawnError::ResolveBlocksTable)?;
+            // Temporary guard: multi-network streaming queries are not yet supported
+            if raw_datasets.len() > 1 {
+                let networks: Vec<NetworkId> = raw_datasets.keys().cloned().collect();
+                return Err(SpawnError::MultiNetwork(networks));
+            }
 
-            (network, blocks_table)
+            // Resolve blocks table for each network
+            let mut blocks_tables = BTreeMap::new();
+            for (network, raw_dataset) in &raw_datasets {
+                let blocks_table =
+                    resolve_blocks_table(raw_dataset.clone(), exec_env.store.clone())
+                        .await
+                        .map_err(SpawnError::ResolveBlocksTable)?;
+                blocks_tables.insert(network.clone(), blocks_table);
+            }
+
+            // For single-network queries, extract the network directly
+            let network = raw_datasets
+                .into_keys()
+                .next()
+                .expect("raw_datasets is non-empty after ResolveRawDataset check");
+
+            (network, blocks_tables)
         };
 
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
@@ -413,7 +452,7 @@ impl StreamingQuery {
             destination,
             preserve_block_num,
             network,
-            blocks_table,
+            blocks_tables,
         };
 
         let join_handle =
@@ -525,16 +564,16 @@ impl StreamingQuery {
         // Use a single context for all queries against the blocks table. This is to keep a
         // consistent reference chain within the scope of this function.
         let blocks_ctx = {
-            // Construct a catalog for the single `blocks_table`.
+            // Construct a catalog for the single blocks table.
             let catalog = {
-                let table = &self.blocks_table;
+                let table = self.single_blocks_table();
                 let resolved_table = LogicalTable::new(
                     table.sql_schema_name().to_string(),
                     table.physical_table().dataset_reference().clone(),
                     table.physical_table().table().clone(),
                 );
                 let logical = LogicalCatalog::from_tables(std::iter::once(&resolved_table));
-                Catalog::new(logical, vec![self.blocks_table.clone()])
+                Catalog::new(logical, vec![self.single_blocks_table().clone()])
             };
             ExecContext::for_catalog(self.exec_env.clone(), catalog, false)
                 .await
@@ -808,7 +847,7 @@ impl StreamingQuery {
             .unwrap_or_default();
         let sql = format!(
             "SELECT hash, parent_hash, timestamp FROM {} WHERE block_num = {} {} LIMIT 1",
-            self.blocks_table.table_ref().to_quoted_string(),
+            self.single_blocks_table().table_ref().to_quoted_string(),
             number,
             hash_constraint,
         );
@@ -1207,17 +1246,17 @@ pub enum ResolveBlocksTableError {
     TableNotSynced(String, String),
 }
 
-/// Resolve the raw dataset and its network by BFS through dataset dependencies.
+/// Resolve raw datasets and their networks by BFS through dataset dependencies.
 ///
-/// Returns the first raw (non-derived) dataset found and its network, validating that all raw
-/// datasets in the dependency tree belong to the same network.
-async fn resolve_raw_dataset_from_dependencies(
+/// Returns a map of network IDs to raw (non-derived) datasets found in the dependency tree.
+/// Each network will have exactly one representative raw dataset (the first one discovered
+/// for that network).
+async fn resolve_raw_datasets_from_dependencies(
     dataset_store: &DatasetStore,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
-) -> Result<Arc<RawDataset>, ResolveRawDatasetError> {
-    let mut found: Option<Arc<RawDataset>> = None;
+) -> Result<BTreeMap<NetworkId, Arc<RawDataset>>, ResolveRawDatasetError> {
+    let mut found: BTreeMap<NetworkId, Arc<RawDataset>> = BTreeMap::new();
     let mut queue: VecDeque<Arc<dyn Dataset>> = VecDeque::new();
-
     for hash_ref in root_dataset_refs {
         let dataset = dataset_store
             .get_dataset(hash_ref)
@@ -1233,20 +1272,10 @@ async fn resolve_raw_dataset_from_dependencies(
             continue;
         }
 
-        // Raw dataset: record its network, fail if a second network appears
+        // Raw dataset: record its network (first one wins per network)
         if let Ok(raw) = dataset.clone().downcast_arc::<RawDataset>() {
-            match &found {
-                None => {
-                    found = Some(raw);
-                }
-                Some(first) if *first.network() != *raw.network() => {
-                    return Err(ResolveRawDatasetError::MultipleNetworks {
-                        first: first.network().clone(),
-                        second: raw.network().clone(),
-                    });
-                }
-                Some(_) => {} // same network, continue BFS
-            }
+            let network = raw.network().clone();
+            found.entry(network).or_insert(raw);
         }
 
         // Derived dataset: enqueue dependencies
@@ -1268,7 +1297,11 @@ async fn resolve_raw_dataset_from_dependencies(
         }
     }
 
-    found.ok_or(ResolveRawDatasetError::NoRawDatasetFound)
+    if found.is_empty() {
+        return Err(ResolveRawDatasetError::NoRawDatasetFound);
+    }
+
+    Ok(found)
 }
 
 /// Errors that occur when resolving the raw dataset from dependencies.
@@ -1285,10 +1318,6 @@ pub enum ResolveRawDatasetError {
     /// Dependency not found.
     #[error("dependency '{0}' not found")]
     NotFound(String),
-
-    /// Multiple networks found in the dependency tree.
-    #[error("multiple networks in dependency tree: {first} and {second}")]
-    MultipleNetworks { first: NetworkId, second: NetworkId },
 
     /// No raw dataset found in the dependency tree.
     #[error("no raw dataset found in dependency tree")]
