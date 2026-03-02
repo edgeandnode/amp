@@ -138,7 +138,7 @@ pub async fn dump(
     let writer = writer.into();
 
     let dump_start_time = Instant::now();
-    let parquet_opts = amp_worker_core::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet.clone());
 
     let dataset = ctx
         .dataset_store

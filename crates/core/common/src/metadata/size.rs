@@ -369,24 +369,6 @@ impl Serialize for Overflow {
     }
 }
 
-#[cfg(feature = "schemars")]
-impl schemars::JsonSchema for Overflow {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Overflow".into()
-    }
-
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "oneOf": [
-                { "type": "integer", "minimum": 1 },
-                { "type": "number", "exclusiveMinimum": 0 },
-                { "type": "string" }
-            ],
-            "description": "Overflow multiplier as an integer, float, or fraction (e.g. 1, 1.5, \"3/2\")"
-        })
-    }
-}
-
 /// Represents the size of a Segment (one or more parquet files) in four dimensions: blocks, bytes, rows, and count.
 ///
 /// This struct is used to track file sizes for compaction operations, allowing the

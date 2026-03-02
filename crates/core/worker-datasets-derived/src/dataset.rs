@@ -165,7 +165,7 @@ pub async fn dump(
         .map(Arc::new)
         .map_err(Error::GetDerivedManifest)?;
 
-    let parquet_opts = amp_worker_core::parquet_opts(&ctx.config.parquet);
+    let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet.clone());
 
     // Get dataset for table resolution
     let dataset = ctx

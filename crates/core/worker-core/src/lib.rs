@@ -66,7 +66,8 @@ pub struct WriterProperties {
     pub segment_flush_interval: Duration,
 }
 
-pub fn parquet_opts(config: &ParquetConfig) -> Arc<WriterProperties> {
+pub fn parquet_opts(config: impl Into<ParquetConfig>) -> Arc<WriterProperties> {
+    let config = config.into();
     // We have not done our own benchmarking, but the default 1_000_000 value for this adds about a
     // megabyte of storage per column, per row group. This analysis by InfluxData suggests that
     // smaller NDV values may be equally effective:
@@ -85,8 +86,8 @@ pub fn parquet_opts(config: &ParquetConfig) -> Arc<WriterProperties> {
         .set_bloom_filter_enabled(config.bloom_filters)
         .build();
 
-    let collector = CollectorProperties::from(config);
-    let compactor = CompactorProperties::from(config);
+    let collector = CollectorProperties::from(&config);
+    let compactor = CompactorProperties::from(&config);
     let partition = SegmentSizeLimit::from(&config.target_size);
     let cache_size_mb = (config.cache_size_mb * 1024 * 1024) as usize;
     let max_row_group_bytes = (config.max_row_group_mb * 1024 * 1024) as usize;

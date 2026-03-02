@@ -31,7 +31,6 @@ object_store.workspace = true
 parking_lot = "0.12.4"
 rand.workspace = true
 regex.workspace = true
-schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 solana-datasets = { path = "../../extractors/solana" }

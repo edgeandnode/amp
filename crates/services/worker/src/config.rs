@@ -1,7 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use amp_config::WorkerEventsConfig;
-use amp_worker_core::ParquetConfig;
+use amp_config::{WorkerEventsConfig, worker_core::ParquetConfig};
 
 /// Configuration specific to the worker service
 ///
@@ -47,7 +46,7 @@ impl Config {
             max_mem_mb: self.max_mem_mb,
             query_max_mem_mb: self.query_max_mem_mb,
             spill_location: self.spill_location.clone(),
-            parquet: self.parquet.clone(),
+            parquet: (&self.parquet).into(),
             progress_interval: self.events_config.progress_interval.clone().into(),
         }
     }

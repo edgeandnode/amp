@@ -4,10 +4,6 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
-[features]
-# JSON Schema generation support for configuration validation
-schemars = ["dep:schemars", "common/schemars"]
-
 [dependencies]
 amp-data-store = { path = "../data-store" }
 amp-providers-registry = { path = "../providers-registry" }
@@ -19,7 +15,6 @@ metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }
 object_store.workspace = true
 parking_lot.workspace = true
-schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
