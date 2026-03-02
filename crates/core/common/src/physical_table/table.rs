@@ -189,11 +189,14 @@ impl PhysicalTable {
                 let FileMetadata {
                     file_id: id,
                     object_meta: object,
-                    parquet_meta: ParquetMeta { ranges, .. },
+                    parquet_meta:
+                        ParquetMeta {
+                            ranges, watermark, ..
+                        },
                     ..
                 } = file;
 
-                Ok(Segment::new(id, object, ranges))
+                Ok(Segment::new(id, object, ranges, watermark))
             })
             .try_collect()
             .await

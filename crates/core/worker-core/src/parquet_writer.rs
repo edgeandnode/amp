@@ -182,6 +182,7 @@ impl ParquetFileWriter {
             filename: self.filename.clone(),
             created_at: Timestamp::now(),
             ranges: vec![range.clone()],
+            watermark: None,
         };
 
         let kv_metadata = KeyValue::new(

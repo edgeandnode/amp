@@ -22,7 +22,7 @@ use amp_data_store::file_name::FileName;
 use datasets_common::block_range::BlockRange;
 use serde::{Deserialize, Serialize};
 
-use crate::Timestamp;
+use crate::{Timestamp, cursor::Watermark};
 
 pub const PARQUET_METADATA_KEY: &str = "nozzle_metadata";
 pub const PARENT_FILE_ID_METADATA_KEY: &str = "parent_file_ids";
@@ -38,4 +38,9 @@ pub struct ParquetMeta {
     pub created_at: Timestamp,
     // for now, this list should contain exactly 1 entry
     pub ranges: Vec<BlockRange>,
+    /// For single-network segments, this is `None` as the watermark equals the end block number.
+    /// For multi-network segments, this represents the cumulative watermark at the end of
+    /// this segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<Watermark>,
 }
