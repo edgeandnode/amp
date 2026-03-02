@@ -3,6 +3,8 @@ use std::future::Future;
 use datasets_common::block_num::BlockNum;
 pub use datasets_common::end_block::EndBlock;
 
+use crate::retryable::RetryableErrorExt;
+
 /// Result of resolving an EndBlock configuration.
 ///
 /// After resolution, the end block specification becomes one of:
@@ -105,6 +107,15 @@ pub enum ResolutionError {
     /// Failed to fetch the latest block number
     #[error("failed to fetch latest block: {0}")]
     FetchLatestFailed(String),
+}
+
+impl RetryableErrorExt for ResolutionError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::InvalidEndBlock { .. } => false,
+            Self::FetchLatestFailed(_) => true,
+        }
+    }
 }
 
 impl ResolutionError {

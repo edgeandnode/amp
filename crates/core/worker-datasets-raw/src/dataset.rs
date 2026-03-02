@@ -89,7 +89,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use amp_data_store::DataStore;
+use amp_data_store::{DataStore, retryable::RetryableErrorExt as _};
+use amp_providers_registry::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
     Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
     block_ranges::resolve_end_block,
@@ -99,6 +100,7 @@ use amp_worker_core::{
     progress::{
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     },
+    retryable::RetryableErrorExt,
     tasks::{FailFastJoinSet, TryWaitAllError},
 };
 use common::{
@@ -109,6 +111,7 @@ use common::{
     },
     parquet::errors::ParquetError,
     physical_table::{MissingRangesError, PhysicalTable, segments::merge_ranges},
+    retryable::RetryableErrorExt as _,
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_raw::client::{
@@ -542,17 +545,38 @@ pub enum Error {
     Cleanup(#[source] CleanupError),
 }
 
-impl Error {
-    pub fn is_fatal(&self) -> bool {
-        // TODO: To keep things semantically the same, [TryWaitAllError::Panic] is not
-        // considered a fatal error, even though it indicates a bug. We may want to
-        // revisit this in the future.
-        matches!(
-            self,
-            Self::PartitionTask(TryWaitAllError::Error(RunRangeError::ReadStream(
-                BlockStreamError::Fatal(_)
-            )))
-        )
+impl RetryableErrorExt for Error {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Delegate to inner error classification
+            Self::GetDataset(err) => err.is_retryable(),
+
+            // Transient DB/store lookup failures
+            Self::GetActivePhysicalTable(err) => err.is_retryable(),
+            Self::RegisterNewPhysicalTable(_) => true,
+            Self::LockRevisionsForWriter(err) => err.is_retryable(),
+
+            // Data integrity violation — fatal
+            Self::ConsistencyCheck { .. } => false,
+
+            // Delegate to inner error classification
+            Self::CreateBlockStreamClient(err) => err.is_retryable(),
+
+            // Block range resolution — inspect the source variant
+            Self::ResolveEndBlock(err) => err.is_retryable(),
+
+            // Transient RPC/network failures — recoverable
+            Self::LatestBlock(_) => true,
+
+            // Delegate to inner error classification
+            Self::MissingRanges(err) => err.is_retryable(),
+
+            // Partition tasks — delegate to TryWaitAllError classification
+            Self::PartitionTask(err) => err.is_retryable(),
+
+            // Cleanup failures — recoverable
+            Self::Cleanup(_) => true,
+        }
     }
 }
 
@@ -1022,6 +1046,19 @@ pub enum RunRangeError {
     Close(#[source] RawDatasetWriterCloseError),
 }
 
+impl RetryableErrorExt for RunRangeError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::CreateWriter(_) => true,
+            Self::ReadStream(BlockStreamError::Fatal(_)) => false,
+            Self::ReadStream(BlockStreamError::Recoverable(_)) => true,
+            Self::NonIncreasingBlockNum { .. } => false,
+            Self::Write(err) => err.is_retryable(),
+            Self::Close(err) => err.is_retryable(),
+        }
+    }
+}
+
 /// Spawns a background task that tracks freshness metrics for all tables in the catalog.
 ///
 /// The task subscribes to table change notifications and, when a table changes, takes a
@@ -1470,5 +1507,39 @@ mod test {
             completed.is_ok(),
             "freshness tracker loop must exit when all subscriptions close"
         );
+    }
+
+    mod is_fatal {
+        use amp_worker_core::block_ranges::ResolutionError;
+
+        use super::*;
+
+        #[test]
+        fn is_fatal_resolve_end_block_invalid_returns_true() {
+            //* Given
+            let err = Error::ResolveEndBlock(ResolutionError::InvalidEndBlock {
+                start_block: 100,
+                end_block: 5,
+            });
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(result, "InvalidEndBlock should be fatal");
+        }
+
+        #[test]
+        fn is_fatal_resolve_end_block_fetch_failed_returns_false() {
+            //* Given
+            let err =
+                Error::ResolveEndBlock(ResolutionError::FetchLatestFailed("timeout".to_string()));
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(!result, "FetchLatestFailed should not be fatal");
+        }
     }
 }

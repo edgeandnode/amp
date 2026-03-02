@@ -9,6 +9,7 @@ use amp_worker_core::{
         CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
         ParquetFileWriterOutput, commit_metadata,
     },
+    retryable::RetryableErrorExt,
 };
 use common::{
     BlockNum, BlockRange, arrow::array::RecordBatch, catalog::physical::Catalog,
@@ -152,6 +153,15 @@ pub enum RawDatasetWriterError {
     CommitMetadata(#[source] CommitMetadataError),
 }
 
+impl RetryableErrorExt for RawDatasetWriterError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Write(err) => err.is_retryable(),
+            Self::CommitMetadata(err) => err.is_retryable(),
+        }
+    }
+}
+
 /// Errors that occur when closing the raw dataset writer
 ///
 /// This error type is used by `RawDatasetWriter::close()`.
@@ -180,6 +190,15 @@ pub enum RawDatasetWriterCloseError {
     /// - Transaction timeout
     #[error("Failed to commit metadata")]
     CommitMetadata(#[source] CommitMetadataError),
+}
+
+impl RetryableErrorExt for RawDatasetWriterCloseError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::CloseCurrentFile(err) => err.is_retryable(),
+            Self::CommitMetadata(err) => err.is_retryable(),
+        }
+    }
 }
 
 struct RawTableWriter {
@@ -457,6 +476,16 @@ pub enum RawTableWriterError {
     Write(#[source] ParquetError),
 }
 
+impl RetryableErrorExt for RawTableWriterError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::CloseCurrentFile(err) => err.is_retryable(),
+            Self::CreateNewFile(_) => true,
+            Self::Write(_) => true,
+        }
+    }
+}
+
 /// Errors that occur when closing the current parquet file
 ///
 /// This error type is used by `RawTableWriter::close_current_file()`.
@@ -484,6 +513,15 @@ pub enum CloseCurrentFileError {
     /// - Resource exhaustion during compaction
     #[error("Failed to run compactor")]
     Compactor(#[source] AmpCompactorTaskError),
+}
+
+impl RetryableErrorExt for CloseCurrentFileError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Close(err) => err.is_retryable(),
+            Self::Compactor(err) => err.is_retryable(),
+        }
+    }
 }
 
 fn limit_ranges(

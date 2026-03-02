@@ -249,6 +249,16 @@ pub enum GetSegmentsError {
     ParseMetadata(#[source] serde_json::Error),
 }
 
+impl crate::retryable::RetryableErrorExt for GetSegmentsError {
+    fn is_retryable(&self) -> bool {
+        use amp_data_store::retryable::RetryableErrorExt;
+        match self {
+            Self::StreamMetadata(err) => err.is_retryable(),
+            Self::ParseMetadata(_) => false,
+        }
+    }
+}
+
 /// Errors that can occur when computing missing ranges for a physical table.
 #[derive(Debug, thiserror::Error)]
 pub enum MissingRangesError {
@@ -261,6 +271,15 @@ pub enum MissingRangesError {
     /// This surfaces as a recoverable error rather than propagating a process-level panic.
     #[error("missing_ranges computation task panicked or was aborted")]
     TaskPanicked(#[source] tokio::task::JoinError),
+}
+
+impl crate::retryable::RetryableErrorExt for MissingRangesError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::GetSegments(err) => err.is_retryable(),
+            Self::TaskPanicked(_) => false,
+        }
+    }
 }
 
 /// Errors that can occur when computing the canonical chain for a physical table.
@@ -281,6 +300,16 @@ pub enum CanonicalChainError {
     MultiNetworkWithStartBlock,
 }
 
+impl crate::retryable::RetryableErrorExt for CanonicalChainError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::GetSegments(err) => err.is_retryable(),
+            Self::TaskPanicked(_) => true,
+            Self::MultiNetworkWithStartBlock => false,
+        }
+    }
+}
+
 /// Errors that can occur when creating a table snapshot.
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -291,4 +320,13 @@ pub enum SnapshotError {
     /// Failed to compute canonical chain
     #[error("failed to compute canonical chain")]
     CanonicalChain(#[source] CanonicalChainError),
+}
+
+impl crate::retryable::RetryableErrorExt for SnapshotError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::GetSegments(err) => err.is_retryable(),
+            Self::CanonicalChain(err) => err.is_retryable(),
+        }
+    }
 }

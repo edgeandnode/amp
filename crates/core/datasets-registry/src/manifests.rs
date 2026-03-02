@@ -140,6 +140,16 @@ pub enum GetError {
     Utf8Error(#[source] std::string::FromUtf8Error),
 }
 
+impl crate::retryable::RetryableErrorExt for GetError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::ObjectStoreGet(_) => true,
+            Self::ObjectStoreReadBytes(_) => true,
+            Self::Utf8Error(_) => false,
+        }
+    }
+}
+
 /// Errors that can occur during manifest deletion
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to delete manifest from object store")]

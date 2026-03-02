@@ -57,6 +57,15 @@ pub enum GetManifestError {
     ObjectStoreError(#[source] crate::manifests::GetError),
 }
 
+impl crate::retryable::RetryableErrorExt for GetManifestError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::MetadataDbQueryPath(err) => err.is_retryable(),
+            Self::ObjectStoreError(err) => err.is_retryable(),
+        }
+    }
+}
+
 /// Errors that can occur when deleting a manifest
 ///
 /// This error type is used by `DatasetsRegistry::delete_manifest()`.
@@ -284,6 +293,12 @@ pub enum SetVersionTagError {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to query metadata database")]
 pub struct ResolveRevisionError(#[source] pub metadata_db::Error);
+
+impl crate::retryable::RetryableErrorExt for ResolveRevisionError {
+    fn is_retryable(&self) -> bool {
+        self.0.is_retryable()
+    }
+}
 
 /// Error when listing version tags for a dataset
 ///

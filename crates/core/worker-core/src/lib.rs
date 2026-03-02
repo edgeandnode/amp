@@ -19,6 +19,7 @@ pub mod metrics;
 pub mod node_id;
 pub mod parquet_writer;
 pub mod progress;
+pub mod retryable;
 pub mod tasks;
 
 pub use self::{

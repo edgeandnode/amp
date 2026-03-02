@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 pub mod file_name;
 pub mod physical_table;
+pub mod retryable;
 
 use self::{
     file_name::FileName,
@@ -1004,6 +1005,12 @@ pub struct GetRevisionByLocationIdError(#[source] metadata_db::Error);
 #[error("Failed to get active revision from metadata database")]
 pub struct GetTableActiveRevisionError(#[source] pub metadata_db::Error);
 
+impl crate::retryable::RetryableErrorExt for GetTableActiveRevisionError {
+    fn is_retryable(&self) -> bool {
+        self.0.is_retryable()
+    }
+}
+
 /// Errors that occur when activating a physical table revision
 ///
 /// This error type is used by `DataStore::activate_table_revision()`.
@@ -1227,6 +1234,12 @@ pub struct RegisterTableRevisionError(#[source] pub metadata_db::Error);
 #[error("failed to lock revisions for writer")]
 pub struct LockRevisionsForWriterError(#[source] pub metadata_db::Error);
 
+impl crate::retryable::RetryableErrorExt for LockRevisionsForWriterError {
+    fn is_retryable(&self) -> bool {
+        self.0.is_retryable()
+    }
+}
+
 /// Errors that occur when restoring the latest table revision
 ///
 /// This error type is used by `DataStore::restore_latest_table_revision()`.
@@ -1330,6 +1343,12 @@ pub struct RegisterFileError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to stream file metadata from metadata database")]
 pub struct StreamFileMetadataError(#[source] pub metadata_db::Error);
+
+impl crate::retryable::RetryableErrorExt for StreamFileMetadataError {
+    fn is_retryable(&self) -> bool {
+        self.0.is_retryable()
+    }
+}
 
 /// Errors that occur when deleting multiple files from object storage
 ///

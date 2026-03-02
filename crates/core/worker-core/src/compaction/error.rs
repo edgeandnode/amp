@@ -5,13 +5,16 @@ use common::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
     },
     physical_table::SnapshotError,
+    retryable::RetryableErrorExt as _,
 };
 use datafusion::error::DataFusionError;
 use metadata_db::files::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
-use crate::{WriterProperties, parquet_writer::ParquetFileWriterCloseError};
+use crate::{
+    WriterProperties, parquet_writer::ParquetFileWriterCloseError, retryable::RetryableErrorExt,
+};
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
@@ -170,6 +173,21 @@ pub enum CompactorError {
     /// in the metadata database. The file is orphaned and may need manual cleanup.
     #[error("failed to commit file metadata: {0}")]
     MetadataCommit(#[source] metadata_db::Error),
+}
+
+impl RetryableErrorExt for CompactorError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::CanonicalChain(err) => err.is_retryable(),
+            Self::CreateWriter { .. } => true,
+            Self::FileWrite(err) => err.is_retryable(),
+            Self::FileStream(_) => true,
+            Self::Join(_) => false,
+            Self::ManifestUpdate { .. } => true,
+            Self::ManifestDelete { .. } => true,
+            Self::MetadataCommit(_) => true,
+        }
+    }
 }
 
 impl CompactorError {
@@ -391,6 +409,22 @@ impl From<JoinError> for CollectorError {
 impl From<ObjectStoreError> for CollectorError {
     fn from(err: ObjectStoreError) -> Self {
         Self::ObjectStore(err)
+    }
+}
+
+impl RetryableErrorExt for CollectorError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::FileNotFound { .. } => true,
+            Self::ObjectStore(_) => true,
+            Self::FileStream(_) => true,
+            Self::Join(_) => false,
+            Self::FileMetadataDelete { .. } => true,
+            Self::ManifestDelete { .. } => true,
+            Self::Parse { .. } => false,
+            Self::Path(_) => false,
+            Self::MultipleErrors { errors } => errors.iter().all(|e| e.is_retryable()),
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use std::{
     future::Future,
 };
 
-use amp_worker_core::jobs::job_id::JobId;
+use amp_worker_core::{jobs::job_id::JobId, retryable::RetryableErrorExt};
 use tokio::task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet};
 
 use super::job_impl::JobError;
@@ -96,10 +96,10 @@ impl JobSet {
             Ok(Ok(())) => (job_id, Ok(())),
             // The job returned an error
             Ok(Err(err)) => {
-                let join_err = if err.is_fatal() {
-                    JoinError::FailedFatal(Box::new(err))
-                } else {
+                let join_err = if err.is_retryable() {
                     JoinError::FailedRecoverable(Box::new(err))
+                } else {
+                    JoinError::FailedFatal(Box::new(err))
                 };
                 (job_id, Err(join_err))
             }

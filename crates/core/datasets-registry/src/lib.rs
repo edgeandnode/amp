@@ -18,6 +18,7 @@ use crate::{
 };
 pub mod error;
 pub mod manifests;
+pub mod retryable;
 
 /// Datasets registry.
 ///

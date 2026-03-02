@@ -191,6 +191,17 @@ pub enum CreateClientError {
     UnsupportedKind { kind: String },
 }
 
+impl crate::retryable::RetryableErrorExt for CreateClientError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::ConfigParse { .. } => false,
+            Self::ProviderClient { source, .. } => source.is_retryable(),
+            Self::ProviderNotFound { .. } => false,
+            Self::UnsupportedKind { .. } => false,
+        }
+    }
+}
+
 /// Provider-specific client creation errors.
 ///
 /// This enum groups errors from different provider types (EVM RPC, Solana, Firehose)
@@ -217,4 +228,15 @@ pub enum ProviderClientError {
     /// invalid gRPC endpoints, connection issues, or authentication failures.
     #[error("failed to create Firehose client")]
     Firehose(#[source] firehose_datasets::error::ClientError),
+}
+
+impl crate::retryable::RetryableErrorExt for ProviderClientError {
+    fn is_retryable(&self) -> bool {
+        use amp_providers_common::retryable::RetryableErrorExt as _;
+        match self {
+            Self::EvmRpc(_) => true,
+            Self::Solana(err) => err.is_retryable(),
+            Self::Firehose(err) => err.is_retryable(),
+        }
+    }
 }
