@@ -113,9 +113,14 @@ use common::{
     physical_table::{MissingRangesError, PhysicalTable, segments::merge_ranges},
     retryable::RetryableErrorExt as _,
 };
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
-use datasets_raw::client::{
-    BlockStreamError, BlockStreamer, BlockStreamerExt as _, CleanupError, LatestBlockError,
+use datasets_common::{
+    dataset::Dataset as _, hash_reference::HashReference, table_name::TableName,
+};
+use datasets_raw::{
+    client::{
+        BlockStreamError, BlockStreamer, BlockStreamerExt as _, CleanupError, LatestBlockError,
+    },
+    dataset::Dataset as RawDataset,
 };
 use futures::TryStreamExt as _;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, physical_table_revision::LocationId};
@@ -129,22 +134,26 @@ use crate::writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWrit
 #[instrument(skip_all, err)]
 pub async fn dump(
     ctx: Ctx,
-    dataset_reference: &HashReference,
+    dataset_ref: &HashReference,
     max_writers: u16,
     end: EndBlock,
     writer: impl Into<Option<metadata_db::jobs::JobId>>,
     progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
+    let dataset = ctx
+        .dataset_store
+        .get_dataset(dataset_ref)
+        .await
+        .map_err(Error::GetDataset)?;
+    let dataset = dataset
+        .downcast_arc::<RawDataset>()
+        .map_err(|_| Error::NotARawDataset(dataset_ref.clone()))?;
+
     let writer = writer.into();
+    let dataset_reference = dataset.reference();
 
     let dump_start_time = Instant::now();
     let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet.clone());
-
-    let dataset = ctx
-        .dataset_store
-        .get_dataset(dataset_reference)
-        .await
-        .map_err(Error::GetDataset)?;
 
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
@@ -242,11 +251,7 @@ pub async fn dump(
     let finalized_blocks_only = dataset.finalized_blocks_only();
 
     let kind = dataset.kind();
-    let network = dataset
-        .tables()
-        .first()
-        .expect("raw dataset must have tables")
-        .network();
+    let network = dataset.network();
     let mut client = ctx
         .providers_registry
         .create_block_stream_client(kind, network, metrics.as_ref().map(|m| m.meter()))
@@ -424,19 +429,13 @@ pub async fn dump(
 /// when dumping raw datasets to Parquet files.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Failed to get dataset from dataset store
-    ///
-    /// This occurs when retrieving the dataset instance from the dataset store fails.
-    /// The dataset store loads dataset manifests and parses them into Dataset instances.
-    ///
-    /// Common causes:
-    /// - Dataset not found in metadata database
-    /// - Manifest file not accessible in object store
-    /// - Invalid or corrupted manifest content
-    /// - Manifest parsing errors
-    /// - Missing required manifest fields
+    /// Failed to load the dataset from the dataset store.
     #[error("Failed to get dataset")]
     GetDataset(#[source] common::dataset_store::GetDatasetError),
+
+    /// The dataset is not a raw dataset (e.g., it is a derived dataset).
+    #[error("Dataset '{0}' is not a raw dataset")]
+    NotARawDataset(HashReference),
 
     /// Failed to get active physical table
     ///
@@ -550,6 +549,9 @@ impl RetryableErrorExt for Error {
         match self {
             // Delegate to inner error classification
             Self::GetDataset(err) => err.is_retryable(),
+
+            // Wrong dataset type — fatal
+            Self::NotARawDataset(_) => false,
 
             // Transient DB/store lookup failures
             Self::GetActivePhysicalTable(err) => err.is_retryable(),
