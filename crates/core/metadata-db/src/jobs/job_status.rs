@@ -54,14 +54,14 @@ pub enum JobStatus {
     /// A recoverable error occurred while running the job. The job may succeed if retried.
     ///
     /// This is a terminal state.
-    FailedRecoverable,
+    Error,
 
     /// Job has failed with a fatal error
     ///
     /// A fatal error occurred while running the job. The job will not succeed if retried.
     ///
     /// This is a terminal state.
-    FailedFatal,
+    Fatal,
 
     /// Unknown status
     ///
@@ -81,8 +81,8 @@ impl JobStatus {
             Self::Stopped => "STOPPED",
             Self::StopRequested => "STOP_REQUESTED",
             Self::Stopping => "STOPPING",
-            Self::FailedRecoverable => "FAILED_RECOVERABLE",
-            Self::FailedFatal => "FAILED_FATAL",
+            Self::Error => "ERROR",
+            Self::Fatal => "FATAL",
             Self::Unknown => "UNKNOWN",
         }
     }
@@ -98,7 +98,7 @@ impl JobStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Stopped | Self::FailedRecoverable | Self::FailedFatal
+            Self::Completed | Self::Stopped | Self::Error | Self::Fatal
         )
     }
 
@@ -107,12 +107,7 @@ impl JobStatus {
     /// These are the statuses that represent completed job lifecycles
     /// and can be safely deleted from the system.
     pub fn terminal_statuses() -> [JobStatus; 4] {
-        [
-            Self::Completed,
-            Self::Stopped,
-            Self::FailedRecoverable,
-            Self::FailedFatal,
-        ]
+        [Self::Completed, Self::Stopped, Self::Error, Self::Fatal]
     }
 
     /// Returns an array of all non-terminal (active) job statuses
@@ -141,8 +136,8 @@ impl std::str::FromStr for JobStatus {
             s if s.eq_ignore_ascii_case("STOPPED") => Ok(Self::Stopped),
             s if s.eq_ignore_ascii_case("STOP_REQUESTED") => Ok(Self::StopRequested),
             s if s.eq_ignore_ascii_case("STOPPING") => Ok(Self::Stopping),
-            s if s.eq_ignore_ascii_case("FAILED_RECOVERABLE") => Ok(Self::FailedRecoverable),
-            s if s.eq_ignore_ascii_case("FAILED_FATAL") => Ok(Self::FailedFatal),
+            s if s.eq_ignore_ascii_case("ERROR") => Ok(Self::Error),
+            s if s.eq_ignore_ascii_case("FATAL") => Ok(Self::Fatal),
             _ => Ok(Self::Unknown), // Default to Unknown for Infallible
         }
     }
