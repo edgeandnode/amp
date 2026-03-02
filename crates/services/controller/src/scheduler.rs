@@ -186,8 +186,8 @@ impl Scheduler {
                 }) => match actual.into() {
                     JobStatus::Stopped
                     | JobStatus::Completed
-                    | JobStatus::FailedRecoverable
-                    | JobStatus::FailedFatal => StopJobError::JobAlreadyTerminated {
+                    | JobStatus::Error
+                    | JobStatus::Fatal => StopJobError::JobAlreadyTerminated {
                         status: actual.into(),
                     },
                     _ => StopJobError::StateConflict {
@@ -397,10 +397,7 @@ impl SchedulerJobs for Scheduler {
     async fn delete_failed_jobs(&self) -> Result<usize, DeleteJobsByStatusError> {
         metadata_db::jobs::delete_all_by_status(
             &self.metadata_db,
-            [
-                JobStatus::FailedRecoverable.into(),
-                JobStatus::FailedFatal.into(),
-            ],
+            [JobStatus::Error.into(), JobStatus::Fatal.into()],
         )
         .await
         .map_err(DeleteJobsByStatusError)

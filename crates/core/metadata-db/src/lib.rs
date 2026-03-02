@@ -10,7 +10,7 @@ mod db;
 mod error;
 pub mod files;
 pub mod gc;
-pub mod job_attempts;
+pub mod job_events;
 pub mod jobs;
 pub mod manifests;
 pub mod notification_multiplexer;
