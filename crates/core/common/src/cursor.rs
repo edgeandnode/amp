@@ -58,6 +58,16 @@ impl Cursor {
         Self(cursors)
     }
 
+    /// Returns the single network cursor.
+    ///
+    /// # Panics
+    /// Panics if the cursor does not have exactly one network entry. This is safe
+    /// because we guard against multi-network queries in `StreamingQuery::spawn()`.
+    pub fn single_cursor(&self) -> &NetworkCursor {
+        assert_eq!(self.0.len(), 1);
+        self.0.values().next().unwrap()
+    }
+
     /// Extract the single-network cursor for a specific network.
     pub fn to_single_network(
         self,

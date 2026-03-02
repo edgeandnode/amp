@@ -886,7 +886,7 @@ async fn dump_sql_query(
         let message = message.map_err(DumpSqlQueryError::StreamingQuery)?;
         match message {
             QueryMessage::MicrobatchStart {
-                range: _,
+                ranges: _,
                 is_reorg: _,
             } => (),
             QueryMessage::Data(batch) => {
@@ -905,7 +905,11 @@ async fn dump_sql_query(
             QueryMessage::Watermark(_) => {
                 // TODO: Check if file should be closed early
             }
-            QueryMessage::MicrobatchEnd(range) => {
+            QueryMessage::MicrobatchEnd(ranges) => {
+                // For single-network queries, extract the single range.
+                // TODO: For multi-network, handle multiple ranges.
+                assert_eq!(ranges.len(), 1, "multi-network not yet supported");
+                let range = ranges.into_iter().next().unwrap();
                 let microbatch_end = range.end();
                 let block_timestamp = range.timestamp();
                 // Close current file and commit metadata

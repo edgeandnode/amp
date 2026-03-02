@@ -808,9 +808,9 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
                     break;
                 }
                 Ok(message) => match message {
-                    QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
+                    QueryMessage::MicrobatchStart { ranges: batch_ranges, is_reorg: _ } => {
                         assert!(ranges.is_empty());
-                        ranges.push(range);
+                        ranges.extend(batch_ranges);
 
                         if first_message {
                             first_message = false;

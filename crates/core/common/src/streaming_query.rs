@@ -39,7 +39,7 @@ use crate::{
         physical::{Catalog, CatalogTable},
     },
     context::{exec::ExecContext, plan::PlanContext},
-    cursor::{Cursor, CursorNetworkNotFoundError, NetworkCursor, Watermark},
+    cursor::{Cursor, NetworkCursor, Watermark},
     dataset_store::{DatasetStore, ResolveRevisionError},
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
@@ -134,23 +134,6 @@ pub enum SpawnError {
     #[error("failed to resolve blocks table for network")]
     ResolveBlocksTable(#[source] ResolveBlocksTableError),
 
-    /// Failed to convert cursor to target network
-    ///
-    /// When resuming a streaming query from a previous cursor, the cursor
-    /// must be converted to the target network's format. This error occurs when
-    /// the cursor doesn't contain an entry for the expected network.
-    ///
-    /// Common causes:
-    /// - Cursor from a different network than current query
-    /// - Corrupted or invalid cursor state
-    /// - Network name mismatch (e.g., "ethereum" vs "mainnet")
-    /// - Resume state out of sync with current catalog
-    ///
-    /// This prevents the query from resuming at the correct position and may
-    /// require starting from scratch or using a different resume point.
-    #[error("failed to convert cursor")]
-    ConvertCursor(#[source] CursorNetworkNotFoundError),
-
     /// Streaming query spans multiple networks
     ///
     /// Multi-network streaming queries are not yet supported. This error is
@@ -217,11 +200,13 @@ impl TableUpdates {
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
     MicrobatchStart {
-        range: BlockRange,
+        /// Block ranges for this microbatch, one per network (sorted alphabetically by network ID).
+        ranges: Vec<BlockRange>,
         is_reorg: bool,
     },
     Data(RecordBatch),
-    MicrobatchEnd(BlockRange),
+    /// End of a microbatch with the block ranges that were processed.
+    MicrobatchEnd(Vec<BlockRange>),
 
     /// Watermark indicating the query has emitted all outputs up to the given block number.
     /// This represents a monotonically increasing checkpoint in the stream.
@@ -229,8 +214,21 @@ pub enum QueryMessage {
 }
 
 struct MicrobatchRange {
-    range: BlockRange,
+    /// Block ranges for this microbatch, one per network (sorted alphabetically by network ID).
+    ranges: Vec<BlockRange>,
     direction: StreamDirection,
+}
+
+impl MicrobatchRange {
+    /// Returns the single block range for single-network queries.
+    ///
+    /// # Panics
+    /// Panics if there is not exactly one range. This is safe because we guard
+    /// against multi-network queries in `spawn()`.
+    fn single_range(&self) -> &BlockRange {
+        assert_eq!(self.ranges.len(), 1);
+        &self.ranges[0]
+    }
 }
 
 struct SegmentStart {
@@ -328,9 +326,9 @@ pub struct StreamingQuery {
     network: NetworkId,
     /// `blocks` tables for all networks in the catalog, keyed by network ID.
     blocks_tables: BTreeMap<NetworkId, CatalogTable>,
-    /// The single-network cursor for the previously processed range. This may be provided by the
-    /// consumer (as a multi-network cursor) and converted to this single-network cursor.
-    prev_cursor: Option<NetworkCursor>,
+    /// Cursor for the previously processed ranges, one entry per network.
+    /// Used for stream resumption and reorg detection.
+    prev_cursor: Option<Cursor>,
 }
 
 impl StreamingQuery {
@@ -434,10 +432,6 @@ impl StreamingQuery {
         };
 
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
-        let prev_cursor = cursor
-            .map(|c| c.to_single_network(&network))
-            .transpose()
-            .map_err(SpawnError::ConvertCursor)?;
         let streaming_query = Self {
             exec_env,
             catalog,
@@ -445,7 +439,7 @@ impl StreamingQuery {
             tx,
             start_block,
             end_block,
-            prev_cursor,
+            prev_cursor: cursor,
             table_updates,
             microbatch_max_interval,
             keep_alive_interval,
@@ -477,7 +471,7 @@ impl StreamingQuery {
                 .map_err(StreamingQueryExecutionError::CreateExecContext)?;
 
             // Get the next execution range
-            let Some(MicrobatchRange { range, direction }) = self
+            let Some(microbatch) = self
                 .next_microbatch_range(&ctx)
                 .await
                 .map_err(StreamingQueryExecutionError::NextMicrobatchRange)?
@@ -485,6 +479,9 @@ impl StreamingQuery {
                 continue;
             };
 
+            // For single-network queries, use the single range for incrementalization.
+            // TODO: For multi-network, compute watermark range instead.
+            let range = microbatch.single_range();
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             let plan = {
@@ -522,8 +519,8 @@ impl StreamingQuery {
             let _ = self
                 .tx
                 .send(QueryMessage::MicrobatchStart {
-                    range: range.clone(),
-                    is_reorg: direction.is_reorg(),
+                    ranges: microbatch.ranges.clone(),
+                    is_reorg: microbatch.direction.is_reorg(),
                 })
                 .await;
 
@@ -539,14 +536,14 @@ impl StreamingQuery {
             // Send end message for this microbatch
             let _ = self
                 .tx
-                .send(QueryMessage::MicrobatchEnd(range.clone()))
+                .send(QueryMessage::MicrobatchEnd(microbatch.ranges.clone()))
                 .await;
 
             if Some(range.end()) == self.end_block {
                 // If we reached the end block, we are done
                 return Ok(());
             }
-            self.prev_cursor = Some((&range).into());
+            self.prev_cursor = Some(Cursor::from_ranges(&microbatch.ranges));
         }
     }
 
@@ -614,13 +611,13 @@ impl StreamingQuery {
             return Ok(None);
         };
         Ok(Some(MicrobatchRange {
-            range: BlockRange {
+            ranges: vec![BlockRange {
                 numbers: start.number..=end.number,
                 network: self.network.clone(),
                 hash: end.hash,
                 prev_hash: start.prev_hash,
                 timestamp: end.timestamp,
-            },
+            }],
             direction,
         }))
     }
@@ -640,26 +637,29 @@ impl StreamingQuery {
                 Ok(block.map(|b| StreamDirection::ForwardFrom(b.into())))
             }
             // continue stream
-            Some(prev)
+            Some(prev_cursor) => {
+                // For single-network queries, extract the single cursor.
+                // TODO: For multi-network, handle per-network cursor extraction.
+                let prev = prev_cursor.single_cursor();
                 if self
                     .blocks_table_contains(ctx, prev)
                     .await
                     .map_err(NextMicrobatchStartError::BlocksTableContains)?
-                    .is_some() =>
-            {
-                let segment_start = SegmentStart {
-                    number: prev.number + 1,
-                    prev_hash: prev.hash,
-                };
-                Ok(Some(StreamDirection::ForwardFrom(segment_start)))
-            }
-            // rewind stream due to reorg
-            Some(prev) => {
-                let block = self
-                    .reorg_base(ctx, prev)
-                    .await
-                    .map_err(NextMicrobatchStartError::ReorgBase)?;
-                Ok(block.map(|b| StreamDirection::ReorgFrom(b.into())))
+                    .is_some()
+                {
+                    let segment_start = SegmentStart {
+                        number: prev.number + 1,
+                        prev_hash: prev.hash,
+                    };
+                    Ok(Some(StreamDirection::ForwardFrom(segment_start)))
+                } else {
+                    // rewind stream due to reorg
+                    let block = self
+                        .reorg_base(ctx, prev)
+                        .await
+                        .map_err(NextMicrobatchStartError::ReorgBase)?;
+                    Ok(block.map(|b| StreamDirection::ReorgFrom(b.into())))
+                }
             }
         }
     }
