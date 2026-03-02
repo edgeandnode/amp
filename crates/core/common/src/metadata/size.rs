@@ -1100,6 +1100,7 @@ mod test {
                 created_at,
                 filename: FileName::new(0, 0),
                 ranges: vec![],
+                watermark: None,
             };
 
             key_value_metadata.push(KeyValue {
