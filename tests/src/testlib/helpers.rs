@@ -31,9 +31,9 @@ use datasets_common::reference::Reference;
 /// # Behavior
 ///
 /// - **Finalized jobs** (`is_continuous = false`): Waits for one of the these terminal
-///   states: COMPLETED, STOPPED, or FAILED_FATAL. COMPLETED and STOPPED are treated as
-///   successful completions, whereas FAILED_FATAL is treated as a failure and causes
-///   this function to return an error. FAILED_RECOVERABLE is not treated as a terminal
+///   states: COMPLETED, STOPPED, or FATAL. COMPLETED and STOPPED are treated as
+///   successful completions, whereas FATAL is treated as a failure and causes
+///   this function to return an error. ERROR is not treated as a terminal
 ///   state since the worker may automatically retry the job.
 /// - **Continuous jobs** (`is_continuous = true`): Returns as soon as the job
 ///   reaches RUNNING state, since continuous jobs never complete
@@ -76,7 +76,7 @@ pub async fn wait_for_job_completion(
         match job_info.status.as_str() {
             "RUNNING" if is_continuous => return Ok(job_info),
             "COMPLETED" | "STOPPED" => return Ok(job_info),
-            "FAILED_FATAL" => return Err(anyhow!("Job {} failed (fatal)", job_id)),
+            "FATAL" => return Err(anyhow!("Job {} failed (fatal)", job_id)),
             _ => {
                 if start.elapsed() > timeout {
                     return Err(anyhow!(

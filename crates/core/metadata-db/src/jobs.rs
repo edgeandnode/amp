@@ -19,7 +19,7 @@ pub use self::{
 use crate::{
     db::Executor,
     error::Error,
-    job_attempts,
+    job_events,
     manifests::ManifestHash,
     workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
@@ -285,7 +285,7 @@ where
         .map_err(Error::JobStatusUpdate)
 }
 
-/// Conditionally marks a job as `FAILED_RECOVERABLE` from either `RUNNING` or `SCHEDULED` states
+/// Conditionally marks a job as `ERROR` from either `RUNNING` or `SCHEDULED` states
 ///
 /// This is used for recoverable failures where retry attempts can be made.
 ///
@@ -302,13 +302,13 @@ where
         exe,
         id.into(),
         &[JobStatus::Scheduled, JobStatus::Running],
-        JobStatus::FailedRecoverable,
+        JobStatus::Error,
     )
     .await
     .map_err(Error::JobStatusUpdate)
 }
 
-/// Conditionally marks a job as `FAILED_FATAL` from either `RUNNING` or `SCHEDULED` states
+/// Conditionally marks a job as `FATAL` from either `RUNNING` or `SCHEDULED` states
 ///
 /// This is used for unrecoverable failures where retry attempts should not be made.
 ///
@@ -325,7 +325,7 @@ where
         exe,
         id.into(),
         &[JobStatus::Scheduled, JobStatus::Running],
-        JobStatus::FailedFatal,
+        JobStatus::Fatal,
     )
     .await
     .map_err(Error::JobStatusUpdate)
@@ -371,7 +371,7 @@ where
 /// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
 ///
 /// The backoff is calculated as 2^next_retry_index seconds (unbounded exponential growth).
-/// The next_retry_index is calculated from the job_attempts table.
+/// The next_retry_index is derived from SCHEDULED events in the job_events table.
 #[tracing::instrument(skip(exe), err)]
 pub async fn get_failed_jobs_ready_for_retry<'c, E>(exe: E) -> Result<Vec<JobWithRetryInfo>, Error>
 where
@@ -408,12 +408,12 @@ pub async fn reschedule(
     let new_node_id = new_node_id.into();
 
     // Update job status to SCHEDULED and assign to worker
-    sql::reschedule(&mut *tx, job_id, new_node_id)
+    sql::reschedule(&mut *tx, job_id, &new_node_id)
         .await
         .map_err(Error::Database)?;
 
-    // Insert job attempt record
-    job_attempts::sql::insert_attempt(&mut *tx, job_id, retry_index)
+    // Insert job event record
+    job_events::sql::insert(&mut *tx, job_id, &new_node_id, JobStatus::Scheduled)
         .await
         .map_err(Error::Database)?;
 

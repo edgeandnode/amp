@@ -15,7 +15,7 @@ use crate::{
 /// Job with calculated retry information
 ///
 /// This struct extends the base Job with retry_index information calculated
-/// from the job_attempts table. Used by retry scheduling logic.
+/// from SCHEDULED events in job_events. Used by retry scheduling logic.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct JobWithRetryInfo {
     /// Base job information
@@ -24,8 +24,8 @@ pub struct JobWithRetryInfo {
 
     /// Next retry index to use when scheduling this job
     ///
-    /// Calculated as MAX(retry_index) + 1 from job_attempts table.
-    /// Will be 0 if no attempts exist yet.
+    /// Calculated as COUNT of SCHEDULED events from job_events table.
+    /// Will be 0 if no events exist yet.
     pub next_retry_index: i32,
 }
 
@@ -408,14 +408,14 @@ where
     }
 }
 
-/// Get failed (recoverable) jobs that are ready for retry
+/// Get failed jobs that are ready for retry
 ///
 /// Returns failed jobs where enough time has passed since last failure based on
 /// exponential backoff. Jobs retry indefinitely with exponentially increasing delays.
 ///
-/// The backoff is calculated as 2^(MAX(retry_index)+1) seconds, where retry_index
-/// comes from the job_attempts table. Jobs without attempts are treated as having
-/// retry_index 0 (initial attempt).
+/// The backoff is calculated as 2^(COUNT(SCHEDULED events)) seconds, where the
+/// retry count is derived from SCHEDULED events in job_events. Jobs without events
+/// are treated as having retry count 0 (initial attempt).
 pub async fn get_failed_jobs_ready_for_retry<'c, E>(
     exe: E,
 ) -> Result<Vec<JobWithRetryInfo>, sqlx::Error>
@@ -430,17 +430,21 @@ where
             j.descriptor,
             j.created_at,
             j.updated_at,
-            COALESCE(MAX(ja.retry_index), -1) + 1 as next_retry_index
+            COUNT(je.id)::int4 AS next_retry_index
         FROM jobs j
-        LEFT JOIN job_attempts ja ON j.id = ja.job_id
-        WHERE j.status = 'FAILED_RECOVERABLE'
+        LEFT JOIN job_events je ON j.id = je.job_id AND je.event_type = $1
+        WHERE j.status = $2
         GROUP BY j.id, j.node_id, j.status, j.descriptor, j.created_at, j.updated_at
-        HAVING j.updated_at + INTERVAL '1 second' * POW(2, COALESCE(MAX(ja.retry_index), -1) + 1)::bigint
+        HAVING j.updated_at + INTERVAL '1 second' * POW(2, COUNT(je.id))::bigint
             <= timezone('UTC', now())
         ORDER BY j.id ASC
     "#};
 
-    sqlx::query_as(query).fetch_all(exe).await
+    sqlx::query_as(query)
+        .bind(JobStatus::Scheduled)
+        .bind(JobStatus::Error)
+        .fetch_all(exe)
+        .await
 }
 
 /// Reschedule a failed job for retry
@@ -450,13 +454,13 @@ where
 /// 2. Assigns the job to the specified worker node
 /// 3. Updates the updated_at timestamp
 ///
-/// Note: Retry tracking is handled via the job_attempts table.
+/// Note: Retry tracking is handled via the job_events table.
 ///
 /// Returns an error if the job doesn't exist or if the database operation fails.
 pub async fn reschedule<'c, E>(
     exe: E,
     job_id: JobId,
-    new_node_id: WorkerNodeId<'_>,
+    new_node_id: &WorkerNodeId<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -464,7 +468,7 @@ where
     let query = indoc::indoc! {r#"
         UPDATE jobs
         SET
-            status = 'SCHEDULED',
+            status = $3,
             node_id = $2,
             updated_at = timezone('UTC', now())
         WHERE id = $1
@@ -473,6 +477,7 @@ where
     sqlx::query(query)
         .bind(job_id)
         .bind(new_node_id)
+        .bind(JobStatus::Scheduled)
         .execute(exe)
         .await?;
 

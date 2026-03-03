@@ -52,14 +52,14 @@ pub enum JobStatus {
     /// A recoverable error occurred while running the job. The job may succeed if retried.
     ///
     /// This is a terminal state.
-    FailedRecoverable,
+    Error,
 
     /// Job has failed with a fatal error
     ///
     /// A fatal error occurred while running the job. The job will not succeed if retried.
     ///
     /// This is a terminal state.
-    FailedFatal,
+    Fatal,
 
     /// Unknown status
     ///
@@ -80,8 +80,8 @@ impl JobStatus {
             Self::Stopped => "STOPPED",
             Self::StopRequested => "STOP_REQUESTED",
             Self::Stopping => "STOPPING",
-            Self::FailedRecoverable => "FAILED_RECOVERABLE",
-            Self::FailedFatal => "FAILED_FATAL",
+            Self::Error => "ERROR",
+            Self::Fatal => "FATAL",
             Self::Unknown => "UNKNOWN",
         }
     }
@@ -98,7 +98,7 @@ impl JobStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Stopped | Self::FailedRecoverable | Self::FailedFatal
+            Self::Completed | Self::Stopped | Self::Error | Self::Fatal
         )
     }
 
@@ -108,12 +108,7 @@ impl JobStatus {
     /// and can be safely deleted from the system.
     #[must_use]
     pub fn terminal_statuses() -> [JobStatus; 4] {
-        [
-            Self::Completed,
-            Self::Stopped,
-            Self::FailedRecoverable,
-            Self::FailedFatal,
-        ]
+        [Self::Completed, Self::Stopped, Self::Error, Self::Fatal]
     }
 }
 
@@ -126,8 +121,8 @@ impl From<metadata_db::jobs::JobStatus> for JobStatus {
             metadata_db::jobs::JobStatus::Stopped => Self::Stopped,
             metadata_db::jobs::JobStatus::StopRequested => Self::StopRequested,
             metadata_db::jobs::JobStatus::Stopping => Self::Stopping,
-            metadata_db::jobs::JobStatus::FailedRecoverable => Self::FailedRecoverable,
-            metadata_db::jobs::JobStatus::FailedFatal => Self::FailedFatal,
+            metadata_db::jobs::JobStatus::Error => Self::Error,
+            metadata_db::jobs::JobStatus::Fatal => Self::Fatal,
             metadata_db::jobs::JobStatus::Unknown => Self::Unknown,
         }
     }
@@ -142,8 +137,8 @@ impl From<JobStatus> for metadata_db::jobs::JobStatus {
             JobStatus::Stopped => Self::Stopped,
             JobStatus::StopRequested => Self::StopRequested,
             JobStatus::Stopping => Self::Stopping,
-            JobStatus::FailedRecoverable => Self::FailedRecoverable,
-            JobStatus::FailedFatal => Self::FailedFatal,
+            JobStatus::Error => Self::Error,
+            JobStatus::Fatal => Self::Fatal,
             JobStatus::Unknown => Self::Unknown,
         }
     }
@@ -160,8 +155,8 @@ impl std::str::FromStr for JobStatus {
             s if s.eq_ignore_ascii_case("STOPPED") => Ok(Self::Stopped),
             s if s.eq_ignore_ascii_case("STOP_REQUESTED") => Ok(Self::StopRequested),
             s if s.eq_ignore_ascii_case("STOPPING") => Ok(Self::Stopping),
-            s if s.eq_ignore_ascii_case("FAILED_RECOVERABLE") => Ok(Self::FailedRecoverable),
-            s if s.eq_ignore_ascii_case("FAILED_FATAL") => Ok(Self::FailedFatal),
+            s if s.eq_ignore_ascii_case("ERROR") => Ok(Self::Error),
+            s if s.eq_ignore_ascii_case("FATAL") => Ok(Self::Fatal),
             _ => Ok(Self::Unknown),
         }
     }

@@ -4,7 +4,7 @@ use pgtemp::PgTempDB;
 
 use crate::{
     config::DEFAULT_POOL_MAX_CONNECTIONS,
-    job_attempts,
+    job_events,
     jobs::{self, JobDescriptorRaw, JobStatus},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
@@ -163,14 +163,9 @@ async fn get_jobs_for_node_filters_by_status() {
         .await
         .expect("Failed to register completed job");
 
-    jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to register failed (recoverable) job");
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Error)
+        .await
+        .expect("Failed to register failed (recoverable) job");
 
     let job_id_stop_requested = jobs::sql::insert(
         &conn,
@@ -575,14 +570,9 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     let job_id1 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Completed)
         .await
         .expect("Failed to insert job 1");
-    let job_id2 = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to insert job 2");
+    let job_id2 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Error)
+        .await
+        .expect("Failed to insert job 2");
     let job_id3 = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Stopped)
         .await
         .expect("Failed to insert job 3");
@@ -593,11 +583,7 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     //* When
     let deleted_count = jobs::sql::delete_by_status(
         &conn,
-        [
-            JobStatus::Completed,
-            JobStatus::FailedRecoverable,
-            JobStatus::Stopped,
-        ],
+        [JobStatus::Completed, JobStatus::Error, JobStatus::Stopped],
     )
     .await
     .expect("Failed to delete jobs");
@@ -651,14 +637,9 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
-    let job_id = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Error)
+        .await
+        .expect("Failed to insert job");
 
     // Wait longer than initial backoff (1 second)
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -692,14 +673,9 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
-    jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to insert job");
+    jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Error)
+        .await
+        .expect("Failed to insert job");
 
     //* When (immediately check, before backoff expires)
     let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
@@ -728,27 +704,18 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
-    let job_id = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Error)
+        .await
+        .expect("Failed to insert job");
 
-    // Insert multiple attempts
-    job_attempts::insert_attempt(&conn, job_id, 0)
-        .await
-        .expect("Failed to insert attempt 0");
-    job_attempts::insert_attempt(&conn, job_id, 1)
-        .await
-        .expect("Failed to insert attempt 1");
-    job_attempts::insert_attempt(&conn, job_id, 2)
-        .await
-        .expect("Failed to insert attempt 2");
+    // Insert 3 SCHEDULED events (simulating initial schedule + 2 retries)
+    for _ in 0..3 {
+        job_events::sql::insert(&conn, job_id, &worker_id, JobStatus::Scheduled)
+            .await
+            .expect("Failed to insert SCHEDULED event");
+    }
 
-    // Wait longer than backoff for retry_index 2 (2^3 = 8 seconds)
+    // Wait longer than backoff for 3 SCHEDULED events (2^3 = 8 seconds)
     tokio::time::sleep(tokio::time::Duration::from_secs(9)).await;
 
     //* When
@@ -759,7 +726,7 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     //* Then
     assert_eq!(ready_jobs.len(), 1);
     assert_eq!(ready_jobs[0].job.id, job_id);
-    assert_eq!(ready_jobs[0].next_retry_index, 3); // MAX(2) + 1
+    assert_eq!(ready_jobs[0].next_retry_index, 3); // COUNT of SCHEDULED events
 }
 
 #[tokio::test]
@@ -779,22 +746,10 @@ async fn get_failed_jobs_handles_missing_attempts() {
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    // Create a failed (recoverable) job WITHOUT any attempts (edge case)
-    let job_id = jobs::sql::insert(
-        &conn,
-        worker_id.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to insert job");
-
-    // Manually delete any backfilled attempts to simulate edge case
-    sqlx::query("DELETE FROM job_attempts WHERE job_id = $1")
-        .bind(job_id)
-        .execute(&conn)
+    // Create a failed (recoverable) job WITHOUT any SCHEDULED events (edge case)
+    let job_id = jobs::sql::insert(&conn, worker_id.clone(), &job_desc, JobStatus::Error)
         .await
-        .expect("Failed to delete attempts");
+        .expect("Failed to insert job");
 
     // Wait longer than initial backoff (1 second for retry_index 0)
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -807,7 +762,7 @@ async fn get_failed_jobs_handles_missing_attempts() {
     //* Then
     assert_eq!(ready_jobs.len(), 1);
     assert_eq!(ready_jobs[0].job.id, job_id);
-    assert_eq!(ready_jobs[0].next_retry_index, 0); // COALESCE handles missing attempts
+    assert_eq!(ready_jobs[0].next_retry_index, 0); // COUNT returns 0 when no SCHEDULED events
 }
 
 #[tokio::test]
@@ -831,17 +786,12 @@ async fn reschedule_updates_status_and_worker() {
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    let job_id = jobs::sql::insert(
-        &conn,
-        worker_id1.clone(),
-        &job_desc,
-        JobStatus::FailedRecoverable,
-    )
-    .await
-    .expect("Failed to insert job");
+    let job_id = jobs::sql::insert(&conn, worker_id1.clone(), &job_desc, JobStatus::Error)
+        .await
+        .expect("Failed to insert job");
 
     //* When
-    jobs::sql::reschedule(&conn, job_id, worker_id2.clone())
+    jobs::sql::reschedule(&conn, job_id, &worker_id2)
         .await
         .expect("Failed to reschedule job");
 

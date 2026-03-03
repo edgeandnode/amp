@@ -334,7 +334,7 @@ impl Worker {
 
                 // Mark the job as COMPLETED (retry on failure)
                 self.queue
-                    .mark_job_completed(job_id)
+                    .mark_job_completed(job_id, &self.node_id)
                     .await
                     .map_err(|error| JobResultError::MarkCompletedFailed {
                         job_id,
@@ -349,9 +349,9 @@ impl Worker {
                     "job failed with recoverable error"
                 );
 
-                // Mark the job as FAILED_RECOVERABLE (retry on failure)
+                // Mark the job as ERROR (retry on failure)
                 self.queue
-                    .mark_job_failed(job_id, /* fatal */ false)
+                    .mark_job_failed(job_id, /* fatal */ false, &self.node_id)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
@@ -366,9 +366,9 @@ impl Worker {
                     "job failed with fatal error"
                 );
 
-                // Mark the job as FAILED_FATAL (retry on failure)
+                // Mark the job as FATAL (retry on failure)
                 self.queue
-                    .mark_job_failed(job_id, /* fatal */ true)
+                    .mark_job_failed(job_id, /* fatal */ true, &self.node_id)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
@@ -379,19 +379,26 @@ impl Worker {
                 tracing::info!(node_id=%self.node_id, %job_id, "job cancelled");
 
                 // Mark the job as STOPPED (retry on failure)
-                self.queue.mark_job_stopped(job_id).await.map_err(|error| {
-                    JobResultError::MarkStoppedFailed {
+                self.queue
+                    .mark_job_stopped(job_id, &self.node_id)
+                    .await
+                    .map_err(|error| JobResultError::MarkStoppedFailed {
                         job_id,
                         source: error,
-                    }
-                })?;
+                    })?;
             }
             Err(JobSetJoinError::Panicked(err)) => {
-                tracing::error!(node_id=%self.node_id, %job_id, error=%err, error_source = logging::error_source(&err), "job panicked");
+                tracing::error!(
+                    node_id = %self.node_id,
+                    %job_id,
+                    error = %err,
+                    error_source = logging::error_source(&err),
+                    "job panicked"
+                );
 
-                // Mark the job as FAILED_FATAL (retry on failure)
+                // Mark the job as FATAL (retry on failure)
                 self.queue
-                    .mark_job_failed(job_id, /* fatal */ true)
+                    .mark_job_failed(job_id, /* fatal */ true, &self.node_id)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
@@ -418,7 +425,12 @@ impl Worker {
             Err(err) => {
                 // If any error occurs while fetching active jobs, we consider the worker to be
                 // in a degraded state and we skip the reconciliation
-                tracing::warn!(node_id=%self.node_id, error=%err, error_source = logging::error_source(&err), "failed to fetch active jobs");
+                tracing::warn!(
+                    node_id = %self.node_id,
+                    error = %err,
+                    error_source = logging::error_source(&err),
+                    "failed to fetch active jobs"
+                );
                 return Ok(());
             }
         };
@@ -465,7 +477,7 @@ impl Worker {
         // Mark the job as RUNNING (retry on failure)
         if job.status != JobStatus::Running {
             self.queue
-                .mark_job_running(job.id)
+                .mark_job_running(job.id, &self.node_id)
                 .await
                 .map_err(SpawnJobError::StatusUpdateFailed)?;
         }
@@ -500,7 +512,7 @@ impl Worker {
 
         // Mark the job as STOPPING (retry on failure)
         self.queue
-            .mark_job_stopping(job_id)
+            .mark_job_stopping(job_id, &self.node_id)
             .await
             .map_err(AbortJobError)?;
 
