@@ -15,8 +15,8 @@ This hybrid approach ensures efficient historical backfills while maintaining lo
 
 ### Components
 
-- **`Client`**: Main client implementing the `BlockStreamer` trait
-- **`SolanaRpcClient`**: Handles HTTP requests to the Solana RPC endpoint, with optional rate limiting and metrics
+- **`Client`**: Main client implementing the `BlockStreamer` trait. Supports a primary and optional fallback RPC client for filling truncated log messages.
+- **`SolanaRpcClient`**: Handles HTTP requests to a Solana RPC endpoint, with optional rate limiting and metrics
 - **`of1_client`**: Manages Old Faithful CAR file downloads with resume support, retry logic, and lifecycle tracking
 
 ### Data Flow
@@ -24,7 +24,9 @@ This hybrid approach ensures efficient historical backfills while maintaining lo
 ```
 Old Faithful Archive (CAR files) ──┐
                                    ├──> Client ──> Block Processing ──> Parquet Tables
-Solana JSON-RPC ───────────────────┘
+Main Solana JSON-RPC ──────────────┘
+                                         │
+Fallback Solana JSON-RPC ────────────────┘ (fills truncated log messages)
 ```
 
 ### Archive Usage Modes
@@ -58,17 +60,29 @@ This extractor treats Solana slots as block numbers for compatibility with the `
 ```toml
 kind = "solana"
 network = "mainnet"
-rpc_provider_url = "https://api.mainnet-beta.solana.com"
 of1_car_directory = "path/to/local/car/files"
+
+[main_rpc_provider_info]
+url = "https://api.mainnet-beta.solana.com"
+# auth_header = "X-Api-Key"   # Optional: custom auth header name
+# auth_token = "your-token"   # Optional: auth token (Bearer by default)
+
+# [fallback_rpc_provider_info]   # Optional: used to fill truncated log messages
+# url = "https://another-rpc.example.com"
+# auth_token = "your-token"
 ```
 
 **Configuration Options**:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `rpc_provider_url` | Yes | Solana RPC HTTP endpoint |
+| `main_rpc_provider_info` | Yes | Primary RPC endpoint connection info (table) |
+| `main_rpc_provider_info.url` | Yes | Solana RPC HTTP endpoint URL |
+| `main_rpc_provider_info.auth_header` | No | Custom header name for auth (default: `Authorization: Bearer`) |
+| `main_rpc_provider_info.auth_token` | No | Authentication token for RPC requests |
+| `fallback_rpc_provider_info` | No | Fallback RPC endpoint for filling truncated log messages (same fields as `main_rpc_provider_info`) |
 | `of1_car_directory` | Yes | Local directory for caching Old Faithful CAR files |
-| `max_rpc_calls_per_second` | No | Rate limit for RPC calls |
+| `max_rpc_calls_per_second` | No | Rate limit for RPC calls (applies to main RPC only) |
 | `keep_of1_car_files` | No | Whether to retain downloaded CAR files after use (default: `false`) |
 | `use_archive` | No | Archive usage mode: `always` (default), `never`, or `auto` |
 | `start_block` | No | Starting slot number for extraction (set in the manifest) |
