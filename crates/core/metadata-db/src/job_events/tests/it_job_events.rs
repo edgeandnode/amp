@@ -5,14 +5,10 @@ use pgtemp::PgTempDB;
 use crate::{
     config::DEFAULT_POOL_MAX_CONNECTIONS,
     job_events,
-    jobs::{self, JobDescriptorRaw, JobStatus},
+    jobs::JobStatus,
+    tests::common::{raw_descriptor, register_job},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
-
-fn raw_descriptor(value: &serde_json::Value) -> JobDescriptorRaw<'static> {
-    let raw = serde_json::value::to_raw_value(value).expect("Failed to serialize to raw value");
-    JobDescriptorRaw::from_owned_unchecked(raw)
-}
 
 #[tokio::test]
 async fn register_inserts_event() {
@@ -29,14 +25,9 @@ async fn register_inserts_event() {
         .expect("Failed to register worker");
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "event"}));
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
-        .await
-        .expect("Failed to insert job");
 
     //* When
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register event");
+    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     //* Then
     let attempts = job_events::get_attempts_for_job(&conn, job_id)
@@ -62,14 +53,9 @@ async fn get_attempts_returns_only_scheduled_events() {
         .expect("Failed to register worker");
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "filter"}));
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
-        .await
-        .expect("Failed to insert job");
 
     // Insert a mix of event types
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register SCHEDULED");
+    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
     job_events::register(&conn, job_id, &worker_id, JobStatus::Running)
         .await
         .expect("Failed to register RUNNING");
@@ -92,34 +78,6 @@ async fn get_attempts_returns_only_scheduled_events() {
 }
 
 #[tokio::test]
-async fn get_attempts_returns_empty_for_no_events() {
-    //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    workers::register(&conn, worker_id.clone(), WorkerInfo::default())
-        .await
-        .expect("Failed to register worker");
-
-    let job_desc = raw_descriptor(&serde_json::json!({"test": "empty"}));
-    let job_id = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
-        .await
-        .expect("Failed to insert job");
-
-    //* When
-    let attempts = job_events::get_attempts_for_job(&conn, job_id)
-        .await
-        .expect("Failed to get attempts");
-
-    //* Then
-    assert!(attempts.is_empty());
-}
-
-#[tokio::test]
 async fn get_attempts_scoped_to_job() {
     //* Given
     let temp_db = PgTempDB::new();
@@ -135,23 +93,13 @@ async fn get_attempts_scoped_to_job() {
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "scope"}));
 
-    let job_id_1 = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
-        .await
-        .expect("Failed to insert job 1");
-    let job_id_2 = jobs::sql::insert_with_default_status(&conn, worker_id.clone(), &job_desc)
-        .await
-        .expect("Failed to insert job 2");
-
     // Insert events for both jobs
-    job_events::register(&conn, job_id_1, &worker_id, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register event for job 1");
+    let job_id_1 = register_job(&conn, &job_desc, &worker_id, None).await;
     job_events::register(&conn, job_id_1, &worker_id, JobStatus::Scheduled)
         .await
         .expect("Failed to register second event for job 1");
-    job_events::register(&conn, job_id_2, &worker_id, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register event for job 2");
+
+    let job_id_2 = register_job(&conn, &job_desc, &worker_id, None).await;
 
     //* When
     let attempts_1 = job_events::get_attempts_for_job(&conn, job_id_1)

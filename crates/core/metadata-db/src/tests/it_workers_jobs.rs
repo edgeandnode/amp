@@ -5,6 +5,7 @@ use pgtemp::PgTempDB;
 use crate::{
     config::DEFAULT_POOL_MAX_CONNECTIONS,
     jobs::{self, JobStatus},
+    tests::common::{raw_descriptor, register_job},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
 
@@ -36,9 +37,7 @@ async fn schedule_and_retrieve_job() {
 
     //* When
     // Register the job
-    let job_id = jobs::register(&conn, &worker_id, &job_desc)
-        .await
-        .expect("Failed to register job");
+    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     // Get the job
     let job = jobs::get_by_id(&conn, job_id)
@@ -78,9 +77,7 @@ async fn pagination_traverses_all_jobs_ordered() {
             "table": "test-table",
         }));
 
-        let job_id = jobs::register(&conn, &worker_id, &job_desc)
-            .await
-            .expect("Failed to register job");
+        let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
         created_job_ids.push(job_id);
     }
 
@@ -113,10 +110,4 @@ async fn pagination_traverses_all_jobs_ordered() {
     for i in 0..all_jobs.len() - 1 {
         assert!(all_jobs[i].id > all_jobs[i + 1].id);
     }
-}
-
-/// Helper to create a [`jobs::JobDescriptorRaw`] from a [`serde_json::Value`].
-fn raw_descriptor(value: &serde_json::Value) -> jobs::JobDescriptorRaw<'static> {
-    let raw = serde_json::value::to_raw_value(value).expect("Failed to serialize to raw value");
-    jobs::JobDescriptorRaw::from_owned_unchecked(raw)
 }
