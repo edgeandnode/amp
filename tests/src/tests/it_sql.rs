@@ -27,6 +27,27 @@ async fn sql_tests() {
 }
 
 #[tokio::test]
+async fn eth_call_tests() {
+    logging::init();
+
+    let test_ctx = TestCtxBuilder::new("eth_call_tests")
+        .with_dataset_manifests(["eth_rpc"])
+        .with_dataset_snapshots(["eth_rpc"])
+        .with_provider_configs(["rpc_eth_mainnet"])
+        .build()
+        .await
+        .expect("Failed to create test environment");
+    let mut client = test_ctx
+        .new_flight_client()
+        .await
+        .expect("Failed to connect FlightClient");
+
+    run_spec("eth-call-tests", &test_ctx, &mut client, None)
+        .await
+        .expect("Failed to run spec");
+}
+
+#[tokio::test]
 async fn sql_advanced_tests() {
     logging::init();
 
