@@ -45,12 +45,7 @@
 //! - **Data Validation**: Comprehensive consistency checks ensure data integrity
 //! - **Error Recovery**: Detailed error messages for troubleshooting
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
 use amp_datasets_registry::{
@@ -62,10 +57,7 @@ use anyhow::{Result, anyhow};
 use clap::Parser;
 use common::datasets_cache::{DatasetsCache, GetDatasetError};
 use datasets_common::reference::Reference;
-use datasets_derived::{
-    Dataset as DerivedDataset,
-    deps::{DfsError, dfs},
-};
+use datasets_derived::{Dataset as DerivedDataset, sorting::CyclicDepError};
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
 use monitoring::logging;
@@ -547,25 +539,13 @@ enum DatasetDependencyError {
     /// occurs when traversing the dependency graph reveals a cycle, which would
     /// cause infinite recursion during query execution.
     #[error("dependency cycle detected")]
-    CycleDetected(#[source] datasets_derived::deps::DfsError<Reference>),
+    CycleDetected(#[source] CyclicDepError<Reference>),
 }
 
 /// Given a map of values to their dependencies, return a set where each value is ordered after
 /// all of its dependencies. An error is returned if a cycle is detected.
 fn dependency_sort(
     deps: BTreeMap<Reference, Vec<Reference>>,
-) -> Result<Vec<Reference>, DfsError<Reference>> {
-    let nodes: BTreeSet<&Reference> = deps
-        .iter()
-        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
-        .collect();
-    let mut ordered: Vec<Reference> = Default::default();
-    let mut visited: BTreeSet<&Reference> = Default::default();
-    let mut visited_cycle: BTreeSet<&Reference> = Default::default();
-    for node in nodes {
-        if !visited.contains(node) {
-            dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
-        }
-    }
-    Ok(ordered)
+) -> Result<Vec<Reference>, CyclicDepError<Reference>> {
+    datasets_derived::sorting::topological_sort(deps)
 }

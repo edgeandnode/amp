@@ -11,7 +11,6 @@ pub mod context;
 pub mod cursor;
 pub mod dataset_schema_provider;
 pub mod datasets_cache;
-pub mod datasets_derived;
 pub mod detached_logical_plan;
 pub mod ethcall_udfs_cache;
 pub mod evm;
