@@ -22,7 +22,6 @@ use alloy::{
     transports::http::reqwest::Url,
 };
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
-use amp_providers_evm_rpc::provider::Auth;
 use anyhow::Context;
 use async_stream::stream;
 use datasets_common::{
@@ -49,6 +48,7 @@ use crate::{
     error::{
         BatchRequestError, BatchingError, ClientError, OverflowSource, RpcToRowsError, ToRowError,
     },
+    provider::Auth,
     tables::transactions::{Transaction, TransactionRowsBuilder},
 };
 
@@ -136,7 +136,7 @@ impl Client {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
-        let client = amp_providers_evm_rpc::provider::new_http(url, auth, rate_limit, timeout);
+        let client = crate::provider::new_http(url, auth, rate_limit, timeout);
         let client =
             RootProviderWithMetrics::new(client, meter, provider_name.to_string(), network.clone());
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
@@ -162,7 +162,7 @@ impl Client {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
-        let client = amp_providers_evm_rpc::provider::new_ipc(path, rate_limit)
+        let client = crate::provider::new_ipc(path, rate_limit)
             .await
             .map_err(ClientError)
             .map(|c| {
@@ -192,7 +192,7 @@ impl Client {
         meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, ClientError> {
         assert!(request_limit >= 1);
-        let client = amp_providers_evm_rpc::provider::new_ws(url, auth, rate_limit)
+        let client = crate::provider::new_ws(url, auth, rate_limit)
             .await
             .map_err(ClientError)
             .map(|c| {

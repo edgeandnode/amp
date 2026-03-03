@@ -1055,13 +1055,20 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "amp-providers-common",
+ "anyhow",
+ "async-stream",
+ "datasets-common",
+ "datasets-raw",
+ "futures",
  "governor 0.10.4",
  "headers",
+ "monitoring",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror 2.0.18",
+ "tokio",
  "tower",
  "tracing",
  "url",
@@ -1108,7 +1115,6 @@ dependencies = [
  "async-stream",
  "datasets-common",
  "datasets-raw",
- "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
  "indoc",
@@ -4991,21 +4997,13 @@ dependencies = [
 name = "evm-rpc-datasets"
 version = "0.1.0"
 dependencies = [
- "alloy",
- "amp-providers-common",
  "amp-providers-evm-rpc",
- "anyhow",
- "async-stream",
  "datasets-common",
  "datasets-raw",
- "futures",
- "monitoring",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
- "tracing",
 ]
 
 [[package]]

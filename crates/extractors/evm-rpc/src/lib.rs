@@ -1,24 +1,15 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::collections::BTreeMap;
 
-use amp_providers_common::provider_name::ProviderName;
-use amp_providers_evm_rpc::{config::EvmRpcProviderConfig, provider::Auth};
 use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
+use datasets_raw::dataset::Dataset as RawDataset;
 
-mod client;
 mod dataset_kind;
-pub mod error;
-pub mod metrics;
 pub mod tables;
 
 // Reuse types from datasets-common for consistency
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_raw::dataset::Dataset as RawDataset;
 
-pub use self::{
-    client::Client,
-    dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError},
-};
-use crate::error::ClientError;
+pub use self::dataset_kind::{EvmRpcDatasetKind, EvmRpcDatasetKindError};
 
 /// Table definition for raw datasets
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -71,65 +62,4 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> RawDataset {
         Some(manifest.start_block),
         manifest.finalized_blocks_only,
     )
-}
-
-pub async fn client(
-    name: ProviderName,
-    config: EvmRpcProviderConfig,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<Client, ClientError> {
-    let url = config.url.into_inner();
-    let auth = config.auth_token.map(|token| match config.auth_header {
-        Some(header) => Auth::CustomHeader {
-            name: header,
-            value: token,
-        },
-        None => Auth::Bearer(token),
-    });
-
-    let request_limit = u16::max(1, config.concurrent_request_limit.unwrap_or(1024));
-    let client = match url.scheme() {
-        "ipc" => {
-            let path = url.path();
-            Client::new_ipc(
-                PathBuf::from(path),
-                config.network,
-                name,
-                request_limit,
-                config.rpc_batch_size,
-                config.rate_limit_per_minute,
-                config.fetch_receipts_per_tx,
-                meter,
-            )
-            .await?
-        }
-        "ws" | "wss" => {
-            Client::new_ws(
-                url,
-                config.network,
-                name,
-                request_limit,
-                config.rpc_batch_size,
-                config.rate_limit_per_minute,
-                config.fetch_receipts_per_tx,
-                auth,
-                meter,
-            )
-            .await?
-        }
-        _ => Client::new(
-            url,
-            config.network,
-            name,
-            request_limit,
-            config.rpc_batch_size,
-            config.rate_limit_per_minute,
-            config.fetch_receipts_per_tx,
-            config.timeout,
-            auth,
-            meter,
-        )?,
-    };
-
-    Ok(client)
 }
