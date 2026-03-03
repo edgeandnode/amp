@@ -557,21 +557,11 @@ impl DataStore {
         let location_id = revision.location_id;
         let table_path = revision.path.as_object_store_path().clone();
 
-        // Use REPEATABLE READ isolation to ensure consistent snapshot during query.
-        // This prevents missing rows due to concurrent table modifications.
-        let mut txn = self
-            .metadata_db
-            .begin_txn_repeatable_read()
-            .await
-            .map_err(StreamFileMetadataError)?;
-
         let rows: Vec<FileMetadataWithDetails> =
-            metadata_db::files::stream_by_location_id_with_details(&mut txn, location_id)
+            metadata_db::files::stream_by_location_id_with_details(&self.metadata_db, location_id)
                 .map_err(StreamFileMetadataError)
                 .try_collect()
                 .await?;
-
-        // Transaction auto-rolls back on drop (read-only, no commit needed)
 
         let results = rows
             .into_iter()
