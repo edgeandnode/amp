@@ -78,7 +78,9 @@ pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), Data
                     if matches!(expr, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME) {
                         return plan_err!(
                             "selecting `{}` from a multi-table context (e.g. a join) is ambiguous. \
-                             Use the `block_num()` function instead to get the correct value",
+                             Use the `block_num()` function instead to get the correct value, \
+                             or use explicit column names instead of `*` to omit `{}`",
+                            RESERVED_BLOCK_NUM_COLUMN_NAME,
                             RESERVED_BLOCK_NUM_COLUMN_NAME
                         );
                     }

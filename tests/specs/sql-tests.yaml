@@ -452,12 +452,17 @@
 - name: implicit_cross_join_duplicate_field_names
   query: select * from eth_rpc.blocks, eth_rpc.logs limit 1
   failure: |
-    selecting `_block_num` from a multi-table context (e.g. a join) is ambiguous. Use the `block_num()` function instead to get the correct value
+    selecting `_block_num` from a multi-table context (e.g. a join) is ambiguous. Use the `block_num()` function instead to get the correct value, or use explicit column names instead of `*` to omit `_block_num`
 
 - name: implicit_cross_join
   query: select logs.* from eth_rpc.blocks, eth_rpc.logs logs limit 1
   failure: |
-    selecting `_block_num` from a multi-table context (e.g. a join) is ambiguous. Use the `block_num()` function instead to get the correct value
+    selecting `_block_num` from a multi-table context (e.g. a join) is ambiguous. Use the `block_num()` function instead to get the correct value, or use explicit column names instead of `*` to omit `_block_num`
+
+- name: implicit_cross_join_explicit_columns
+  query: SELECT block_num(), logs.address FROM eth_rpc.blocks, eth_rpc.logs logs limit 1
+  results: |
+    [{"block_num()":15000000,"address":"c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"}]
 
 - name: select_alias_starting_with_underscore
   query: |
