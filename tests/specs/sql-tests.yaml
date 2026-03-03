@@ -452,7 +452,7 @@
 - name: implicit_cross_join_duplicate_field_names
   query: select * from eth_rpc.blocks, eth_rpc.logs limit 1
   failure: |
-    Duplicate field names detected in plan schema: [eth_rpc.blocks._block_num and eth_rpc.logs._block_num, eth_rpc.blocks.block_num and eth_rpc.logs.block_num, eth_rpc.blocks.timestamp and eth_rpc.logs.timestamp]. Please alias your columns to be unique.
+    selecting `_block_num` from a multi-table context (e.g. a join) is ambiguous. Use the `block_num()` function instead to get the correct value
 
 - name: implicit_cross_join
   query: select logs.* from eth_rpc.blocks, eth_rpc.logs logs limit 1
