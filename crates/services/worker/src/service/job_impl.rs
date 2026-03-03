@@ -87,7 +87,7 @@ pub(super) fn new(
             }
             JobDescriptor::MaterializeDerived(desc) => {
                 let microbatch_max_interval = job_ctx.config.microbatch_max_interval;
-                amp_worker_datasets_derived::dump(
+                amp_worker_datasets_derived::job_impl::execute(
                     ctx,
                     &reference,
                     microbatch_max_interval,
@@ -126,7 +126,7 @@ pub(crate) enum JobError {
     /// environment creation failures, manifest retrieval errors, and table
     /// materialization failures.
     #[error("Failed to materialize derived dataset")]
-    MaterializeDerived(#[source] amp_worker_datasets_derived::Error),
+    MaterializeDerived(#[source] amp_worker_datasets_derived::job_impl::Error),
 }
 
 impl RetryableErrorExt for JobError {
