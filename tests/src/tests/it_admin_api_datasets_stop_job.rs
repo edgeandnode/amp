@@ -8,12 +8,13 @@
 
 use amp_client_admin::{
     self as client,
+    end_block::EndBlock,
     jobs::{JobInfo, StopError},
 };
 use amp_worker_core::jobs::job_id::JobId;
 use datasets_common::{
-    end_block::EndBlock, fqn::FullyQualifiedName, name::Name, namespace::Namespace,
-    reference::Reference, revision::Revision, version::Version,
+    fqn::FullyQualifiedName, name::Name, namespace::Namespace, reference::Reference,
+    revision::Revision, version::Version,
 };
 use datasets_derived::Manifest as DerivedDatasetManifest;
 use serde_json::value::RawValue;

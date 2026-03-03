@@ -4,10 +4,10 @@
 //! and provider configurations with the Admin API in test environments. It uses
 //! the ampctl admin API client for direct programmatic access.
 
-use amp_client_admin::{Client, datasets::NodeSelector};
+use amp_client_admin::{Client, datasets::NodeSelector, end_block::EndBlock};
 use amp_worker_core::jobs::job_id::JobId;
 use anyhow::{Result, anyhow};
-use datasets_common::{end_block::EndBlock, hash::Hash, reference::Reference};
+use datasets_common::{hash::Hash, reference::Reference};
 use serde_json::value::RawValue;
 use url::Url;
 

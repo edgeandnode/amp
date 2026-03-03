@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod datasets;
+pub mod end_block;
 pub mod error;
 pub mod jobs;
 pub mod manifests;

@@ -7,14 +7,15 @@ use amp_worker_core::{
     node_id::{InvalidIdError, NodeId, validate_node_id},
 };
 use datasets_common::{
-    end_block::EndBlock, fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace,
-    reference::Reference, revision::Revision, version::Version,
+    fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace, reference::Reference,
+    revision::Revision, version::Version,
 };
 use monitoring::logging;
 use serde_json::value::RawValue;
 
 use super::{
     Client,
+    end_block::EndBlock,
     error::{ApiError, ErrorResponse},
 };
 
