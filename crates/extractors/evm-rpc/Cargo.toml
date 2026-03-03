@@ -8,18 +8,10 @@ license-file.workspace = true
 schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
 
 [dependencies]
-alloy.workspace = true
-amp-providers-common = { path = "../../core/providers-common" }
 amp-providers-evm-rpc = { path = "../../core/providers-evm-rpc" }
-anyhow.workspace = true
-async-stream.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-raw = { path = "../../core/datasets-raw" }
-futures.workspace = true
-monitoring = { path = "../../core/monitoring" }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
-tokio.workspace = true
-tracing.workspace = true
