@@ -581,9 +581,9 @@ async fn fill_truncated_logs(
             .any(|msg| msg == TRUNCATED_LOG_MESSAGES_MARKER)
         {
             tracing::warn!(
-                slot = slot.slot,
-                id = tx_id,
-                "fallback JSON-RPC logs also contain truncated log marker, skipping truncated log fill for this transaction"
+                slot_number = slot.slot,
+                transaction_id = %tx_id,
+                "fallback logs also truncated, skipped log fill"
             );
             continue;
         }
@@ -593,10 +593,16 @@ async fn fill_truncated_logs(
             .filter(|msg| *msg != TRUNCATED_LOG_MESSAGES_MARKER)
             .count();
 
-        anyhow::ensure!(
-            fallback_log_messages.len() > truncated_log_len_without_markers,
-            "cannot fill truncated logs for transaction {id}, fallback logs do not have enough entries",
-        );
+        if fallback_log_messages.len() <= truncated_log_len_without_markers {
+            tracing::warn!(
+                slot_number = %slot.slot,
+                transaction_id = %tx_id,
+                fallback_len = %fallback_log_messages.len(),
+                truncated_len = %truncated_log_len_without_markers,
+                "fallback logs too short, skipped log fill"
+            );
+            continue;
+        }
 
         *truncated_log = fallback_log_messages;
     }
