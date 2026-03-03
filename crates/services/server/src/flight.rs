@@ -40,8 +40,9 @@ use common::{
         plan::{self, PlanContextBuilder},
     },
     cursor::Cursor,
-    dataset_store::{DatasetStore, GetDatasetError},
+    datasets_cache::{DatasetsCache, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
+    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::ExecEnv,
     sql::{ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_table_references},
     sql_str::SqlStr,
@@ -86,7 +87,8 @@ impl Service {
         config: Arc<Config>,
         data_store: DataStore,
         metadata_db: MetadataDb,
-        dataset_store: DatasetStore,
+        datasets_cache: DatasetsCache,
+        ethcall_udfs_cache: EthCallUdfsCache,
         meter: Option<Meter>,
     ) -> Result<Self, InitError> {
         let env = common::exec_env::create(
@@ -94,7 +96,8 @@ impl Service {
             config.query_max_mem_mb,
             &config.spill_location,
             data_store,
-            dataset_store,
+            datasets_cache,
+            ethcall_udfs_cache,
         )
         .map_err(InitError::ExecEnv)?;
         let notification_multiplexer =
@@ -119,7 +122,7 @@ impl Service {
         let physical_table_refs = resolve_table_references::<PartialReference>(&query)
             .map_err(Error::TableReferenceResolution)?;
         let catalog = create_physical_table_catalog(
-            &self.env.dataset_store,
+            &self.env.datasets_cache,
             &self.env.store,
             physical_table_refs,
         )
@@ -127,7 +130,8 @@ impl Service {
         .map_err(Error::PhysicalCatalogError)?;
 
         let amp_catalog = Arc::new(AmpCatalogProvider::new(
-            self.env.dataset_store.clone(),
+            self.env.datasets_cache.clone(),
+            self.env.ethcall_udfs_cache.clone(),
             self.env.isolate_pool.clone(),
         ));
         let ctx = PlanContextBuilder::new(self.env.session_config.clone())
@@ -302,7 +306,8 @@ impl Service {
                     let query = common::sql::parse(&sql_str).map_err(Error::SqlParse)?;
                     let plan_ctx = {
                         let amp_catalog = Arc::new(AmpCatalogProvider::new(
-                            self.env.dataset_store.clone(),
+                            self.env.datasets_cache.clone(),
+                            self.env.ethcall_udfs_cache.clone(),
                             self.env.isolate_pool.clone(),
                         ));
                         PlanContextBuilder::new(self.env.session_config.clone())

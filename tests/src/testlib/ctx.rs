@@ -34,7 +34,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 use amp_data_store::DataStore;
 use amp_worker_core::node_id::NodeId;
 use anyhow::{Result, anyhow};
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use datasets_common::reference::Reference;
 use worker::events::EventEmitter;
 
@@ -400,7 +400,7 @@ impl TestCtxBuilder {
             config.parquet.cache_size_mb,
         )?;
 
-        // Create shared DatasetStore instance (used by both server and worker)
+        // Create shared DatasetsCache and EthCallUdfsCache (used by server, controller, and worker)
         let (datasets_registry, providers_registry) = {
             use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
             use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
@@ -421,8 +421,8 @@ impl TestCtxBuilder {
                 DatasetsRegistry::new(metadata_db.conn_pool().clone(), dataset_manifests_store);
             (datasets_registry, providers_registry)
         };
-        let dataset_store =
-            DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+        let datasets_cache = DatasetsCache::new(datasets_registry.clone());
+        let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
 
         // Create Anvil fixture (if enabled) and capture provider config for later registration
         let (anvil, anvil_provider_config) = match self.anvil_fixture {
@@ -455,19 +455,20 @@ impl TestCtxBuilder {
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
 
-        // Start query server (pass shared dataset_store)
+        // Start query server
         let server = DaemonServer::new(
             config.clone(),
             metadata_db.conn_pool().clone(),
             data_store.clone(),
-            dataset_store.clone(),
+            datasets_cache.clone(),
+            ethcall_udfs_cache.clone(),
             self.meter,
             true, // enable_flight
             true, // enable_jsonl
         )
         .await?;
 
-        // Start controller (Admin API) with shared dataset_store
+        // Start controller (Admin API)
         let build_info = build_info::load();
         let controller = DaemonController::new(
             build_info.clone(),
@@ -476,7 +477,8 @@ impl TestCtxBuilder {
             datasets_registry,
             providers_registry.clone(),
             data_store.clone(),
-            dataset_store.clone(),
+            datasets_cache.clone(),
+            ethcall_udfs_cache.clone(),
             controller_meter,
         )
         .await?;
@@ -576,7 +578,7 @@ impl TestCtxBuilder {
             }
         }
 
-        // Start worker using the fixture with shared dataset_store
+        // Start worker
         let node_id: NodeId = self
             .test_name
             .parse()
@@ -586,8 +588,8 @@ impl TestCtxBuilder {
             config,
             metadata_db.conn_pool().clone(),
             data_store,
-            dataset_store,
-            providers_registry.clone(),
+            datasets_cache,
+            ethcall_udfs_cache,
             worker_meter,
             node_id,
             self.event_emitter.clone(),

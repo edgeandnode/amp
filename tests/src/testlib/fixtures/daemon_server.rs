@@ -8,7 +8,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use amp_data_store::DataStore;
 use anyhow::Result;
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{
@@ -26,7 +26,7 @@ pub struct DaemonServer {
     config: Arc<Config>,
     metadata_db: MetadataDb,
     data_store: DataStore,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
     server_addrs: BoundAddrs,
 
     _task: JoinHandle<Result<(), ServeError>>,
@@ -39,11 +39,13 @@ impl DaemonServer {
     /// Only query servers (Flight and JSON Lines) are enabled. For Admin API,
     /// use the `DaemonController` fixture.
     /// The server will be automatically shut down when the fixture is dropped.
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         config: Arc<amp_config::Config>,
         metadb: MetadataDb,
         data_store: DataStore,
-        dataset_store: DatasetStore,
+        datasets_cache: DatasetsCache,
+        ethcall_udfs_cache: EthCallUdfsCache,
         meter: Option<Meter>,
         enable_flight: bool,
         enable_jsonl: bool,
@@ -64,7 +66,8 @@ impl DaemonServer {
             config.clone(),
             metadb.clone(),
             data_store.clone(),
-            dataset_store.clone(),
+            datasets_cache.clone(),
+            ethcall_udfs_cache,
             meter,
             flight_at,
             jsonl_at,
@@ -77,7 +80,7 @@ impl DaemonServer {
             config,
             metadata_db: metadb,
             data_store,
-            dataset_store,
+            datasets_cache,
             server_addrs,
             _task: server_task,
         })
@@ -101,9 +104,9 @@ impl DaemonServer {
         &self.data_store
     }
 
-    /// Get a reference to the dataset store.
-    pub fn dataset_store(&self) -> &DatasetStore {
-        &self.dataset_store
+    /// Get a reference to the datasets cache.
+    pub fn datasets_cache(&self) -> &DatasetsCache {
+        &self.datasets_cache
     }
 
     /// Get the Flight server address.

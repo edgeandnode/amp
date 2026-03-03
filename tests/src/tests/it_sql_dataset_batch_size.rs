@@ -9,7 +9,7 @@ use amp_worker_core::{
     parquet_opts,
 };
 use anyhow::Result;
-use common::{dataset_store::DatasetStore, metadata::Generation};
+use common::{datasets_cache::DatasetsCache, metadata::Generation};
 use datasets_common::reference::Reference;
 use monitoring::logging;
 
@@ -28,13 +28,13 @@ async fn sql_dataset_input_batch_size() {
         .parse()
         .expect("should be valid reference");
     let hash_ref = test
-        .dataset_store()
+        .datasets_cache()
         .resolve_revision(&eth_rpc_ref)
         .await
         .expect("Failed to resolve dataset reference")
         .expect("Dataset not found");
     let start = test
-        .dataset_store()
+        .datasets_cache()
         .get_dataset(&hash_ref)
         .await
         .unwrap()
@@ -117,9 +117,9 @@ impl TestCtx {
         Self { ctx }
     }
 
-    /// Get reference to the dataset store.
-    fn dataset_store(&self) -> &DatasetStore {
-        self.ctx.daemon_server().dataset_store()
+    /// Get reference to the datasets cache.
+    fn datasets_cache(&self) -> &DatasetsCache {
+        self.ctx.daemon_server().datasets_cache()
     }
 
     /// Create a new Flight client for this test context.
@@ -143,7 +143,7 @@ impl TestCtx {
     ) -> Result<common::catalog::physical::Catalog> {
         test_helpers::catalog_for_dataset(
             dataset_name,
-            self.ctx.daemon_server().dataset_store(),
+            self.ctx.daemon_server().datasets_cache(),
             self.ctx.daemon_server().data_store(),
         )
         .await

@@ -7,7 +7,8 @@ use amp_datasets_registry::error::ResolveRevisionError;
 use common::{
     amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
     context::plan::PlanContextBuilder,
-    dataset_store::{DatasetStore, GetDatasetError},
+    datasets_cache::{DatasetsCache, GetDatasetError},
+    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::default_session_config,
     metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
     self_schema_provider::SelfSchemaProvider,
@@ -143,12 +144,13 @@ pub struct EmptyStringError;
 /// 3. Re-serialize to canonical JSON
 pub async fn parse_and_canonicalize_derived_dataset_manifest(
     manifest_str: impl AsRef<str>,
-    store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
+    ethcall_udfs_cache: &EthCallUdfsCache,
 ) -> Result<String, ParseDerivedManifestError> {
     let manifest: DerivedDatasetManifest = serde_json::from_str(manifest_str.as_ref())
         .map_err(ParseDerivedManifestError::Deserialization)?;
 
-    validate_derived_manifest(&manifest, store)
+    validate_derived_manifest(&manifest, datasets_cache, ethcall_udfs_cache)
         .await
         .map_err(|err| ParseDerivedManifestError::ManifestValidation(Box::new(err)))?;
 
@@ -235,7 +237,8 @@ pub enum ParseRawManifestError {
 //  moved to a more appropriate location.
 pub async fn validate_derived_manifest(
     manifest: &DerivedDatasetManifest,
-    store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
+    ethcall_udfs_cache: &EthCallUdfsCache,
 ) -> Result<(), ManifestValidationError> {
     // Step 1: Resolve all dependencies to HashReference
     // This must happen first to ensure all dependencies exist before parsing SQL
@@ -247,7 +250,7 @@ pub async fn validate_derived_manifest(
 
         // Resolve reference to its manifest hash reference
         // This handles all revision types (Version, Hash)
-        let reference = store
+        let reference = datasets_cache
             .resolve_revision(&reference)
             .await
             .map_err(|err| ManifestValidationError::DependencyResolution {
@@ -352,9 +355,13 @@ pub async fn validate_derived_manifest(
             &manifest.functions,
         ));
     let amp_catalog = Arc::new(
-        AmpCatalogProvider::new(store.clone(), IsolatePool::dummy())
-            .with_dep_aliases(dep_aliases)
-            .with_self_schema(self_schema),
+        AmpCatalogProvider::new(
+            datasets_cache.clone(),
+            ethcall_udfs_cache.clone(),
+            IsolatePool::dummy(),
+        )
+        .with_dep_aliases(dep_aliases)
+        .with_self_schema(self_schema),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())

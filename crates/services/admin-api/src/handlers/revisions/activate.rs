@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::dataset_store::GetDatasetError;
+use common::datasets_cache::GetDatasetError;
 use datasets_common::{reference::Reference, table_name::TableName};
 use metadata_db::physical_table_revision::LocationId;
 use monitoring::logging;
@@ -97,7 +97,7 @@ pub async fn handler(
         })?;
 
     let dataset = ctx
-        .dataset_store
+        .datasets_cache
         .get_dataset(&reference)
         .await
         .map_err(|err| {

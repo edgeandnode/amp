@@ -12,7 +12,7 @@ use axum::{
     },
     http::StatusCode,
 };
-use common::dataset_store::GetDatasetError;
+use common::datasets_cache::GetDatasetError;
 use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
 use datasets_derived::DerivedDatasetKind;
 use monitoring::logging;
@@ -141,7 +141,7 @@ pub async fn handler(
 
     // Load the full dataset object using the resolved hash reference
     let dataset = ctx
-        .dataset_store
+        .datasets_cache
         .get_dataset(&reference)
         .await
         .map_err(Error::GetDataset)?;

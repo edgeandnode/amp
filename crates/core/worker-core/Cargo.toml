@@ -6,7 +6,6 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
-amp-providers-registry = { path = "../providers-registry" }
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }

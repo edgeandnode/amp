@@ -60,8 +60,8 @@ pub(super) fn new(
     let ctx = Ctx {
         config: job_ctx.config.dump_config(),
         metadata_db: job_ctx.metadata_db.clone(),
-        dataset_store: job_ctx.dataset_store.clone(),
-        providers_registry: job_ctx.providers_registry.clone(),
+        datasets_cache: job_ctx.datasets_cache.clone(),
+        ethcall_udfs_cache: job_ctx.ethcall_udfs_cache.clone(),
         data_store: job_ctx.data_store.clone(),
         notification_multiplexer: job_ctx.notification_multiplexer.clone(),
         metrics,

@@ -25,7 +25,7 @@ use js_runtime::isolate_pool::IsolatePool;
 use parking_lot::RwLock;
 
 use crate::{
-    dataset_store::DatasetStore,
+    ethcall_udfs_cache::EthCallUdfsCache,
     func_catalog::{
         function_provider::{FunctionProvider, ScalarFunctionProvider},
         schema_provider::{
@@ -42,7 +42,7 @@ use crate::{
 pub struct DatasetSchemaProvider {
     schema_name: String,
     dataset: Arc<dyn Dataset>,
-    dataset_store: DatasetStore,
+    ethcall_udfs_cache: EthCallUdfsCache,
     isolate_pool: IsolatePool,
     tables: RwLock<BTreeMap<String, Arc<dyn TableProvider>>>,
     functions: RwLock<BTreeMap<String, Arc<ScalarUDF>>>,
@@ -53,13 +53,13 @@ impl DatasetSchemaProvider {
     pub(crate) fn new(
         schema_name: String,
         dataset: Arc<dyn Dataset>,
-        dataset_store: DatasetStore,
+        ethcall_udfs_cache: EthCallUdfsCache,
         isolate_pool: IsolatePool,
     ) -> Self {
         Self {
             schema_name,
             dataset,
-            dataset_store,
+            ethcall_udfs_cache,
             isolate_pool,
             tables: RwLock::new(Default::default()),
             functions: RwLock::new(Default::default()),
@@ -163,7 +163,7 @@ impl FuncSchemaProvider for DatasetSchemaProvider {
         // Check for eth_call function
         if name == ETH_CALL_FUNCTION_NAME {
             let udf = self
-                .dataset_store
+                .ethcall_udfs_cache
                 .eth_call_for_dataset(&self.schema_name, self.dataset.as_ref())
                 .await
                 .map_err(|err| DataFusionError::External(Box::new(err)))?;

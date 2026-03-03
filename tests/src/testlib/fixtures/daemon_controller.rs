@@ -10,7 +10,7 @@ use amp_data_store::DataStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
 use anyhow::Result;
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -24,7 +24,7 @@ use crate::testlib::build_info::BuildInfo;
 /// and cleanup by aborting the controller task when dropped.
 pub struct DaemonController {
     metadata_db: MetadataDb,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
     admin_api_addr: SocketAddr,
 
     _task: JoinHandle<Result<(), controller::service::ServerError>>,
@@ -35,7 +35,7 @@ impl DaemonController {
     ///
     /// Starts a Amp controller with the provided configuration and metadata database.
     /// The controller will be automatically shut down when the fixture is dropped.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         build_info: BuildInfo,
         config: Arc<amp_config::Config>,
@@ -43,7 +43,8 @@ impl DaemonController {
         datasets_registry: DatasetsRegistry,
         providers_registry: ProvidersRegistry,
         data_store: DataStore,
-        dataset_store: DatasetStore,
+        datasets_cache: DatasetsCache,
+        ethcall_udfs_cache: EthCallUdfsCache,
         meter: Option<Meter>,
     ) -> Result<Self> {
         let admin_api_addr = config.controller_addrs.admin_api_addr;
@@ -54,7 +55,8 @@ impl DaemonController {
             datasets_registry,
             providers_registry,
             data_store,
-            dataset_store.clone(),
+            datasets_cache.clone(),
+            ethcall_udfs_cache,
             meter,
             admin_api_addr,
         )
@@ -64,7 +66,7 @@ impl DaemonController {
 
         Ok(Self {
             metadata_db,
-            dataset_store,
+            datasets_cache,
             admin_api_addr,
             _task: controller_task,
         })
@@ -75,9 +77,9 @@ impl DaemonController {
         &self.metadata_db
     }
 
-    /// Get a reference to the dataset store.
-    pub fn dataset_store(&self) -> &DatasetStore {
-        &self.dataset_store
+    /// Get a reference to the datasets cache.
+    pub fn datasets_cache(&self) -> &DatasetsCache {
+        &self.datasets_cache
     }
 
     /// Get the Admin API server address.

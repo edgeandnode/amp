@@ -44,7 +44,8 @@ use crate::{
         common::{INVALID_INPUT_CONTEXT, ReadOnlyCheckError, read_only_check},
         session::{SessionContext, SessionState, SessionStateBuilder},
     },
-    dataset_store::DatasetStore,
+    datasets_cache::DatasetsCache,
+    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::ExecEnv,
     func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
@@ -291,7 +292,8 @@ pub enum CreateContextError {
 pub struct ExecContextBuilder {
     session_config: SessionConfig,
     store: DataStore,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
+    ethcall_udfs_cache: EthCallUdfsCache,
     isolate_pool: IsolatePool,
     global_memory_pool: Arc<dyn MemoryPool>,
     query_max_mem_mb: usize,
@@ -313,7 +315,8 @@ impl ExecContextBuilder {
         Self {
             session_config: env.session_config,
             store: env.store,
-            dataset_store: env.dataset_store,
+            datasets_cache: env.datasets_cache,
+            ethcall_udfs_cache: env.ethcall_udfs_cache,
             isolate_pool: env.isolate_pool,
             global_memory_pool: env.global_memory_pool,
             query_max_mem_mb: env.query_max_mem_mb,
@@ -408,7 +411,8 @@ impl ExecContextBuilder {
             isolate_pool: self.isolate_pool,
             query_max_mem_mb: self.query_max_mem_mb,
             store: self.store,
-            dataset_store: self.dataset_store,
+            datasets_cache: self.datasets_cache,
+            ethcall_udfs_cache: self.ethcall_udfs_cache,
         };
 
         // Compose a SessionStateBuilder from the stored components (including

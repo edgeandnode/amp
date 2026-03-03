@@ -5,7 +5,7 @@ use amp_data_store::DataStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 
@@ -51,7 +51,8 @@ pub async fn run(
         let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
         (datasets_registry, providers_registry)
     };
-    let dataset_store = DatasetStore::new(datasets_registry, providers_registry);
+    let datasets_cache = DatasetsCache::new(datasets_registry);
+    let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry);
 
     let server_config = config_from_common(&config);
 
@@ -81,7 +82,8 @@ pub async fn run(
         Arc::new(server_config),
         metadata_db,
         data_store,
-        dataset_store,
+        datasets_cache,
+        ethcall_udfs_cache,
         meter,
         flight_at,
         jsonl_at,

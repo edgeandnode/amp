@@ -141,7 +141,7 @@ pub async fn dump(
     progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
     let dataset = ctx
-        .dataset_store
+        .datasets_cache
         .get_dataset(dataset_ref)
         .await
         .map_err(Error::GetDataset)?;
@@ -254,7 +254,8 @@ pub async fn dump(
     let kind = dataset.kind();
     let network = dataset.network();
     let mut client = ctx
-        .providers_registry
+        .ethcall_udfs_cache
+        .providers_registry()
         .create_block_stream_client(kind, network, metrics.as_ref().map(|m| m.meter()))
         .await
         .map_err(Error::CreateBlockStreamClient)?
@@ -432,7 +433,7 @@ pub async fn dump(
 pub enum Error {
     /// Failed to load the dataset from the dataset store.
     #[error("Failed to get dataset")]
-    GetDataset(#[source] common::dataset_store::GetDatasetError),
+    GetDataset(#[source] common::datasets_cache::GetDatasetError),
 
     /// The dataset is not a raw dataset (e.g., it is a derived dataset).
     #[error("Dataset '{0}' is not a raw dataset")]

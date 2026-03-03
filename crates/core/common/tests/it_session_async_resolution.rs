@@ -18,7 +18,8 @@ use common::{
         exec::ExecContextBuilder,
         session::{SessionStateBuilder, is_user_input_error},
     },
-    dataset_store::DatasetStore,
+    datasets_cache::DatasetsCache,
+    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::{ExecEnv, default_session_config},
     func_catalog::{
         catalog_provider::{
@@ -394,7 +395,8 @@ async fn exec_statement_to_plan_with_qualified_function_uses_async_pre_resolutio
     let provider_configs =
         ProviderConfigsStore::new(Arc::new(InMemory::new()) as Arc<dyn ObjectStore>);
     let providers_registry = ProvidersRegistry::new(provider_configs);
-    let dataset_store = DatasetStore::new(datasets_registry, providers_registry);
+    let datasets_cache = DatasetsCache::new(datasets_registry);
+    let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry);
 
     let runtime_env: Arc<RuntimeEnv> = Default::default();
     let exec_env = ExecEnv {
@@ -406,7 +408,8 @@ async fn exec_statement_to_plan_with_qualified_function_uses_async_pre_resolutio
         isolate_pool: IsolatePool::new(),
         query_max_mem_mb: 64,
         store: data_store,
-        dataset_store,
+        datasets_cache,
+        ethcall_udfs_cache,
     };
 
     let (amp_table_catalog, amp_table_schema_requests, _amp_table_requests) =
@@ -493,7 +496,8 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
     let provider_configs =
         ProviderConfigsStore::new(Arc::new(InMemory::new()) as Arc<dyn ObjectStore>);
     let providers_registry = ProvidersRegistry::new(provider_configs);
-    let dataset_store = DatasetStore::new(datasets_registry, providers_registry);
+    let datasets_cache = DatasetsCache::new(datasets_registry);
+    let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry);
 
     let runtime_env: Arc<RuntimeEnv> = Default::default();
     let exec_env = ExecEnv {
@@ -505,7 +509,8 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
         isolate_pool: IsolatePool::new(),
         query_max_mem_mb: 64,
         store: data_store.clone(),
-        dataset_store,
+        datasets_cache,
+        ethcall_udfs_cache,
     };
 
     // Create a physical table under "test_schema.blocks" — the same name

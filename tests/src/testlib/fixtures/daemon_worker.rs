@@ -7,10 +7,9 @@
 use std::sync::Arc;
 
 use amp_data_store::DataStore;
-use amp_providers_registry::ProvidersRegistry;
 use amp_worker_core::node_id::NodeId;
 use anyhow::Result;
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -27,7 +26,7 @@ pub struct DaemonWorker {
     config: Config,
     metadata_db: MetadataDb,
     data_store: DataStore,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
     node_id: NodeId,
 
     _task: JoinHandle<Result<(), WorkerRuntimeError>>,
@@ -44,8 +43,8 @@ impl DaemonWorker {
         config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
         data_store: DataStore,
-        dataset_store: DatasetStore,
-        providers_registry: ProvidersRegistry,
+        datasets_cache: DatasetsCache,
+        ethcall_udfs_cache: EthCallUdfsCache,
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self> {
@@ -54,8 +53,8 @@ impl DaemonWorker {
             config,
             metadata_db,
             data_store,
-            dataset_store,
-            providers_registry,
+            datasets_cache,
+            ethcall_udfs_cache,
             meter,
             node_id,
             None,
@@ -72,14 +71,14 @@ impl DaemonWorker {
     ///
     /// - `event_emitter`: If `Some`, uses the provided emitter. If `None`, creates
     ///   an emitter based on the configuration (same as `new()`).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn with_event_emitter(
         build_info: BuildInfo,
         config: Arc<amp_config::Config>,
         metadata_db: MetadataDb,
         data_store: DataStore,
-        dataset_store: DatasetStore,
-        providers_registry: ProvidersRegistry,
+        datasets_cache: DatasetsCache,
+        ethcall_udfs_cache: EthCallUdfsCache,
         meter: Option<Meter>,
         node_id: NodeId,
         event_emitter: Option<Arc<dyn EventEmitter>>,
@@ -90,8 +89,8 @@ impl DaemonWorker {
             build_info,
             metadata_db.clone(),
             data_store.clone(),
-            dataset_store.clone(),
-            providers_registry,
+            datasets_cache.clone(),
+            ethcall_udfs_cache,
             meter,
             node_id.clone(),
             event_emitter,
@@ -103,7 +102,7 @@ impl DaemonWorker {
             config: worker_config,
             metadata_db,
             data_store,
-            dataset_store,
+            datasets_cache,
             node_id,
             _task: worker_task,
         })
@@ -132,9 +131,9 @@ impl DaemonWorker {
         &self.data_store
     }
 
-    /// Get a reference to the dataset store.
-    pub fn dataset_store(&self) -> &DatasetStore {
-        &self.dataset_store
+    /// Get a reference to the datasets cache.
+    pub fn datasets_cache(&self) -> &DatasetsCache {
+        &self.datasets_cache
     }
 }
 

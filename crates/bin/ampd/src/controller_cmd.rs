@@ -5,7 +5,7 @@ use amp_data_store::DataStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use monitoring::telemetry::metrics::Meter;
 
 use crate::build_info::BuildInfo;
@@ -53,7 +53,8 @@ pub async fn run(
         let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
         (datasets_registry, providers_registry)
     };
-    let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+    let datasets_cache = DatasetsCache::new(datasets_registry.clone());
+    let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
 
     let (addr, server) = controller::service::new(
         build_info,
@@ -61,7 +62,8 @@ pub async fn run(
         datasets_registry,
         providers_registry,
         data_store,
-        dataset_store,
+        datasets_cache,
+        ethcall_udfs_cache,
         meter,
         at,
     )

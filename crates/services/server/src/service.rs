@@ -12,7 +12,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use metadata_db::MetadataDb;
@@ -27,18 +27,27 @@ use crate::{config::Config, flight, jsonl};
 /// Sets up the Arrow Flight RPC server and/or JSON Lines HTTP server based on the provided addresses.
 /// Creates the internal service instance with query execution capabilities and returns bound
 /// addresses along with a future that runs the servers with graceful shutdown.
+#[expect(clippy::too_many_arguments)]
 pub async fn new(
     config: Arc<Config>,
     metadata_db: MetadataDb,
     data_store: DataStore,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
+    ethcall_udfs_cache: EthCallUdfsCache,
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
     jsonl_at: impl Into<Option<SocketAddr>>,
 ) -> Result<(BoundAddrs, impl Future<Output = Result<(), ServeError>>), InitError> {
     // Create the internal service instance
-    let service =
-        flight::Service::create(config, data_store, metadata_db, dataset_store, meter).await?;
+    let service = flight::Service::create(
+        config,
+        data_store,
+        metadata_db,
+        datasets_cache,
+        ethcall_udfs_cache,
+        meter,
+    )
+    .await?;
 
     // Start Arrow Flight Server if address provided
     let (flight_addr, flight_fut) = match flight_at.into() {

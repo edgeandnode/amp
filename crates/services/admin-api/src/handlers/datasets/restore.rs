@@ -112,7 +112,7 @@ pub async fn handler(
 
     // Load the full dataset object using the resolved hash reference
     let dataset = ctx
-        .dataset_store
+        .datasets_cache
         .get_dataset(&dataset_ref)
         .await
         .map_err(Error::GetDataset)?;
@@ -281,7 +281,7 @@ pub enum Error {
     /// - Manifest parsing errors
     /// - Invalid dataset structure
     #[error("Failed to load dataset: {0}")]
-    GetDataset(#[source] common::dataset_store::GetDatasetError),
+    GetDataset(#[source] common::datasets_cache::GetDatasetError),
 
     /// Failed to restore table revision from storage
     ///
