@@ -14,14 +14,6 @@ network = "solana-mainnet"
 # This directory is used to cache downloaded archive data
 of1_car_directory = "/data/solana/car"
 
-# Solana main RPC endpoint URL (required)
-[rpc_provider_info]
-url = "${SOLANA_RPC_URL}"
-
-# ============================
-# Optional Fields
-# ============================
-
 # Controls when to use the Solana archive for historical data (optional)
 # - "auto": Automatically determine based on block age
 # - "always": Always use the archive, even for recent blocks
@@ -40,8 +32,12 @@ url = "${SOLANA_RPC_URL}"
 # Default: false
 # keep_of1_car_files = false
 
-# Authentication token main RPC endpoint requests (optional)
-# [rpc_provider_info]
+# Primary RPC provider configuration
+[rpc_provider_info]
+# Solana primary RPC endpoint URL (required)
+url = "${SOLANA_RPC_URL}"
+
+# Authentication token for primary RPC endpoint requests (optional)
 # Default: sent as `Authorization: Bearer <token>`.
 # With `auth_header`: sent as `<auth_header>: <token>`.
 # auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"

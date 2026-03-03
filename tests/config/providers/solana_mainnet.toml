@@ -12,6 +12,6 @@ url = "${SOLANA_MAINNET_RPC_URL}"
 # auth_token = "${SOLANA_MAINNET_RPC_AUTH_TOKEN}"
 
 # [fallback_rpc_provider_info]
-# url = "{FALLBACK_SOLANA_MAINNET_RPC_URL}"
+# url = "${FALLBACK_SOLANA_MAINNET_RPC_URL}"
 # auth_header = "${FALLBACK_SOLANA_MAINNET_RPC_AUTH_HEADER}"
 # auth_token = "${FALLBACK_SOLANA_MAINNET_RPC_AUTH_TOKEN}"
