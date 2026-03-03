@@ -184,7 +184,7 @@ pub enum GetDatasetError {
     CreateDerivedDataset {
         reference: HashReference,
         #[source]
-        source: Box<crate::datasets_derived::DatasetError>,
+        source: Box<datasets_derived::dataset::DatasetError>,
     },
 }
 
@@ -274,7 +274,7 @@ fn create_dataset_from_manifest(
                     kind: DerivedDatasetKind.into(),
                     source,
                 })?;
-            crate::datasets_derived::dataset(reference.clone(), manifest)
+            datasets_derived::dataset::dataset(reference.clone(), manifest)
                 .map(Arc::new)
                 .map_err(|source| GetDatasetError::CreateDerivedDataset {
                     reference: reference.clone(),

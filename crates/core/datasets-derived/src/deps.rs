@@ -4,7 +4,6 @@
 //! and utilities for dependency graph operations.
 
 mod alias;
-mod dfs;
 mod reference;
 
 pub use self::{
@@ -12,6 +11,5 @@ pub use self::{
         DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError, SELF_REF_KEYWORD,
         validate_dep_alias,
     },
-    dfs::{DfsError, dfs},
     reference::{DepReference, DepReferenceParseError, HashOrVersion, HashOrVersionParseError},
 };

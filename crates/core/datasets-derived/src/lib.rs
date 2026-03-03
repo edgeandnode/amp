@@ -18,6 +18,8 @@ pub mod deps;
 pub mod func_name;
 pub mod function;
 pub mod manifest;
+pub mod sorting;
+pub mod sql;
 pub mod sql_str;
 
 pub use self::{
