@@ -5,7 +5,6 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datasets_common::{
     dataset::Table, hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
 };
-use futures::{StreamExt as _, TryStreamExt as _};
 use metadata_db::physical_table_revision::LocationId;
 use url::Url;
 
@@ -115,14 +114,16 @@ impl PhysicalTable {
     }
 
     pub async fn files(&self) -> Result<Vec<FileMetadata>, GetFilesError> {
-        self.store
-            .stream_revision_file_metadata(&self.revision)
-            .map(|result| {
-                let file_meta = result.map_err(GetFilesError::StreamMetadata)?;
-                file_meta.try_into().map_err(GetFilesError::ParseMetadata)
-            })
-            .try_collect()
+        let raw_files = self
+            .store
+            .get_revision_files(&self.revision)
             .await
+            .map_err(GetFilesError::StreamMetadata)?;
+
+        raw_files
+            .into_iter()
+            .map(|file_meta| file_meta.try_into().map_err(GetFilesError::ParseMetadata))
+            .collect()
     }
 
     /// Compute missing block ranges from the canonical chain.
@@ -174,12 +175,15 @@ impl PhysicalTable {
     }
 
     pub(crate) async fn segments(&self) -> Result<Vec<Segment>, GetSegmentsError> {
-        self.store
-            .stream_revision_file_metadata(&self.revision)
-            .map(|result| {
-                // Handle stream error
-                let file_meta = result.map_err(GetSegmentsError::StreamMetadata)?;
+        let raw_files = self
+            .store
+            .get_revision_files(&self.revision)
+            .await
+            .map_err(GetSegmentsError::StreamMetadata)?;
 
+        raw_files
+            .into_iter()
+            .map(|file_meta| {
                 // Parse FileMetadata
                 let file: FileMetadata = file_meta
                     .try_into()
@@ -198,8 +202,7 @@ impl PhysicalTable {
 
                 Ok(Segment::new(id, object, ranges, watermark))
             })
-            .try_collect()
-            .await
+            .collect()
     }
 
     /// A snapshot binds this physical table to the currently canonical chain.
@@ -231,8 +234,8 @@ impl PhysicalTable {
 /// Errors that can occur when getting files from a physical table.
 #[derive(Debug, thiserror::Error)]
 pub enum GetFilesError {
-    /// Failed to stream file metadata from data store
-    #[error("failed to stream file metadata")]
+    /// Failed to retrieve file metadata from data store
+    #[error("failed to retrieve file metadata")]
     StreamMetadata(#[source] amp_data_store::StreamFileMetadataError),
 
     /// Failed to parse parquet metadata JSON
@@ -243,8 +246,8 @@ pub enum GetFilesError {
 /// Errors that can occur when getting segments from a physical table.
 #[derive(Debug, thiserror::Error)]
 pub enum GetSegmentsError {
-    /// Failed to stream file metadata from data store
-    #[error("failed to stream file metadata")]
+    /// Failed to retrieve file metadata from data store
+    #[error("failed to retrieve file metadata")]
     StreamMetadata(#[source] amp_data_store::StreamFileMetadataError),
 
     /// Failed to parse parquet metadata JSON
