@@ -467,19 +467,20 @@ impl StreamingQuery {
                     .map(|t| (t.table_ref().into(), t.physical_table().network().clone()))
                     .collect();
 
-                // Incrementalize and propagate block_num with watermark context
+                // Propagate block_num with watermark context on the DETACHED plan
                 let plan = self
                     .plan
                     .clone()
-                    .attach_to(&ctx)
-                    .map_err(StreamingQueryExecutionError::AttachPlan)?;
-                let plan =
-                    crate::plan_visitors::propagate_block_num_with_watermark(
-                        plan,
+                    .propagate_block_num_with_watermark(
                         Some(watermark_ctx.clone()),
                         table_to_network,
                     )
                     .map_err(StreamingQueryExecutionError::PropagateBlockNum)?;
+
+                // Attach and incrementalize the plan
+                let plan = plan
+                    .attach_to(&ctx)
+                    .map_err(StreamingQueryExecutionError::AttachPlan)?;
                 let mut plan = incrementalize_plan(plan, range.start(), range.end())
                     .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
 
