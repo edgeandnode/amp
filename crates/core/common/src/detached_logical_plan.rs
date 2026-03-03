@@ -1,20 +1,22 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
     common::{
-        DFSchemaRef,
         tree_node::{Transformed, TreeNode, TreeNodeRecursion},
+        DFSchemaRef,
     },
     datasource::{DefaultTableSource, TableType},
     error::DataFusionError,
     logical_expr::{LogicalPlan, TableScan},
+    sql::TableReference,
 };
+use datasets_common::network_id::NetworkId;
 
 use crate::{
     context::exec::ExecContext,
     incrementalizer::NonIncrementalQueryError,
-    plan_visitors::{is_incremental, propagate_block_num},
-    sql::TableReference,
+    plan_visitors::{is_incremental, propagate_block_num, propagate_block_num_with_watermark},
+    watermark::WatermarkContext,
 };
 
 /// A plan that has `PlanTable` for its `TableProvider`s. It cannot be executed before being
@@ -41,12 +43,12 @@ impl DetachedLogicalPlan {
                 }) if source.table_type() == TableType::Base
                     && source.get_logical_plan().is_none() =>
                 {
-                    let table_ref: TableReference<String> = table_name
-                        .clone()
+                    let table_ref: TableReference = table_name.clone();
+                    let local_table_ref: crate::sql::TableReference = table_ref
                         .try_into()
                         .map_err(|e| DataFusionError::External(Box::new(e)))?;
                     let provider = ctx
-                        .get_table(&table_ref)
+                        .get_table(&local_table_ref)
                         .map_err(|e| DataFusionError::External(e.into()))?;
                     *source = Arc::new(DefaultTableSource::new(provider));
                     Ok(Transformed::yes(node))
@@ -70,6 +72,19 @@ impl DetachedLogicalPlan {
     /// Rewrites the plan to propagate `_block_num` through all nodes.
     pub fn propagate_block_num(self) -> Result<Self, DataFusionError> {
         Ok(Self(propagate_block_num(self.0)?))
+    }
+
+    /// Rewrites the plan to propagate `_block_num` with optional watermark context.
+    pub fn propagate_block_num_with_watermark(
+        self,
+        watermark_ctx: Option<WatermarkContext>,
+        table_to_network: BTreeMap<TableReference, NetworkId>,
+    ) -> Result<Self, DataFusionError> {
+        Ok(Self(propagate_block_num_with_watermark(
+            self.0,
+            watermark_ctx,
+            table_to_network,
+        )?))
     }
 
     /// Applies a visitor closure to each node in the logical plan tree.

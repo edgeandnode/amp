@@ -21,7 +21,10 @@ use datafusion::{
 };
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
-use crate::incrementalizer::{NonIncrementalQueryError, incremental_op_kind};
+use crate::{
+    incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
+    watermark::WatermarkContext,
+};
 
 /// Helper function to create a column reference to `_block_num`
 fn block_num_col() -> Expr {
@@ -128,18 +131,66 @@ fn block_num_for_join(join: &JoinStruct) -> Result<Expr, DataFusionError> {
     Ok(greatest(vec![left_block_num, right_block_num]))
 }
 
+/// Generates the watermark expression for a table in multi-network queries.
+///
+/// Formula: `base_watermark + offset[n] + (b - start[n]) + 1`
+/// where:
+/// - base_watermark: ending watermark of previous microbatch (0 for first)
+/// - offset[n]: sum of block counts for all networks alphabetically before n
+/// - b: the block number column value
+/// - start[n]: starting block number for network n in this microbatch
+fn watermark_expr_for_table(
+    watermark_ctx: &WatermarkContext,
+    table_network: &NetworkId,
+) -> Result<Expr, DataFusionError> {
+    let info = watermark_ctx.networks.get(table_network).ok_or_else(|| {
+        DataFusionError::Plan(format!(
+            "Network '{}' not found in watermark context. Available networks: {:?}",
+            table_network,
+            watermark_ctx.networks.keys().collect::<Vec<_>>()
+        ))
+    })?;
+
+    // base_watermark + offset[n] + (b - start[n]) + 1
+    let expr = lit(watermark_ctx.base_watermark)
+        + lit(info.offset)
+        + (block_num_col() - lit(info.start))
+        + lit(1u64);
+
+    Ok(expr)
+}
+
 /// Rewriter that propagates the `RESERVED_BLOCK_NUM_COLUMN_NAME` column through the logical plan.
 struct BlockNumPropagator {
     // State variable of the transformation.
     // This is the block num value being bubbled up to be applied in the next projection as:
     // `<block_num_expr> as _block_num`
     next_block_num_expr: Option<Expr>,
+
+    // Optional watermark context for multi-network queries
+    watermark_ctx: Option<WatermarkContext>,
+
+    // Mapping from table reference to network ID
+    table_to_network: BTreeMap<TableReference, NetworkId>,
 }
 
 impl BlockNumPropagator {
     fn new() -> Self {
         Self {
             next_block_num_expr: None,
+            watermark_ctx: None,
+            table_to_network: BTreeMap::new(),
+        }
+    }
+
+    fn with_watermark_context(
+        watermark_ctx: WatermarkContext,
+        table_to_network: BTreeMap<TableReference, NetworkId>,
+    ) -> Self {
+        Self {
+            next_block_num_expr: None,
+            watermark_ctx: Some(watermark_ctx),
+            table_to_network,
         }
     }
 }
@@ -235,7 +286,31 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 if scan.projection.is_some() {
                     return Err(df_err(format!("Scan should not have projection: {scan:?}")));
                 }
-                self.next_block_num_expr = Some(block_num_col());
+
+                // Check if we need to inject watermark calculation
+                if let Some(ref ctx) = self.watermark_ctx {
+                    if ctx.is_multi_network() {
+                        // Look up the table's network
+                        let table_ref = scan.table_name.clone();
+                        if let Some(network) = self.table_to_network.get(&table_ref) {
+                            // Generate watermark expression for this table
+                            self.next_block_num_expr =
+                                Some(watermark_expr_for_table(ctx, network)?);
+                        } else {
+                            return Err(DataFusionError::Plan(format!(
+                                "Table '{}' not found in table_to_network mapping",
+                                table_ref
+                            )));
+                        }
+                    } else {
+                        // Single network - use literal block numbers as before
+                        self.next_block_num_expr = Some(block_num_col());
+                    }
+                } else {
+                    // No watermark context - use literal block numbers as before
+                    self.next_block_num_expr = Some(block_num_col());
+                }
+
                 Ok(Transformed::no(node))
             }
 
@@ -273,6 +348,21 @@ impl TreeNodeRewriter for BlockNumPropagator {
 /// Propagate the `RESERVED_BLOCK_NUM_COLUMN_NAME` column through the logical plan.
 pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
     let mut propagator = BlockNumPropagator::new();
+    plan.rewrite(&mut propagator).map(|t| t.data)
+}
+
+/// Propagate the `RESERVED_BLOCK_NUM_COLUMN_NAME` column with optional watermark context.
+/// When watermark_ctx is provided and is multi-network, _block_num will contain computed
+/// watermark values instead of literal block numbers.
+pub fn propagate_block_num_with_watermark(
+    plan: LogicalPlan,
+    watermark_ctx: Option<WatermarkContext>,
+    table_to_network: BTreeMap<TableReference, NetworkId>,
+) -> Result<LogicalPlan, DataFusionError> {
+    let mut propagator = match watermark_ctx {
+        Some(ctx) => BlockNumPropagator::with_watermark_context(ctx, table_to_network),
+        None => BlockNumPropagator::new(),
+    };
     plan.rewrite(&mut propagator).map(|t| t.data)
 }
 

@@ -8,7 +8,9 @@ use std::{
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
-use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
+use datafusion::{
+    common::cast::as_fixed_size_binary_array, error::DataFusionError, sql::TableReference,
+};
 use datasets_common::{
     block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, dataset::Dataset, hash_reference::HashReference,
     network_id::NetworkId,
@@ -49,6 +51,7 @@ use crate::{
         find_cross_network_join, order_by_block_num, unproject_special_block_num_column,
     },
     sql_str::SqlStr,
+    watermark::WatermarkContext,
 };
 
 /// Errors that occur when spawning a streaming query
@@ -206,11 +209,11 @@ impl TableUpdates {
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
     MicrobatchStart {
-        range: BlockRange,
+        ranges: Vec<BlockRange>,
         is_reorg: bool,
     },
     Data(RecordBatch),
-    MicrobatchEnd(BlockRange),
+    MicrobatchEnd(Vec<BlockRange>),
 
     /// Watermark indicating the query has emitted all outputs up to the given block number.
     /// This represents a monotonically increasing checkpoint in the stream.
@@ -429,6 +432,9 @@ impl StreamingQuery {
     /// 4. Once execution of batch is exhausted, send completion trigger
     #[instrument(skip_all, err)]
     async fn execute(mut self) -> Result<(), StreamingQueryExecutionError> {
+        // Track base_watermark across microbatches for multi-network support
+        let mut base_watermark: u64 = 0;
+
         loop {
             self.table_updates.changed().await;
 
@@ -449,12 +455,31 @@ impl StreamingQuery {
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             let plan = {
-                // Incrementalize the plan
+                // Build watermark context for this microbatch
+                // For single-network queries, this won't affect behavior (literal block numbers preserved)
+                // For multi-network queries (currently blocked), this would enable watermark calculation
+                let watermark_ctx =
+                    WatermarkContext::from_block_ranges(base_watermark, std::slice::from_ref(&range));
+                let table_to_network: BTreeMap<TableReference, NetworkId> = self
+                    .catalog
+                    .entries()
+                    .iter()
+                    .map(|t| (t.table_ref().into(), t.physical_table().network().clone()))
+                    .collect();
+
+                // Incrementalize and propagate block_num with watermark context
                 let plan = self
                     .plan
                     .clone()
                     .attach_to(&ctx)
                     .map_err(StreamingQueryExecutionError::AttachPlan)?;
+                let plan =
+                    crate::plan_visitors::propagate_block_num_with_watermark(
+                        plan,
+                        Some(watermark_ctx.clone()),
+                        table_to_network,
+                    )
+                    .map_err(StreamingQueryExecutionError::PropagateBlockNum)?;
                 let mut plan = incrementalize_plan(plan, range.start(), range.end())
                     .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
 
@@ -483,7 +508,7 @@ impl StreamingQuery {
             let _ = self
                 .tx
                 .send(QueryMessage::MicrobatchStart {
-                    range: range.clone(),
+                    ranges: vec![range.clone()],
                     is_reorg: direction.is_reorg(),
                 })
                 .await;
@@ -500,8 +525,13 @@ impl StreamingQuery {
             // Send end message for this microbatch
             let _ = self
                 .tx
-                .send(QueryMessage::MicrobatchEnd(range.clone()))
+                .send(QueryMessage::MicrobatchEnd(vec![range.clone()]))
                 .await;
+
+            // Update base_watermark for next microbatch
+            // For single-network: base_watermark + (end - start + 1)
+            let block_count = range.end().saturating_sub(range.start()).saturating_add(1);
+            base_watermark = base_watermark.saturating_add(block_count);
 
             if Some(range.end()) == self.end_block {
                 // If we reached the end block, we are done
@@ -892,6 +922,12 @@ pub enum StreamingQueryExecutionError {
     /// This occurs when the plan cannot be attached to the query context.
     #[error("failed to attach the plan to the query context: {0}")]
     AttachPlan(#[source] crate::detached_logical_plan::AttachPlanError),
+
+    /// Failed to propagate block num
+    ///
+    /// This occurs when the block num column cannot be propagated through the plan.
+    #[error("failed to propagate block num: {0}")]
+    PropagateBlockNum(#[source] DataFusionError),
 
     /// Failed to incrementalize the plan
     ///

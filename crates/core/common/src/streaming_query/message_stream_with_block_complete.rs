@@ -71,12 +71,12 @@ where
         };
 
         match message {
-            QueryMessage::MicrobatchStart { range, is_reorg } => {
+            QueryMessage::MicrobatchStart { ranges, is_reorg } => {
                 // Clear state on reorgs
                 if is_reorg {
                     this.last_block_num = None;
                 }
-                Poll::Ready(Some(Ok(QueryMessage::MicrobatchStart { range, is_reorg })))
+                Poll::Ready(Some(Ok(QueryMessage::MicrobatchStart { ranges, is_reorg })))
             }
             QueryMessage::Data(batch) => {
                 match process_data_batch(batch, this.last_block_num) {
@@ -114,10 +114,10 @@ where
                     Err(e) => Poll::Ready(Some(Err(e.into()))),
                 }
             }
-            QueryMessage::MicrobatchEnd(range) => {
+            QueryMessage::MicrobatchEnd(ranges) => {
                 // Clear state on microbatch end
                 this.last_block_num = None;
-                Poll::Ready(Some(Ok(QueryMessage::MicrobatchEnd(range))))
+                Poll::Ready(Some(Ok(QueryMessage::MicrobatchEnd(ranges))))
             }
             QueryMessage::Watermark(block_num) => Poll::Ready(Some(Err(format!(
                 "Unexpected Watermark message from inner stream: {}",
@@ -423,14 +423,14 @@ mod tests {
 
     fn microbatch(start: u64, end: u64) -> QueryMessage {
         QueryMessage::MicrobatchStart {
-            range: create_test_range(start, end),
+            ranges: vec![create_test_range(start, end)],
             is_reorg: false,
         }
     }
 
     fn microbatch_reorg(start: u64, end: u64) -> QueryMessage {
         QueryMessage::MicrobatchStart {
-            range: create_test_range(start, end),
+            ranges: vec![create_test_range(start, end)],
             is_reorg: true,
         }
     }
@@ -443,7 +443,7 @@ mod tests {
                 vec![100, 100, 100],
                 vec![1, 2, 3],
             ))),
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 100))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(100, 100)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -462,7 +462,7 @@ mod tests {
                 vec![100, 101, 101],
                 vec![3, 4, 5],
             ))), // spans blocks
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 101))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(100, 101)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -484,7 +484,7 @@ mod tests {
                 vec![101, 101],
                 vec![3, 4],
             ))), // new block
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 101))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(100, 101)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -505,7 +505,7 @@ mod tests {
                 vec![99, 99],
                 vec![3, 4],
             ))), // goes backwards
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(99, 99))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(99, 99)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -521,7 +521,7 @@ mod tests {
                 vec![100, 101, 102, 102],
                 vec![2, 3, 4, 5],
             ))), // 3 blocks
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 102))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(100, 102)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -559,7 +559,7 @@ mod tests {
         let messages = vec![
             Ok(microbatch(100, 100)),
             Ok(QueryMessage::Data(batch)),
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 100))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(100, 100)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -587,7 +587,7 @@ mod tests {
                 vec![100, 100],
                 vec![3, 4],
             ))), // same block, should pass through
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 100))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(100, 100)])),
         ];
 
         let results = collect_messages(messages).await;
@@ -608,7 +608,7 @@ mod tests {
                 vec![99, 99],
                 vec![3, 4],
             ))), // goes backwards (not during reorg)
-            Ok(QueryMessage::MicrobatchEnd(create_test_range(99, 100))),
+            Ok(QueryMessage::MicrobatchEnd(vec![create_test_range(99, 100)])),
         ];
 
         let results = collect_messages(messages).await;

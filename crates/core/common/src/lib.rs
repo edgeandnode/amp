@@ -24,6 +24,7 @@ pub mod retryable;
 pub mod sql;
 pub mod stream_helpers;
 pub mod streaming_query;
+pub mod watermark;
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;
