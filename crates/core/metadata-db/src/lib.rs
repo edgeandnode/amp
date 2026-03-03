@@ -127,24 +127,6 @@ impl MetadataDb {
         let tx = self.pool.begin().await.map_err(Error::Database)?;
         Ok(Transaction::new(tx))
     }
-
-    /// Begins a new database transaction with REPEATABLE READ isolation level.
-    ///
-    /// This ensures a consistent snapshot throughout the transaction, preventing
-    /// phantom reads or missed rows during queries with concurrent modifications.
-    ///
-    /// Automatically rolls back when dropped unless committed.
-    #[instrument(skip(self), err)]
-    pub async fn begin_txn_repeatable_read(&self) -> Result<Transaction<'static>, Error> {
-        let mut tx = self.pool.begin().await.map_err(Error::Database)?;
-
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            .execute(&mut *tx)
-            .await
-            .map_err(Error::Database)?;
-
-        Ok(Transaction::new(tx))
-    }
 }
 
 // Implement sqlx::Executor for &MetadataDb by delegating to the pool
