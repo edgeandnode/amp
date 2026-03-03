@@ -2,9 +2,8 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use amp_config::WorkerEventsConfig;
 use amp_data_store::DataStore;
-use amp_providers_registry::ProvidersRegistry;
 use backon::{ExponentialBuilder, Retryable};
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use futures::TryStreamExt as _;
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle, notification_multiplexer,
@@ -69,8 +68,8 @@ pub async fn new(
     build_info: impl Into<BuildInfo>,
     metadata_db: MetadataDb,
     data_store: DataStore,
-    dataset_store: DatasetStore,
-    providers_registry: ProvidersRegistry,
+    datasets_cache: DatasetsCache,
+    ethcall_udfs_cache: EthCallUdfsCache,
     meter: Option<Meter>,
     node_id: NodeId,
     event_emitter: Option<Arc<dyn EventEmitter>>,
@@ -127,8 +126,8 @@ pub async fn new(
         WorkerJobCtx {
             config,
             metadata_db: metadata_db.clone(),
-            dataset_store,
-            providers_registry,
+            datasets_cache,
+            ethcall_udfs_cache,
             data_store,
             notification_multiplexer,
             meter,
@@ -245,8 +244,8 @@ pub async fn new(
 pub(crate) struct WorkerJobCtx {
     pub config: Config,
     pub metadata_db: MetadataDb,
-    pub dataset_store: DatasetStore,
-    pub providers_registry: ProvidersRegistry,
+    pub datasets_cache: DatasetsCache,
+    pub ethcall_udfs_cache: EthCallUdfsCache,
     pub data_store: DataStore,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,

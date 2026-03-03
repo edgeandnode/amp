@@ -60,7 +60,7 @@ use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use amp_worker_core::consistency_check;
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use common::dataset_store::{DatasetStore, GetDatasetError};
+use common::datasets_cache::{DatasetsCache, GetDatasetError};
 use datasets_common::reference::Reference;
 use datasets_derived::{
     Dataset as DerivedDataset,
@@ -181,7 +181,9 @@ async fn main() {
             )
             .expect("Failed to create data store");
 
-            let (dataset_store, datasets_registry, providers_registry) = {
+            let (datasets_cache, ethcall_udfs_cache, datasets_registry, providers_registry) = {
+                use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+
                 let provider_configs_store = ProviderConfigsStore::new(
                     amp_object_store::new_with_prefix(
                         &config.providers_store_url,
@@ -199,9 +201,14 @@ async fn main() {
                 );
                 let datasets_registry =
                     DatasetsRegistry::new(sysdb.conn_pool().clone(), dataset_manifests_store);
-                let dataset_store =
-                    DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
-                (dataset_store, datasets_registry, providers_registry)
+                let datasets_cache = DatasetsCache::new(datasets_registry.clone());
+                let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
+                (
+                    datasets_cache,
+                    ethcall_udfs_cache,
+                    datasets_registry,
+                    providers_registry,
+                )
             };
 
             // Start controller for Admin API access during dependency restoration
@@ -213,7 +220,8 @@ async fn main() {
                 datasets_registry,
                 providers_registry.clone(),
                 data_store.clone(),
-                dataset_store.clone(),
+                datasets_cache.clone(),
+                ethcall_udfs_cache.clone(),
                 None,
             )
             .await
@@ -225,8 +233,8 @@ async fn main() {
                 config.clone(),
                 sysdb.conn_pool().clone(),
                 data_store.clone(),
-                dataset_store.clone(),
-                providers_registry,
+                datasets_cache.clone(),
+                ethcall_udfs_cache,
                 None,
                 "bless".parse().expect("valid worker node id"),
             )
@@ -266,7 +274,7 @@ async fn main() {
             // Run blessing procedure
             bless(
                 &ampctl,
-                dataset_store.clone(),
+                datasets_cache.clone(),
                 data_store.clone(),
                 dataset_ref.clone(),
                 end_block,
@@ -310,7 +318,7 @@ async fn main() {
 /// All errors include context about the specific dataset and operation that failed.
 async fn bless(
     ampctl: &Ampctl,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
     data_store: DataStore,
     dataset: Reference,
     end: u64,
@@ -318,7 +326,7 @@ async fn bless(
     // Resolve dataset dependencies and restore them first
     tracing::debug!(%dataset, "Resolving dataset dependencies");
     let deps = {
-        let mut ds_and_deps = dataset_and_dependencies(&dataset_store, dataset.clone())
+        let mut ds_and_deps = dataset_and_dependencies(&datasets_cache, dataset.clone())
             .await
             .map_err(|err| {
                 anyhow!(
@@ -341,7 +349,7 @@ async fn bless(
 
     tracing::debug!(%dataset, ?deps, "Restoring dataset dependencies");
     for dep in deps {
-        test_helpers::restore_dataset_snapshot(ampctl, &dataset_store, &data_store, &dep)
+        test_helpers::restore_dataset_snapshot(ampctl, &datasets_cache, &data_store, &dep)
             .await
             .map_err(|err| {
                 anyhow!(
@@ -396,7 +404,7 @@ async fn bless(
     // Run consistency check on all tables after dump
     tracing::debug!(%dataset, "Running consistency checks on dumped tables");
     let physical_tables =
-        test_helpers::load_physical_tables(&dataset_store, &data_store, &dataset).await?;
+        test_helpers::load_physical_tables(&datasets_cache, &data_store, &dataset).await?;
     for physical_table in physical_tables {
         consistency_check(&physical_table, &data_store)
             .await
@@ -462,19 +470,19 @@ fn resolve_test_data_dir() -> Result<PathBuf> {
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that
 /// each dataset comes after all datasets it depends on.
 async fn dataset_and_dependencies(
-    store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     dataset: Reference,
 ) -> Result<Vec<Reference>, DatasetDependencyError> {
     let mut datasets = vec![dataset];
     let mut deps: BTreeMap<Reference, Vec<Reference>> = BTreeMap::new();
     while let Some(dataset_ref) = datasets.pop() {
         // Resolve the reference to a hash reference first
-        let hash_ref = store
+        let hash_ref = datasets_cache
             .resolve_revision(&dataset_ref)
             .await
             .map_err(DatasetDependencyError::ResolveRevision)?
             .ok_or_else(|| DatasetDependencyError::DatasetNotFound(dataset_ref.clone()))?;
-        let dataset = store
+        let dataset = datasets_cache
             .get_dataset(&hash_ref)
             .await
             .map_err(DatasetDependencyError::GetDataset)?;

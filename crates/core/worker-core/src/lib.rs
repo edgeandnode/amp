@@ -3,9 +3,8 @@
 use std::{sync::Arc, time::Duration};
 
 use amp_data_store::DataStore;
-use amp_providers_registry::ProvidersRegistry;
 use common::{
-    dataset_store::DatasetStore,
+    datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
 };
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
@@ -46,8 +45,8 @@ use crate::{
 pub struct Ctx {
     pub config: Config,
     pub metadata_db: MetadataDb,
-    pub dataset_store: DatasetStore,
-    pub providers_registry: ProvidersRegistry,
+    pub datasets_cache: DatasetsCache,
+    pub ethcall_udfs_cache: EthCallUdfsCache,
     pub data_store: DataStore,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,

@@ -51,9 +51,9 @@ impl Step {
             .expect("Failed to dump dataset via worker");
 
             let data_store = ctx.daemon_server().data_store();
-            let dataset_store = ctx.daemon_server().dataset_store();
+            let datasets_cache = ctx.daemon_server().datasets_cache();
             let physical_tables =
-                test_helpers::load_physical_tables(dataset_store, data_store, &self.dataset)
+                test_helpers::load_physical_tables(datasets_cache, data_store, &self.dataset)
                     .await?;
             for table in physical_tables {
                 test_helpers::check_table_consistency(&table, data_store).await?;

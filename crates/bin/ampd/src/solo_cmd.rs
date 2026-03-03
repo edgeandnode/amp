@@ -5,7 +5,7 @@ use amp_data_store::DataStore;
 use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 
 use crate::{build_info, server_cmd, worker_cmd};
 
@@ -112,7 +112,8 @@ pub async fn run(
         (datasets_registry, providers_registry)
     };
 
-    let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+    let datasets_cache = DatasetsCache::new(datasets_registry.clone());
+    let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
 
     // Spawn controller (Admin API) if enabled
     let controller_fut: ControllerFuture = if admin_server {
@@ -122,7 +123,8 @@ pub async fn run(
             datasets_registry,
             providers_registry.clone(),
             data_store.clone(),
-            dataset_store.clone(),
+            datasets_cache.clone(),
+            ethcall_udfs_cache.clone(),
             meter.clone(),
             config.controller_addrs.admin_api_addr,
         )
@@ -153,7 +155,8 @@ pub async fn run(
             Arc::new(server_config),
             metadata_db.clone(),
             data_store.clone(),
-            dataset_store.clone(),
+            datasets_cache.clone(),
+            ethcall_udfs_cache.clone(),
             meter.clone(),
             flight_at,
             jsonl_at,
@@ -180,8 +183,8 @@ pub async fn run(
         build_info,
         metadata_db,
         data_store,
-        dataset_store,
-        providers_registry.clone(),
+        datasets_cache,
+        ethcall_udfs_cache,
         meter,
         worker_id,
         None, // Use config-based event emitter

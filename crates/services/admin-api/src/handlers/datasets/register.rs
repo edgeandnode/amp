@@ -176,7 +176,8 @@ pub async fn handler(
             let manifest_canonical = if manifest.kind == DerivedDatasetKind {
                 parse_and_canonicalize_derived_dataset_manifest(
                     manifest_content.get(),
-                    &ctx.dataset_store,
+                    &ctx.datasets_cache,
+                    &ctx.ethcall_udfs_cache,
                 )
                 .await
                 .map_err(Error::from)?

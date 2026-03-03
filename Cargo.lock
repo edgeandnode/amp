@@ -1150,7 +1150,6 @@ name = "amp-worker-core"
 version = "0.1.0"
 dependencies = [
  "amp-data-store",
- "amp-providers-registry",
  "common",
  "datafusion",
  "datasets-common",
@@ -14687,7 +14686,6 @@ version = "0.1.0"
 dependencies = [
  "amp-config",
  "amp-data-store",
- "amp-providers-registry",
  "amp-worker-core",
  "amp-worker-datasets-derived",
  "amp-worker-datasets-raw",

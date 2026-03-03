@@ -279,7 +279,7 @@ impl TestCtx {
             .expect("should parse eth_firehose reference");
         test_helpers::restore_dataset_snapshot(
             &ampctl,
-            self.ctx.daemon_controller().dataset_store(),
+            self.ctx.daemon_controller().datasets_cache(),
             self.ctx.daemon_server().data_store(),
             &eth_firehose_ref,
         )

@@ -21,17 +21,17 @@ async fn multi_network_batch_join() {
 
     // Restore both dataset snapshots (indexes files into metadata DB)
     let ampctl = test_ctx.new_ampctl();
-    let dataset_store = test_ctx.daemon_controller().dataset_store();
+    let datasets_cache = test_ctx.daemon_controller().datasets_cache();
     let data_store = test_ctx.daemon_server().data_store();
 
     let eth_rpc_ref = "_/eth_rpc@0.0.0".parse().expect("Valid reference");
     let base_rpc_ref = "_/base_rpc@0.0.0".parse().expect("Valid reference");
 
-    test_helpers::restore_dataset_snapshot(&ampctl, dataset_store, data_store, &eth_rpc_ref)
+    test_helpers::restore_dataset_snapshot(&ampctl, datasets_cache, data_store, &eth_rpc_ref)
         .await
         .expect("Failed to restore eth_rpc snapshot");
 
-    test_helpers::restore_dataset_snapshot(&ampctl, dataset_store, data_store, &base_rpc_ref)
+    test_helpers::restore_dataset_snapshot(&ampctl, datasets_cache, data_store, &base_rpc_ref)
         .await
         .expect("Failed to restore base_rpc snapshot");
 

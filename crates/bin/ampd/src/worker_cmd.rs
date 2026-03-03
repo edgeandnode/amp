@@ -4,7 +4,7 @@ use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use amp_worker_core::node_id::NodeId;
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use monitoring::telemetry::metrics::Meter;
 
 use crate::build_info::BuildInfo;
@@ -52,7 +52,8 @@ pub async fn run(
         (datasets_registry, providers_registry)
     };
 
-    let dataset_store = DatasetStore::new(datasets_registry.clone(), providers_registry.clone());
+    let datasets_cache = DatasetsCache::new(datasets_registry.clone());
+    let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
 
     // Convert common config to worker-specific config
     let worker_config = config_from_common(&config);
@@ -63,8 +64,8 @@ pub async fn run(
         build_info,
         metadata_db,
         data_store,
-        dataset_store,
-        providers_registry,
+        datasets_cache,
+        ethcall_udfs_cache,
         meter,
         node_id,
         None, // Use config-based event emitter

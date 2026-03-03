@@ -129,7 +129,7 @@ pub async fn handler(
     );
 
     let dataset = ctx
-        .dataset_store
+        .datasets_cache
         .get_dataset(&hash_ref)
         .await
         .map_err(|err| {
@@ -317,7 +317,7 @@ pub enum Error {
 
     /// Failed to get dataset definition
     #[error("failed to get dataset definition")]
-    GetDataset(#[source] common::dataset_store::GetDatasetError),
+    GetDataset(#[source] common::datasets_cache::GetDatasetError),
 
     /// Failed to get active table revision
     #[error("failed to get active table revision")]

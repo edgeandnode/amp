@@ -16,7 +16,8 @@ use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     amp_catalog_provider::AMP_CATALOG_NAME,
-    dataset_store::DatasetStore,
+    datasets_cache::DatasetsCache,
+    ethcall_udfs_cache::EthCallUdfsCache,
     memory_pool::{MemoryPoolKind, make_memory_pool},
 };
 
@@ -79,8 +80,11 @@ pub struct ExecEnv {
     /// The data store used for query execution.
     pub store: DataStore,
 
-    /// The dataset store used for dataset resolution and loading.
-    pub dataset_store: DatasetStore,
+    /// The datasets cache used for dataset resolution and loading.
+    pub datasets_cache: DatasetsCache,
+
+    /// The EthCall UDFs cache used for eth_call UDF creation.
+    pub ethcall_udfs_cache: EthCallUdfsCache,
 }
 
 /// Creates a ExecEnv with specified memory and cache configuration
@@ -92,7 +96,8 @@ pub fn create(
     query_max_mem_mb: usize,
     spill_location: &[PathBuf],
     store: DataStore,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
+    ethcall_udfs_cache: EthCallUdfsCache,
 ) -> Result<ExecEnv, datafusion::error::DataFusionError> {
     let spill_allowed = !spill_location.is_empty();
     let disk_manager_mode = if spill_allowed {
@@ -128,6 +133,7 @@ pub fn create(
         isolate_pool,
         query_max_mem_mb,
         store,
-        dataset_store,
+        datasets_cache,
+        ethcall_udfs_cache,
     })
 }

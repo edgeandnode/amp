@@ -10,7 +10,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::dataset_store::DatasetStore;
+use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use metadata_db::MetadataDb;
 use monitoring::telemetry::metrics::Meter;
 use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
@@ -38,7 +38,8 @@ pub async fn new(
     datasets_registry: DatasetsRegistry,
     providers_registry: ProvidersRegistry,
     data_store: DataStore,
-    dataset_store: DatasetStore,
+    datasets_cache: DatasetsCache,
+    ethcall_udfs_cache: EthCallUdfsCache,
     meter: Option<Meter>,
     at: SocketAddr,
 ) -> Result<(SocketAddr, impl Future<Output = Result<(), ServerError>>), Error> {
@@ -50,7 +51,8 @@ pub async fn new(
         metadata_db,
         datasets_registry,
         providers_registry,
-        dataset_store,
+        datasets_cache,
+        ethcall_udfs_cache,
         scheduler: scheduler.clone(),
         data_store,
         build_info,

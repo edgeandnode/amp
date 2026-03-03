@@ -18,7 +18,7 @@ async fn verify_eth_rpc_snapshot_block_15000000() {
     let ampctl = test_ctx.new_ampctl();
     test_helpers::restore_dataset_snapshot(
         &ampctl,
-        test_ctx.daemon_controller().dataset_store(),
+        test_ctx.daemon_controller().datasets_cache(),
         test_ctx.daemon_server().data_store(),
         &dataset_ref,
     )

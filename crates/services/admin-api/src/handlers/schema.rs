@@ -219,9 +219,13 @@ pub async fn handler(
             &functions,
         ));
     let amp_catalog = Arc::new(
-        AmpCatalogProvider::new(ctx.dataset_store.clone(), IsolatePool::dummy())
-            .with_dep_aliases(dep_aliases.clone())
-            .with_self_schema(self_schema),
+        AmpCatalogProvider::new(
+            ctx.datasets_cache.clone(),
+            ctx.ethcall_udfs_cache.clone(),
+            IsolatePool::dummy(),
+        )
+        .with_dep_aliases(dep_aliases.clone())
+        .with_self_schema(self_schema),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())

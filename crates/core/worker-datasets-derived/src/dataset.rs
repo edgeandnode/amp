@@ -119,7 +119,7 @@ use common::{
     catalog::physical::{Catalog, EarliestBlockError, for_dump as physical_for_dump},
     context::{exec::ExecContextBuilder, plan::PlanContextBuilder},
     cursor::Cursor,
-    dataset_store::ResolveRevisionError,
+    datasets_cache::ResolveRevisionError,
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     metadata::Generation,
@@ -155,7 +155,7 @@ pub async fn dump(
 
     // Resolve manifest once using the provided hash reference
     let manifest = ctx
-        .dataset_store
+        .datasets_cache
         .get_derived_manifest(dataset_ref.hash())
         .await
         .map(Arc::new)
@@ -165,7 +165,7 @@ pub async fn dump(
 
     // Get dataset for table resolution
     let dataset = ctx
-        .dataset_store
+        .datasets_cache
         .get_dataset(dataset_ref)
         .await
         .map_err(Error::GetDataset)?;
@@ -241,7 +241,8 @@ pub async fn dump(
         ctx.config.query_max_mem_mb,
         &ctx.config.spill_location,
         ctx.data_store.clone(),
-        ctx.dataset_store.clone(),
+        ctx.datasets_cache.clone(),
+        ctx.ethcall_udfs_cache.clone(),
     )
     .map_err(Error::CreateQueryEnv)?;
     for (table, compactor) in &tables {
@@ -306,7 +307,7 @@ pub enum Error {
     /// - Manifest parsing errors
     /// - Missing required manifest fields
     #[error("Failed to get dataset")]
-    GetDataset(#[source] common::dataset_store::GetDatasetError),
+    GetDataset(#[source] common::datasets_cache::GetDatasetError),
 
     /// Failed to get active physical table
     ///
@@ -367,7 +368,7 @@ pub enum Error {
     ///
     /// The manifest is required to determine table definitions and SQL queries.
     #[error("Failed to get derived manifest")]
-    GetDerivedManifest(#[source] common::dataset_store::GetDerivedManifestError),
+    GetDerivedManifest(#[source] common::datasets_cache::GetDerivedManifestError),
 
     /// Failed to dump individual table
     ///
@@ -477,7 +478,7 @@ async fn dump_table(
 
         // Resolve reference to its manifest hash
         let hash_reference = ctx
-            .dataset_store
+            .datasets_cache
             .resolve_revision(&reference)
             .await
             .map_err(DumpTableError::ResolveRevision)?
@@ -501,7 +502,7 @@ async fn dump_table(
         let table_refs = resolve_table_references::<DepAlias>(&query)
             .map_err(DumpTableError::ResolveTableReferences)?;
         physical_for_dump::create(
-            &ctx.dataset_store,
+            &ctx.datasets_cache,
             &ctx.data_store,
             &dependencies,
             table_refs,
@@ -517,9 +518,13 @@ async fn dump_table(
     let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
         Arc::new(self_schema_provider);
     let amp_catalog = Arc::new(
-        AmpCatalogProvider::new(ctx.dataset_store.clone(), env.isolate_pool.clone())
-            .with_dep_aliases(dep_alias_map)
-            .with_self_schema(self_schema),
+        AmpCatalogProvider::new(
+            ctx.datasets_cache.clone(),
+            ctx.ethcall_udfs_cache.clone(),
+            env.isolate_pool.clone(),
+        )
+        .with_dep_aliases(dep_alias_map)
+        .with_self_schema(self_schema),
     );
     let planning_ctx = PlanContextBuilder::new(env.session_config.clone())
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())

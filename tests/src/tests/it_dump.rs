@@ -257,7 +257,7 @@ impl TestCtx {
         let hash_ref = self
             .ctx
             .daemon_server()
-            .dataset_store()
+            .datasets_cache()
             .resolve_revision(&self.dataset_ref)
             .await
             .expect("Failed to resolve dataset reference")
@@ -266,7 +266,7 @@ impl TestCtx {
         let dataset = self
             .ctx
             .daemon_server()
-            .dataset_store()
+            .datasets_cache()
             .get_dataset(&hash_ref)
             .await
             .expect("Failed to load dataset");
@@ -281,7 +281,7 @@ impl TestCtx {
         let ampctl = self.ctx.new_ampctl();
         test_helpers::restore_dataset_snapshot(
             &ampctl,
-            self.ctx.daemon_controller().dataset_store(),
+            self.ctx.daemon_controller().datasets_cache(),
             self.ctx.daemon_server().data_store(),
             &self.dataset_ref,
         )
@@ -308,7 +308,7 @@ impl TestCtx {
 
         // Load physical tables from dataset store
         test_helpers::load_physical_tables(
-            self.ctx.daemon_server().dataset_store(),
+            self.ctx.daemon_server().datasets_cache(),
             self.ctx.daemon_server().data_store(),
             &self.dataset_ref,
         )

@@ -18,7 +18,7 @@ use common::{
         logical::LogicalTable,
         physical::{Catalog, CatalogTable},
     },
-    dataset_store::DatasetStore,
+    datasets_cache::DatasetsCache,
     physical_table::PhysicalTable,
 };
 use datasets_common::reference::Reference;
@@ -160,7 +160,7 @@ pub async fn deploy_and_wait(
 ///
 /// # Arguments
 ///
-/// * `dataset_store` - The dataset store for resolving dataset metadata
+/// * `datasets_cache` - The dataset store for resolving dataset metadata
 /// * `data_store` - The object store containing the physical Parquet files
 /// * `dataset_ref` - Reference to the dataset (namespace/name@version)
 ///
@@ -176,17 +176,17 @@ pub async fn deploy_and_wait(
 /// - The dataset metadata cannot be loaded
 /// - Any physical table is not found in the data store
 pub async fn load_physical_tables(
-    dataset_store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     data_store: &DataStore,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>> {
-    let dataset_ref = dataset_store
+    let dataset_ref = datasets_cache
         .resolve_revision(&dataset_ref)
         .await
         .expect("Failed to resolve dataset")
         .expect("Dataset not found");
 
-    let dataset = dataset_store
+    let dataset = datasets_cache
         .get_dataset(&dataset_ref)
         .await
         .expect("Failed to get dataset");
@@ -235,7 +235,7 @@ pub async fn check_table_consistency(table: &Arc<PhysicalTable>, store: &DataSto
 /// This is typically used to set up known-good data for comparison testing.
 pub async fn restore_dataset_snapshot(
     ampctl: &super::fixtures::Ampctl,
-    dataset_store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     data_store: &DataStore,
     dataset_ref: &Reference,
 ) -> Result<Vec<Arc<PhysicalTable>>> {
@@ -249,11 +249,11 @@ pub async fn restore_dataset_snapshot(
     );
 
     // 2. Load the dataset to get LogicalTables
-    let dataset_ref = dataset_store
+    let dataset_ref = datasets_cache
         .resolve_revision(dataset_ref)
         .await?
         .ok_or_else(|| anyhow!("dataset '{}' not found", dataset_ref))?;
-    let dataset = dataset_store.get_dataset(&dataset_ref).await?;
+    let dataset = datasets_cache.get_dataset(&dataset_ref).await?;
 
     // 3. Load PhysicalTable objects for each restored table
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
@@ -333,20 +333,20 @@ pub async fn get_table_block_ranges(table: &Arc<PhysicalTable>) -> Vec<BlockRang
 /// compaction, collection, and other table lifecycle operations.
 pub async fn catalog_for_dataset(
     dataset_name: &str,
-    dataset_store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     data_store: &DataStore,
 ) -> Result<Catalog> {
     let dataset_ref = {
         let reference: Reference = format!("_/{dataset_name}@latest")
             .parse()
             .expect("should be valid reference");
-        dataset_store
+        datasets_cache
             .resolve_revision(&reference)
             .await?
             .ok_or_else(|| anyhow!("dataset '{}' not found", reference))?
     };
 
-    let dataset = dataset_store.get_dataset(&dataset_ref).await?;
+    let dataset = datasets_cache.get_dataset(&dataset_ref).await?;
 
     let mut tables: Vec<CatalogTable> = Vec::new();
     for table_def in dataset.tables() {

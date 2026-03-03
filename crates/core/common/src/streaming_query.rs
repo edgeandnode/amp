@@ -44,7 +44,7 @@ use crate::{
         plan::PlanContextBuilder,
     },
     cursor::{Cursor, CursorNetworkNotFoundError, NetworkCursor, Watermark},
-    dataset_store::{DatasetStore, ResolveRevisionError},
+    datasets_cache::{DatasetsCache, ResolveRevisionError},
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     incrementalizer::incrementalize_plan,
@@ -383,7 +383,8 @@ impl StreamingQuery {
             ));
             let amp_catalog = Arc::new(
                 AmpCatalogProvider::new(
-                    exec_env.dataset_store.clone(),
+                    exec_env.datasets_cache.clone(),
+                    exec_env.ethcall_udfs_cache.clone(),
                     exec_env.isolate_pool.clone(),
                 )
                 .with_dep_aliases(dep_alias_map)
@@ -405,7 +406,7 @@ impl StreamingQuery {
                 .collect();
 
             let raw_dataset =
-                resolve_raw_dataset_from_dependencies(&exec_env.dataset_store, unique_refs.iter())
+                resolve_raw_dataset_from_dependencies(&exec_env.datasets_cache, unique_refs.iter())
                     .await
                     .map_err(SpawnError::ResolveRawDataset)?;
 
@@ -1248,14 +1249,14 @@ pub enum ResolveBlocksTableError {
 /// Returns the first raw (non-derived) dataset found and its network, validating that all raw
 /// datasets in the dependency tree belong to the same network.
 async fn resolve_raw_dataset_from_dependencies(
-    dataset_store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
 ) -> Result<Arc<RawDataset>, ResolveRawDatasetError> {
     let mut found: Option<Arc<RawDataset>> = None;
     let mut queue: VecDeque<Arc<dyn Dataset>> = VecDeque::new();
 
     for hash_ref in root_dataset_refs {
-        let dataset = dataset_store
+        let dataset = datasets_cache
             .get_dataset(hash_ref)
             .await
             .map_err(ResolveRawDatasetError::GetDataset)?;
@@ -1288,14 +1289,14 @@ async fn resolve_raw_dataset_from_dependencies(
         // Derived dataset: enqueue dependencies
         if let Some(derived) = dataset.downcast_ref::<DerivedDataset>() {
             for dep in derived.dependencies().values() {
-                let hash_ref = dataset_store
+                let hash_ref = datasets_cache
                     .resolve_revision(dep.to_reference())
                     .await
                     .map_err(ResolveRawDatasetError::ResolveRevision)?
                     .ok_or_else(|| {
                         ResolveRawDatasetError::NotFound(dep.to_reference().to_string())
                     })?;
-                let dataset = dataset_store
+                let dataset = datasets_cache
                     .get_dataset(&hash_ref)
                     .await
                     .map_err(ResolveRawDatasetError::GetDataset)?;
@@ -1312,7 +1313,7 @@ async fn resolve_raw_dataset_from_dependencies(
 pub enum ResolveRawDatasetError {
     /// Failed to get dataset from dataset store.
     #[error("failed to get dataset")]
-    GetDataset(#[source] crate::dataset_store::GetDatasetError),
+    GetDataset(#[source] crate::datasets_cache::GetDatasetError),
 
     /// Failed to resolve revision.
     #[error("failed to resolve revision")]

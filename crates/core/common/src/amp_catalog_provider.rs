@@ -22,7 +22,8 @@ use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     dataset_schema_provider::DatasetSchemaProvider,
-    dataset_store::DatasetStore,
+    datasets_cache::DatasetsCache,
+    ethcall_udfs_cache::EthCallUdfsCache,
     func_catalog::{
         catalog_provider::{
             AsyncCatalogProvider as FuncAsyncCatalogProvider,
@@ -50,7 +51,8 @@ pub const AMP_CATALOG_NAME: &str = "amp";
 /// that provide schema information without requiring a data store.
 #[derive(Clone)]
 pub struct AmpCatalogProvider {
-    store: DatasetStore,
+    datasets_cache: DatasetsCache,
+    ethcall_udfs_cache: EthCallUdfsCache,
     isolate_pool: IsolatePool,
     /// Optional dependency alias overrides. When set, bare names matching
     /// a key are resolved directly to the corresponding [`HashReference`]
@@ -63,9 +65,14 @@ pub struct AmpCatalogProvider {
 
 impl AmpCatalogProvider {
     /// Creates a new catalog provider.
-    pub fn new(store: DatasetStore, isolate_pool: IsolatePool) -> Self {
+    pub fn new(
+        datasets_cache: DatasetsCache,
+        ethcall_udfs_cache: EthCallUdfsCache,
+        isolate_pool: IsolatePool,
+    ) -> Self {
         Self {
-            store,
+            datasets_cache,
+            ethcall_udfs_cache,
             isolate_pool,
             dep_aliases: Default::default(),
             self_schema: None,
@@ -111,7 +118,7 @@ impl AmpCatalogProvider {
         // 2. Dep alias overrides — pinned hash, no store resolution needed.
         if let Some(hash_ref) = self.dep_aliases.get(name) {
             let dataset = self
-                .store
+                .datasets_cache
                 .get_dataset(hash_ref)
                 .await
                 .map_err(|err| DataFusionError::External(Box::new(err)))?;
@@ -119,7 +126,7 @@ impl AmpCatalogProvider {
             let provider: Arc<dyn AsyncSchemaProvider> = Arc::new(DatasetSchemaProvider::new(
                 name.to_string(),
                 dataset,
-                self.store.clone(),
+                self.ethcall_udfs_cache.clone(),
                 self.isolate_pool.clone(),
             ));
             return Ok(Some(provider));
@@ -133,7 +140,7 @@ impl AmpCatalogProvider {
         let reference: Reference = partial_ref.into();
 
         let Some(hash_ref) = self
-            .store
+            .datasets_cache
             .resolve_revision(&reference)
             .await
             .map_err(|err| DataFusionError::External(Box::new(err)))?
@@ -142,7 +149,7 @@ impl AmpCatalogProvider {
         };
 
         let dataset = self
-            .store
+            .datasets_cache
             .get_dataset(&hash_ref)
             .await
             .map_err(|err| DataFusionError::External(Box::new(err)))?;
@@ -150,7 +157,7 @@ impl AmpCatalogProvider {
         let provider: Arc<dyn AsyncSchemaProvider> = Arc::new(DatasetSchemaProvider::new(
             name.to_string(),
             dataset,
-            self.store.clone(),
+            self.ethcall_udfs_cache.clone(),
             self.isolate_pool.clone(),
         ));
         Ok(Some(provider))

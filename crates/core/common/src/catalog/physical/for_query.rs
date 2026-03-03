@@ -14,7 +14,7 @@ use datasets_common::{
 
 use super::catalog::{Catalog, CatalogTable};
 use crate::{
-    dataset_store::{DatasetStore, GetDatasetError, ResolveRevisionError},
+    datasets_cache::{DatasetsCache, GetDatasetError, ResolveRevisionError},
     physical_table::table::PhysicalTable,
     sql::TableReference,
 };
@@ -27,11 +27,11 @@ use crate::{
 ///
 /// ## Parameters
 ///
-/// - `dataset_store`: Used to resolve references and retrieve dataset metadata
+/// - `datasets_cache`: Used to resolve references and retrieve dataset metadata
 /// - `data_store`: Used to query metadata database for physical parquet locations
 /// - `table_refs`: Parsed SQL table references with partial dataset references
 pub async fn create(
-    dataset_store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     data_store: &DataStore,
     table_refs: Vec<TableReference<PartialReference>>,
 ) -> Result<Catalog, CreateCatalogError> {
@@ -46,7 +46,7 @@ pub async fn create(
         let reference: Reference = PartialReference::clone(schema).into();
 
         // Resolve to hash reference
-        let hash_ref = dataset_store
+        let hash_ref = datasets_cache
             .resolve_revision(&reference)
             .await
             .map_err(|source| CreateCatalogError::ResolveRevision {
@@ -67,7 +67,7 @@ pub async fn create(
         }
 
         // Load dataset
-        let dataset = dataset_store
+        let dataset = datasets_cache
             .get_dataset(&hash_ref)
             .await
             .map_err(|source| CreateCatalogError::DatasetRetrieval {

@@ -14,7 +14,7 @@ use datasets_derived::deps::DepAlias;
 use super::catalog::{Catalog, CatalogTable};
 use crate::{
     catalog::logical::LogicalTable,
-    dataset_store::{DatasetStore, GetDatasetError},
+    datasets_cache::{DatasetsCache, GetDatasetError},
     physical_table::table::PhysicalTable,
     sql::TableReference,
 };
@@ -26,13 +26,13 @@ use crate::{
 ///
 /// ## Parameters
 ///
-/// - `dataset_store`: Used to retrieve dataset metadata including start_block
+/// - `datasets_cache`: Used to retrieve dataset metadata including start_block
 /// - `data_store`: Used to query metadata database for physical parquet locations
 /// - `manifest_deps`: Dependency alias → hash reference mappings from the manifest
 /// - `table_refs`: Parsed SQL table references with dep alias schemas
 /// - `udfs`: Pre-resolved self-ref UDFs (from logical catalog)
 pub async fn create(
-    dataset_store: &DatasetStore,
+    datasets_cache: &DatasetsCache,
     data_store: &DataStore,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     table_refs: Vec<TableReference<DepAlias>>,
@@ -64,7 +64,7 @@ pub async fn create(
                     continue;
                 };
 
-                let dataset = dataset_store
+                let dataset = datasets_cache
                     .get_dataset(dataset_ref)
                     .await
                     .map_err(|err| CreateCatalogError::GetDataset {
@@ -116,7 +116,7 @@ pub async fn create(
                 table: table_name.clone(),
             })?;
 
-        let dataset = dataset_store
+        let dataset = datasets_cache
             .get_dataset(dataset_ref)
             .await
             .map_err(|source| CreateCatalogError::DatasetRetrieval {

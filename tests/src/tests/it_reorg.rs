@@ -478,7 +478,7 @@ impl ReorgTestCtx {
             let table_refs = resolve_table_references::<PartialReference>(&sql)
                 .expect("Failed to resolve table references");
             physical_table_catalog::create(
-                test_env.daemon_server().dataset_store(),
+                test_env.daemon_server().datasets_cache(),
                 test_env.daemon_server().data_store(),
                 table_refs,
             )
