@@ -140,7 +140,6 @@ Guidelines scoped to individual crates or modules.
 Documentation format specifications. Meta guidelines live in `docs/__meta__/`.
 
 **Examples:**
-- `features` - Feature doc format (`docs/__meta__/features.md`)
 - `code` - Guideline doc format (`docs/__meta__/code.md`)
 - `code-principle` - Principle guideline template (`docs/__meta__/code-principle.md`)
 - `code-pattern` - Pattern guideline template (`docs/__meta__/code-pattern.md`)
@@ -461,4 +460,4 @@ Before committing guideline documentation:
 
 ### Review
 
-Use the `/docs-code-fmt-check` skill to validate guideline docs before committing.
+Use the `/docs-fmt-check` skill to validate guideline docs before committing.

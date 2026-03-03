@@ -1,5 +1,5 @@
 ---
-name: feature-discovery
+name: feat-discovery
 description: Load relevant feature docs based on user query. Use when user asks about features, functionality, or how things work in the project.
 ---
 
@@ -33,7 +33,7 @@ The discovery command extracts all feature frontmatter for lazy loading.
 
 **Primary Method**: Use the Grep tool with multiline mode:
 - **Pattern**: `^---\n[\s\S]*?\n---`
-- **Path**: `docs/features/`
+- **Path**: `docs/feat/`
 - **Glob**: `*.md`
 - **multiline**: `true`
 - **output_mode**: `content`
@@ -42,19 +42,19 @@ Extracts YAML frontmatter from all feature docs. Returns feature metadata for ma
 
 **Fallback**: Bash command (if Grep tool is unavailable):
 ```bash
-grep -Pzo '(?s)^---\n.*?\n---' docs/features/*.md 2>/dev/null | tr '\0' '\n'
+grep -Pzo '(?s)^---\n.*?\n---' docs/feat/*.md 2>/dev/null | tr '\0' '\n'
 ```
 
 **Cross-platform alternative** (macOS compatible):
 ```bash
-awk '/^---$/{p=!p; print; next} p' docs/features/*.md
+awk '/^---$/{p=!p; print; next} p' docs/feat/*.md
 ```
 
 **Use this when**: You need to see all available features and their descriptions.
 
 ### Read Specific Feature Doc
 
-Use the Read tool to load `docs/features/<feature-name>.md`.
+Use the Read tool to load `docs/feat/<feature-name>.md`.
 
 **Use this when**: You've identified which feature doc is relevant to the user's query.
 
@@ -100,7 +100,7 @@ Read the full content of matched feature docs using the Read tool.
 ### Pre-approved Commands
 
 These tools/commands can run without user permission:
-- Discovery command (Grep tool or bash fallback) on `docs/features/` - Safe, read-only
+- Discovery command (Grep tool or bash fallback) on `docs/feat/` - Safe, read-only
 - Reading feature docs via Read tool - Safe, read-only
 
 ### When to Load Multiple Features
@@ -116,7 +116,7 @@ Load multiple feature docs when:
 - User needs to run commands -> Use appropriate `/code-*` skill
 - User is doing simple file edits -> No discovery needed
 - User asks about implementation details -> Use `/code-discovery` skill
-- User asks if implementation matches docs -> Use `/feature-validate`
+- User asks if implementation matches docs -> Use `/feat-validate`
 
 ## Example Workflows
 
@@ -127,7 +127,7 @@ Load multiple feature docs when:
 1. Run the discovery command to extract all feature metadata
 2. Match "sql" and "query" against feature descriptions
 3. Find match: `jsonl-sql-batch-query` with description "Execute one-shot SQL batch queries..."
-4. Load `docs/features/jsonl-sql-batch-query.md`
+4. Load `docs/feat/jsonl-sql-batch-query.md`
 5. Provide summary from loaded doc
 
 ### Example 2: User Working on Multiple Components

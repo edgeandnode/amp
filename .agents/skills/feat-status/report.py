@@ -2,7 +2,7 @@
 """
 Feature Status Report Generator
 
-Parses YAML frontmatter from docs/features/*.md and generates a status report
+Parses YAML frontmatter from docs/feat/*.md and generates a status report
 grouped by maturity level (stable, experimental, unstable, development, unknown).
 """
 
@@ -101,7 +101,7 @@ def draw_table(headers: List[str], rows: List[List[str]], terminal_width: int = 
 
 
 def main():
-    # Find docs/features directory relative to script location
+    # Find docs/feat directory relative to script location
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent.parent.parent
     features_dir = repo_root / 'docs' / 'features'

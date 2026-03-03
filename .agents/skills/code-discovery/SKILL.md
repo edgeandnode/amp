@@ -163,10 +163,10 @@ Load multiple guideline docs when:
 
 ### When NOT to Use This Skill
 
-- User asks about features -> Use `/feature-discovery` skill
+- User asks about features -> Use `/feat-discovery` skill
 - User needs to run commands -> Use appropriate `/code-*` skill
 - Guidelines are already loaded in context -> No need to reload
-- User asks about implementation status -> Use `/feature-validate` skill
+- User asks about implementation status -> Use `/feat-validate` skill
 
 ## Example Workflows
 
