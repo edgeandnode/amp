@@ -8,7 +8,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 
 **If you're an AI agent working on this codebase, here's what you need to know immediately:**
 
-1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`, `/feature-discovery`, `/docs-features-fmt-check`, `/feature-validate`) instead of running commands directly
+1. **Use Skills for operations** → Invoke skills (`/code-format`, `/code-check`, `/code-test`, `/code-gen`, `/feat-discovery`, `/docs-fmt-check`, `/feat-validate`) instead of running commands directly
 2. **Skills wrap justfile tasks** → Skills provide the interface to `just` commands with proper guidance
 3. **Follow the workflow** → Format → Check → Clippy → Targeted Tests (when needed)
 4. **Fix ALL warnings** → Zero tolerance for clippy warnings
@@ -24,7 +24,7 @@ Project Amp is a high-performance ETL (Extract, Transform, Load) architecture fo
 1. [Principles](#1-principles) - Core design principles guiding this codebase
 2. [Code Guidelines](#2-coding-patterns) - Understanding coding standards via `/code-discovery` skill
 3. [Development Workflow](#3-development-workflow) - How to develop with this codebase
-4. [Feature Discovery](#4-feature-discovery) - Understanding project features via `/feature-discovery` skill
+4. [Feat Discovery](#4-feat-discovery) - Understanding project features via `/feat-discovery` skill
 5. [Additional Resources](#5-additional-resources) - Links to documentation
 
 
@@ -65,13 +65,13 @@ Code guideline documentation lives in `docs/code/` with YAML frontmatter for dyn
 | Understand code guidelines before implementing                | `/code-discovery` |
 | "How should I handle errors?", "What's the pattern for X?"    | `/code-discovery` |
 | Load crate-specific guidelines for admin-api, metadata-db, etc. | `/code-discovery` |
-| Creating or editing files in `docs/code/`                     | `/docs-code-fmt-check` |
-| Reviewing PRs that modify guideline docs                        | `/docs-code-fmt-check` |
+| Creating or editing files in `docs/code/`                     | `/docs-fmt-check` |
+| Reviewing PRs that modify guideline docs                        | `/docs-fmt-check` |
 
 **Navigation:**
 
 - Need to understand patterns? → `/code-discovery`
-- Writing guideline docs? → `/docs-code-fmt-check` + [docs/__meta__/code.md](docs/__meta__/code.md)
+- Writing guideline docs? → `/docs-fmt-check` + [docs/__meta__/code.md](docs/__meta__/code.md)
 - All patterns located in `docs/code/`
 
 
@@ -315,30 +315,30 @@ Edit File → /code-format skill
 
 **Remember**: When in doubt, invoke the appropriate Skill!
 
-## 4. Feature Discovery
+## 4. Feat Discovery
 
-Feature documentation lives in `docs/features/` with YAML frontmatter for dynamic discovery.
+Feature documentation lives in `docs/feat/` with YAML frontmatter for dynamic discovery.
 
 **Feature docs are authoritative**: If a feature doc exists, it is the ground truth. Implementation MUST align with documentation. If there's a mismatch, either fix the code or update the doc to reflect the correct state.
 
 | When User Asks                                              | Invoke This Skill    |
 |-------------------------------------------------------------|----------------------|
-| "What is X?", "How does X work?", "Explain the Y feature"   | `/feature-discovery` |
-| "What features does Amp have?", "What can this project do?" | `/feature-discovery` |
-| Questions about project functionality or capabilities       | `/feature-discovery` |
-| Need context before implementing a feature                  | `/feature-discovery` |
-| Creating or editing files in `docs/features/`               | `/docs-features-fmt-check` |
-| Reviewing PRs that modify feature docs (format check)       | `/docs-features-fmt-check` |
-| "What's the status of feature X implementation?"            | `/feature-validate`  |
-| Verify feature doc matches implementation                   | `/feature-validate`  |
-| Check if documented functionality exists in code            | `/feature-validate`  |
-| Audit feature docs for accuracy and test coverage           | `/feature-validate`  |
+| "What is X?", "How does X work?", "Explain the Y feature"   | `/feat-discovery` |
+| "What features does Amp have?", "What can this project do?" | `/feat-discovery` |
+| Questions about project functionality or capabilities       | `/feat-discovery` |
+| Need context before implementing a feature                  | `/feat-discovery` |
+| Creating or editing files in `docs/feat/`               | `/docs-fmt-check` |
+| Reviewing PRs that modify feature docs (format check)       | `/docs-fmt-check` |
+| "What's the status of feature X implementation?"            | `/feat-validate`  |
+| Verify feature doc matches implementation                   | `/feat-validate`  |
+| Check if documented functionality exists in code            | `/feat-validate`  |
+| Audit feature docs for accuracy and test coverage           | `/feat-validate`  |
 
 **Navigation:**
 
-- Need to understand a feature? → `/feature-discovery`
-- Writing feature docs? → `/docs-features-fmt-check` + [docs/__meta__/features.md](docs/__meta__/features.md)
-- Validate implementation aligns with feature claims? → `/feature-validate`
+- Need to understand a feature? → `/feat-discovery`
+- Writing feature docs? → `/docs-fmt-check` + [docs/__meta__/feat.md](docs/__meta__/feat.md)
+- Validate implementation aligns with feature claims? → `/feat-validate`
 
 ## 5. Additional Resources
 

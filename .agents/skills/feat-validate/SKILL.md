@@ -1,5 +1,5 @@
 ---
-name: feature-validate
+name: feat-validate
 description: Verify feature doc alignment with implementation. Use when asking about feature implementation status, or to check that documented functionality exists in code and has test coverage
 ---
 
@@ -251,7 +251,7 @@ These tools/commands can run without user permission:
 
 ### Example 1: UDF Feature (Function-focused)
 
-**Scenario**: Verify `docs/features/udf-builtin-evm-eth-call.md`
+**Scenario**: Verify `docs/feat/udf-builtin-evm-eth-call.md`
 
 1. **Parse doc** - Extract documented capabilities:
    - `eth_call(from, to, input, block)` function signature
@@ -271,7 +271,7 @@ These tools/commands can run without user permission:
 
 ### Example 2: HTTP Endpoint Feature (Distributed)
 
-**Scenario**: Verify `docs/features/query-jsonl-batch.md`
+**Scenario**: Verify `docs/feat/query-jsonl-batch.md`
 
 1. **Parse doc** - Extract documented capabilities:
    - POST endpoint on port 1603

@@ -1,7 +1,7 @@
 ---
-name: feature-status
+name: feat-status
 description: Report feature maturity and status. Use when asking about project status, feature readiness, or which features are stable/experimental/development
-allowed-tools: Bash(python3 .claude/skills/feature-status/report.py )
+allowed-tools: Bash(python3 .agents/skills/feat-status/report.py )
 ---
 
 # Feature Status Skill
@@ -23,7 +23,7 @@ Use this skill when:
 
 The skill:
 
-1. **Parses frontmatter**: Extracts `status` field from all `docs/features/*.md` files
+1. **Parses frontmatter**: Extracts `status` field from all `docs/feat/*.md` files
 2. **Groups by maturity**: Organizes features by status level
 3. **Generates report**: Creates formatted tables grouped by status with feature details
 
@@ -32,7 +32,7 @@ The skill:
 ### Status Report Command
 
 ```bash
-python3 .claude/skills/feature-status/report.py
+python3 .agents/skills/feat-status/report.py
 ```
 
 Generates a comprehensive status report with:
@@ -80,17 +80,17 @@ The skill should be invoked for queries about:
 ### Not Status Queries
 
 Do NOT use this skill for:
-- "How does feature X work?" → Use `/feature-discovery`
-- "What features are available?" → Use `/feature-discovery`
-- "Validate feature implementation" → Use `/feature-validate`
-- "Check feature doc format" → Use `/docs-features-fmt-check`
+- "How does feature X work?" → Use `/feat-discovery`
+- "What features are available?" → Use `/feat-discovery`
+- "Validate feature implementation" → Use `/feat-validate`
+- "Check feature doc format" → Use `/docs-fmt-check`
 
 ## Important Guidelines
 
 ### Pre-approved Commands
 
 These commands can run without user permission:
-- `python3 .claude/skills/feature-status/report.py` - Safe, read-only, no side effects
+- `python3 .agents/skills/feat-status/report.py` - Safe, read-only, no side effects
 
 ### Status Field Values
 
@@ -105,7 +105,7 @@ The `status` field in feature frontmatter should be one of:
 
 After running the status report, if user wants details about specific features:
 1. Note which features the user is interested in
-2. Use `/feature-discovery` to load full documentation for those features
+2. Use `/feat-discovery` to load full documentation for those features
 
 ## Example Workflows
 
@@ -113,7 +113,7 @@ After running the status report, if user wants details about specific features:
 
 **Query**: "What's the overall status of the project?"
 
-1. Run `python3 .claude/skills/feature-status/report.py`
+1. Run `python3 .agents/skills/feat-status/report.py`
 2. Review the generated report
 3. Summarize findings: X stable features, Y experimental, Z in development
 4. Highlight any features with unknown status that need attention
@@ -124,7 +124,7 @@ After running the status report, if user wants details about specific features:
 
 1. Run the status report
 2. Extract and list features marked as `stable`
-3. If user wants details, use `/feature-discovery` to load specific stable features
+3. If user wants details, use `/feat-discovery` to load specific stable features
 
 ### Example 3: User Audits Documentation
 
@@ -142,7 +142,7 @@ After running the status report, if user wants details about specific features:
 1. Run the status report
 2. Extract features from the "experimental" section
 3. Present the list with descriptions
-4. If user wants more details, use `/feature-discovery` to load specific docs
+4. If user wants more details, use `/feat-discovery` to load specific docs
 
 ## Common Mistakes to Avoid
 
@@ -158,7 +158,7 @@ After running the status report, if user wants details about specific features:
 ### Best Practices
 
 - Run the report script to get current status
-- Use report for overview, `/feature-discovery` for details
+- Use report for overview, `/feat-discovery` for details
 - Flag features with unknown status for documentation updates
 - Present status grouped by maturity level for clarity
 
@@ -168,5 +168,5 @@ After generating a status report:
 
 1. **Present findings** - Summarize status distribution to user
 2. **Identify actions** - Note features needing status updates
-3. **Provide details** - Use `/feature-discovery` if user wants specifics
+3. **Provide details** - Use `/feat-discovery` if user wants specifics
 4. **Suggest improvements** - Recommend adding status to unknown features
