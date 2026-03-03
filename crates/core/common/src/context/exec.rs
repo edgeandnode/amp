@@ -11,6 +11,8 @@ use datafusion::{
     self,
     arrow::array::RecordBatch,
     catalog::{AsyncCatalogProvider as TableAsyncCatalogProvider, MemorySchemaProvider},
+    common::tree_node::Transformed,
+    datasource::{DefaultTableSource, TableType},
     error::DataFusionError,
     execution::{
         RecordBatchStream, SendableRecordBatchStream, TaskContext,
@@ -20,7 +22,7 @@ use datafusion::{
         memory_pool::{MemoryPool, human_readable_size},
         object_store::ObjectStoreRegistry,
     },
-    logical_expr::LogicalPlan,
+    logical_expr::{LogicalPlan, TableScan},
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, execute_stream, stream::RecordBatchStreamAdapter},
     sql::parser,
@@ -72,6 +74,15 @@ pub struct ExecContext {
 }
 
 impl ExecContext {
+    /// Attaches a detached logical plan to this query context by replacing
+    /// `PlanTable` table sources in `TableScan` nodes with actual
+    /// `QueryableSnapshot` providers from the catalog.
+    #[tracing::instrument(skip_all, err)]
+    pub(crate) fn attach(&self, plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
+        plan.transform_with_subqueries(|node| attach_table_node(node, self))
+            .map(|t| t.data)
+    }
+
     /// Returns the physical catalog snapshot backing this query context.
     ///
     /// Exposes segment-level data for streaming query consumers that need to
@@ -708,6 +719,30 @@ pub enum RegisterTableError {
     /// Failed to register a catalog UDF in the exec session context
     #[error("failed to register catalog UDF in exec session context")]
     RegisterUdf(#[source] DataFusionError),
+}
+
+/// Replaces `PlanTable` table sources with actual `QueryableSnapshot` providers
+/// in a single plan node.
+fn attach_table_node(
+    mut node: LogicalPlan,
+    ctx: &ExecContext,
+) -> Result<Transformed<LogicalPlan>, DataFusionError> {
+    match &mut node {
+        LogicalPlan::TableScan(TableScan {
+            table_name, source, ..
+        }) if source.table_type() == TableType::Base && source.get_logical_plan().is_none() => {
+            let table_ref: TableReference<String> = table_name
+                .clone()
+                .try_into()
+                .map_err(|err| DataFusionError::External(Box::new(err)))?;
+            let provider = ctx
+                .get_table(&table_ref)
+                .map_err(|err| DataFusionError::External(Box::new(err)))?;
+            *source = Arc::new(DefaultTableSource::new(provider));
+            Ok(Transformed::yes(node))
+        }
+        _ => Ok(Transformed::no(node)),
+    }
 }
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.
