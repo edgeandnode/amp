@@ -40,11 +40,11 @@ fn block_num_col() -> Expr {
 ///    The check walks every expression in the entire plan tree exhaustively
 ///    (`node.expressions()` + `Expr::apply`), so no node type can be missed.
 ///
-/// 2. **No duplicate `_block_num` columns in a Projection** — `SELECT *` over a join
-///    produces one `_block_num` per side, which is ambiguous.
+/// 2. **No bare `col("_block_num")` in multi-table Projections** — over a join there
+///    is one `_block_num` per side; a bare column reference picks one arbitrarily and
+///    conflicts with the `_block_num` the propagator will insert.
 ///    Users must write `block_num()` instead, which the propagator replaces with
 ///    `greatest(left._block_num, right._block_num)`.
-///    A qualified selection like `SELECT table.*` (single source of `_block_num`) is allowed.
 ///
 /// Rule 1 establishes the invariant that [`expr_outputs_block_num`] relies on: any
 /// expression whose `physical_name` is `"_block_num"` in a validated plan is a genuine
@@ -70,17 +70,19 @@ pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), Data
         })?;
 
         if let LogicalPlan::Projection(projection) = node {
-            let block_num_cols = projection
-                .expr
-                .iter()
-                .filter(|e| matches!(e, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME))
-                .count();
-            if block_num_cols > 1 {
-                return plan_err!(
-                    "selecting `{}` from a multi-table context (e.g. a join) is ambiguous. \
-                     Use the `block_num()` function instead to get the correct value",
-                    RESERVED_BLOCK_NUM_COLUMN_NAME
-                );
+            let input_schema = projection.input.schema();
+            let input_qualifiers: BTreeSet<&TableReference> =
+                input_schema.iter().filter_map(|(q, _)| q).collect();
+            if input_qualifiers.len() > 1 {
+                for expr in projection.expr.iter() {
+                    if matches!(expr, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME) {
+                        return plan_err!(
+                            "selecting `{}` from a multi-table context (e.g. a join) is ambiguous. \
+                             Use the `block_num()` function instead to get the correct value",
+                            RESERVED_BLOCK_NUM_COLUMN_NAME
+                        );
+                    }
+                }
             }
         }
 
