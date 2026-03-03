@@ -461,7 +461,7 @@ fn known_log_message_mismatch(
     };
 
     let is_known_mismatch1 = of1_log_messages.is_empty() && !rpc_log_messages.is_empty();
-    let truncated_log_marker = String::from("Log truncated");
+    let truncated_log_marker = String::from(solana_datasets::TRUNCATED_LOG_MESSAGES_MARKER);
     let is_known_mismatch2 = of1_log_messages.contains(&truncated_log_marker)
         || rpc_log_messages.contains(&truncated_log_marker);
 

@@ -35,7 +35,7 @@ use datasets_raw::dataset::Dataset as RawDataset;
 use solana_client::rpc_config::CommitmentConfig;
 
 pub use self::{
-    client::{Client, non_empty_of1_slot, non_empty_rpc_slot},
+    client::{Client, TRUNCATED_LOG_MESSAGES_MARKER, non_empty_of1_slot, non_empty_rpc_slot},
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
 };
 use crate::error::ClientError;
@@ -119,11 +119,9 @@ pub fn client(
     {
         Some("http") | Some("https") | None => {}
         Some(scheme) => {
-            let err = format!(
-                "unsupported Solana fallback RPC provider URL scheme: {}",
-                scheme
-            );
-            return Err(ClientError(err));
+            return Err(ClientError::UnsupportedUrlScheme {
+                scheme: scheme.to_string(),
+            });
         }
     }
 
