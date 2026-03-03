@@ -143,8 +143,7 @@ impl Service {
             .await
             .map_err(Error::PlanSql)?;
 
-        let is_streaming =
-            is_streaming.unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
+        let is_streaming = is_streaming.unwrap_or_else(|| crate::helpers::is_streaming(&query));
         let result = self.execute_plan(catalog, plan, is_streaming, cursor).await;
 
         // Record execution error
@@ -316,8 +315,8 @@ impl Service {
                             .build()
                     };
 
-                    let is_streaming = streaming_override
-                        .unwrap_or_else(|| common::stream_helpers::is_streaming(&query));
+                    let is_streaming =
+                        streaming_override.unwrap_or_else(|| crate::helpers::is_streaming(&query));
                     let schema = plan_ctx
                         .sql_output_schema(query)
                         .await

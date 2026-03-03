@@ -5,11 +5,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use common::{arrow, sql_str::SqlStr, stream_helpers::is_streaming};
+use common::{arrow, sql_str::SqlStr};
 use futures::{StreamExt as _, TryStreamExt as _};
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
-use crate::flight::Service;
+use crate::{flight::Service, helpers::is_streaming};
 
 /// Build the JSON Lines HTTP router
 ///

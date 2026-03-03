@@ -25,7 +25,6 @@ pub mod plan_visitors;
 pub mod retryable;
 pub mod self_schema_provider;
 pub mod sql;
-pub mod stream_helpers;
 pub mod streaming_query;
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
