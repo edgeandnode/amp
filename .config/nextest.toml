@@ -35,6 +35,7 @@ default-filter = '''
   - test(tests::it_dump::evm_rpc_single_dump)
   - test(tests::it_dump::evm_rpc_single_dump_fetch_receipts_per_tx)
   - test(tests::it_solana_historical_to_json_rpc_transition::historical_to_json_rpc_transition)
+  - test(tests::it_sql::eth_call_tests)
   - test(tests::it_sql::sql_tests)
   - test(tests::it_sql_dataset_batch_size::sql_dataset_input_batch_size)
   - test(tests::it_streaming::streaming_tests_with_sql_datasets)
