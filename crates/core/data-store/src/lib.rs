@@ -21,10 +21,10 @@ use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use foyer::Cache;
 // Re-export foyer::Cache for use by downstream crates
 pub use foyer::Cache as FoyerCache;
-use futures::{Stream, StreamExt as _, TryStreamExt as _, stream::BoxStream};
+use futures::{StreamExt as _, TryStreamExt as _, stream::BoxStream};
 use metadata_db::{
     MetadataDb,
-    files::FileId,
+    files::{FileId, FileMetadataWithDetails},
     physical_table_revision::{LocationId, PhysicalTableRevision, RevisionMetadataOwned},
 };
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
@@ -545,21 +545,37 @@ impl DataStore {
         .map_err(RegisterFileError)
     }
 
-    /// Streams file metadata for a revision with path-resolved object metadata.
+    /// Gets all file metadata for a revision with path-resolved object metadata.
     ///
-    /// This method combines the database metadata with the revision path to produce
-    /// `PhyTableRevisionFileMetadata` entries that include the full object store path.
-    pub fn stream_revision_file_metadata(
+    /// This method retrieves file metadata from the database and combines it with the
+    /// revision path to produce `PhyTableRevisionFileMetadata` entries that include
+    /// the full object store path and parsed metadata.
+    pub async fn get_revision_files(
         &self,
         revision: &PhyTableRevision,
-    ) -> impl Stream<Item = Result<PhyTableRevisionFileMetadata, StreamFileMetadataError>> + '_
-    {
+    ) -> Result<Vec<PhyTableRevisionFileMetadata>, StreamFileMetadataError> {
         let location_id = revision.location_id;
         let table_path = revision.path.as_object_store_path().clone();
 
-        metadata_db::files::stream_by_location_id_with_details(&self.metadata_db, location_id)
-            .map_err(StreamFileMetadataError)
-            .map_ok(move |row| {
+        // Use REPEATABLE READ isolation to ensure consistent snapshot during query.
+        // This prevents missing rows due to concurrent table modifications.
+        let mut txn = self
+            .metadata_db
+            .begin_txn_repeatable_read()
+            .await
+            .map_err(StreamFileMetadataError)?;
+
+        let rows: Vec<FileMetadataWithDetails> =
+            metadata_db::files::stream_by_location_id_with_details(&mut txn, location_id)
+                .map_err(StreamFileMetadataError)
+                .try_collect()
+                .await?;
+
+        // Transaction auto-rolls back on drop (read-only, no commit needed)
+
+        let results = rows
+            .into_iter()
+            .map(|row| {
                 let location = table_path.child(row.file_name.as_str());
                 let size = row.object_size.unwrap_or_default() as u64;
 
@@ -594,19 +610,9 @@ impl DataStore {
                     parquet_meta_json: row.metadata,
                 }
             })
-    }
+            .collect();
 
-    /// Gets all files for a revision as a Vec.
-    ///
-    /// This is a convenience method that collects the stream from
-    /// `stream_revision_file_metadata` into a vector.
-    pub async fn get_revision_files(
-        &self,
-        revision: &PhyTableRevision,
-    ) -> Result<Vec<PhyTableRevisionFileMetadata>, StreamFileMetadataError> {
-        self.stream_revision_file_metadata(revision)
-            .try_collect()
-            .await
+        Ok(results)
     }
 
     /// Truncate a table revision by deleting all files and their metadata.
@@ -623,9 +629,8 @@ impl DataStore {
         revision: &PhyTableRevision,
         concurrency: usize,
     ) -> Result<u64, TruncateError> {
-        let files: Vec<PhyTableRevisionFileMetadata> = self
-            .stream_revision_file_metadata(revision)
-            .try_collect()
+        let files = self
+            .get_revision_files(revision)
             .await
             .map_err(TruncateError::StreamMetadata)?;
 
@@ -1283,15 +1288,15 @@ pub struct ListAllTableRevisionsError(#[source] pub metadata_db::Error);
 /// This error type is used by `DataStore::truncate_revision()`.
 #[derive(Debug, thiserror::Error)]
 pub enum TruncateError {
-    /// Failed to stream file metadata from metadata database
+    /// Failed to retrieve file metadata from metadata database
     ///
     /// This error occurs when querying the database for file metadata fails.
     ///
     /// Common causes:
-    /// - Database connection lost during streaming
+    /// - Database connection lost during query
     /// - Database server unreachable
     /// - Network connectivity issues
-    #[error("Failed to stream file metadata")]
+    #[error("Failed to retrieve file metadata")]
     StreamMetadata(#[source] StreamFileMetadataError),
 
     /// Failed to delete a file from object store
