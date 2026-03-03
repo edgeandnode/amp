@@ -12,12 +12,11 @@
 use std::{
     num::NonZeroU32,
     path::PathBuf,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
-use amp_providers_common::{
-    network_id::NetworkId, provider_name::ProviderName, redacted::Redacted,
-};
+use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
 use amp_providers_solana::config::UseArchive;
 use anyhow::Context;
 use datasets_common::block_num::BlockNum;
@@ -30,9 +29,12 @@ use datasets_raw::{
 use futures::{Stream, StreamExt, TryStreamExt};
 use solana_client::rpc_config::CommitmentConfig;
 use solana_clock::Slot;
-use url::Url;
 
-use crate::{metrics, of1_client, rpc_client, rpc_client::Auth, tables};
+use crate::{metrics, of1_client, rpc_client, tables};
+
+/// Marker string that appears in Solana transaction log message lists when logs
+/// have been truncated.
+pub const TRUNCATED_LOG_MESSAGES_MARKER: &str = "Log truncated";
 
 /// Handles related to the OF1 CAR manager task, stored in the client for cleanup.
 struct Of1CarManagerHandles {
@@ -43,7 +45,8 @@ struct Of1CarManagerHandles {
 /// A JSON-RPC based Solana client that implements the [`BlockStreamer`] trait.
 pub struct Client {
     of1_car_manager_handles: Arc<Mutex<Option<Of1CarManagerHandles>>>,
-    rpc_client: Arc<rpc_client::SolanaRpcClient>,
+    main_rpc_client: Arc<rpc_client::SolanaRpcClient>,
+    fallback_rpc_client: Option<Arc<rpc_client::SolanaRpcClient>>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     network: NetworkId,
     provider_name: ProviderName,
@@ -55,8 +58,8 @@ pub struct Client {
 impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        rpc_provider_url: Redacted<Url>,
-        auth: impl Into<Option<Auth>>,
+        main_rpc_connection_info: rpc_client::RpcProviderConnectionInfo,
+        fallback_rpc_connection_info: Option<rpc_client::RpcProviderConnectionInfo>,
         max_rpc_calls_per_second: Option<NonZeroU32>,
         network: NetworkId,
         provider_name: ProviderName,
@@ -70,13 +73,22 @@ impl Client {
 
         let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
 
-        let rpc_client = rpc_client::SolanaRpcClient::new(
-            rpc_provider_url,
-            auth.into(),
+        let main_rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
+            main_rpc_connection_info,
             max_rpc_calls_per_second,
             provider_name.to_string(),
             network.clone(),
-        );
+        ));
+        let fallback_rpc_client = fallback_rpc_connection_info.map(|info| {
+            // No rate limiting for fallback client since it's only used for filling truncated logs.
+            let rate_limit = None;
+            Arc::new(rpc_client::SolanaRpcClient::new(
+                info,
+                rate_limit,
+                provider_name.to_string(),
+                network.clone(),
+            ))
+        });
 
         let (of1_car_manager_tx, of1_car_manager_rx) = tokio::sync::mpsc::channel(128);
         let of1_car_manager_jh = tokio::task::spawn(of1_client::car_file_manager(
@@ -94,7 +106,8 @@ impl Client {
 
         Self {
             of1_car_manager_handles: Arc::new(Mutex::new(Some(handles))),
-            rpc_client: Arc::new(rpc_client),
+            main_rpc_client,
+            fallback_rpc_client,
             metrics,
             network,
             provider_name,
@@ -117,6 +130,7 @@ impl Client {
         end: BlockNum,
         historical_block_stream: T,
         get_block_config: rpc_client::rpc_config::RpcBlockConfig,
+        get_transaction_config: rpc_client::rpc_config::RpcTransactionConfig,
     ) -> impl Stream<Item = Result<Rows, BlockStreamError>>
     where
         T: Stream<Item = Result<of1_client::DecodedSlot, BlockStreamError>>,
@@ -155,7 +169,19 @@ impl Client {
                 }
 
                 // Don't emit rows for skipped slots.
-                let non_empty_slot = ok_or_bail!(non_empty_of1_slot(slot).fatal());
+                let mut non_empty_slot = ok_or_bail!(non_empty_of1_slot(slot).fatal());
+                if let Some(fallback_rpc_client) = self.fallback_rpc_client.as_ref() {
+                    fill_truncated_logs(
+                        &mut non_empty_slot,
+                        fallback_rpc_client,
+                        get_transaction_config,
+                        self.metrics.clone(),
+                    )
+                    .await
+                    .with_context(|| format!("filling truncated OF1 logs for slot {current_slot}"))
+                    .recoverable()?;
+                }
+
                 yield non_empty_slot.into_db_rows(&self.network).fatal();
 
                 if current_slot == end {
@@ -174,17 +200,25 @@ impl Client {
 
             // Download the remaining blocks via JSON-RPC.
             for slot in expected_next_slot..=end {
-                let get_block_resp = self.rpc_client.get_block(
-                    slot,
-                    get_block_config,
-                    self.metrics.clone(),
-                ).await;
+                let get_block_resp = self
+                    .main_rpc_client
+                    .get_block(slot, get_block_config, self.metrics.clone())
+                    .await;
 
                 match get_block_resp {
                     Ok(block) => {
-                        let non_empty_slot = ok_or_bail!(
-                            non_empty_rpc_slot(slot, block).recoverable()
-                        );
+                        let mut non_empty_slot = ok_or_bail!(non_empty_rpc_slot(slot, block).recoverable());
+                        if let Some(fallback_rpc_client) = self.fallback_rpc_client.as_ref() {
+                            fill_truncated_logs(
+                                &mut non_empty_slot,
+                                fallback_rpc_client,
+                                get_transaction_config,
+                                self.metrics.clone(),
+                            )
+                            .await
+                            .with_context(|| format!("filling truncated JSON-RPC logs for slot {slot}"))
+                            .recoverable()?;
+                        }
                         yield non_empty_slot.into_db_rows(&self.network).fatal();
                     }
                     Err(e) => {
@@ -209,7 +243,8 @@ impl Clone for Client {
 
         Self {
             of1_car_manager_handles: self.of1_car_manager_handles.clone(),
-            rpc_client: self.rpc_client.clone(),
+            main_rpc_client: self.main_rpc_client.clone(),
+            fallback_rpc_client: self.fallback_rpc_client.clone(),
             metrics: self.metrics.clone(),
             network: self.network.clone(),
             provider_name: self.provider_name.clone(),
@@ -233,6 +268,11 @@ impl BlockStreamer for Client {
             rewards: Some(true),
             commitment: Some(self.commitment),
         };
+        let get_transaction_config = rpc_client::rpc_config::RpcTransactionConfig {
+            encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
+            max_supported_transaction_version: Some(0),
+            commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
+        };
 
         // Determine archive usage based on configuration
         let use_rpc_only = match self.use_archive {
@@ -246,7 +286,7 @@ impl BlockStreamer for Client {
             }
             UseArchive::Auto => {
                 // Auto mode: skip archive for recent slots, use it for historical data
-                match self.rpc_client.get_slot(self.metrics.clone()).await {
+                match self.main_rpc_client.get_slot(self.metrics.clone()).await {
                     Ok(current_slot) => {
                         let threshold = current_slot.saturating_sub(10_000);
                         let skip_archive = start > threshold;
@@ -297,7 +337,7 @@ impl BlockStreamer for Client {
                 end,
                 self.of1_car_directory.clone(),
                 of1_car_manager_tx,
-                self.rpc_client.clone(),
+                self.main_rpc_client.clone(),
                 get_block_config,
                 self.metrics.clone(),
             )
@@ -305,14 +345,20 @@ impl BlockStreamer for Client {
             .boxed()
         };
 
-        self.block_stream_impl(start, end, historical_block_stream, get_block_config)
+        self.block_stream_impl(
+            start,
+            end,
+            historical_block_stream,
+            get_block_config,
+            get_transaction_config,
+        )
     }
 
     async fn latest_block(
         &mut self,
         _finalized: bool,
     ) -> Result<Option<BlockNum>, LatestBlockError> {
-        let get_slot_resp = self.rpc_client.get_slot(self.metrics.clone()).await;
+        let get_slot_resp = self.main_rpc_client.get_slot(self.metrics.clone()).await;
 
         match get_slot_resp {
             Ok(slot) => Ok(Some(slot)),
@@ -491,6 +537,76 @@ pub fn non_empty_rpc_slot(
     })
 }
 
+/// Searches for any transactions in the given slot that have truncated logs, and attempts to fill
+/// in the full logs for those transactions by fetching the transaction details via fallback JSON-RPC.
+async fn fill_truncated_logs(
+    slot: &mut tables::NonEmptySlot,
+    fallback_rpc_client: &rpc_client::SolanaRpcClient,
+    get_transaction_config: rpc_client::rpc_config::RpcTransactionConfig,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
+) -> anyhow::Result<()> {
+    let truncated_logs: Vec<_> = slot
+        .transactions
+        .iter_mut()
+        .filter_map(|tx| {
+            let log_messages = tx.transaction_status_meta.as_mut()?.log_messages.as_mut();
+            match log_messages {
+                Some(msgs) if msgs.iter().any(|msg| msg == TRUNCATED_LOG_MESSAGES_MARKER) => {
+                    // If the transaction does not have any signatures, we won't be able to
+                    // fetch it via JSON-RPC to fill the logs, so skip it.
+                    let tx_id = tx.signatures.first()?;
+                    Some((tx_id, msgs))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+
+    for (tx_id, truncated_log) in truncated_logs {
+        let id = solana_transaction::Signature::from_str(tx_id)
+            .with_context(|| format!("parsing transaction signature {tx_id}"))?;
+        let fallback_log_messages = fallback_rpc_client
+            .get_transaction(id, get_transaction_config, metrics.clone())
+            .await
+            .with_context(|| {
+                format!(
+                    "fetching transaction details for tx {id} in slot {}",
+                    slot.slot
+                )
+            })?
+            .transaction
+            .meta
+            .and_then(|meta| -> Option<Vec<String>> { meta.log_messages.into() })
+            .unwrap_or_default();
+
+        if fallback_log_messages
+            .iter()
+            .any(|msg| msg == TRUNCATED_LOG_MESSAGES_MARKER)
+        {
+            tracing::warn!(
+                slot = slot.slot,
+                id = tx_id,
+                "fallback JSON-RPC logs also contain truncated log marker, skipping truncated log fill for this transaction"
+            );
+            continue;
+        }
+
+        let truncated_log_len_without_markers = truncated_log
+            .iter()
+            .filter(|msg| *msg != TRUNCATED_LOG_MESSAGES_MARKER)
+            .count();
+
+        anyhow::ensure!(
+            fallback_log_messages.len() > truncated_log_len_without_markers,
+            "cannot fill truncated logs for transaction {id}, fallback logs do not have enough entries",
+        );
+
+        *truncated_log = fallback_log_messages;
+    }
+
+    Ok(())
+}
+
 fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
     bs58::decode(blockhash_str)
         .into_vec()
@@ -523,8 +639,13 @@ mod tests {
             .parse()
             .expect("Failed to parse provider name");
 
+        let rpc_connection_info = rpc_client::RpcProviderConnectionInfo {
+            url: Redacted::from(url),
+            auth: None,
+        };
+
         let client = Client::new(
-            Redacted::from(url),
+            rpc_connection_info,
             None,
             None,
             network,
@@ -551,6 +672,7 @@ mod tests {
             end,
             historical,
             rpc_client::rpc_config::RpcBlockConfig::default(),
+            rpc_client::rpc_config::RpcTransactionConfig::default(),
         );
 
         futures::pin_mut!(block_stream);
