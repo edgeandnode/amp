@@ -4,6 +4,10 @@
   "description": "Solana provider configuration for parsing TOML config.\n\nThis structure defines the parameters required to connect to a Solana\nRPC endpoint for blockchain data extraction. The `kind` field validates\nthat the config belongs to a `solana` provider at deserialization time.",
   "type": "object",
   "properties": {
+    "commitment": {
+      "description": "Commitment level for RPC requests.",
+      "$ref": "#/$defs/CommitmentLevel"
+    },
     "fallback_rpc_provider_info": {
       "description": "Optional connection information for a fallback Solana RPC endpoint\n(different than the main one).\n\nThe fallback endpoint is used for filling truncated log messages if\nthey are returned as such by the main RPC provider or extracted from\nhistorical data.\n\nWhen using a fallback RPC provider, make sure it points to an RPC\nprovider with a higher limit (or without one) for log messages, or\nthe fallback mechanism will be ineffective.",
       "anyOf": [
@@ -14,10 +18,6 @@
           "type": "null"
         }
       ]
-    },
-    "commitment": {
-      "description": "Commitment level for RPC requests.",
-      "$ref": "#/$defs/CommitmentLevel"
     },
     "keep_of1_car_files": {
       "description": "Whether to keep downloaded CAR files after processing.",
