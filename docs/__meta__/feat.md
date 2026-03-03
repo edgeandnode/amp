@@ -1,13 +1,13 @@
 ---
-name: "features"
-description: "Feature documentation format specification. Load when creating or editing feature docs in docs/features/"
+name: "feat"
+description: "Feature documentation format specification. Load when creating or editing feature docs in docs/feat/"
 type: meta
 scope: "global"
 ---
 
 # Feature Documentation Patterns
 
-**MANDATORY for ALL feature documentation in `docs/features/`**
+**MANDATORY for ALL feature documentation in `docs/feat/`**
 
 ## Table of Contents
 
@@ -170,18 +170,18 @@ The discovery command extracts all feature frontmatter for lazy loading.
 
 **Primary Method**: Use the Grep tool with multiline mode:
 - **Pattern**: `^---\n[\s\S]*?\n---`
-- **Path**: `docs/features/`
+- **Path**: `docs/feat/`
 - **multiline**: `true`
 - **output_mode**: `content`
 
 **Fallback**: Bash command for manual use:
 ```bash
-grep -Pzo '(?s)^---\n.*?\n---' docs/features/*.md 2>/dev/null | tr '\0' '\n'
+grep -Pzo '(?s)^---\n.*?\n---' docs/feat/*.md 2>/dev/null | tr '\0' '\n'
 ```
 
 **Cross-platform alternative** (macOS compatible):
 ```bash
-awk '/^---$/{p=!p; print; next} p' docs/features/*.md
+awk '/^---$/{p=!p; print; next} p' docs/feat/*.md
 ```
 
 ---
@@ -546,4 +546,4 @@ Before committing feature documentation:
 
 ### Review
 
-Use the `/docs-features-fmt-check` skill to validate feature docs before committing.
+Use the `/docs-fmt-check` skill to validate feature docs before committing.

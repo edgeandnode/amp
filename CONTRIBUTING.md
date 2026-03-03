@@ -201,7 +201,7 @@ Contributors using [Claude Code](https://claude.ai/claude-code) can leverage pro
 | `/code-review` | Review code changes |
 | `/commit` | Generate commit messages |
 | `/code-discovery` | Load code guidelines |
-| `/feature-discovery` | Load feature documentation |
+| `/feat-discovery` | Load feature documentation |
 
 ## License
 

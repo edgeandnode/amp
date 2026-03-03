@@ -173,20 +173,20 @@ When reviewing PRs, validate documentation alignment:
 
 #### Format Validation
 
-- **Feature docs** (`docs/features/*.md`): Invoke `/docs-features-fmt-check` to validate format compliance
-- **Guideline docs** (`docs/code/*.md`): Invoke `/docs-code-fmt-check` to validate format compliance
+- **Feature docs** (`docs/feat/*.md`): Invoke `/docs-fmt-check` to validate format compliance
+- **Guideline docs** (`docs/code/*.md`): Invoke `/docs-fmt-check` to validate format compliance
 
 #### Implementation Alignment
 
-- **Feature docs**: Invoke `/feature-validate` to verify feature documentation aligns with actual code implementation
+- **Feature docs**: Invoke `/feat-validate` to verify feature documentation aligns with actual code implementation
 - Check whether code changes require feature doc updates (new features, changed behavior)
 - Check whether feature doc changes reflect actual implementation state
 
 **Process:**
-1. Check if PR modifies files in `docs/features/` or `docs/code/`
-2. If feature docs changed: Run `/docs-features-fmt-check` skill for format validation
-3. If guideline docs changed: Run `/docs-code-fmt-check` skill for format validation
-4. If PR changes feature-related code OR feature docs: Run `/feature-validate` to verify alignment
+1. Check if PR modifies files in `docs/feat/` or `docs/code/`
+2. If feature docs changed: Run `/docs-fmt-check` skill for format validation
+3. If guideline docs changed: Run `/docs-fmt-check` skill for format validation
+4. If PR changes feature-related code OR feature docs: Run `/feat-validate` to verify alignment
 5. Report any format violations or implementation mismatches in the review
 
 ## Important Guidelines
