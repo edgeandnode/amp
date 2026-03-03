@@ -11,21 +11,21 @@ async fn historical_to_json_rpc_transition() {
     let provider_name = "test_provider"
         .parse()
         .expect("Failed to parse provider name");
-    let url = std::env::var("SOLANA_MAINNET_HTTP_URL")
+    let main_rpc_connection_info = std::env::var("SOLANA_MAINNET_HTTP_URL")
         .expect("Missing environment variable SOLANA_MAINNET_HTTP_URL")
         .parse::<Url>()
-        .map(Into::into)
+        .map(|url| rpc_client::RpcProviderConnectionInfo::new(url, None, None))
         .expect("Failed to parse URL");
     let network = "mainnet".parse().expect("Failed to parse network id");
 
     let client = Client::new(
-        url,
-        None, // Auth
+        main_rpc_connection_info,
+        None, // Fallback RPC connection info
         None, // Rate limit
         network,
         provider_name,
-        std::path::PathBuf::new(),
-        false, // keep_of1_car_files
+        std::path::PathBuf::new(), // of1_car_directory
+        false,                     // keep_of1_car_files
         UseArchive::Auto,
         None, // Metrics
         CommitmentConfig::finalized(),
@@ -49,7 +49,19 @@ async fn historical_to_json_rpc_transition() {
         rewards: Some(true),
         commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
     };
-    let block_stream = client.block_stream_impl(start, end, historical, get_block_config);
+    let get_transaction_config = rpc_client::rpc_config::RpcTransactionConfig {
+        encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
+        max_supported_transaction_version: Some(0),
+        commitment: Some(rpc_client::rpc_config::CommitmentConfig::finalized()),
+    };
+
+    let block_stream = client.block_stream_impl(
+        start,
+        end,
+        historical,
+        get_block_config,
+        get_transaction_config,
+    );
 
     let mut expected_block = start;
     let mut stream = std::pin::pin!(block_stream);

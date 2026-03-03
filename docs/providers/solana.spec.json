@@ -4,23 +4,20 @@
   "description": "Solana provider configuration for parsing TOML config.\n\nThis structure defines the parameters required to connect to a Solana\nRPC endpoint for blockchain data extraction. The `kind` field validates\nthat the config belongs to a `solana` provider at deserialization time.",
   "type": "object",
   "properties": {
-    "auth_header": {
-      "description": "Custom header name for authentication.\n\nWhen set alongside `auth_token`, sends `<auth_header>: <auth_token>` as a raw header\ninstead of the default `Authorization: Bearer <auth_token>`.\nIgnored if `auth_token` is not set.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "auth_token": {
-      "description": "Authentication token for RPC requests.\n\nDefault: sent as `Authorization: Bearer <token>`.\nWith `auth_header`: sent as `<auth_header>: <token>`.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "commitment": {
       "description": "Commitment level for RPC requests.",
       "$ref": "#/$defs/CommitmentLevel"
+    },
+    "fallback_rpc_provider_info": {
+      "description": "Optional connection information for a fallback Solana RPC endpoint\n(different than the main one).\n\nThe fallback endpoint is used for filling truncated log messages if\nthey are returned as such by the main RPC provider or extracted from\nhistorical data.\n\nWhen using a fallback RPC provider, make sure it points to an RPC\nprovider with a higher limit (or without one) for log messages, or\nthe fallback mechanism will be ineffective.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RpcProviderConnectionConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "keep_of1_car_files": {
       "description": "Whether to keep downloaded CAR files after processing.",
@@ -48,9 +45,9 @@
       "description": "Directory for storing Old Faithful ONE CAR files.",
       "type": "string"
     },
-    "rpc_provider_url": {
-      "description": "The URL of the Solana RPC endpoint.",
-      "type": "string"
+    "rpc_provider_info": {
+      "description": "Connection information for the primary Solana RPC endpoint.\n\nUsed for fetching recent blocks and all non-historical data.",
+      "$ref": "#/$defs/RpcProviderConnectionConfig"
     },
     "use_archive": {
       "description": "Controls when to use the Solana archive for historical data.",
@@ -60,7 +57,7 @@
   "required": [
     "kind",
     "network",
-    "rpc_provider_url",
+    "rpc_provider_info",
     "of1_car_directory"
   ],
   "$defs": {
@@ -88,6 +85,33 @@
       "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
       "type": "string",
       "minLength": 1
+    },
+    "RpcProviderConnectionConfig": {
+      "description": "Configuration for connecting to a Solana RPC endpoint.",
+      "type": "object",
+      "properties": {
+        "auth_header": {
+          "description": "Custom header name for authentication.\n\nWhen set alongside `auth_token`, sends `<auth_header>: <auth_token>` as a raw header\ninstead of the default `Authorization: Bearer <auth_token>`.\nIgnored if `auth_token` is not set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "auth_token": {
+          "description": "Authentication token for RPC requests.\n\nDefault: sent as `Authorization: Bearer <token>`.\nWith `auth_header`: sent as `<auth_header>: <token>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "The URL of the Solana RPC endpoint.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
     },
     "UseArchive": {
       "description": "Configures when to use the Solana archive for fetching historical data.",

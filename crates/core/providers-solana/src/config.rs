@@ -20,26 +20,22 @@ pub struct SolanaProviderConfig {
     /// The network this provider serves.
     pub network: NetworkId,
 
-    /// The URL of the Solana RPC endpoint.
-    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
-    pub rpc_provider_url: Redacted<Url>,
-
-    /// Custom header name for authentication.
+    /// Connection information for the primary Solana RPC endpoint.
     ///
-    /// When set alongside `auth_token`, sends `<auth_header>: <auth_token>` as a raw header
-    /// instead of the default `Authorization: Bearer <auth_token>`.
-    /// Ignored if `auth_token` is not set.
-    #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
-    pub auth_header: Option<AuthHeaderName>,
+    /// Used for fetching recent blocks and all non-historical data.
+    pub rpc_provider_info: RpcProviderConnectionConfig,
 
-    /// Authentication token for RPC requests.
+    /// Optional connection information for a fallback Solana RPC endpoint
+    /// (different than the main one).
     ///
-    /// Default: sent as `Authorization: Bearer <token>`.
-    /// With `auth_header`: sent as `<auth_header>: <token>`.
-    #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
-    pub auth_token: Option<AuthToken>,
+    /// The fallback endpoint is used for filling truncated log messages if
+    /// they are returned as such by the main RPC provider or extracted from
+    /// historical data.
+    ///
+    /// When using a fallback RPC provider, make sure it points to an RPC
+    /// provider with a higher limit (or without one) for log messages, or
+    /// the fallback mechanism will be ineffective.
+    pub fallback_rpc_provider_info: Option<RpcProviderConnectionConfig>,
 
     /// Optional rate limit for RPC calls per second.
     pub max_rpc_calls_per_second: Option<NonZeroU32>,
@@ -58,6 +54,32 @@ pub struct SolanaProviderConfig {
     /// Commitment level for RPC requests.
     #[serde(default)]
     pub commitment: CommitmentLevel,
+}
+
+/// Configuration for connecting to a Solana RPC endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct RpcProviderConnectionConfig {
+    /// The URL of the Solana RPC endpoint.
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
+    pub url: Redacted<Url>,
+
+    /// Custom header name for authentication.
+    ///
+    /// When set alongside `auth_token`, sends `<auth_header>: <auth_token>` as a raw header
+    /// instead of the default `Authorization: Bearer <auth_token>`.
+    /// Ignored if `auth_token` is not set.
+    #[serde(default)]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
+    pub auth_header: Option<AuthHeaderName>,
+
+    /// Authentication token for RPC requests.
+    ///
+    /// Default: sent as `Authorization: Bearer <token>`.
+    /// With `auth_header`: sent as `<auth_header>: <token>`.
+    #[serde(default)]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
+    pub auth_token: Option<AuthToken>,
 }
 
 /// Validated HTTP header name for custom authentication.
