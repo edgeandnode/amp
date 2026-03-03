@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     sync::Arc,
 };
 
@@ -12,11 +13,11 @@ use datafusion::{
     functions::core::expr_fn::greatest,
     logical_expr::{
         Join as JoinStruct, LogicalPlan, LogicalPlanBuilder, Sort,
-        SubqueryAlias as SubqueryAliasStruct, Union as UnionStruct, expr::physical_name,
+        SubqueryAlias as SubqueryAliasStruct, Union as UnionStruct,
     },
     physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
-    sql::{TableReference as DFTableReference, utils::UNNEST_PLACEHOLDER},
+    sql::{TableReference, utils::UNNEST_PLACEHOLDER},
 };
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
@@ -25,7 +26,6 @@ use crate::{
         BLOCK_NUM_UDF_SCHEMA_NAME, expr_outputs_block_num, is_block_num_udf_or_normalized,
     },
     incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
-    sql::TableReference,
 };
 
 /// Helper function to create a column reference to `_block_num`
@@ -33,23 +33,58 @@ fn block_num_col() -> Expr {
     col(RESERVED_BLOCK_NUM_COLUMN_NAME)
 }
 
-/// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
-/// names are reserved for special columns.
+/// Rejects a user plan that violates either of two rules needed for safe `_block_num`
+/// propagation:
+///
+/// 1. **No `_`-prefixed aliases** — `_block_num` and all other `_…` names are reserved.
+///    The check walks every expression in the entire plan tree exhaustively
+///    (`node.expressions()` + `Expr::apply`), so no node type can be missed.
+///
+/// 2. **No bare `col("_block_num")` in multi-table Projections** — over a join there
+///    is one `_block_num` per side; a bare column reference picks one arbitrarily.
+///    Users must write `block_num()` instead, which the propagator replaces with
+///    `greatest(left._block_num, right._block_num)`.
+///
+/// Rule 1 establishes the invariant that [`expr_outputs_block_num`] relies on: any
+/// expression whose `physical_name` is `"_block_num"` in a validated plan is a genuine
+/// column tracing back to a real source, never a user alias — so the propagator can
+/// safely use it as the "already has `_block_num`" signal.
 pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), DataFusionError> {
     plan.apply(|node| {
-        if let LogicalPlan::Projection(projection) = node {
-            for expr in projection.expr.iter() {
-                if let Expr::Alias(alias) = expr
+        node.apply_expressions(|expr| {
+            expr.apply(|e| {
+                if let Expr::Alias(alias) = e
                     && alias.name.starts_with('_')
-                    && !alias.name.starts_with(UNNEST_PLACEHOLDER) // DF built-in we want to allow
-                     {
+                    && !alias.name.starts_with(UNNEST_PLACEHOLDER)
+                // DF built-in we want to allow
+                {
+                    return plan_err!(
+                        "expression contains a column alias starting with '_': '{}'. \
+                         Underscore-prefixed names are reserved. Please rename your column",
+                        alias.name
+                    );
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })
+        })?;
+
+        if let LogicalPlan::Projection(projection) = node {
+            let input_schema = projection.input.schema();
+            let input_qualifiers: BTreeSet<&TableReference> =
+                input_schema.iter().filter_map(|(q, _)| q).collect();
+            if input_qualifiers.len() > 1 {
+                for expr in projection.expr.iter() {
+                    if matches!(expr, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME) {
                         return plan_err!(
-                            "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
-                            alias.name
+                            "selecting `{}` from a multi-table context (e.g. a join) is ambiguous. \
+                             Use the `block_num()` function instead to get the correct value",
+                            RESERVED_BLOCK_NUM_COLUMN_NAME
                         );
                     }
+                }
             }
         }
+
         Ok(TreeNodeRecursion::Continue)
     })?;
     Ok(())
@@ -159,59 +194,125 @@ impl TreeNodeRewriter for BlockNumPropagator {
         let op_kind =
             incremental_op_kind(&node).map_err(|e| DataFusionError::External(e.into()))?;
 
+        // Step 1: Replace block_num() UDF in all expressions of this node using
+        // the currently accumulated _block_num expression. For setter nodes
+        // (TableScan, Join, etc.) block_num() won't appear in their expressions
+        // (we run before optimization), so this is effectively a no-op for them.
+        //
+        // Unwrap: `next_block_num_expr` is only `None` at initialization; any
+        // leaf node (TableScan, EmptyRelation, Values) unconditionally sets it.
+        // The unwrap_or fallback is only reached for the leaf nodes themselves,
+        // where block_num() cannot appear, so the replacement is always a no-op.
+        let block_num_expr = {
+            let raw = self
+                .next_block_num_expr
+                .clone()
+                .unwrap_or_else(block_num_col);
+            if raw != block_num_col() {
+                raw.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
+            } else {
+                raw
+            }
+        };
+        // Step 1 replaces block_num() UDF in expressions.
+        //
+        // Output-column positions (Projection.expr, DistinctOn.select_expr) use
+        // `replace_udf_select`: when block_num() IS the entire expression it gets
+        // aliased as BLOCK_NUM_UDF_SCHEMA_NAME (preserving the user's output column
+        // name); when block_num() is nested inside a larger expression (e.g.
+        // `block_num() + 1`) the alias would be swallowed by the outer expression
+        // anyway, so the plain unaliased replacement is used there.
+        //
+        // All other positions (sort keys, Aggregate group keys, Filter …) always use
+        // the unaliased replacement via `replace_udf`.
+        use datafusion::logical_expr::Distinct as DistinctKind;
+        let select_replacement = block_num_expr.clone().alias(BLOCK_NUM_UDF_SCHEMA_NAME);
+        let replace_udf = |e: Expr, repl: &Expr| {
+            e.transform(|e| {
+                if is_block_num_udf_or_normalized(&e) {
+                    Ok(Transformed::yes(repl.clone()))
+                } else {
+                    Ok(Transformed::no(e))
+                }
+            })
+        };
+        let replace_udf_select = |e: Expr| -> Result<Transformed<Expr>, DataFusionError> {
+            if is_block_num_udf_or_normalized(&e) {
+                Ok(Transformed::yes(select_replacement.clone()))
+            } else {
+                replace_udf(e, &block_num_expr)
+            }
+        };
+        let (was_replaced, node) = match node {
+            Distinct(DistinctKind::On(mut on)) => {
+                // on_expr / sort_expr are sort keys — unaliased.
+                // select_expr is named output — top-level-aware alias.
+                let mut changed = false;
+                for e in std::mem::take(&mut on.on_expr) {
+                    let t = replace_udf(e, &block_num_expr)?;
+                    changed |= t.transformed;
+                    on.on_expr.push(t.data);
+                }
+                for e in std::mem::take(&mut on.select_expr) {
+                    let t = replace_udf_select(e)?;
+                    changed |= t.transformed;
+                    on.select_expr.push(t.data);
+                }
+                if let Some(sort_exprs) = on.sort_expr.take() {
+                    let mut new_sort = Vec::with_capacity(sort_exprs.len());
+                    for mut s in sort_exprs {
+                        let t = replace_udf(s.expr, &block_num_expr)?;
+                        changed |= t.transformed;
+                        s.expr = t.data;
+                        new_sort.push(s);
+                    }
+                    on.sort_expr = Some(new_sort);
+                }
+                let node = if changed {
+                    Distinct(DistinctKind::On(on)).recompute_schema()?
+                } else {
+                    Distinct(DistinctKind::On(on))
+                };
+                (changed, node)
+            }
+            node => {
+                let is_projection = matches!(node, Projection(_));
+                let r = node.map_expressions(|e| {
+                    if is_projection {
+                        replace_udf_select(e)
+                    } else {
+                        replace_udf(e, &block_num_expr)
+                    }
+                })?;
+                let was = r.transformed;
+                let node = if was {
+                    r.data.recompute_schema()?
+                } else {
+                    r.data
+                };
+                (was, node)
+            }
+        };
+
+        // Step 2: Handle structural changes — consuming/setting next_block_num_expr,
+        // prepending _block_num to outputs, schema fixes, sanity checks.
         match node {
             Projection(mut projection) => {
-                let block_num_expr = {
-                    // Set the `next_block_num_expr` and take the current one.
-                    //
-                    // Unwrap: `next_block_num_expr` is only `None` at initialization.
-                    // When visiting any leaf plan, we unconditionally set it.
-                    let mut expr = self.next_block_num_expr.replace(block_num_col()).unwrap();
+                // Consume next_block_num_expr: reset to block_num_col() so parent nodes
+                // see a simple _block_num column reference from this projection's output.
+                self.next_block_num_expr = Some(block_num_col());
 
-                    // Use an alias if it would not be redundant
-                    if expr != block_num_col() {
-                        expr = expr.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
-                    }
-                    expr
-                };
-
-                // Deal with any existing projection that resolves to `_block_num`
-                for existing_expr in projection.expr.iter() {
-                    // Unwrap: `physical_name` never errors
-                    if physical_name(existing_expr).unwrap() != RESERVED_BLOCK_NUM_COLUMN_NAME {
-                        continue;
-                    }
-
-                    // If the user already correctly selected `RESERVED_BLOCK_NUM_COLUMN_NAME`, we don't need to modify the projection.
-                    // We do a best effort to detect correct selections:
-                    // - If the expression is identical to the generated one, it is trivially correct.
-                    // - If the input is a single table and the expression is simply `_block_num`, qualified or not, it is also correct.
-                    if existing_expr == &block_num_expr {
-                        return Ok(Transformed::no(LogicalPlan::Projection(projection)));
-                    } else if matches!(existing_expr, Expr::Column(_))
-                        && block_num_expr == block_num_col()
-                    {
-                        // Both the user expression and the generated one are simple column references to `_block_num`.
-                        // But they were not equal, probably due to qualifiers. If there is only one input table, we can ignore the qualifier difference.
-                        let input_schema = projection.input.schema();
-                        let input_qualifiers: BTreeSet<&DFTableReference> =
-                            input_schema.iter().filter_map(|x| x.0).collect();
-
-                        if input_qualifiers.len() <= 1 {
-                            return Ok(Transformed::no(LogicalPlan::Projection(projection)));
-                        }
-                    }
-
-                    // But If we cannot be sure that the `_block_num` selection is correct, we reject the query.
-                    //
-                    // Many cases of this would currently be caught by `fn forbid_underscore_prefixed_aliases`.
-                    return Err(df_err(
-                        "Invalid select of `_block_num`. To fix this error, alias the column or \
-                        if using `*`, consider explicitly selecting the columns you need."
-                            .to_string(),
+                // If any top-level expression already outputs _block_num, skip auto-prepend.
+                // This covers backward-compat `SELECT _block_num, ...` on a single table,
+                // and `SELECT block_num(), ...` after UDF replacement above.
+                if projection.expr.iter().any(expr_outputs_block_num) {
+                    return Ok(Transformed::new_transformed(
+                        LogicalPlan::Projection(projection),
+                        was_replaced,
                     ));
                 }
 
+                // Auto-prepend the _block_num expression.
                 projection.expr.insert(0, block_num_expr);
                 projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
@@ -232,7 +333,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
 
             Join(ref join) => {
                 self.next_block_num_expr = Some(block_num_for_join(join)?);
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             TableScan(ref scan) => {
@@ -241,13 +342,13 @@ impl TreeNodeRewriter for BlockNumPropagator {
                     return Err(df_err(format!("Scan should not have projection: {scan:?}")));
                 }
                 self.next_block_num_expr = Some(block_num_col());
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             // Constants are formally produced "before block 0" but hopefully it's correct enough to assign them 0.
             EmptyRelation(_) | Values(_) => {
                 self.next_block_num_expr = Some(lit(0));
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             // SubqueryAlias caches its schema - we need to rebuild it to reflect schema changes in its input.
@@ -259,45 +360,38 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 Ok(Transformed::yes(LogicalPlan::SubqueryAlias(rebuilt)))
             }
 
-            // These DfTableReferencenodes do not cache schema and are not leaves, so we can leave them as-is
+            // These nodes do not cache schema and are not leaves. block_num() UDF in their
+            // expressions (e.g. `WHERE block_num() > 100`) is handled by the replacement above.
             Filter(_) | Repartition(_) | Subquery(_) | Explain(_) | Analyze(_)
-            | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
+            | DescribeTable(_) | Unnest(_) => Ok(Transformed::new_transformed(node, was_replaced)),
 
             // DISTINCT ON (_block_num) is incrementally valid: the DistinctOn node has a
             // cached schema field that must be rebuilt to include _block_num after propagation.
             Distinct(distinct) => {
-                use datafusion::logical_expr::{Distinct as DistinctKind, DistinctOn};
-
                 match distinct {
                     DistinctKind::On(mut on) => {
-                        let block_num_expr = {
-                            let mut expr =
-                                self.next_block_num_expr.replace(block_num_col()).unwrap();
-                            if expr != block_num_col() {
-                                expr = expr.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
-                            }
-                            expr
-                        };
+                        // Consume next_block_num_expr.
+                        self.next_block_num_expr = Some(block_num_col());
 
-                        // If _block_num is already in select_expr, no modification needed
-                        for existing_expr in on.select_expr.iter() {
-                            if physical_name(existing_expr).unwrap()
-                                == RESERVED_BLOCK_NUM_COLUMN_NAME
-                            {
-                                return Ok(Transformed::no(LogicalPlan::Distinct(
-                                    DistinctKind::On(on),
-                                )));
-                            }
+                        // Skip auto-prepend only when _block_num is already explicitly present.
+                        if on.select_expr.iter().any(expr_outputs_block_num) {
+                            return Ok(Transformed::new_transformed(
+                                LogicalPlan::Distinct(DistinctKind::On(on)),
+                                was_replaced,
+                            ));
                         }
 
-                        // Prepend _block_num to select_expr and rebuild the cached schema
+                        // Prepend _block_num to select_expr and rebuild the cached schema.
                         on.select_expr.insert(0, block_num_expr);
                         on.schema = prepend_special_block_num_field(&on.schema);
-                        Ok(Transformed::yes(LogicalPlan::Distinct(DistinctKind::On(on))))
+                        Ok(Transformed::yes(LogicalPlan::Distinct(DistinctKind::On(
+                            on,
+                        ))))
                     }
-                    DistinctKind::All(_) => Err(df_err(
-                        format!("incremental_op_kind should have already rejected Distinct::All: {:?}", op_kind)
-                    ))
+                    DistinctKind::All(_) => Err(df_err(format!(
+                        "incremental_op_kind should have already rejected Distinct::All: {:?}",
+                        op_kind
+                    ))),
                 }
             }
 
@@ -306,22 +400,24 @@ impl TreeNodeRewriter for BlockNumPropagator {
             // next_block_num_expr for the parent and leave the node unchanged.
             Aggregate(_) => {
                 self.next_block_num_expr = Some(block_num_col());
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             // These variants would have already errored in `incremental_op_kind` above
-            Limit(_) | Sort(_) | Window(_) | RecursiveQuery(_)
-            | Statement(_) | Dml(_) | Ddl(_) | Copy(_) | Extension(_) => {
-                Err(df_err(
-                    format!("incremental_op_kind should have already rejected this node type: {:?}", op_kind)
-                ))
-            }
+            Limit(_) | Sort(_) | Window(_) | RecursiveQuery(_) | Statement(_) | Dml(_) | Ddl(_)
+            | Copy(_) | Extension(_) => Err(df_err(format!(
+                "incremental_op_kind should have already rejected this node type: {:?}",
+                op_kind
+            ))),
         }
     }
 }
 
 /// Propagate the `RESERVED_BLOCK_NUM_COLUMN_NAME` column through the logical plan.
 pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
+    // The transformation relies on the invariants of `forbid_underscore_prefixed_aliases`
+    // to prevent conflicts between user-selected columns and the propagated `_block_num` column.
+    forbid_underscore_prefixed_aliases(&plan)?;
     let mut propagator = BlockNumPropagator::new();
     plan.rewrite(&mut propagator).map(|t| t.data)
 }
@@ -370,8 +466,8 @@ pub enum NonIncrementalOp {
     RecursiveQuery,
 }
 
-impl std::fmt::Display for NonIncrementalOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NonIncrementalOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use NonIncrementalOp::*;
         match self {
             Limit => write!(f, "Limit"),
@@ -408,7 +504,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
 
 pub fn extract_table_references_from_plan(
     plan: &LogicalPlan,
-) -> Result<Vec<DFTableReference>, DataFusionError> {
+) -> Result<Vec<TableReference>, DataFusionError> {
     let mut refs = BTreeSet::new();
 
     plan.apply(|node| {
@@ -430,11 +526,11 @@ pub fn extract_table_references_from_plan(
 #[derive(Debug, Clone)]
 pub struct CrossNetworkJoinInfo {
     /// Networks involved in the cross-network join
-    pub networks: BTreeSet<NetworkId>,
+    pub networks: BTreeSet<datasets_common::network_id::NetworkId>,
 }
 
-impl std::fmt::Display for CrossNetworkJoinInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for CrossNetworkJoinInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "join across multiple networks: {:?}", self.networks)
     }
 }
@@ -448,7 +544,7 @@ pub fn find_cross_network_join(
     plan: &LogicalPlan,
     catalog: &crate::catalog::physical::Catalog,
 ) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
-    let table_to_network: BTreeMap<DFTableReference, NetworkId> = catalog
+    let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
         .entries()
         .iter()
         .filter_map(|(physical_table, sql_schema_name)| {

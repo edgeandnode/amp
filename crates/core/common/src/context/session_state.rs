@@ -29,6 +29,7 @@ use datafusion::{
 use futures::future;
 
 use crate::{
+    block_num::BlockNumUdf,
     context::common::INVALID_INPUT_CONTEXT,
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
@@ -383,6 +384,7 @@ impl Default for SessionState {
 /// Returns the built-in scalar UDFs registered in every session state.
 fn builtin_udfs() -> Vec<ScalarUDF> {
     vec![
+        BlockNumUdf::new().into(),
         EvmDecodeLog::new().into(),
         EvmDecodeLog::new().with_deprecated_name().into(),
         EvmTopic::new().into(),
