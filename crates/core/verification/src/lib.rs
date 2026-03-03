@@ -248,7 +248,7 @@ fn verify_transactions_root(block: &Block) -> anyhow::Result<()> {
 }
 
 fn verify_receipts_root(block: &Block) -> anyhow::Result<()> {
-    let mut logs_by_tx: BTreeMap<u32, Vec<&Log>> = Default::default();
+    let mut logs_by_tx: BTreeMap<u32, Vec<&Log>> = BTreeMap::new();
     for log in &block.logs {
         logs_by_tx.entry(log.tx_index).or_default().push(log);
     }

@@ -466,7 +466,7 @@ async fn dataset_and_dependencies(
     dataset: Reference,
 ) -> Result<Vec<Reference>, DatasetDependencyError> {
     let mut datasets = vec![dataset];
-    let mut deps: BTreeMap<Reference, Vec<Reference>> = Default::default();
+    let mut deps: BTreeMap<Reference, Vec<Reference>> = BTreeMap::new();
     while let Some(dataset_ref) = datasets.pop() {
         // Resolve the reference to a hash reference first
         let hash_ref = store
