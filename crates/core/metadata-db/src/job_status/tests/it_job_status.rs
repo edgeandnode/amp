@@ -3,7 +3,7 @@
 use crate::{
     job_status,
     jobs::{self, JobStatus},
-    tests::common::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
+    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
 

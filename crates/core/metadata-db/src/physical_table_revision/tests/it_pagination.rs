@@ -1,29 +1,20 @@
 //! Pagination tests for location listing
 
-use pgtemp::PgTempDB;
-
 use crate::{
     datasets::{DatasetName, DatasetNamespace},
-    db::Connection,
-    error::Error,
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},
+    tests::helpers::{register_table_and_revision, setup_test_db},
 };
 
 #[tokio::test]
 async fn list_locations_first_page_when_empty() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     //* When
-    let locations = physical_table_revision::list(&mut conn, 10, None as Option<LocationId>)
+    let locations = physical_table_revision::list(&conn, 10, None as Option<LocationId>)
         .await
         .expect("Failed to list locations");
 
@@ -37,13 +28,7 @@ async fn list_locations_first_page_when_empty() {
 #[tokio::test]
 async fn list_locations_first_page_respects_limit() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -59,11 +44,11 @@ async fn list_locations_first_page_respects_limit() {
             i, i
         ));
         let location_id =
-            register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
                 .await
                 .expect("Failed to insert location");
         physical_table::mark_active_by_id(
-            &mut conn,
+            &conn,
             location_id,
             &namespace,
             &name,
@@ -78,7 +63,7 @@ async fn list_locations_first_page_respects_limit() {
     }
 
     //* When
-    let locations = physical_table_revision::list(&mut conn, 3, None as Option<LocationId>)
+    let locations = physical_table_revision::list(&conn, 3, None as Option<LocationId>)
         .await
         .expect("Failed to list locations");
 
@@ -116,13 +101,7 @@ async fn list_locations_first_page_respects_limit() {
 #[tokio::test]
 async fn list_locations_next_page_uses_cursor() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -139,12 +118,12 @@ async fn list_locations_next_page_uses_cursor() {
             i, i
         ));
         let location_id =
-            register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+            register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
                 .await
                 .expect("Failed to insert location");
         all_location_ids.push(location_id);
         physical_table::mark_active_by_id(
-            &mut conn,
+            &conn,
             location_id,
             &namespace,
             &name,
@@ -159,7 +138,7 @@ async fn list_locations_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = physical_table_revision::list(&mut conn, 3, None as Option<LocationId>)
+    let first_page = physical_table_revision::list(&conn, 3, None as Option<LocationId>)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -168,7 +147,7 @@ async fn list_locations_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = physical_table_revision::list(&mut conn, 3, Some(cursor))
+    let second_page = physical_table_revision::list(&conn, 3, Some(cursor))
         .await
         .expect("Failed to list second page");
 
@@ -200,26 +179,4 @@ async fn list_locations_next_page_uses_cursor() {
         cursor > second_page[0].id,
         "list should use cursor to exclude locations with ID >= cursor"
     );
-}
-
-async fn register_table_and_revision(
-    conn: &mut Connection,
-    namespace: &DatasetNamespace<'_>,
-    name: &DatasetName<'_>,
-    hash: &ManifestHash<'_>,
-    table_name: &TableName<'_>,
-    path: &TablePath<'_>,
-) -> Result<LocationId, Error> {
-    physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
-    let metadata_json = serde_json::json!({
-        "dataset_namespace": namespace,
-        "dataset_name": name,
-        "manifest_hash": hash,
-        "table_name": table_name,
-    });
-    let raw =
-        serde_json::value::to_raw_value(&metadata_json).expect("test metadata should serialize");
-    let metadata = physical_table_revision::RevisionMetadata::from_owned_unchecked(raw);
-    let revision_id = physical_table_revision::register(conn, path, metadata).await?;
-    Ok(revision_id)
 }

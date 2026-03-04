@@ -2,8 +2,13 @@ use pgtemp::PgTempDB;
 
 use crate::{
     config::DEFAULT_POOL_MAX_CONNECTIONS,
+    datasets::{DatasetName, DatasetNamespace},
+    error::Error,
     job_events, job_status,
     jobs::{self, JobDescriptorRaw, JobStatus},
+    manifests::ManifestHash,
+    physical_table::{self, TableName},
+    physical_table_revision::{self, LocationId, TablePath},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
 
@@ -57,4 +62,30 @@ pub async fn register_job(
         .expect("Failed to register job status");
     tx.commit().await.expect("Failed to commit transaction");
     job_id
+}
+
+/// Helper to register a physical table and its first revision in a single step.
+///
+/// Creates the table entry via [`physical_table::register`] and then inserts a
+/// revision with auto-generated metadata via [`physical_table_revision::register`].
+pub async fn register_table_and_revision(
+    conn: &crate::MetadataDb,
+    namespace: &DatasetNamespace<'_>,
+    name: &DatasetName<'_>,
+    hash: &ManifestHash<'_>,
+    table_name: &TableName<'_>,
+    path: &TablePath<'_>,
+) -> Result<LocationId, Error> {
+    physical_table::register(conn, namespace, name, hash, table_name).await?;
+    let metadata_json = serde_json::json!({
+        "dataset_namespace": namespace,
+        "dataset_name": name,
+        "manifest_hash": hash,
+        "table_name": table_name,
+    });
+    let raw =
+        serde_json::value::to_raw_value(&metadata_json).expect("test metadata should serialize");
+    let metadata = physical_table_revision::RevisionMetadata::from_owned_unchecked(raw);
+    let revision_id = physical_table_revision::register(conn, path, metadata).await?;
+    Ok(revision_id)
 }

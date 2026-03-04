@@ -1,29 +1,17 @@
 //! In-tree DB integration tests for the workers queue
 
-use pgtemp::PgTempDB;
-
 use crate::{
-    config::DEFAULT_POOL_MAX_CONNECTIONS,
     job_events, job_status,
     jobs::{self, JobStatus},
-    tests::common::{raw_descriptor, register_job},
+    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
 
 #[tokio::test]
 async fn register_job_creates_with_scheduled_status() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to pre-register the worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc_json = serde_json::json!({
         "dataset": "test-dataset",
@@ -52,20 +40,11 @@ async fn register_job_creates_with_scheduled_status() {
 #[tokio::test]
 async fn get_jobs_for_node_filters_by_node_id() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
-    let worker_id_main = WorkerNodeId::from_ref_unchecked("test-worker-main");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id_main.clone(), worker_info)
-        .await
-        .expect("Failed to pre-register the worker 1");
+    let worker_id_main = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let worker_id_other = WorkerNodeId::from_ref_unchecked("test-worker-other");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id_other.clone(), worker_info)
+    workers::register(&conn, worker_id_other.clone(), WorkerInfo::default())
         .await
         .expect("Failed to pre-register the worker 2");
 
@@ -110,19 +89,8 @@ async fn get_jobs_for_node_filters_by_node_id() {
 #[tokio::test]
 async fn get_jobs_for_node_filters_by_status() {
     //* Given
-    let temp_db = PgTempDB::new();
-
-    // Connect to the DB
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-active-ids");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to pre-register the worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({ "key": "value" }));
 
@@ -178,17 +146,8 @@ async fn get_jobs_for_node_filters_by_status() {
 #[tokio::test]
 async fn get_job_by_id_returns_job() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-get");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc_json = serde_json::json!({
         "dataset": "test-dataset",
@@ -217,17 +176,8 @@ async fn get_job_by_id_returns_job() {
 #[tokio::test]
 async fn get_job_includes_timestamps() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-details");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc_json = serde_json::json!({
         "dataset": "detailed-dataset",
@@ -256,11 +206,7 @@ async fn get_job_includes_timestamps() {
 #[tokio::test]
 async fn list_jobs_first_page_when_empty() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     //* When
     let jobs = jobs::sql::list_first_page(&conn, 10, None)
@@ -274,18 +220,13 @@ async fn list_jobs_first_page_when_empty() {
 #[tokio::test]
 async fn list_jobs_first_page_respects_limit() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     // Create workers and jobs
     let mut job_ids = Vec::new();
     for i in 0..5 {
         let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-{}", i));
-        let worker_info = WorkerInfo::default(); // {}
-        workers::register(&conn, worker_id.clone(), worker_info)
+        workers::register(&conn, worker_id.clone(), WorkerInfo::default())
             .await
             .expect("Failed to register worker");
 
@@ -319,18 +260,13 @@ async fn list_jobs_first_page_respects_limit() {
 #[tokio::test]
 async fn list_jobs_next_page_uses_cursor() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     // Create 10 jobs
     let mut all_job_ids = Vec::new();
     for i in 0..10 {
         let worker_id = WorkerNodeId::from_owned_unchecked(format!("test-worker-page-{}", i));
-        let worker_info = WorkerInfo::default(); // {}
-        workers::register(&conn, worker_id.clone(), worker_info)
+        workers::register(&conn, worker_id.clone(), WorkerInfo::default())
             .await
             .expect("Failed to register worker");
 
@@ -377,17 +313,8 @@ async fn list_jobs_next_page_uses_cursor() {
 #[tokio::test]
 async fn delete_by_id_and_statuses_deletes_matching_job() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-delete");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -410,17 +337,8 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
 #[tokio::test]
 async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-no-delete");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -444,17 +362,8 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
 #[tokio::test]
 async fn delete_by_status_deletes_all_matching_jobs() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-bulk-delete");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -496,17 +405,8 @@ async fn delete_by_status_deletes_all_matching_jobs() {
 #[tokio::test]
 async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-multi-delete");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -558,17 +458,8 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
 #[tokio::test]
 async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-retry-query");
-    let worker_info = WorkerInfo::default();
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -592,17 +483,8 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
 #[tokio::test]
 async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-not-ready");
-    let worker_info = WorkerInfo::default();
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -621,17 +503,8 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
 #[tokio::test]
 async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-calc");
-    let worker_info = WorkerInfo::default();
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -662,17 +535,8 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
 #[tokio::test]
 async fn get_failed_jobs_handles_missing_attempts() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-missing");
-    let worker_info = WorkerInfo::default();
-    workers::register(&conn, worker_id.clone(), worker_info)
-        .await
-        .expect("Failed to register worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
@@ -696,19 +560,11 @@ async fn get_failed_jobs_handles_missing_attempts() {
 #[tokio::test]
 async fn reschedule_updates_status_and_worker() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
-    let worker_id1 = WorkerNodeId::from_ref_unchecked("test-worker-original");
+    let worker_id1 = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let worker_id2 = WorkerNodeId::from_ref_unchecked("test-worker-new");
-    let worker_info = WorkerInfo::default();
-    workers::register(&conn, worker_id1.clone(), worker_info.clone())
-        .await
-        .expect("Failed to register worker 1");
-    workers::register(&conn, worker_id2.clone(), worker_info)
+    workers::register(&conn, worker_id2.clone(), WorkerInfo::default())
         .await
         .expect("Failed to register worker 2");
 

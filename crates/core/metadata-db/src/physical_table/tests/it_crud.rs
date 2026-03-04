@@ -1,26 +1,18 @@
 //! Core location operations tests
 
-use pgtemp::PgTempDB;
-
 use crate::{
     datasets::{DatasetName, DatasetNamespace},
-    db::Connection,
     error::Error,
     manifests::ManifestHash,
     physical_table::{self, GetActiveByLocationIdError, TableName},
-    physical_table_revision::{self, LocationId, TablePath},
+    physical_table_revision::{LocationId, TablePath},
+    tests::helpers::{register_table_and_revision, setup_test_db},
 };
 
 #[tokio::test]
 async fn insert_creates_location_and_returns_id() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -34,10 +26,10 @@ async fn insert_creates_location_and_returns_id() {
 
     //* When
     let location_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
-    physical_table::mark_active_by_id(&mut conn, location_id, namespace, name, hash, table_name)
+    physical_table::mark_active_by_id(&conn, location_id, namespace, name, hash, table_name)
         .await
         .expect("Failed to mark location active");
 
@@ -49,7 +41,7 @@ async fn insert_creates_location_and_returns_id() {
 
     // Verify the location was created correctly
     let (row_location_id, row_manifest_hash, row_table_name, row_path, row_active) =
-        get_location_by_id(&mut conn, location_id)
+        get_location_by_id(&conn, location_id)
             .await
             .expect("Failed to fetch inserted location");
 
@@ -75,13 +67,7 @@ async fn insert_creates_location_and_returns_id() {
 #[tokio::test]
 async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -96,77 +82,57 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
     // Create active location for first target table
     let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/target1-revision");
     let target_id1 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path1)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path1)
             .await
             .expect("Failed to insert target location 1");
-    physical_table::mark_active_by_id(&mut conn, target_id1, &namespace, &name, &hash, &table_name)
+    physical_table::mark_active_by_id(&conn, target_id1, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
     // Create active location for second target table
     let path2 = TablePath::from_ref_unchecked("test-dataset/test_table2/target2-revision");
     let target_id2 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table2_name, &path2)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table2_name, &path2)
             .await
             .expect("Failed to insert target location 2");
-    physical_table::mark_active_by_id(
-        &mut conn,
-        target_id2,
-        &namespace,
-        &name,
-        &hash,
-        &table2_name,
-    )
-    .await
-    .expect("Failed to mark location active");
+    physical_table::mark_active_by_id(&conn, target_id2, &namespace, &name, &hash, &table2_name)
+        .await
+        .expect("Failed to mark location active");
 
     // Create already inactive location for target table (should remain unchanged)
     let path3 = TablePath::from_ref_unchecked("test-dataset/test_table/already-inactive-revision");
     let inactive_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path3)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path3)
             .await
             .expect("Failed to insert inactive location");
 
     // Create active location for different table (should remain unchanged)
     let path4 = TablePath::from_ref_unchecked("test-dataset/other_table/other-revision");
-    let other_id = register_table_and_revision(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &other_table_name,
-        &path4,
-    )
-    .await
-    .expect("Failed to insert other table location");
-    physical_table::mark_active_by_id(
-        &mut conn,
-        other_id,
-        &namespace,
-        &name,
-        &hash,
-        &other_table_name,
-    )
-    .await
-    .expect("Failed to mark other location active");
+    let other_id =
+        register_table_and_revision(&conn, &namespace, &name, &hash, &other_table_name, &path4)
+            .await
+            .expect("Failed to insert other table location");
+    physical_table::mark_active_by_id(&conn, other_id, &namespace, &name, &hash, &other_table_name)
+        .await
+        .expect("Failed to mark other location active");
 
     //* When - Mark only the first table inactive
-    physical_table::mark_inactive_by_table_name(&mut conn, &namespace, &name, &hash, &table_name)
+    physical_table::mark_inactive_by_table_name(&conn, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark locations inactive");
 
     //* Then
     // Check that only first target table location is now inactive
-    let target1_active = is_location_active(&mut conn, target_id1)
+    let target1_active = is_location_active(&conn, target_id1)
         .await
         .expect("Failed to check target1 active status");
-    let target2_active = is_location_active(&mut conn, target_id2)
+    let target2_active = is_location_active(&conn, target_id2)
         .await
         .expect("Failed to check target2 active status"); // Different table, should stay active
-    let inactive_still_inactive = is_location_active(&mut conn, inactive_id)
+    let inactive_still_inactive = is_location_active(&conn, inactive_id)
         .await
         .expect("Failed to check inactive location status");
-    let other_still_active = is_location_active(&mut conn, other_id)
+    let other_still_active = is_location_active(&conn, other_id)
         .await
         .expect("Failed to check other location status");
 
@@ -191,14 +157,7 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
 #[tokio::test]
 async fn mark_active_by_id_activates_specific_location() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -210,27 +169,27 @@ async fn mark_active_by_id_activates_specific_location() {
 
     let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/to-activate-revision");
     let target_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path1)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path1)
             .await
             .expect("Failed to insert location to activate");
 
     let path2 = TablePath::from_ref_unchecked("test-dataset/test_table/stay-inactive-revision");
     let other_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path2)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path2)
             .await
             .expect("Failed to insert other location");
 
     //* When
-    physical_table::mark_active_by_id(&mut conn, target_id, &namespace, &name, &hash, &table_name)
+    physical_table::mark_active_by_id(&conn, target_id, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
     //* Then
-    let target_active = is_location_active(&mut conn, target_id)
+    let target_active = is_location_active(&conn, target_id)
         .await
         .expect("Failed to check target location active status");
 
-    let other_still_inactive = is_location_active(&mut conn, other_id)
+    let other_still_inactive = is_location_active(&conn, other_id)
         .await
         .expect("Failed to check other location active status");
 
@@ -247,13 +206,7 @@ async fn mark_active_by_id_activates_specific_location() {
 #[tokio::test]
 async fn get_active_by_location_id_returns_some_when_active() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -265,22 +218,15 @@ async fn get_active_by_location_id_returns_some_when_active() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/active-for-get-active");
 
     let inserted_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
-    physical_table::mark_active_by_id(
-        &mut conn,
-        inserted_id,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-    )
-    .await
-    .expect("Failed to mark location active");
+    physical_table::mark_active_by_id(&conn, inserted_id, &namespace, &name, &hash, &table_name)
+        .await
+        .expect("Failed to mark location active");
 
     //* When
-    let table = physical_table::get_active_by_location_id(&mut conn, inserted_id)
+    let table = physical_table::get_active_by_location_id(&conn, inserted_id)
         .await
         .expect("Failed to get active table by location id");
 
@@ -305,13 +251,7 @@ async fn get_active_by_location_id_returns_some_when_active() {
 #[tokio::test]
 async fn get_active_by_location_id_returns_err_inactive_when_inactive() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -323,13 +263,13 @@ async fn get_active_by_location_id_returns_err_inactive_when_inactive() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/inactive-for-get-active");
 
     let inserted_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
     // Do NOT call mark_active_by_id - revision stays inactive
 
     //* When
-    let result = physical_table::get_active_by_location_id(&mut conn, inserted_id).await;
+    let result = physical_table::get_active_by_location_id(&conn, inserted_id).await;
 
     //* Then
     assert!(
@@ -346,18 +286,12 @@ async fn get_active_by_location_id_returns_err_inactive_when_inactive() {
 #[tokio::test]
 async fn get_active_by_location_id_returns_err_not_found_for_nonexistent() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
 
     //* When
-    let result = physical_table::get_active_by_location_id(&mut conn, nonexistent_id).await;
+    let result = physical_table::get_active_by_location_id(&conn, nonexistent_id).await;
 
     //* Then
     assert!(
@@ -406,27 +340,4 @@ where
         .bind(location_id)
         .fetch_one(exe)
         .await
-}
-
-// Helper function to register a table and revision
-async fn register_table_and_revision(
-    conn: &mut Connection,
-    namespace: &DatasetNamespace<'_>,
-    name: &DatasetName<'_>,
-    hash: &ManifestHash<'_>,
-    table_name: &TableName<'_>,
-    path: &TablePath<'_>,
-) -> Result<LocationId, Error> {
-    physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
-    let metadata_json = serde_json::json!({
-        "dataset_namespace": namespace,
-        "dataset_name": name,
-        "manifest_hash": hash,
-        "table_name": table_name,
-    });
-    let raw =
-        serde_json::value::to_raw_value(&metadata_json).expect("test metadata should serialize");
-    let metadata = physical_table_revision::RevisionMetadata::from_owned_unchecked(raw);
-    let revision_id = physical_table_revision::register(conn, path, metadata).await?;
-    Ok(revision_id)
 }

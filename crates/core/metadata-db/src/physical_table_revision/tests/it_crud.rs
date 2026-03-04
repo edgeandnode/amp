@@ -1,26 +1,19 @@
-use pgtemp::PgTempDB;
-
 use crate::{
     datasets::{DatasetName, DatasetNamespace},
-    db::Connection,
-    error::Error,
-    jobs::{self, JobId, JobStatus},
+    jobs,
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},
-    workers::{self, WorkerInfo, WorkerNodeId},
+    tests::helpers::{
+        TEST_WORKER_ID, raw_descriptor, register_job, register_table_and_revision, setup_test_db,
+    },
+    workers::WorkerNodeId,
 };
 
 #[tokio::test]
 async fn get_by_location_id_with_details_returns_existing_location() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -32,22 +25,15 @@ async fn get_by_location_id_with_details_returns_existing_location() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/get-by-id-revision");
 
     let inserted_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
-    physical_table::mark_active_by_id(
-        &mut conn,
-        inserted_id,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-    )
-    .await
-    .expect("Failed to mark location active");
+    physical_table::mark_active_by_id(&conn, inserted_id, &namespace, &name, &hash, &table_name)
+        .await
+        .expect("Failed to mark location active");
 
     //* When
-    let location = physical_table_revision::get_by_location_id_with_details(&mut conn, inserted_id)
+    let location = physical_table_revision::get_by_location_id_with_details(&conn, inserted_id)
         .await
         .expect("Failed to get location by id");
 
@@ -93,21 +79,14 @@ async fn get_by_location_id_with_details_returns_existing_location() {
 #[tokio::test]
 async fn get_by_location_id_with_details_returns_none_for_nonexistent_location() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
 
     //* When
-    let location =
-        physical_table_revision::get_by_location_id_with_details(&mut conn, nonexistent_id)
-            .await
-            .expect("Failed to get location by id");
+    let location = physical_table_revision::get_by_location_id_with_details(&conn, nonexistent_id)
+        .await
+        .expect("Failed to get location by id");
 
     //* Then
     assert!(
@@ -119,13 +98,7 @@ async fn get_by_location_id_with_details_returns_none_for_nonexistent_location()
 #[tokio::test]
 async fn get_by_location_id_with_details_returns_inactive_revision() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -138,13 +111,13 @@ async fn get_by_location_id_with_details_returns_inactive_revision() {
         TablePath::from_ref_unchecked("test-dataset/test_table/inactive-revision-for-get-by-id");
 
     let inserted_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
     // Do NOT call mark_active_by_id - revision stays inactive
 
     //* When
-    let location = physical_table_revision::get_by_location_id_with_details(&mut conn, inserted_id)
+    let location = physical_table_revision::get_by_location_id_with_details(&conn, inserted_id)
         .await
         .expect("Failed to get location by id");
 
@@ -172,13 +145,7 @@ async fn get_by_location_id_with_details_returns_inactive_revision() {
 #[tokio::test]
 async fn get_by_location_id_with_details_returns_revision_with_writer_when_assigned() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -186,42 +153,28 @@ async fn get_by_location_id_with_details_returns_revision_with_writer_when_assig
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
-    let worker_info = WorkerInfo::default();
-    workers::register(&mut conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to register worker");
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
-    let job_desc = crate::jobs::JobDescriptorRaw::from_owned_unchecked(
-        serde_json::value::to_raw_value(&serde_json::json!({"operation": "write"}))
-            .expect("Failed to serialize job description"),
-    );
-    let job_id = register_job(&mut conn, &job_desc, &worker_id).await;
+    let job_desc = raw_descriptor(&serde_json::json!({"operation": "write"}));
+    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     let table_name = TableName::from_ref_unchecked("writer_table");
     let path = TablePath::from_ref_unchecked("test-dataset/writer_table/writer-assigned-revision");
 
     let inserted_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
-    physical_table::mark_active_by_id(
-        &mut conn,
-        inserted_id,
-        &namespace,
-        &name,
-        &hash,
-        &table_name,
-    )
-    .await
-    .expect("Failed to mark location active");
+    physical_table::mark_active_by_id(&conn, inserted_id, &namespace, &name, &hash, &table_name)
+        .await
+        .expect("Failed to mark location active");
 
-    physical_table_revision::assign_job_writer(&mut conn, &[inserted_id], job_id)
+    physical_table_revision::assign_job_writer(&conn, &[inserted_id], job_id)
         .await
         .expect("Failed to assign job writer");
 
     //* When
-    let location = physical_table_revision::get_by_location_id_with_details(&mut conn, inserted_id)
+    let location = physical_table_revision::get_by_location_id_with_details(&conn, inserted_id)
         .await
         .expect("Failed to get location by id");
 
@@ -243,13 +196,7 @@ async fn get_by_location_id_with_details_returns_revision_with_writer_when_assig
 #[tokio::test]
 async fn get_active_by_table_id_filters_by_table_and_active_status() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -264,52 +211,39 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     // Create active location for target table
     let path1 = TablePath::from_ref_unchecked("test-dataset/test_table/active1-revision");
     let active_id1 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path1)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path1)
             .await
             .expect("Failed to insert active location 1");
 
-    physical_table::mark_active_by_id(&mut conn, active_id1, &namespace, &name, &hash, &table_name)
+    physical_table::mark_active_by_id(&conn, active_id1, &namespace, &name, &hash, &table_name)
         .await
         .expect("Failed to mark location active");
 
     // Create another active location for different table (still should be returned)
     let path2 = TablePath::from_ref_unchecked("test-dataset/test_table2/active2-revision");
     let active_id2 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table2_name, &path2)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table2_name, &path2)
             .await
             .expect("Failed to insert active location 2");
 
-    physical_table::mark_active_by_id(
-        &mut conn,
-        active_id2,
-        &namespace,
-        &name,
-        &hash,
-        &table2_name,
-    )
-    .await
-    .expect("Failed to mark location active");
+    physical_table::mark_active_by_id(&conn, active_id2, &namespace, &name, &hash, &table2_name)
+        .await
+        .expect("Failed to mark location active");
 
     // Create inactive location for target table (should be filtered out)
     let path3 = TablePath::from_ref_unchecked("test-dataset/test_table/inactive-revision");
-    register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path3)
+    register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path3)
         .await
         .expect("Failed to insert inactive location");
 
     // Create active location for different table (should be filtered out)
     let path4 = TablePath::from_ref_unchecked("test-dataset/other_table/other-revision");
-    let active_id3 = register_table_and_revision(
-        &mut conn,
-        &namespace,
-        &name,
-        &hash,
-        &other_table_name,
-        &path4,
-    )
-    .await
-    .expect("Failed to insert location for other table");
+    let active_id3 =
+        register_table_and_revision(&conn, &namespace, &name, &hash, &other_table_name, &path4)
+            .await
+            .expect("Failed to insert location for other table");
     physical_table::mark_active_by_id(
-        &mut conn,
+        &conn,
         active_id3,
         &namespace,
         &name,
@@ -320,10 +254,10 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
     .expect("Failed to mark location active");
 
     //* When - Get locations for first table
-    let active_location1 = physical_table_revision::get_active(&mut conn, &hash, &table_name)
+    let active_location1 = physical_table_revision::get_active(&conn, &hash, &table_name)
         .await
         .expect("Failed to get active locations for table 1");
-    let active_location2 = physical_table_revision::get_active(&mut conn, &hash, &table2_name)
+    let active_location2 = physical_table_revision::get_active(&conn, &hash, &table2_name)
         .await
         .expect("Failed to get active locations for table 2");
 
@@ -366,13 +300,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 #[tokio::test]
 async fn insert_on_conflict_returns_existing_id() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -383,14 +311,13 @@ async fn insert_on_conflict_returns_existing_id() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/unique-revision-id");
 
     // Insert first location
-    let first_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
-            .await
-            .expect("Failed to insert first location");
+    let first_id = register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
+        .await
+        .expect("Failed to insert first location");
 
     //* When - Try to insert with same path but different data
     let second_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert second location");
 
@@ -404,13 +331,7 @@ async fn insert_on_conflict_returns_existing_id() {
 #[tokio::test]
 async fn path_to_location_id_finds_existing_location() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -422,12 +343,12 @@ async fn path_to_location_id_finds_existing_location() {
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/find-me-revision");
 
     let expected_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
             .await
             .expect("Failed to insert location");
 
     //* When
-    let found_id = physical_table_revision::path_to_id(&mut conn, path)
+    let found_id = physical_table_revision::path_to_id(&conn, path)
         .await
         .expect("Failed to search for location");
 
@@ -442,18 +363,12 @@ async fn path_to_location_id_finds_existing_location() {
 #[tokio::test]
 async fn path_to_location_id_returns_none_when_not_found() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let path = TablePath::from_ref_unchecked("test-dataset/test_table/nonexistent-revision");
 
     //* When
-    let found_id = physical_table_revision::path_to_id(&mut conn, path)
+    let found_id = physical_table_revision::path_to_id(&conn, path)
         .await
         .expect("Failed to search for location");
 
@@ -464,58 +379,25 @@ async fn path_to_location_id_returns_none_when_not_found() {
     );
 }
 
-// Helper function to register a table and revision
-async fn register_table_and_revision(
-    conn: &mut Connection,
-    namespace: &DatasetNamespace<'_>,
-    name: &DatasetName<'_>,
-    hash: &ManifestHash<'_>,
-    table_name: &TableName<'_>,
-    path: &TablePath<'_>,
-) -> Result<LocationId, Error> {
-    physical_table::register(&mut *conn, namespace, name, hash, table_name).await?;
-    let metadata_json = serde_json::json!({
-        "dataset_namespace": namespace,
-        "dataset_name": name,
-        "manifest_hash": hash,
-        "table_name": table_name,
-    });
-    let raw =
-        serde_json::value::to_raw_value(&metadata_json).expect("test metadata should serialize");
-    let metadata = physical_table_revision::RevisionMetadata::from_owned_unchecked(raw);
-    let revision_id = physical_table_revision::register(conn, path, metadata).await?;
-    Ok(revision_id)
-}
-
-// TODO: Import from tests::common once this file is migrated from Connection to MetadataDb pool.
-/// Local helper to register a job using a `&mut Connection` (3-step: insert job → event → status).
-async fn register_job(
-    conn: &mut Connection,
-    job_desc: &jobs::JobDescriptorRaw<'_>,
-    worker_id: &WorkerNodeId<'_>,
-) -> JobId {
-    let job_id = jobs::register(&mut *conn, worker_id, job_desc)
+/// Helper function to get writer job ID by location ID
+async fn get_writer_by_location_id<'c, E>(
+    exe: E,
+    location_id: LocationId,
+) -> Result<Option<jobs::JobId>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = "SELECT writer FROM physical_table_revisions WHERE id = $1";
+    sqlx::query_scalar(query)
+        .bind(location_id)
+        .fetch_one(exe)
         .await
-        .expect("Failed to register job");
-    crate::job_events::register(&mut *conn, job_id, worker_id, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register job event");
-    crate::job_status::register(&mut *conn, job_id, worker_id, JobStatus::Scheduled)
-        .await
-        .expect("Failed to register job status");
-    job_id
 }
 
 #[tokio::test]
 async fn assign_job_writer_assigns_job_to_multiple_locations() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = Connection::connect_with_retry(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset");
@@ -523,50 +405,43 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
 
-    // Create a worker and job
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
-    let worker_info = WorkerInfo::default();
-    workers::register(&mut conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to register worker");
+    // Use the pre-registered worker from setup_test_db
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
-    let job_desc = crate::jobs::JobDescriptorRaw::from_owned_unchecked(
-        serde_json::value::to_raw_value(&serde_json::json!({"operation": "write"}))
-            .expect("Failed to serialize job description"),
-    );
-    let job_id = register_job(&mut conn, &job_desc, &worker_id).await;
+    let job_desc = raw_descriptor(&serde_json::json!({"operation": "write"}));
+    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     let table_name = TableName::from_ref_unchecked("output_table");
 
     // Create locations to assign
     let path1 = TablePath::from_ref_unchecked("test-dataset/output_table/assign1-revision");
     let location_id1 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path1)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path1)
             .await
             .expect("Failed to insert location 1");
 
     let path2 = TablePath::from_ref_unchecked("test-dataset/output_table/assign2-revision");
     let location_id2 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path2)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path2)
             .await
             .expect("Failed to insert location 2");
 
     let path3 = TablePath::from_ref_unchecked("test-dataset/output_table/assign3-revision");
     let location_id3 =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path3)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path3)
             .await
             .expect("Failed to insert location 3");
 
     // Create a location that should not be assigned
     let path4 = TablePath::from_ref_unchecked("test-dataset/output_table/not-assigned-revision");
     let unassigned_id =
-        register_table_and_revision(&mut conn, &namespace, &name, &hash, &table_name, &path4)
+        register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path4)
             .await
             .expect("Failed to insert unassigned location");
 
     //* When
     physical_table_revision::assign_job_writer(
-        &mut conn,
+        &conn,
         &[location_id1, location_id2, location_id3],
         job_id,
     )
@@ -574,16 +449,16 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     .expect("Failed to assign job writer");
 
     //* Then
-    let writer1 = get_writer_by_location_id(&mut conn, location_id1)
+    let writer1 = get_writer_by_location_id(&conn, location_id1)
         .await
         .expect("Failed to get writer for location_id1");
-    let writer2 = get_writer_by_location_id(&mut conn, location_id2)
+    let writer2 = get_writer_by_location_id(&conn, location_id2)
         .await
         .expect("Failed to get writer for location_id2");
-    let writer3 = get_writer_by_location_id(&mut conn, location_id3)
+    let writer3 = get_writer_by_location_id(&conn, location_id3)
         .await
         .expect("Failed to get writer for location_id3");
-    let writer_unassigned = get_writer_by_location_id(&mut conn, unassigned_id)
+    let writer_unassigned = get_writer_by_location_id(&conn, unassigned_id)
         .await
         .expect("Failed to get writer for unassigned location");
 
@@ -606,19 +481,4 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         writer_unassigned, None,
         "assign_job_writer should only affect specified locations"
     );
-}
-
-/// Helper function to get writer job ID by location ID
-async fn get_writer_by_location_id<'c, E>(
-    exe: E,
-    location_id: LocationId,
-) -> Result<Option<JobId>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = "SELECT writer FROM physical_table_revisions WHERE id = $1";
-    sqlx::query_scalar(query)
-        .bind(location_id)
-        .fetch_one(exe)
-        .await
 }

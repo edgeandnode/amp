@@ -1,29 +1,17 @@
 //! Integration tests for the job_events module
 
-use pgtemp::PgTempDB;
-
 use crate::{
-    config::DEFAULT_POOL_MAX_CONNECTIONS,
     job_events,
     jobs::JobStatus,
-    tests::common::{raw_descriptor, register_job},
-    workers::{self, WorkerInfo, WorkerNodeId},
+    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
+    workers::WorkerNodeId,
 };
 
 #[tokio::test]
 async fn register_inserts_event() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    workers::register(&conn, worker_id.clone(), WorkerInfo::default())
-        .await
-        .expect("Failed to register worker");
-
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "event"}));
 
     //* When
@@ -41,17 +29,8 @@ async fn register_inserts_event() {
 #[tokio::test]
 async fn get_attempts_returns_only_scheduled_events() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    workers::register(&conn, worker_id.clone(), WorkerInfo::default())
-        .await
-        .expect("Failed to register worker");
-
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "filter"}));
 
     // Insert a mix of event types
@@ -80,17 +59,8 @@ async fn get_attempts_returns_only_scheduled_events() {
 #[tokio::test]
 async fn get_attempts_scoped_to_job() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker");
-    workers::register(&conn, worker_id.clone(), WorkerInfo::default())
-        .await
-        .expect("Failed to register worker");
-
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "scope"}));
 
     // Insert events for both jobs
