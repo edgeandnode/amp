@@ -365,6 +365,7 @@ impl BlockStreamer for Client {
     }
 
     fn bucket_size(&self) -> Option<NonZeroU64> {
+        const _: () = assert!(solana_clock::DEFAULT_SLOTS_PER_EPOCH > 0);
         NonZeroU64::new(solana_clock::DEFAULT_SLOTS_PER_EPOCH)
     }
 
