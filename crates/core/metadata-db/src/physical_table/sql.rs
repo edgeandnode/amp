@@ -187,10 +187,11 @@ where
         SELECT
             pt.table_name,
             ptr.writer AS job_id,
-            j.status AS job_status
+            js.status AS job_status
         FROM physical_tables pt
         JOIN physical_table_revisions ptr ON ptr.id = pt.active_revision_id
         LEFT JOIN jobs j ON ptr.writer = j.id
+        LEFT JOIN jobs_status js ON j.id = js.job_id
         WHERE pt.manifest_hash = $1
         ORDER BY pt.table_name
     "#};

@@ -191,6 +191,15 @@ pub enum ScheduleJobError {
     #[error("specified worker '{0}' not found or inactive")]
     WorkerNotAvailable(NodeId),
 
+    /// Failed to begin transaction for schedule operation
+    ///
+    /// This occurs when:
+    /// - Database connection pool is exhausted
+    /// - Database connection fails or is lost
+    /// - Transaction initialization encounters an error
+    #[error("failed to begin transaction")]
+    BeginTransaction(#[source] metadata_db::Error),
+
     /// Failed to register job in the metadata database
     ///
     /// This occurs when:
@@ -200,6 +209,15 @@ pub enum ScheduleJobError {
     #[error("failed to register job: {0}")]
     RegisterJob(#[source] metadata_db::Error),
 
+    /// Failed to register job status in the metadata database
+    ///
+    /// This occurs when:
+    /// - Job status insertion into database fails
+    /// - Unique constraint violation on job ID
+    /// - Connection is lost during job status registration
+    #[error("failed to register job status: {0}")]
+    RegisterJobStatus(#[source] metadata_db::Error),
+
     /// Failed to register job event in the metadata database
     ///
     /// This occurs when:
@@ -207,15 +225,6 @@ pub enum ScheduleJobError {
     /// - Connection is lost during job event registration
     #[error("failed to register job event: {0}")]
     RegisterJobEvent(#[source] metadata_db::Error),
-
-    /// Failed to begin transaction for schedule operation
-    ///
-    /// This occurs when:
-    /// - Database connection pool is exhausted
-    /// - Database connection fails or is lost
-    /// - Transaction initialization encounters an error
-    #[error("failed to begin transaction")]
-    BeginTransaction(#[source] metadata_db::Error),
 
     /// Failed to send job notification to worker
     ///

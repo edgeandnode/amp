@@ -138,13 +138,14 @@ where
 
             -- Writer job fields (optional)
             j.id          AS writer_job_id,
-            j.node_id     AS writer_job_node_id,
-            j.status      AS writer_job_status,
+            js.node_id     AS writer_job_node_id,
+            js.status     AS writer_job_status,
             j.descriptor  AS writer_job_descriptor,
             j.created_at  AS writer_job_created_at,
-            j.updated_at  AS writer_job_updated_at
+            js.updated_at AS writer_job_updated_at
         FROM physical_table_revisions ptr
         LEFT JOIN jobs j ON ptr.writer = j.id
+        LEFT JOIN jobs_status js ON j.id = js.job_id
         WHERE ptr.id = $1
     "};
 

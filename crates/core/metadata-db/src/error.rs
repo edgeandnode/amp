@@ -149,7 +149,7 @@ pub enum Error {
     ///
     /// See `JobStatusUpdateError` for specific transition validation errors.
     #[error("Job status update error: {0}")]
-    JobStatusUpdate(#[source] crate::jobs::JobStatusUpdateError),
+    JobStatusUpdate(#[source] crate::job_status::JobStatusUpdateError),
 
     /// Failed to get active physical table by location ID
     ///

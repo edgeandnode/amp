@@ -4,7 +4,7 @@ use crate::{
     datasets::{DatasetName, DatasetNamespace},
     db::Connection,
     error::Error,
-    jobs::{self, JobId},
+    jobs::{self, JobId, JobStatus},
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},
@@ -196,9 +196,7 @@ async fn get_by_location_id_with_details_returns_revision_with_writer_when_assig
         serde_json::value::to_raw_value(&serde_json::json!({"operation": "write"}))
             .expect("Failed to serialize job description"),
     );
-    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc)
-        .await
-        .expect("Failed to register job");
+    let job_id = register_job(&mut conn, &job_desc, &worker_id).await;
 
     let table_name = TableName::from_ref_unchecked("writer_table");
     let path = TablePath::from_ref_unchecked("test-dataset/writer_table/writer-assigned-revision");
@@ -489,6 +487,25 @@ async fn register_table_and_revision(
     Ok(revision_id)
 }
 
+// TODO: Import from tests::common once this file is migrated from Connection to MetadataDb pool.
+/// Local helper to register a job using a `&mut Connection` (3-step: insert job → event → status).
+async fn register_job(
+    conn: &mut Connection,
+    job_desc: &jobs::JobDescriptorRaw<'_>,
+    worker_id: &WorkerNodeId<'_>,
+) -> JobId {
+    let job_id = jobs::register(&mut *conn, worker_id, job_desc)
+        .await
+        .expect("Failed to register job");
+    crate::job_events::register(&mut *conn, job_id, worker_id, JobStatus::Scheduled)
+        .await
+        .expect("Failed to register job event");
+    crate::job_status::register(&mut *conn, job_id, worker_id, JobStatus::Scheduled)
+        .await
+        .expect("Failed to register job status");
+    job_id
+}
+
 #[tokio::test]
 async fn assign_job_writer_assigns_job_to_multiple_locations() {
     //* Given
@@ -508,7 +525,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 
     // Create a worker and job
     let worker_id = WorkerNodeId::from_ref_unchecked("test-writer-worker");
-    let worker_info = WorkerInfo::default(); // {}
+    let worker_info = WorkerInfo::default();
     workers::register(&mut conn, &worker_id, worker_info)
         .await
         .expect("Failed to register worker");
@@ -517,9 +534,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
         serde_json::value::to_raw_value(&serde_json::json!({"operation": "write"}))
             .expect("Failed to serialize job description"),
     );
-    let job_id = jobs::sql::insert_with_default_status(&mut conn, worker_id, &job_desc)
-        .await
-        .expect("Failed to register job");
+    let job_id = register_job(&mut conn, &job_desc, &worker_id).await;
 
     let table_name = TableName::from_ref_unchecked("output_table");
 

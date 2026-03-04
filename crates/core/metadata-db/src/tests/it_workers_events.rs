@@ -6,6 +6,7 @@ use pgtemp::PgTempDB;
 use crate::{
     config::DEFAULT_POOL_MAX_CONNECTIONS,
     jobs::{JobId, JobStatus},
+    tests::common::register_job,
     workers::{self, WorkerInfo, WorkerNodeId},
 };
 
@@ -52,9 +53,7 @@ async fn schedule_job_and_receive_notification() {
 
     //* When
     // Register the job
-    let job_id = crate::jobs::register(&conn, &worker_id, &job_desc)
-        .await
-        .expect("Failed to register job");
+    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     // Send notification to the worker
     workers::send_job_notif(

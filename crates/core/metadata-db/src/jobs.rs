@@ -7,24 +7,27 @@ use sqlx::types::chrono::{DateTime, Utc};
 
 mod job_descriptor;
 mod job_id;
-mod job_status;
 pub(crate) mod sql;
 
 pub use self::{
     job_descriptor::{JobDescriptorRaw, JobDescriptorRawOwned},
     job_id::JobId,
-    job_status::JobStatus,
     sql::JobWithRetryInfo,
 };
+pub use crate::job_status::JobStatus;
 use crate::{
     db::Executor,
     error::Error,
-    job_events,
+    job_events, job_status,
     manifests::ManifestHash,
     workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
 
-/// Register a job in the queue with the default status (Scheduled)
+/// Register a job in the queue
+///
+/// Creates the job record with its descriptor. The caller is responsible for
+/// separately registering the status via [`job_status::register`] and the event
+/// via [`job_events::register`].
 ///
 /// **Note:** This function does not send notifications. The caller is responsible for
 /// calling `send_job_notification` after successful job registration if worker notification
@@ -39,48 +42,9 @@ where
     E: Executor<'c>,
 {
     let job_desc = job_desc.into();
-    sql::insert_with_default_status(exe, node_id.into(), &job_desc)
+    sql::insert(exe, &node_id.into(), &job_desc)
         .await
         .map_err(Error::Database)
-}
-
-/// Update job status to StopRequested
-///
-/// This function will only update the job status if it's currently in a valid state
-/// to be stopped (Scheduled or Running). If the job is already stopping, this is
-/// considered success (idempotent behavior). If the job is in a terminal state
-/// (Stopped, Completed, Failed), this returns a conflict error.
-///
-/// Returns an error if the job doesn't exist, is in a terminal state, or if there's a database error.
-///
-/// **Note:** This function does not send notifications. The caller is responsible for
-/// calling `send_job_notification` after successful status update if worker notification
-/// is required.
-#[tracing::instrument(skip(exe), err)]
-pub async fn request_stop<'c, E>(
-    exe: E,
-    job_id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    // Try to update job status
-    match sql::update_status_if_any_state(
-        exe,
-        job_id.into(),
-        &[JobStatus::Running, JobStatus::Scheduled],
-        JobStatus::StopRequested,
-    )
-    .await
-    {
-        Ok(()) => Ok(()),
-        // Check if the job is already stopping (idempotent behavior)
-        Err(JobStatusUpdateError::StateConflict {
-            actual: JobStatus::StopRequested | JobStatus::Stopping,
-            ..
-        }) => Ok(()),
-        Err(err) => Err(Error::JobStatusUpdate(err)),
-    }
 }
 
 /// List jobs with cursor-based pagination support, optionally filtered by status
@@ -215,122 +179,6 @@ where
         .map_err(Error::Database)
 }
 
-/// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
-///
-/// This provides idempotent behavior - if the job is already running, completed, or failed,
-/// the appropriate error will be returned indicating the state conflict.
-#[tracing::instrument(skip(exe), err)]
-pub async fn mark_running<'c, E>(
-    exe: E,
-    id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Scheduled], JobStatus::Running)
-        .await
-        .map_err(Error::JobStatusUpdate)
-}
-
-/// Conditionally marks a job as `STOPPING` only if it's currently `STOP_REQUESTED`
-///
-/// This is typically used by workers to acknowledge a stop request.
-#[tracing::instrument(skip(exe), err)]
-pub async fn mark_stopping<'c, E>(
-    exe: E,
-    id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    sql::update_status_if_any_state(
-        exe,
-        id.into(),
-        &[JobStatus::StopRequested],
-        JobStatus::Stopping,
-    )
-    .await
-    .map_err(Error::JobStatusUpdate)
-}
-
-/// Conditionally marks a job as `STOPPED` only if it's currently `STOPPING`
-///
-/// This provides proper state transition from stopping to stopped.
-#[tracing::instrument(skip(exe), err)]
-pub async fn mark_stopped<'c, E>(
-    exe: E,
-    id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Stopping], JobStatus::Stopped)
-        .await
-        .map_err(Error::JobStatusUpdate)
-}
-
-/// Conditionally marks a job as `COMPLETED` only if it's currently `RUNNING`
-///
-/// This ensures jobs can only be completed from a running state.
-#[tracing::instrument(skip(exe), err)]
-pub async fn mark_completed<'c, E>(
-    exe: E,
-    id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Running], JobStatus::Completed)
-        .await
-        .map_err(Error::JobStatusUpdate)
-}
-
-/// Conditionally marks a job as `ERROR` from either `RUNNING` or `SCHEDULED` states
-///
-/// This is used for recoverable failures where retry attempts can be made.
-///
-/// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
-#[tracing::instrument(skip(exe), err)]
-pub async fn mark_failed_recoverable<'c, E>(
-    exe: E,
-    id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    sql::update_status_if_any_state(
-        exe,
-        id.into(),
-        &[JobStatus::Scheduled, JobStatus::Running],
-        JobStatus::Error,
-    )
-    .await
-    .map_err(Error::JobStatusUpdate)
-}
-
-/// Conditionally marks a job as `FATAL` from either `RUNNING` or `SCHEDULED` states
-///
-/// This is used for unrecoverable failures where retry attempts should not be made.
-///
-/// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
-#[tracing::instrument(skip(exe), err)]
-pub async fn mark_failed_fatal<'c, E>(
-    exe: E,
-    id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<(), Error>
-where
-    E: Executor<'c>,
-{
-    sql::update_status_if_any_state(
-        exe,
-        id.into(),
-        &[JobStatus::Scheduled, JobStatus::Running],
-        JobStatus::Fatal,
-    )
-    .await
-    .map_err(Error::JobStatusUpdate)
-}
-
 /// Delete a job by ID if it's in a terminal state
 ///
 /// This function will only delete the job if it exists and is in a terminal state
@@ -384,9 +232,9 @@ where
 
 /// Reschedule a failed job for retry with atomically tracked attempt
 ///
-/// This function performs two operations using the provided transaction:
-///  1. Updates job status to SCHEDULED and assigns to the given worker node
-///  2. Inserts job attempt record with given retry_index
+/// This function performs three operations using the provided transaction:
+///  1. Updates job status to SCHEDULED in `jobs_status` and assigns to the given worker node
+///  2. Inserts a SCHEDULED event into `job_events`
 ///
 /// If any operation fails, the error is returned and no further operations are attempted.
 /// The caller is responsible for transaction management (commit/rollback).
@@ -407,33 +255,13 @@ pub async fn reschedule(
     let job_id = job_id.into();
     let new_node_id = new_node_id.into();
 
-    // Update job status to SCHEDULED and assign to worker
-    sql::reschedule(&mut *tx, job_id, &new_node_id)
-        .await
-        .map_err(Error::Database)?;
+    // Update job status to SCHEDULED in jobs_status and assign to worker
+    job_status::reschedule(&mut *tx, job_id, &new_node_id).await?;
 
     // Insert job event record
-    job_events::sql::insert(&mut *tx, job_id, &new_node_id, JobStatus::Scheduled)
-        .await
-        .map_err(Error::Database)?;
+    job_events::register(&mut *tx, job_id, &new_node_id, JobStatus::Scheduled).await?;
 
     Ok(())
-}
-
-/// Error type for conditional job status updates
-#[derive(Debug, thiserror::Error)]
-pub enum JobStatusUpdateError {
-    #[error("Job not found")]
-    NotFound,
-
-    #[error("Job state conflict: expected one of {expected:?}, but found {actual}")]
-    StateConflict {
-        expected: Vec<JobStatus>,
-        actual: JobStatus,
-    },
-
-    #[error("Database error: {0}")]
-    Database(#[source] sqlx::Error),
 }
 
 /// Represents a job with its metadata and associated node.

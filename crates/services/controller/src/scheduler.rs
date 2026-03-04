@@ -40,7 +40,7 @@ use datasets_common::{
     hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
 };
 use metadata_db::{
-    Error as MetadataDbError, MetadataDb, jobs::JobStatusUpdateError, workers::Worker,
+    Error as MetadataDbError, MetadataDb, job_status::JobStatusUpdateError, workers::Worker,
 };
 use monitoring::logging;
 use rand::seq::IndexedRandom as _;
@@ -144,6 +144,10 @@ impl Scheduler {
             .map(Into::into)
             .map_err(ScheduleJobError::RegisterJob)?;
 
+        metadata_db::job_status::register(&mut tx, job_id, &node_id, JobStatus::Scheduled.into())
+            .await
+            .map_err(ScheduleJobError::RegisterJobStatus)?;
+
         metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Scheduled.into())
             .await
             .map_err(ScheduleJobError::RegisterJobEvent)?;
@@ -171,14 +175,8 @@ impl Scheduler {
             .await
             .map_err(StopJobError::BeginTransaction)?;
 
-        // Fetch the job to get its node_id and validate it exists
-        let job = metadata_db::jobs::get_by_id(&mut tx, &job_id)
-            .await
-            .map_err(StopJobError::GetJob)?
-            .ok_or(StopJobError::JobNotFound)?;
-
         // Attempt to stop the job
-        metadata_db::jobs::request_stop(&mut tx, &job_id)
+        let status_changed = metadata_db::job_status::request_stop(&mut tx, &job_id)
             .await
             .map_err(|err| match err {
                 MetadataDbError::JobStatusUpdate(JobStatusUpdateError::NotFound) => {
@@ -201,19 +199,30 @@ impl Scheduler {
                 other => StopJobError::UpdateJobStatus(other),
             })?;
 
-        metadata_db::job_events::register(
-            &mut tx,
-            job_id,
-            &job.node_id,
-            JobStatus::StopRequested.into(),
-        )
-        .await
-        .map_err(StopJobError::RegisterJobEvent)?;
+        if status_changed {
+            let job = metadata_db::jobs::get_by_id(&mut tx, &job_id)
+                .await
+                .map_err(StopJobError::GetJob)?
+                .ok_or(StopJobError::JobNotFound)?;
 
-        // Notify the worker about the stop request (within the transaction)
-        metadata_db::workers::send_job_notif(&mut tx, job.node_id, &JobNotification::stop(job_id))
+            metadata_db::job_events::register(
+                &mut tx,
+                job_id,
+                &job.node_id,
+                JobStatus::StopRequested.into(),
+            )
+            .await
+            .map_err(StopJobError::RegisterJobEvent)?;
+
+            // Notify the worker about the stop request (within the transaction)
+            metadata_db::workers::send_job_notif(
+                &mut tx,
+                job.node_id,
+                &JobNotification::stop(job_id),
+            )
             .await
             .map_err(StopJobError::SendNotification)?;
+        }
 
         // Commit the transaction
         tx.commit().await.map_err(StopJobError::CommitTransaction)?;

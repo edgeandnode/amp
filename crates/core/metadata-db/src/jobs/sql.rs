@@ -2,12 +2,10 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::{
-    Job, JobStatusUpdateError, job_descriptor::JobDescriptorRaw, job_id::JobId,
-    job_status::JobStatus,
-};
+use super::{Job, job_descriptor::JobDescriptorRaw, job_id::JobId};
 use crate::{
     datasets::{DatasetName, DatasetNamespace},
+    job_status::JobStatus,
     manifests::ManifestHash,
     workers::WorkerNodeId,
 };
@@ -31,107 +29,28 @@ pub struct JobWithRetryInfo {
 
 /// Insert a new job into the queue
 ///
-/// The job will be assigned to the given worker node with the specified status.
+/// Creates the job record with its descriptor and timestamp. The job's status
+/// and worker assignment are stored in the `jobs_status` projection table via
+/// a separate insert.
 pub async fn insert<'c, E>(
     exe: E,
-    node_id: WorkerNodeId<'_>,
+    node_id: &WorkerNodeId<'_>,
     descriptor: &JobDescriptorRaw<'_>,
-    status: JobStatus,
 ) -> Result<JobId, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO jobs (node_id, descriptor, status, created_at, updated_at)
-        VALUES ($1, $2, $3, (timezone('UTC', now())), (timezone('UTC', now())))
+        INSERT INTO jobs (node_id, descriptor, created_at)
+        VALUES ($1, $2, (timezone('UTC', now())))
         RETURNING id
     "#};
     let res = sqlx::query_scalar(query)
-        .bind(&node_id)
+        .bind(node_id)
         .bind(descriptor)
-        .bind(status)
         .fetch_one(exe)
         .await?;
     Ok(res)
-}
-
-/// Insert a new job into the queue with the default status
-///
-/// The job will be assigned to the given worker node with the default status (Scheduled).
-#[inline]
-pub async fn insert_with_default_status<'c, E>(
-    exe: E,
-    node_id: WorkerNodeId<'_>,
-    descriptor: &JobDescriptorRaw<'_>,
-) -> Result<JobId, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    insert(exe, node_id, descriptor, JobStatus::default()).await
-}
-
-/// Update the status of a job with multiple possible expected original states
-///
-/// This function will only update the job status if the job exists and currently has
-/// one of the expected original statuses. If the job doesn't exist, returns `UpdateJobStatusError::NotFound`.
-/// If the job exists but has a different status than any of the expected ones, returns `UpdateJobStatusError::StateConflict`.
-pub async fn update_status_if_any_state<'c, E>(
-    exe: E,
-    id: JobId,
-    expected_statuses: &[JobStatus],
-    new_status: JobStatus,
-) -> Result<(), JobStatusUpdateError>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    /// Internal structure to hold the result of the update operation
-    #[derive(Debug, sqlx::FromRow)]
-    struct UpdateResult {
-        updated_id: Option<JobId>,
-        original_status: Option<JobStatus>,
-    }
-
-    let query = indoc::indoc! {r#"
-        WITH target_job AS (
-            SELECT id, status
-            FROM jobs
-            WHERE id = $1
-        ),
-        target_job_update AS (
-            UPDATE jobs
-            SET status = $3, updated_at = timezone('UTC', now())
-            WHERE id = $1 AND status = ANY($2)
-            RETURNING id
-        )
-        SELECT
-            target_job_update.id AS updated_id,
-            target_job.status AS original_status
-        FROM target_job
-        LEFT JOIN target_job_update ON target_job.id = target_job_update.id
-    "#};
-
-    let result: Option<UpdateResult> = sqlx::query_as(query)
-        .bind(id)
-        .bind(expected_statuses)
-        .bind(new_status)
-        .fetch_optional(exe)
-        .await
-        .map_err(JobStatusUpdateError::Database)?;
-
-    match result {
-        Some(UpdateResult {
-            updated_id: Some(_),
-            ..
-        }) => Ok(()),
-        Some(UpdateResult {
-            updated_id: None,
-            original_status: Some(status),
-        }) => Err(JobStatusUpdateError::StateConflict {
-            expected: expected_statuses.to_vec(),
-            actual: status,
-        }),
-        _ => Err(JobStatusUpdateError::NotFound),
-    }
 }
 
 /// Get a job by its ID
@@ -140,9 +59,10 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT id, node_id, status, descriptor, created_at, updated_at
-        FROM jobs
-        WHERE id = $1
+        SELECT j.id, js.node_id, js.status, j.descriptor, j.created_at, js.updated_at
+        FROM jobs j
+        INNER JOIN jobs_status js ON j.id = js.job_id
+        WHERE j.id = $1
     "#};
     let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
     Ok(res)
@@ -159,15 +79,16 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            id,
-            node_id,
-            status,
-            descriptor,
-            created_at,
-            updated_at
-        FROM jobs
-        WHERE node_id = $1 AND status = ANY($2)
-        ORDER BY id ASC
+            j.id,
+            js.node_id,
+            js.status,
+            j.descriptor,
+            j.created_at,
+            js.updated_at
+        FROM jobs j
+        INNER JOIN jobs_status js ON j.id = js.job_id
+        WHERE js.node_id = $1 AND js.status = ANY($2)
+        ORDER BY j.id ASC
     "#};
     let res = sqlx::query_as(query)
         .bind(node_id)
@@ -192,12 +113,13 @@ where
     let query = indoc::indoc! {r#"
         SELECT DISTINCT
             j.id,
-            j.node_id,
-            j.status,
+            js.node_id,
+            js.status,
             j.descriptor,
             j.created_at,
-            j.updated_at
+            js.updated_at
         FROM jobs j
+        INNER JOIN jobs_status js ON j.id = js.job_id
         INNER JOIN physical_table_revisions ptr ON j.id = ptr.writer
         INNER JOIN physical_tables pt ON pt.active_revision_id = ptr.id
         WHERE pt.manifest_hash = $1
@@ -224,17 +146,18 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            id,
-            node_id,
-            status,
-            descriptor,
-            created_at,
-            updated_at
-        FROM jobs
-        WHERE descriptor->>'dataset_namespace' = $1
-          AND descriptor->>'dataset_name' = $2
-          AND descriptor->>'manifest_hash' = $3
-        ORDER BY id ASC
+            j.id,
+            js.node_id,
+            js.status,
+            j.descriptor,
+            j.created_at,
+            js.updated_at
+        FROM jobs j
+        INNER JOIN jobs_status js ON j.id = js.job_id
+        WHERE j.descriptor->>'dataset_namespace' = $1
+          AND j.descriptor->>'dataset_name' = $2
+          AND j.descriptor->>'manifest_hash' = $3
+        ORDER BY j.id ASC
     "#};
     let res = sqlx::query_as(query)
         .bind(&dataset_namespace)
@@ -248,6 +171,7 @@ where
 /// Delete a job by ID if it matches any of the specified statuses
 ///
 /// This function will only delete the job if it exists and is in one of the specified statuses.
+/// The `jobs_status` row is deleted automatically via ON DELETE CASCADE.
 /// Returns true if a job was deleted, false otherwise.
 pub async fn delete_by_id_and_statuses<'c, E, const N: usize>(
     exe: E,
@@ -259,7 +183,9 @@ where
 {
     let query = indoc::indoc! {r#"
         DELETE FROM jobs
-        WHERE id = $1 AND status = ANY($2)
+        WHERE id = $1 AND id IN (
+            SELECT job_id FROM jobs_status WHERE status = ANY($2)
+        )
     "#};
 
     let result = sqlx::query(query)
@@ -274,6 +200,7 @@ where
 /// Delete all jobs that match any of the specified statuses
 ///
 /// This function deletes all jobs that are in one of the specified statuses.
+/// The `jobs_status` rows are deleted automatically via ON DELETE CASCADE.
 /// Returns the number of jobs that were deleted.
 pub async fn delete_by_status<'c, E, const N: usize>(
     exe: E,
@@ -284,7 +211,9 @@ where
 {
     let query = indoc::indoc! {r#"
         DELETE FROM jobs
-        WHERE status = ANY($1)
+        WHERE id IN (
+            SELECT job_id FROM jobs_status WHERE status = ANY($1)
+        )
     "#};
 
     let result = sqlx::query(query).bind(statuses).execute(exe).await?;
@@ -309,14 +238,15 @@ where
         None => {
             let query = indoc::indoc! {r#"
                 SELECT
-                    id,
-                    node_id,
-                    status,
-                    descriptor,
-                    created_at,
-                    updated_at
-                FROM jobs
-                ORDER BY id DESC
+                    j.id,
+                    js.node_id,
+                    js.status,
+                    j.descriptor,
+                    j.created_at,
+                    js.updated_at
+                FROM jobs j
+                INNER JOIN jobs_status js ON j.id = js.job_id
+                ORDER BY j.id DESC
                 LIMIT $1
             "#};
 
@@ -325,15 +255,16 @@ where
         Some(statuses) => {
             let query = indoc::indoc! {r#"
                 SELECT
-                    id,
-                    node_id,
-                    status,
-                    descriptor,
-                    created_at,
-                    updated_at
-                FROM jobs
-                WHERE status = ANY($2)
-                ORDER BY id DESC
+                    j.id,
+                    js.node_id,
+                    js.status,
+                    j.descriptor,
+                    j.created_at,
+                    js.updated_at
+                FROM jobs j
+                INNER JOIN jobs_status js ON j.id = js.job_id
+                WHERE js.status = ANY($2)
+                ORDER BY j.id DESC
                 LIMIT $1
             "#};
 
@@ -365,15 +296,16 @@ where
         None => {
             let query = indoc::indoc! {r#"
                 SELECT
-                    id,
-                    node_id,
-                    status,
-                    descriptor,
-                    created_at,
-                    updated_at
-                FROM jobs
-                WHERE id < $2
-                ORDER BY id DESC
+                    j.id,
+                    js.node_id,
+                    js.status,
+                    j.descriptor,
+                    j.created_at,
+                    js.updated_at
+                FROM jobs j
+                INNER JOIN jobs_status js ON j.id = js.job_id
+                WHERE j.id < $2
+                ORDER BY j.id DESC
                 LIMIT $1
             "#};
 
@@ -386,15 +318,16 @@ where
         Some(statuses) => {
             let query = indoc::indoc! {r#"
                 SELECT
-                    id,
-                    node_id,
-                    status,
-                    descriptor,
-                    created_at,
-                    updated_at
-                FROM jobs
-                WHERE id < $2 AND status = ANY($3)
-                ORDER BY id DESC
+                    j.id,
+                    js.node_id,
+                    js.status,
+                    j.descriptor,
+                    j.created_at,
+                    js.updated_at
+                FROM jobs j
+                INNER JOIN jobs_status js ON j.id = js.job_id
+                WHERE j.id < $2 AND js.status = ANY($3)
+                ORDER BY j.id DESC
                 LIMIT $1
             "#};
 
@@ -425,17 +358,18 @@ where
     let query = indoc::indoc! {r#"
         SELECT
             j.id,
-            j.node_id,
-            j.status,
+            js.node_id,
+            js.status,
             j.descriptor,
             j.created_at,
-            j.updated_at,
+            js.updated_at,
             COUNT(je.id)::int4 AS next_retry_index
         FROM jobs j
+        INNER JOIN jobs_status js ON j.id = js.job_id
         LEFT JOIN job_events je ON j.id = je.job_id AND je.event_type = $1
-        WHERE j.status = $2
-        GROUP BY j.id, j.node_id, j.status, j.descriptor, j.created_at, j.updated_at
-        HAVING j.updated_at + INTERVAL '1 second' * POW(2, COUNT(je.id))::bigint
+        WHERE js.status = $2
+        GROUP BY j.id, js.node_id, js.status, j.descriptor, j.created_at, js.updated_at
+        HAVING js.updated_at + INTERVAL '1 second' * POW(2, COUNT(je.id))::bigint
             <= timezone('UTC', now())
         ORDER BY j.id ASC
     "#};
@@ -445,41 +379,4 @@ where
         .bind(JobStatus::Error)
         .fetch_all(exe)
         .await
-}
-
-/// Reschedule a failed job for retry
-///
-/// This function updates the job status to SCHEDULED and assigns it to a worker node.
-/// 1. Sets status to SCHEDULED
-/// 2. Assigns the job to the specified worker node
-/// 3. Updates the updated_at timestamp
-///
-/// Note: Retry tracking is handled via the job_events table.
-///
-/// Returns an error if the job doesn't exist or if the database operation fails.
-pub async fn reschedule<'c, E>(
-    exe: E,
-    job_id: JobId,
-    new_node_id: &WorkerNodeId<'_>,
-) -> Result<(), sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        UPDATE jobs
-        SET
-            status = $3,
-            node_id = $2,
-            updated_at = timezone('UTC', now())
-        WHERE id = $1
-    "#};
-
-    sqlx::query(query)
-        .bind(job_id)
-        .bind(new_node_id)
-        .bind(JobStatus::Scheduled)
-        .execute(exe)
-        .await?;
-
-    Ok(())
 }
