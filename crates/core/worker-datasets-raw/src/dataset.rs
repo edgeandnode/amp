@@ -873,6 +873,10 @@ fn split_and_partition_bucketed(
     for range in ranges {
         let (mut start, end) = range.into_inner();
         while start <= end {
+            debug_assert!(
+                start < u64::MAX - bucket_size,
+                "overflow in bucketed partition, start: {start}, bucket_size: {bucket_size}"
+            );
             let this_bucket_end = ((start / bucket_size) + 1) * bucket_size - 1;
             let this_end = this_bucket_end.min(end);
             split_ranges.push(start..=this_end);
