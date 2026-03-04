@@ -104,9 +104,7 @@ pub trait BlockStreamer: Clone + 'static {
     /// Returns the bucket size if the streamer fetches blocks in fixed-size buckets, or `None` if
     /// blocks are produced individually. This matters for determining how to split block ranges
     /// for parallel streaming.
-    fn bucket_size(&self) -> Option<NonZeroU64> {
-        None
-    }
+    fn bucket_size(&self) -> Option<NonZeroU64>;
 
     /// Waits for any background work and resources associated with this [`BlockStreamer`]
     /// to be cleaned up.
@@ -257,6 +255,10 @@ where
             );
         })
         .await
+    }
+
+    fn bucket_size(&self) -> Option<NonZeroU64> {
+        self.0.bucket_size()
     }
 
     fn wait_for_cleanup(self) -> impl Future<Output = Result<(), CleanupError>> + Send {

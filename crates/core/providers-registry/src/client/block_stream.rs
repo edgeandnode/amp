@@ -133,6 +133,14 @@ impl BlockStreamer for BlockStreamClient {
         }
     }
 
+    fn bucket_size(&self) -> Option<std::num::NonZeroU64> {
+        match self {
+            Self::EvmRpc(client) => client.bucket_size(),
+            Self::Solana(client) => client.bucket_size(),
+            Self::Firehose(client) => client.bucket_size(),
+        }
+    }
+
     async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
         match self {
             Self::EvmRpc(client) => client.wait_for_cleanup().await,
