@@ -20,7 +20,6 @@ All test commands use cargo-nextest exclusively. If not available ask the user t
   - [Run Unit Tests Only](#run-unit-tests-only)
   - [Run Integration Tests](#run-integration-tests-requires-external-dependencies)
   - [Run E2E Tests](#run-e2e-tests-requires-external-dependencies)
-  - [Run Ampup Tests](#run-ampup-tests-requires-external-dependencies)
   - [Per-Crate Targeted Testing](#per-crate-targeted-testing)
 - [Important Guidelines](#important-guidelines)
   - [Cargo Nextest](#cargo-nextest)
@@ -90,7 +89,7 @@ Examples:
 ```bash
 just test-unit [EXTRA_FLAGS]
 ```
-Runs only unit tests using the `unit` nextest profile. Excludes integration tests (`it_*`), the top-level `tests` package, and the `ampup` package.
+Runs only unit tests using the `unit` nextest profile. Excludes integration tests (`it_*`), the top-level `tests` package.
 
 **Use this when**: You want fast feedback on pure logic changes. Unit tests have no external dependencies.
 
@@ -102,7 +101,7 @@ Examples:
 ```bash
 just test-integration [EXTRA_FLAGS]
 ```
-Runs integration tests (`it_*` tests across all crates) using the `integration` nextest profile. Excludes the top-level `tests` package and `ampup` package.
+Runs integration tests (`it_*` tests across all crates) using the `integration` nextest profile. Excludes the top-level `tests` package.
 
 **⚠️ WARNING**: Integration tests require external dependencies (databases, Firehose endpoints, etc.).
 
@@ -126,44 +125,6 @@ Examples:
 - `just test-e2e` - run all e2e tests
 - `just test-e2e test_name` - run specific e2e test
 
-### Run Ampup Tests (REQUIRES EXTERNAL DEPENDENCIES)
-```bash
-just test-ampup [EXTRA_FLAGS]
-```
-Runs tests for the ampup package using the `ampup` nextest profile.
-
-**⚠️ WARNING**: May require external dependencies.
-
-Examples:
-- `just test-ampup` - run ampup tests
-
-### Per-Crate Targeted Testing
-
-For targeted testing within a single crate, use `cargo nextest run` directly:
-
-```bash
-# Unit tests for a specific crate (skip in-tree integration tests)
-cargo nextest run -p metadata-db -E 'not test(/::it_/)'
-
-# Specific module's unit tests
-cargo nextest run -p metadata-db -E 'test(/workers::tests::/)'
-
-# In-tree integration tests for a crate
-cargo nextest run -p metadata-db -E 'test(/::it_/)'
-
-# Specific in-tree integration test suite
-cargo nextest run -p metadata-db -E 'test(/::it_workers/)'
-
-# Public API integration tests for a crate
-cargo nextest run -p metadata-db -E 'kind(test)'
-
-# Specific public API integration test file
-cargo nextest run -p metadata-db -E 'test(it_api_workers)'
-
-# Run a single test by name
-cargo nextest run -p metadata-db -E 'test(=my_exact_test_name)'
-```
-
 ## Important Guidelines
 
 ### Cargo Nextest
@@ -184,7 +145,7 @@ This test command is pre-approved and can be run without user permission:
 1. **During local development**: Prefer targeted tests first; use `just test-local` only for broader confidence
 2. **Before commits (local)**: Run the smallest relevant test scope; broaden only if the change is risky or cross-cutting
 3. **In CI environments**: The CI system will run `just test` or other commands
-4. **Local development**: Never run `just test`, `just test-integration`, `just test-e2e`, or `just test-ampup` locally. Those are for CI
+4. **Local development**: Never run `just test`, `just test-integration` or `just test-e2e` locally. Those are for CI
 5. **Codex sandbox**: Run tests only when warranted; prefer targeted scope. If running `just test-local`, request escalation (outside the sandbox)
 
 ### External Dependencies Required by Non-Local Tests
@@ -288,4 +249,4 @@ After required tests pass:
 - E2E tests are in the top-level `tests/` package
 - Some tests require external dependencies (databases, services)
 - Test configurations are defined in `.config/nextest.toml`
-- Nextest profiles: `default`, `unit`, `integration`, `e2e`, `local`, `ampup`
+- Nextest profiles: `default`, `unit`, `integration`, `e2e`, `local`
