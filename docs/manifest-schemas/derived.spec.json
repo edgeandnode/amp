@@ -100,7 +100,7 @@
       ]
     },
     "Function": {
-      "description": "User-defined function specification.\n\nDefines a custom function with input/output types and implementation source.",
+      "description": "User-defined function specification.\n\nDefines a custom function with input/output types and implementation source.\nArrow type validation is performed during deserialization — a successfully\ndeserialized `Function` is guaranteed to have JS UDF-compatible types.",
       "type": "object",
       "properties": {
         "inputTypes": {

@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
 use common::{
-    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider, AsyncSchemaProvider},
     context::plan::PlanContextBuilder,
     datasets_cache::{DatasetsCache, GetDatasetError},
     ethcall_udfs_cache::EthCallUdfsCache,
@@ -348,12 +348,9 @@ pub async fn validate_derived_manifest(
         .iter()
         .map(|(alias, hash_ref)| (alias.to_string(), hash_ref.clone()))
         .collect();
-    let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
-        Arc::new(SelfSchemaProvider::from_manifest_udfs(
-            datasets_derived::deps::SELF_REF_KEYWORD.to_string(),
-            IsolatePool::dummy(),
-            &manifest.functions,
-        ));
+    let self_schema: Arc<dyn AsyncSchemaProvider> = Arc::new(
+        SelfSchemaProvider::from_manifest_udfs(IsolatePool::dummy(), &manifest.functions),
+    );
     let amp_catalog = Arc::new(
         AmpCatalogProvider::new(
             datasets_cache.clone(),

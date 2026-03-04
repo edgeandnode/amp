@@ -28,12 +28,12 @@ use datasets_derived::{
     deps::{DepAlias, DepAliasError},
     manifest::TableInput,
 };
-use tracing::{Instrument, instrument};
+use tracing::Instrument as _;
 
 use super::query::{MaterializeSqlQueryError, materialize_sql_query};
 
 /// Materializes a derived dataset table
-#[instrument(skip_all, fields(table = %table.table_name()), err)]
+#[tracing::instrument(skip_all, fields(table = %table.table_name()), err)]
 #[expect(clippy::too_many_arguments)]
 pub async fn materialize_table(
     ctx: Ctx,
@@ -94,11 +94,8 @@ pub async fn materialize_table(
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), MaterializeTableSpawnError>>::new();
 
-    let self_schema_provider = SelfSchemaProvider::from_manifest_udfs(
-        datasets_derived::deps::SELF_REF_KEYWORD.to_string(),
-        env.isolate_pool.clone(),
-        &manifest.functions,
-    );
+    let self_schema_provider =
+        SelfSchemaProvider::from_manifest_udfs(env.isolate_pool.clone(), &manifest.functions);
 
     let catalog = {
         let table_refs = resolve_table_references::<DepAlias>(&query)

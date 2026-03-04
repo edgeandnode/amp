@@ -58,6 +58,12 @@ impl AsRef<str> for FuncName {
     }
 }
 
+impl std::borrow::Borrow<str> for FuncName {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl std::ops::Deref for FuncName {
     type Target = str;
 
