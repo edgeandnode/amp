@@ -1087,11 +1087,25 @@ dependencies = [
 name = "amp-providers-firehose"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "amp-providers-common",
+ "async-stream",
+ "datasets-common",
+ "datasets-raw",
+ "futures",
+ "hex",
+ "monitoring",
+ "prost",
+ "prost-build",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tracing",
  "url",
 ]
 
@@ -1115,7 +1129,6 @@ dependencies = [
  "async-stream",
  "datasets-common",
  "datasets-raw",
- "firehose-datasets",
  "futures",
  "indoc",
  "monitoring",
@@ -5130,26 +5143,13 @@ checksum = "9844ddc3a6e533d62bba727eb6c28b5d360921d5175e9ff0f1e621a5c590a4d5"
 name = "firehose-datasets"
 version = "0.1.0"
 dependencies = [
- "alloy",
- "amp-providers-common",
  "amp-providers-firehose",
- "async-stream",
  "datasets-common",
  "datasets-raw",
- "futures",
- "hex",
- "monitoring",
- "prost",
- "prost-build",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
- "tracing",
 ]
 
 [[package]]

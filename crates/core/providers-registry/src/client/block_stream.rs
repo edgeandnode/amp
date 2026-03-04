@@ -68,7 +68,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        firehose_datasets::client(name.clone(), typed_config, meter)
+        amp_providers_firehose::client(name.clone(), typed_config, meter)
             .await
             .map(|c| BlockStreamClient::Firehose(Box::new(c)))
             .map_err(|err| CreateClientError::ProviderClient {
@@ -87,7 +87,7 @@ pub async fn create(
 pub enum BlockStreamClient {
     EvmRpc(amp_providers_evm_rpc::Client),
     Solana(solana_datasets::Client),
-    Firehose(Box<firehose_datasets::Client>),
+    Firehose(Box<amp_providers_firehose::Client>),
 }
 
 impl BlockStreamer for BlockStreamClient {
@@ -227,7 +227,7 @@ pub enum ProviderClientError {
     /// This occurs during initialization of the Firehose client, which may fail due to
     /// invalid gRPC endpoints, connection issues, or authentication failures.
     #[error("failed to create Firehose client")]
-    Firehose(#[source] firehose_datasets::error::ClientError),
+    Firehose(#[source] amp_providers_firehose::error::ClientError),
 }
 
 impl crate::retryable::RetryableErrorExt for ProviderClientError {

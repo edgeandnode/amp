@@ -1,7 +1,7 @@
 //! EVM block data is sufficiently complicated that there may be multiple encoding flavors, each with
 //! multiple versions. There is no universal encoding, and we're not going to try to enforce one.
 //! Each extraction layer can have its own data format. This `firehose` crate defines Firehose
-//! data formats and provides a client to fetch them from a Firehose gRPC endpoint.
+//! dataset kinds and manifest types.
 
 use std::collections::BTreeMap;
 
@@ -9,22 +9,12 @@ use datasets_common::{
     block_num::BlockNum, hash_reference::HashReference, manifest::TableSchema,
     network_id::NetworkId,
 };
-
-mod client;
-mod dataset_kind;
-pub mod error;
-pub mod evm;
-pub mod metrics;
-#[expect(clippy::enum_variant_names)]
-mod proto;
-pub mod tables;
-
 use datasets_raw::dataset::Dataset as RawDataset;
 
-pub use self::{
-    client::Client,
-    dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError},
-};
+mod dataset_kind;
+pub mod tables;
+
+pub use self::dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError};
 
 /// Table definition for raw datasets.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -77,13 +67,4 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> RawDataset {
         Some(manifest.start_block),
         manifest.finalized_blocks_only,
     )
-}
-
-/// Create a Firehose client based on the provided configuration.
-pub async fn client(
-    name: amp_providers_common::provider_name::ProviderName,
-    config: amp_providers_firehose::config::FirehoseProviderConfig,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<Client, error::ClientError> {
-    Client::new(name, config, meter).await
 }
