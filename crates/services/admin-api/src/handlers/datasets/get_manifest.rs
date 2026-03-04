@@ -95,9 +95,9 @@ pub async fn handler(
         .await
         .map_err(Error::ResolveRevision)?
         .ok_or_else(|| Error::NotFound {
-            namespace: namespace.clone(),
-            name: name.clone(),
-            revision: revision.clone(),
+            namespace,
+            name,
+            revision,
         })?;
 
     // Load manifest content

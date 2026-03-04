@@ -218,10 +218,6 @@ impl SessionState {
             DataFusionError::Plan(format!("failed to extract function references: {err}"))
                 .context(INVALID_INPUT_CONTEXT)
         })?;
-        let qualified_func_refs: Vec<_> = all_func_refs
-            .into_iter()
-            .filter(|r| matches!(r, FunctionReference::Qualified { .. }))
-            .collect();
 
         // Convert to DataFusion TableReference for the resolve() API.
         // All our refs are Bare or Partial (catalog-qualified refs are rejected
@@ -233,7 +229,7 @@ impl SessionState {
 
         // Function references use TableReference::partial(schema, function_name)
         // because FuncReference is an alias for datafusion::common::TableReference.
-        let df_func_refs: Vec<datafusion::common::TableReference> = qualified_func_refs
+        let df_func_refs: Vec<datafusion::common::TableReference> = all_func_refs
             .into_iter()
             .filter_map(|r| match r {
                 FunctionReference::Qualified { schema, function } => Some(

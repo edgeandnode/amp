@@ -62,7 +62,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, E
         // Parse version string into Version type
         if let Ok(version) = version_str.parse::<Version>() {
             datasets_map
-                .entry((namespace_str.clone(), name_str.clone()))
+                .entry((namespace_str, name_str))
                 .or_default()
                 .push(version);
         }

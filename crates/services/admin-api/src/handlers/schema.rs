@@ -224,7 +224,7 @@ pub async fn handler(
             ctx.ethcall_udfs_cache.clone(),
             IsolatePool::dummy(),
         )
-        .with_dep_aliases(dep_aliases.clone())
+        .with_dep_aliases(dep_aliases)
         .with_self_schema(self_schema),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
@@ -235,13 +235,12 @@ pub async fn handler(
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
     for (table_name, stmt) in statements {
-        let plan = planning_ctx
-            .statement_to_plan(stmt.clone())
-            .await
-            .map_err(|err| Error::SchemaPlanInference {
+        let plan = planning_ctx.statement_to_plan(stmt).await.map_err(|err| {
+            Error::SchemaPlanInference {
                 table_name: table_name.clone(),
                 source: err,
-            })?;
+            }
+        })?;
         // Return error if query is non-incremental
         plan.is_incremental()
             .map_err(|err| Error::NonIncrementalQuery {
