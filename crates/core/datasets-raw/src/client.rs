@@ -1,6 +1,6 @@
 //! BlockStreamer trait and retry wrapper for extracting raw blockchain data.
 
-use std::{future::Future, time::Duration};
+use std::{future::Future, num::NonZeroU64, time::Duration};
 
 use datasets_common::block_num::BlockNum;
 use futures::{Stream, StreamExt as _};
@@ -100,6 +100,13 @@ pub trait BlockStreamer: Clone + 'static {
         &mut self,
         finalized: bool,
     ) -> impl Future<Output = Result<Option<BlockNum>, LatestBlockError>> + Send;
+
+    /// Returns the bucket size if the streamer fetches blocks in fixed-size buckets, or `None` if
+    /// blocks are produced individually. This matters for determining how to split block ranges
+    /// for parallel streaming.
+    fn bucket_size(&self) -> Option<NonZeroU64> {
+        None
+    }
 
     /// Waits for any background work and resources associated with this [`BlockStreamer`]
     /// to be cleaned up.

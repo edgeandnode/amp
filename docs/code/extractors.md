@@ -46,6 +46,8 @@ pub trait BlockStreamer: Clone + 'static {
         finalized: bool,
     ) -> impl Future<Output = Result<Option<BlockNum>, LatestBlockError>> + Send;
 
+    fn bucket_size(&self) -> Option<NonZeroU64>;
+
     fn wait_for_cleanup(self) -> impl Future<Output = Result<(), CleanupError>> + Send;
 
     fn provider_name(&self) -> &str;
@@ -53,14 +55,19 @@ pub trait BlockStreamer: Clone + 'static {
 ```
 
 **Methods:**
+
 - `block_stream()` — async stream of `Rows` from start to end block (inclusive)
 - `latest_block()` — fetches the latest (optionally finalized) block number
+- `bucket_size()` — returns the bucket size if the streamer fetches blocks in fixed-size buckets, or `None` if
+  blocks are produced individually. This matters for determining how to split block ranges
+  for parallel streaming.
 - `wait_for_cleanup()` — releases background tasks, connections, and resources
 - `provider_name()` — returns the provider instance name
 
 **Error types** are all `Box<dyn std::error::Error + Sync + Send + 'static>`.
 
 **Implementations:**
+
 - `evm_rpc_datasets::Client`
 - `solana_datasets::Client`
 - `firehose_datasets::Client`
@@ -101,6 +108,7 @@ impl EvmRpcDatasetKind {
 ```
 
 **Required trait implementations:**
+
 - `FromStr` with custom error type (e.g., `EvmRpcDatasetKindError`)
 - `Display` — returns the const string
 - `Serialize` / `Deserialize` — round-trips through the const string
@@ -108,6 +116,7 @@ impl EvmRpcDatasetKind {
 - `PartialEq` impls for `str`, `&str`, `String`, `DatasetKindStr`
 
 **Error type:**
+
 ```rust
 #[derive(Debug, thiserror::Error)]
 #[error("invalid dataset kind: {}, expected: {}", .0, DATASET_KIND)]
@@ -115,10 +124,11 @@ pub struct EvmRpcDatasetKindError(String);
 ```
 
 **Existing kinds:**
-| Crate | Type | Const |
-|---|---|---|
-| evm-rpc | `EvmRpcDatasetKind` | `"evm-rpc"` |
-| solana | `SolanaDatasetKind` | `"solana"` |
+
+| Crate    | Type                  | Const        |
+| -------- | --------------------- | ------------ |
+| evm-rpc  | `EvmRpcDatasetKind`   | `"evm-rpc"`  |
+| solana   | `SolanaDatasetKind`   | `"solana"`   |
 | firehose | `FirehoseDatasetKind` | `"firehose"` |
 
 ## MANIFEST STRUCTURE
@@ -141,13 +151,13 @@ pub struct Manifest {
 
 **Common fields across all extractors:**
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `kind` | Zero-sized type | required | Dataset kind identifier |
-| `network` | `NetworkId` | required | Target blockchain network |
-| `start_block` | `BlockNum` | `0` | First block to extract |
-| `finalized_blocks_only` | `bool` | `false` | Wait for finalization |
-| `tables` | `BTreeMap<String, Table>` | required | Table definitions |
+| Field                   | Type                      | Default  | Description               |
+| ----------------------- | ------------------------- | -------- | ------------------------- |
+| `kind`                  | Zero-sized type           | required | Dataset kind identifier   |
+| `network`               | `NetworkId`               | required | Target blockchain network |
+| `start_block`           | `BlockNum`                | `0`      | First block to extract    |
+| `finalized_blocks_only` | `bool`                    | `false`  | Wait for finalization     |
+| `tables`                | `BTreeMap<String, Table>` | required | Table definitions         |
 
 ## PROVIDER CONFIG PATTERN
 
@@ -174,14 +184,15 @@ pub struct ProviderConfig {
 
 **Common fields:**
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | `String` | Provider instance name |
-| `kind` | Zero-sized type | Must match extractor kind |
-| `network` | `NetworkId` | Target network |
-| `url` | `Url` or `String` | Endpoint URL |
+| Field     | Type              | Description               |
+| --------- | ----------------- | ------------------------- |
+| `name`    | `String`          | Provider instance name    |
+| `kind`    | Zero-sized type   | Must match extractor kind |
+| `network` | `NetworkId`       | Target network            |
+| `url`     | `Url` or `String` | Endpoint URL              |
 
 **Extractor-specific fields (examples):**
+
 - EVM-RPC: `concurrent_request_limit`, `rpc_batch_size`, `rate_limit_per_minute`, `fetch_receipts_per_tx`
 - Solana: `rpc_provider_url`, `of1_car_directory`, `keep_of1_car_files`, `use_archive`
 - Firehose: `token` (authentication)
@@ -202,6 +213,7 @@ pub async fn client(
 ```
 
 **Convention:**
+
 - Takes `ProviderConfig` + optional `&Meter` for metrics
 - Returns the `BlockStreamer` implementor or an error
 - Validates configuration (URL scheme, network)
@@ -325,6 +337,7 @@ impl MetricsRegistry {
 ```
 
 **Conventions:**
+
 - `Counter` for total counts (requests, errors)
 - `Histogram<f64>` for durations (milliseconds)
 - `Histogram<u64>` for sizes (bytes, batch counts)
@@ -367,6 +380,7 @@ pub enum ClientError {
 ```
 
 **Common error categories:**
+
 - **Transport** — connection failures, network errors
 - **Conversion** — data transformation failures (RPC response to rows)
 - **Protocol** — protocol-specific errors (gRPC, protobuf)
@@ -398,6 +412,7 @@ crates/extractors/<name>/
 ```
 
 **Key conventions:**
+
 - `lib.rs` is the main entry point, exports all public types
 - `dataset_kind.rs` is always a separate file for the zero-sized type
 - `tables/mod.rs` always has an `all()` function
@@ -409,33 +424,39 @@ crates/extractors/<name>/
 Before committing extractor code, verify:
 
 ### Core Traits
-- [ ] `BlockStreamer` trait implemented with all four methods
+
+- [ ] `BlockStreamer` trait implemented with all four required methods
 - [ ] `Dataset` trait implemented with all five methods
 - [ ] Factory function accepts `ProviderConfig` + optional `&Meter`
 
 ### Dataset Kind
+
 - [ ] Zero-sized type with `const DATASET_KIND: &str`
 - [ ] `FromStr`, `Display`, `Serialize`, `Deserialize` implemented
 - [ ] `PartialEq` impls for `str`, `&str`, `String`, `DatasetKindStr`
 - [ ] Custom error type for invalid kind strings
 
 ### Tables
+
 - [ ] `tables::all()` returns all table definitions
 - [ ] Each table has `TABLE_NAME` const and `table()` function
 - [ ] Row builders use `with_capacity()` for pre-allocation
 - [ ] `build()` produces `TableRows` with correct schema
 
 ### Metrics
+
 - [ ] `MetricsRegistry::new()` takes `&Meter`
 - [ ] Record methods use `provider` and `network` key-value pairs
 - [ ] Counters for totals, histograms for durations and sizes
 
 ### Error Handling
+
 - [ ] All errors use `thiserror`
 - [ ] `#[source]` used for error chaining
 - [ ] Domain-specific error categories (transport, conversion, protocol)
 
 ### File Structure
+
 - [ ] Follows standard source file layout
 - [ ] `lib.rs` exports key types and factory functions
 - [ ] `dataset_kind.rs` is a separate file
