@@ -909,6 +909,14 @@ fn split_and_partition_bucketed(
             }
         }
     }
+
+    assert!(
+        partitions
+            .iter()
+            .all(|p| total_blocks(p) >= min_partition_blocks),
+        "Partition contains fewer blocks than min_partition_blocks"
+    );
+
     if !current_partition.is_empty() {
         partitions.push(current_partition);
     }
@@ -1593,6 +1601,34 @@ mod test {
         10, // min_partition_blocks
         NonZeroU64::new(3).unwrap(), // bucket_size
         vec![vec![0..=5]] // expected
+    )]
+    #[case::single_partition_all_buckets_merged(
+        vec![0..=9, 10..=19, 20..=29], // input
+        1, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=29]] // expected
+    )]
+    #[case::non_contiguous_ranges_with_gaps(
+        vec![5..=15, 25..=35], // input
+        2, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![5..=15], vec![25..=35]] // expected
+    )]
+    #[case::n_greater_than_buckets(
+        vec![0..=9, 10..=19], // input
+        10, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=9], vec![10..=19]] // expected
+    )]
+    #[case::adjacent_ranges_should_merge(
+        vec![0..=9, 10..=19], // input
+        2, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(20).unwrap(), // bucket_size
+        vec![vec![0..=19]] // expected
     )]
     fn split_and_partition_bucketed(
         #[case] input: Vec<std::ops::RangeInclusive<u64>>,
