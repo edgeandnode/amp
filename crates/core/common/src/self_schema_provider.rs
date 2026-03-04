@@ -12,11 +12,10 @@ use datafusion::{
         TableProvider,
     },
     error::DataFusionError,
-    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
+    logical_expr::ScalarUDF,
 };
 use datasets_common::table_name::TableName;
 use datasets_derived::{deps::SELF_REF_KEYWORD, func_name::FuncName, function::Function};
-use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 use parking_lot::RwLock;
 
 use crate::{
@@ -28,6 +27,7 @@ use crate::{
         },
     },
     plan_table::PlanTable,
+    udfs::PlanJsUdf,
 };
 
 /// Schema provider for virtual schemas (e.g., `"self"`) that resolve tables
@@ -59,28 +59,17 @@ impl SelfSchemaProvider {
 
     /// Creates a provider from manifest functions (no tables).
     ///
-    /// Functions are already validated at deserialization time.
-    pub fn from_manifest_udfs(
-        isolate_pool: IsolatePool,
-        functions: &BTreeMap<FuncName, Function>,
-    ) -> Self {
+    /// Functions are already validated at deserialization time, so this is
+    /// infallible — no runtime type checks needed.
+    pub fn from_manifest_udfs(functions: &BTreeMap<FuncName, Function>) -> Self {
         let scalar_udfs: Vec<ScalarUDF> = functions
             .iter()
             .map(|(name, function)| {
-                AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                    isolate_pool.clone(),
-                    Some(SELF_REF_KEYWORD.to_string()),
-                    function.source.source.clone(),
-                    function.source.filename.clone(),
-                    Arc::from(name.as_str()),
-                    function
-                        .input_types
-                        .iter()
-                        .map(|dt| dt.clone().into_arrow())
-                        .collect(),
-                    function.output_type.clone().into_arrow(),
-                )))
-                .into_scalar_udf()
+                ScalarUDF::new_from_impl(PlanJsUdf::from_function(
+                    name.as_str(),
+                    function,
+                    Some(SELF_REF_KEYWORD),
+                ))
             })
             .collect();
 

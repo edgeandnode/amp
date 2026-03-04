@@ -88,6 +88,7 @@ impl DaemonWorker {
         event_emitter: Option<Arc<dyn EventEmitter>>,
     ) -> Result<Self> {
         let worker_config = worker_config_from_common(&config);
+
         let worker_fut = worker::service::new(
             worker_config.clone(),
             build_info,

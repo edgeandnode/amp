@@ -12,7 +12,6 @@ use datafusion::{
         runtime_env::RuntimeEnvBuilder,
     },
 };
-use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     amp_catalog_provider::AMP_CATALOG_NAME,
@@ -71,9 +70,6 @@ pub struct ExecEnv {
     pub cache_manager: Arc<CacheManager>,
     pub object_store_registry: Arc<dyn ObjectStoreRegistry>,
 
-    // Existing fields
-    pub isolate_pool: IsolatePool,
-
     // Per-query memory limit configuration
     pub query_max_mem_mb: usize,
 
@@ -98,7 +94,6 @@ pub fn create(
     store: DataStore,
     datasets_cache: DatasetsCache,
     ethcall_udfs_cache: EthCallUdfsCache,
-    isolate_pool: IsolatePool,
 ) -> Result<ExecEnv, datafusion::error::DataFusionError> {
     let spill_allowed = !spill_location.is_empty();
     let disk_manager_mode = if spill_allowed {
@@ -130,7 +125,6 @@ pub fn create(
         disk_manager: runtime_env.disk_manager,
         cache_manager: runtime_env.cache_manager,
         object_store_registry: runtime_env.object_store_registry,
-        isolate_pool,
         query_max_mem_mb,
         store,
         datasets_cache,

@@ -25,7 +25,6 @@ use datasets_derived::{
     function::Function,
     manifest::TableSchema,
 };
-use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
 
 use crate::{
@@ -215,17 +214,12 @@ pub async fn handler(
 
     // Create planning context with self-schema provider
     let session_config = default_session_config().map_err(Error::SessionConfig)?;
-    let self_schema: Arc<dyn AsyncSchemaProvider> = Arc::new(
-        SelfSchemaProvider::from_manifest_udfs(IsolatePool::dummy(), &functions),
-    );
+    let self_schema: Arc<dyn AsyncSchemaProvider> =
+        Arc::new(SelfSchemaProvider::from_manifest_udfs(&functions));
     let amp_catalog = Arc::new(
-        AmpCatalogProvider::new(
-            ctx.datasets_cache.clone(),
-            ctx.ethcall_udfs_cache.clone(),
-            IsolatePool::dummy(),
-        )
-        .with_dep_aliases(dep_aliases)
-        .with_self_schema(self_schema),
+        AmpCatalogProvider::new(ctx.datasets_cache.clone(), ctx.ethcall_udfs_cache.clone())
+            .with_dep_aliases(dep_aliases)
+            .with_self_schema(self_schema),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())

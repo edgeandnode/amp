@@ -81,6 +81,7 @@ type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'sta
 pub struct Service {
     config: Arc<Config>,
     env: ExecEnv,
+    isolate_pool: IsolatePool,
     notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<MetricsRegistry>>,
 }
@@ -102,7 +103,6 @@ impl Service {
             data_store,
             datasets_cache,
             ethcall_udfs_cache,
-            isolate_pool,
         )
         .map_err(InitError::ExecEnv)?;
         let notification_multiplexer =
@@ -112,6 +112,7 @@ impl Service {
         Ok(Self {
             config,
             env,
+            isolate_pool,
             notification_multiplexer,
             metrics,
         })
@@ -137,7 +138,6 @@ impl Service {
         let amp_catalog = Arc::new(AmpCatalogProvider::new(
             self.env.datasets_cache.clone(),
             self.env.ethcall_udfs_cache.clone(),
-            self.env.isolate_pool.clone(),
         ));
         let ctx = PlanContextBuilder::new(self.env.session_config.clone())
             .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
@@ -184,6 +184,7 @@ impl Service {
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let ctx = ExecContextBuilder::new(self.env.clone())
+                .with_isolate_pool(self.isolate_pool.clone())
                 .for_catalog(catalog, false)
                 .await
                 .map_err(Error::CreateExecContext)?;
@@ -257,6 +258,7 @@ impl Service {
 
             let query = StreamingQuery::spawn(
                 self.env.clone(),
+                self.isolate_pool.clone(),
                 catalog,
                 plan,
                 earliest_block,
@@ -326,7 +328,6 @@ impl Service {
                         let amp_catalog = Arc::new(AmpCatalogProvider::new(
                             self.env.datasets_cache.clone(),
                             self.env.ethcall_udfs_cache.clone(),
-                            self.env.isolate_pool.clone(),
                         ));
                         PlanContextBuilder::new(self.env.session_config.clone())
                             .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
