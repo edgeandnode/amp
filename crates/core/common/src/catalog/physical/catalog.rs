@@ -16,7 +16,7 @@ pub struct Catalog {
     /// UDFs specific to the datasets corresponding to the resolved tables.
     udfs: Vec<ScalarUDF>,
     /// The physical catalog entries, each pairing a physical table with SQL naming.
-    entries: Vec<CatalogTable>,
+    entries: Vec<(Arc<PhysicalTable>, Arc<str>)>,
     /// Dependency alias to hash reference mappings for lazy resolution.
     dep_aliases: BTreeMap<String, HashReference>,
 }
@@ -26,7 +26,7 @@ impl Catalog {
     pub fn new(
         tables: Vec<LogicalTable>,
         udfs: Vec<ScalarUDF>,
-        entries: Vec<CatalogTable>,
+        entries: Vec<(Arc<PhysicalTable>, Arc<str>)>,
         dep_aliases: BTreeMap<String, HashReference>,
     ) -> Self {
         Catalog {
@@ -43,14 +43,16 @@ impl Catalog {
     }
 
     /// Returns the catalog entries.
-    pub fn entries(&self) -> &[CatalogTable] {
+    pub fn entries(&self) -> &[(Arc<PhysicalTable>, Arc<str>)] {
         &self.entries
     }
 
     /// Convenience iterator returning physical tables for consumers that only need
     /// physical storage access (e.g. compaction, garbage collection).
     pub fn physical_tables(&self) -> impl Iterator<Item = &Arc<PhysicalTable>> {
-        self.entries.iter().map(|entry| entry.physical_table())
+        self.entries
+            .iter()
+            .map(|(physical_table, _)| physical_table)
     }
 
     /// Returns the logical tables.
@@ -64,7 +66,14 @@ impl Catalog {
     }
 
     /// Consumes the catalog, returning its entries, logical tables, and UDFs.
-    pub fn into_parts(self) -> (Vec<CatalogTable>, Vec<LogicalTable>, Vec<ScalarUDF>) {
+    #[expect(clippy::type_complexity)]
+    pub fn into_parts(
+        self,
+    ) -> (
+        Vec<(Arc<PhysicalTable>, Arc<str>)>,
+        Vec<LogicalTable>,
+        Vec<ScalarUDF>,
+    ) {
         (self.entries, self.tables, self.udfs)
     }
 
@@ -74,9 +83,8 @@ impl Catalog {
     /// when no table has synced data.
     pub async fn earliest_block(&self) -> Result<Option<BlockNum>, EarliestBlockError> {
         let mut earliest = None;
-        for entry in &self.entries {
-            let snapshot = entry
-                .physical_table()
+        for (physical_table, _) in &self.entries {
+            let snapshot = physical_table
                 .snapshot(false)
                 .await
                 .map_err(EarliestBlockError::Snapshot)?;
@@ -118,45 +126,5 @@ impl crate::retryable::RetryableErrorExt for EarliestBlockError {
             Self::Snapshot(err) => err.is_retryable(),
             Self::MultiNetworkSegments(_) => false,
         }
-    }
-}
-
-/// A catalog entry that pairs a physical table with SQL naming information.
-///
-/// `PhysicalTable` represents pure physical storage (revision, segments, canonical chains,
-/// file access). `CatalogTable` adds the SQL catalog identity — the schema string under
-/// which the table is registered for SQL queries.
-///
-/// This separation allows physical-only consumers (compaction, garbage collection, parquet
-/// writing) to work with `PhysicalTable` without carrying SQL naming concerns.
-#[derive(Debug, Clone)]
-pub struct CatalogTable {
-    /// The underlying physical table providing storage access (segments, snapshots, file I/O).
-    physical_table: Arc<PhysicalTable>,
-
-    /// The dataset reference portion of SQL table references.
-    ///
-    /// SQL table references have the format `<dataset_ref>.<table>` (e.g., `anvil_rpc.blocks`).
-    /// This field stores the string form of the `<dataset_ref>` portion.
-    sql_schema_name: String,
-}
-
-impl CatalogTable {
-    /// Creates a new catalog table entry pairing a physical table with its SQL schema name.
-    pub fn new(physical_table: Arc<PhysicalTable>, sql_schema_name: String) -> Self {
-        Self {
-            physical_table,
-            sql_schema_name,
-        }
-    }
-
-    /// Returns a reference to the underlying physical table.
-    pub fn physical_table(&self) -> &Arc<PhysicalTable> {
-        &self.physical_table
-    }
-
-    /// Returns the dataset reference portion for SQL table references.
-    pub fn sql_schema_name(&self) -> &str {
-        &self.sql_schema_name
     }
 }

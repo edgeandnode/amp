@@ -105,10 +105,7 @@ use amp_worker_core::{
 };
 use common::{
     BlockNum,
-    catalog::{
-        logical::LogicalTable,
-        physical::{Catalog, CatalogTable},
-    },
+    catalog::{logical::LogicalTable, physical::Catalog},
     parquet::errors::ParquetError,
     physical_table::{MissingRangesError, PhysicalTable, segments::merge_ranges},
     retryable::RetryableErrorExt as _,
@@ -224,7 +221,7 @@ pub async fn dump(
         vec![],
         tables
             .iter()
-            .map(|(t, _)| CatalogTable::new(Arc::clone(t), sql_schema_name.clone()))
+            .map(|(t, _)| (Arc::clone(t), Arc::from(sql_schema_name.as_str())))
             .collect(),
         Default::default(),
     );

@@ -14,10 +14,7 @@ use amp_worker_core::{consistency_check, jobs::job_id::JobId};
 use anyhow::{Result, anyhow};
 use common::{
     BlockRange,
-    catalog::{
-        logical::LogicalTable,
-        physical::{Catalog, CatalogTable},
-    },
+    catalog::{logical::LogicalTable, physical::Catalog},
     datasets_cache::DatasetsCache,
     physical_table::PhysicalTable,
 };
@@ -348,7 +345,7 @@ pub async fn catalog_for_dataset(
 
     let dataset = datasets_cache.get_dataset(&dataset_ref).await?;
 
-    let mut tables: Vec<CatalogTable> = Vec::new();
+    let mut tables: Vec<(Arc<PhysicalTable>, Arc<str>)> = Vec::new();
     for table_def in dataset.tables() {
         let revision = data_store
             .get_table_active_revision(dataset.reference(), table_def.name())
@@ -363,15 +360,18 @@ pub async fn catalog_for_dataset(
             table_def.clone(),
             revision,
         );
-        tables.push(CatalogTable::new(Arc::new(physical_table), sql_schema_name));
+        tables.push((
+            Arc::new(physical_table),
+            Arc::from(sql_schema_name.as_str()),
+        ));
     }
     let resolved_tables: Vec<_> = tables
         .iter()
-        .map(|t| {
+        .map(|(physical_table, sql_schema_name)| {
             LogicalTable::new(
-                t.sql_schema_name().to_string(),
+                sql_schema_name.to_string(),
                 dataset_ref.clone(),
-                t.physical_table().table().clone(),
+                physical_table.table().clone(),
             )
         })
         .collect();

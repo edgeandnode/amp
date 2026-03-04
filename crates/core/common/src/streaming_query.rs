@@ -35,10 +35,7 @@ use crate::{
         array::{RecordBatch, TimestampNanosecondArray},
         datatypes::SchemaRef,
     },
-    catalog::{
-        logical::LogicalTable,
-        physical::{Catalog, CatalogTable},
-    },
+    catalog::{logical::LogicalTable, physical::Catalog},
     context::{
         exec::{ExecContext, ExecContextBuilder},
         plan::PlanContextBuilder,
@@ -322,7 +319,7 @@ pub struct StreamingQuery {
     preserve_block_num: bool,
     network: NetworkId,
     /// `blocks` table for the network associated with the catalog.
-    blocks_table: CatalogTable,
+    blocks_table: (Arc<PhysicalTable>, Arc<str>),
     /// The single-network cursor for the previously processed range. This may be provided by the
     /// consumer (as a multi-network cursor) and converted to this single-network cursor.
     prev_cursor: Option<NetworkCursor>,
@@ -552,11 +549,11 @@ impl StreamingQuery {
         let blocks_ctx = {
             // Construct a catalog for the single `blocks_table`.
             let catalog = {
-                let table = &self.blocks_table;
+                let (physical_table, sql_schema_name) = &self.blocks_table;
                 let resolved_table = LogicalTable::new(
-                    table.sql_schema_name().to_string(),
-                    table.physical_table().dataset_reference().clone(),
-                    table.physical_table().table().clone(),
+                    sql_schema_name.to_string(),
+                    physical_table.dataset_reference().clone(),
+                    physical_table.table().clone(),
                 );
                 Catalog::new(
                     vec![resolved_table],
@@ -839,11 +836,12 @@ impl StreamingQuery {
         let hash_constraint = hash
             .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
             .unwrap_or_default();
+        let (blocks_physical_table, blocks_sql_schema_name) = &self.blocks_table;
         let sql = format!(
             "SELECT hash, parent_hash, timestamp FROM {} WHERE block_num = {} {} LIMIT 1",
             TableReference::Partial {
-                schema: Arc::new(self.blocks_table.sql_schema_name().to_owned()),
-                table: Arc::new(self.blocks_table.physical_table().table_name().clone()),
+                schema: Arc::new(blocks_sql_schema_name.to_string()),
+                table: Arc::new(blocks_physical_table.table_name().clone()),
             }
             .to_quoted_string(),
             number,
@@ -1189,7 +1187,7 @@ pub fn keep_alive_stream<'a>(
 async fn resolve_blocks_table(
     dataset: Arc<RawDataset>,
     data_store: DataStore,
-) -> Result<CatalogTable, ResolveBlocksTableError> {
+) -> Result<(Arc<PhysicalTable>, Arc<str>), ResolveBlocksTableError> {
     let table = dataset
         .tables()
         .iter()
@@ -1217,7 +1215,10 @@ async fn resolve_blocks_table(
         table.clone(),
         revision,
     );
-    Ok(CatalogTable::new(physical_table.into(), sql_schema_name))
+    Ok((
+        Arc::new(physical_table),
+        Arc::from(sql_schema_name.as_str()),
+    ))
 }
 
 /// Errors that occur when resolving the blocks table for a network
