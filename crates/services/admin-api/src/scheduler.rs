@@ -200,6 +200,14 @@ pub enum ScheduleJobError {
     #[error("failed to register job: {0}")]
     RegisterJob(#[source] metadata_db::Error),
 
+    /// Failed to register job event in the metadata database
+    ///
+    /// This occurs when:
+    /// - Job event insertion into database fails
+    /// - Connection is lost during job event registration
+    #[error("failed to register job event: {0}")]
+    RegisterJobEvent(#[source] metadata_db::Error),
+
     /// Failed to begin transaction for schedule operation
     ///
     /// This occurs when:
@@ -291,6 +299,14 @@ pub enum StopJobError {
     /// - Connection is lost during status update
     #[error("failed to update job status")]
     UpdateJobStatus(#[source] metadata_db::Error),
+
+    /// Failed to register job event in the metadata database
+    ///
+    /// This occurs when:
+    /// - Job event insertion into database fails
+    /// - Connection is lost during job event registration
+    #[error("failed to register job event: {0}")]
+    RegisterJobEvent(#[source] metadata_db::Error),
 
     /// Failed to commit transaction for stop operation
     ///

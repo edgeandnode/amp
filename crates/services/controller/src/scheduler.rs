@@ -144,6 +144,10 @@ impl Scheduler {
             .map(Into::into)
             .map_err(ScheduleJobError::RegisterJob)?;
 
+        metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Scheduled.into())
+            .await
+            .map_err(ScheduleJobError::RegisterJobEvent)?;
+
         metadata_db::workers::send_job_notif(&mut tx, node_id, &JobNotification::start(job_id))
             .await
             .map_err(ScheduleJobError::NotifyWorker)?;
@@ -196,6 +200,15 @@ impl Scheduler {
                 },
                 other => StopJobError::UpdateJobStatus(other),
             })?;
+
+        metadata_db::job_events::register(
+            &mut tx,
+            job_id,
+            &job.node_id,
+            JobStatus::StopRequested.into(),
+        )
+        .await
+        .map_err(StopJobError::RegisterJobEvent)?;
 
         // Notify the worker about the stop request (within the transaction)
         metadata_db::workers::send_job_notif(&mut tx, job.node_id, &JobNotification::stop(job_id))

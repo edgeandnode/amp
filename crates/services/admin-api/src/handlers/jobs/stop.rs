@@ -122,7 +122,8 @@ pub async fn handler(
             | scheduler::StopJobError::GetJob(_)
             | scheduler::StopJobError::UpdateJobStatus(_)
             | scheduler::StopJobError::CommitTransaction(_)
-            | scheduler::StopJobError::SendNotification(_) => {
+            | scheduler::StopJobError::SendNotification(_)
+            | scheduler::StopJobError::RegisterJobEvent(_) => {
                 tracing::error!(error = %err, error_source = logging::error_source(&err), job_id=%id, "Database error during stop operation");
                 Err(Error::StopJob { id, source: err }.into())
             }
