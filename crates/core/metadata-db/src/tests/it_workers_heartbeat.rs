@@ -2,31 +2,18 @@
 
 use std::time::Duration;
 
-use pgtemp::PgTempDB;
-
 use crate::{
-    config::DEFAULT_POOL_MAX_CONNECTIONS,
-    workers::{self, WorkerInfo, WorkerNodeId},
+    tests::helpers::{TEST_WORKER_ID, setup_test_db},
+    workers::{self, WorkerNodeId},
 };
 
 #[tokio::test]
 async fn register_worker() {
     //* Given
-    let temp_db = PgTempDB::new();
-
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
-    let worker_info = WorkerInfo::default(); // {}
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     //* When
-    workers::register(&conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to register the worker");
-
     let active_workers = workers::list_active(&conn, Duration::from_secs(5))
         .await
         .expect("Failed to get active workers");
@@ -43,18 +30,8 @@ async fn detect_inactive_worker() {
     //* Given
     const ACTIVE_INTERVAL: Duration = Duration::from_secs(1);
 
-    let temp_db = PgTempDB::new();
-
-    let conn = crate::connect_pool(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-        .await
-        .expect("Failed to connect to metadata db");
-
-    // Pre-register a worker
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to pre-register the worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     //* When
     // Sleep for 2 ACTIVE_INTERVAL to ensure the worker is considered inactive

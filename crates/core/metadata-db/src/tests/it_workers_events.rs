@@ -1,13 +1,11 @@
 //! DB integration tests for the workers events notifications
 
 use futures::StreamExt;
-use pgtemp::PgTempDB;
 
 use crate::{
-    config::DEFAULT_POOL_MAX_CONNECTIONS,
     jobs::{JobId, JobStatus},
-    tests::common::register_job,
-    workers::{self, WorkerInfo, WorkerNodeId},
+    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
+    workers::{self, WorkerNodeId},
 };
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -19,19 +17,8 @@ struct JobNotification {
 #[tokio::test]
 async fn schedule_job_and_receive_notification() {
     //* Given
-    let temp_db = PgTempDB::new();
-
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    // Pre-register the worker
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-events");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to pre-register the worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     // Specify the job descriptor
     let job_desc_json = serde_json::json!({
@@ -40,9 +27,7 @@ async fn schedule_job_and_receive_notification() {
         "table": "test-table",
         "locations": ["test-location"],
     });
-    let job_desc = crate::jobs::JobDescriptorRaw::from_owned_unchecked(
-        serde_json::value::to_raw_value(&job_desc_json).expect("Failed to serialize job desc"),
-    );
+    let job_desc = raw_descriptor(&job_desc_json);
 
     // Start listening for notifications before scheduling the job
     let listener = workers::listen_for_job_notif(&conn, worker_id.clone())

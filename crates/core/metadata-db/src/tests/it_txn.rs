@@ -1,21 +1,15 @@
 //! Integration tests for transaction support
 
-use pgtemp::PgTempDB;
-
 use crate::{
-    config::DEFAULT_POOL_MAX_CONNECTIONS,
     datasets::{self, DatasetName, DatasetNamespace},
     manifests::{self, ManifestHash, ManifestPath},
+    tests::helpers::setup_test_db,
 };
 
 #[tokio::test]
 async fn commit_persists_changes() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-commit");
@@ -55,11 +49,7 @@ async fn commit_persists_changes() {
 #[tokio::test]
 async fn explicit_rollback_discards_changes() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-rollback");
@@ -100,11 +90,7 @@ async fn explicit_rollback_discards_changes() {
 #[tokio::test]
 async fn rollback_on_drop_discards_changes() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
     let name = DatasetName::from_ref_unchecked("test-dataset-drop");

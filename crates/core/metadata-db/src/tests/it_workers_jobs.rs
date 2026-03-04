@@ -1,30 +1,16 @@
 //! DB integration tests for the workers queue
 
-use pgtemp::PgTempDB;
-
 use crate::{
-    config::DEFAULT_POOL_MAX_CONNECTIONS,
     jobs::{self, JobStatus},
-    tests::common::{raw_descriptor, register_job},
-    workers::{self, WorkerInfo, WorkerNodeId},
+    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
+    workers::WorkerNodeId,
 };
 
 #[tokio::test]
 async fn schedule_and_retrieve_job() {
     //* Given
-    let temp_db = PgTempDB::new();
-
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
-
-    // Pre-register the worker
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-id");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to pre-register the worker");
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     // Specify the job descriptor
     let job_desc_json = serde_json::json!({
@@ -57,18 +43,10 @@ async fn schedule_and_retrieve_job() {
 #[tokio::test]
 async fn pagination_traverses_all_jobs_ordered() {
     //* Given
-    let temp_db = PgTempDB::new();
-    let conn =
-        crate::connect_pool_with_retry(&temp_db.connection_uri(), DEFAULT_POOL_MAX_CONNECTIONS)
-            .await
-            .expect("Failed to connect to metadata db");
+    let (_db, conn) = setup_test_db().await;
 
     let total_jobs = 7;
-    let worker_id = WorkerNodeId::from_ref_unchecked("test-worker-traverse");
-    let worker_info = WorkerInfo::default(); // {}
-    workers::register(&conn, &worker_id, worker_info)
-        .await
-        .expect("Failed to register worker");
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let mut created_job_ids = Vec::new();
     for i in 0..total_jobs {
