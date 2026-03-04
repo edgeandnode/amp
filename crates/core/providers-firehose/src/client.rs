@@ -4,7 +4,6 @@ use std::{
 };
 
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
-use amp_providers_firehose::config::FirehoseProviderConfig;
 use async_stream::stream;
 use datasets_common::block_num::BlockNum;
 use datasets_raw::{
@@ -26,6 +25,7 @@ use tonic::{
 use tracing::instrument;
 
 use crate::{
+    config::FirehoseProviderConfig,
     error::ClientError,
     evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,

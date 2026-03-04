@@ -18,7 +18,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = config
             .protoc_arg("--experimental_allow_proto3_optional")
             .compile_well_known_types(true)
-            .include_file("mod.rs")
             .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
             .emit_rerun_if_changed(false); // See https://github.com/hyperium/tonic/issues/1070
 

@@ -1,6 +1,4 @@
-pub mod calls;
-pub mod transactions;
-
+use amp_providers_firehose::tables::{calls, transactions};
 use datasets_common::{dataset::Table, network_id::NetworkId};
 use datasets_raw::evm::tables::{blocks, logs};
 

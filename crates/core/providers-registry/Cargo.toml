@@ -12,7 +12,6 @@ amp-providers-solana = { path = "../providers-solana" }
 async-stream.workspace = true
 datasets-common = { path = "../datasets-common" }
 datasets-raw = { path = "../datasets-raw" }
-firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 monitoring = { path = "../monitoring" }
 object_store.workspace = true
