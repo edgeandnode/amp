@@ -18,15 +18,16 @@ use datafusion::{
     },
 };
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
-use foyer::Cache;
 // Re-export foyer::Cache for use by downstream crates
 pub use foyer::Cache as FoyerCache;
+use foyer::{Cache, Source};
 use futures::{StreamExt as _, TryStreamExt as _, stream::BoxStream};
 use metadata_db::{
     MetadataDb,
     files::{FileId, FileMetadataWithDetails},
     physical_table_revision::{LocationId, PhysicalTableRevision, RevisionMetadataOwned},
 };
+use monitoring::telemetry::metrics::{Counter, Gauge, Meter};
 use object_store::{ObjectMeta, ObjectStore, buffered::BufWriter, path::Path};
 use url::Url;
 use uuid::Uuid;
@@ -55,6 +56,38 @@ pub struct DataStore {
     object_store: Arc<dyn ObjectStore>,
     url: Arc<ObjectStoreUrl>,
     parquet_footer_cache: Cache<FileId, CachedParquetData>,
+    cache_metrics: Option<CacheMetrics>,
+}
+
+/// Metrics for the parquet footer cache.
+#[derive(Debug, Clone)]
+struct CacheMetrics {
+    hits: Counter,
+    misses: Counter,
+    usage_bytes: Gauge<u64>,
+}
+
+impl CacheMetrics {
+    fn new(meter: &Meter) -> Self {
+        Self {
+            hits: Counter::new(
+                meter,
+                "parquet_footer_cache_hits_total",
+                "Total number of parquet footer cache hits",
+            ),
+            misses: Counter::new(
+                meter,
+                "parquet_footer_cache_misses_total",
+                "Total number of parquet footer cache misses",
+            ),
+            usage_bytes: Gauge::new_u64(
+                meter,
+                "parquet_footer_cache_usage_bytes",
+                "Current memory usage of the parquet footer cache in bytes",
+                "By",
+            ),
+        }
+    }
 }
 
 impl DataStore {
@@ -88,7 +121,14 @@ impl DataStore {
             object_store,
             url: Arc::new(url),
             parquet_footer_cache,
+            cache_metrics: None,
         })
+    }
+
+    /// Enables parquet footer cache metrics using the provided meter.
+    pub fn with_meter(mut self, meter: &Meter) -> Self {
+        self.cache_metrics = Some(CacheMetrics::new(meter));
+        self
     }
 
     pub fn url(&self) -> &Url {
@@ -781,7 +821,7 @@ impl DataStore {
         let metadata_db = self.metadata_db.clone();
         let cache = self.parquet_footer_cache.clone();
 
-        cache
+        let entry = cache
             .get_or_fetch(&file_id, || async move {
                 // Cache miss, fetch from database
                 let footer = metadata_db::files::get_footer_bytes(&metadata_db, file_id)
@@ -806,8 +846,19 @@ impl DataStore {
                 })
             })
             .await
-            .map(|entry| entry.value().clone())
-            .map_err(GetCachedMetadataError::CacheError)
+            .map_err(GetCachedMetadataError::CacheError)?;
+
+        if let Some(metrics) = &self.cache_metrics {
+            match entry.source() {
+                Source::Memory => metrics.hits.inc(),
+                Source::Outer | Source::Disk => metrics.misses.inc(),
+            }
+            metrics
+                .usage_bytes
+                .record(self.parquet_footer_cache.usage() as u64);
+        }
+
+        Ok(entry.value().clone())
     }
 }
 

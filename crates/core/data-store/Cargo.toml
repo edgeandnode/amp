@@ -11,6 +11,7 @@ chrono.workspace = true
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 foyer = "0.22"
+monitoring = { path = "../../core/monitoring" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 object_store.workspace = true
