@@ -19,7 +19,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    BlockNum, block_num::expr_outputs_block_num, catalog::physical::snapshot::QueryableSnapshot,
+    BlockNum, block_num::block_num_udf, catalog::physical::snapshot::QueryableSnapshot,
     plan_visitors::NonIncrementalOp,
 };
 
@@ -302,10 +302,10 @@ pub fn incremental_op_kind(
             // An aggregate is incrementally valid when _block_num is the first group-by key.
             // This also handles DISTINCT ON (_block_num, ...) which DataFusion's optimizer
             // rewrites to an Aggregate with _block_num as the first group-by key.
-            //
-            // We accept any expression whose physical (output) name is `_block_num`, which is safe given that
-            // `forbid_underscore_prefixed_aliases` has already run.
-            let first_group_ok = agg.group_expr.first().is_some_and(expr_outputs_block_num);
+            let first_group_ok = agg
+                .group_expr
+                .first()
+                .is_some_and(|e| *e == block_num_udf());
             if first_group_ok {
                 Ok(Linear)
             } else {
@@ -320,7 +320,7 @@ pub fn incremental_op_kind(
                 // _block_num values, deduplication can be applied per microbatch.
                 // Also accepts block_num() UDF which will be replaced during propagation.
                 DistinctEnum::On(on) => {
-                    let first_on_ok = on.on_expr.first().is_some_and(expr_outputs_block_num);
+                    let first_on_ok = on.on_expr.first().is_some_and(|e| *e == block_num_udf());
                     if first_on_ok {
                         Ok(Linear)
                     } else {

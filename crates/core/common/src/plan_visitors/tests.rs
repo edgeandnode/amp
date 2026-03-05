@@ -5,12 +5,18 @@ use datafusion::{
     },
     common::Column,
     datasource::{MemTable, provider_as_source},
-    logical_expr::{JoinType, LogicalPlanBuilder},
+    logical_expr::{JoinType, LogicalPlanBuilder, expr::physical_name},
     physical_planner::PhysicalPlanner,
 };
+use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME as BN;
 
 use super::*;
 use crate::block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf};
+
+/// Test helper: checks if an expression outputs `_block_num` (by column name, alias, or UDF).
+fn expr_outputs_block_num(expr: &Expr) -> bool {
+    is_block_num_udf(expr) || physical_name(expr).is_ok_and(|name| name == BN)
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -289,15 +295,12 @@ fn test_nested_block_num_udf_replaced_without_alias_distinct_on() {
 
 #[test]
 fn test_propagate_aggregate_outer_projection_gets_block_num_prepended() {
-    // SELECT cnt FROM t GROUP BY _block_num
+    // SELECT cnt FROM t GROUP BY block_num()
     // (outer Projection selects only cnt, not _block_num)
     // → _block_num prepended to the outer Projection
     use datafusion::functions_aggregate::count::count;
     let plan = LogicalPlanBuilder::from(simple_scan("t"))
-        .aggregate(
-            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
-            vec![count(col("id")).alias("cnt")],
-        )
+        .aggregate(vec![block_num_call()], vec![count(col("id")).alias("cnt")])
         .unwrap()
         .project(vec![col("cnt")])
         .unwrap()
@@ -315,16 +318,14 @@ fn test_propagate_aggregate_outer_projection_gets_block_num_prepended() {
 
 #[test]
 fn test_propagate_aggregate_outer_projection_already_has_block_num() {
-    // SELECT _block_num, cnt FROM t GROUP BY _block_num
-    // → outer Projection already has _block_num; no extra prepend
+    // SELECT block_num(), cnt FROM t GROUP BY block_num()
+    // → _block_num prepended + block_num() preserved + cnt
+    //   Projection [ _block_num, _block_num AS "block_num()", cnt ]
     use datafusion::functions_aggregate::count::count;
     let plan = LogicalPlanBuilder::from(simple_scan("t"))
-        .aggregate(
-            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
-            vec![count(col("id")).alias("cnt")],
-        )
+        .aggregate(vec![block_num_call()], vec![count(col("id")).alias("cnt")])
         .unwrap()
-        .project(vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME), col("cnt")])
+        .project(vec![col(BLOCK_NUM_UDF_SCHEMA_NAME), col("cnt")])
         .unwrap()
         .build()
         .unwrap();
@@ -334,10 +335,18 @@ fn test_propagate_aggregate_outer_projection_already_has_block_num() {
     let LogicalPlan::Projection(p) = &result else {
         panic!("expected Projection")
     };
-    assert_eq!(p.expr.len(), 2);
     assert_eq!(
-        p.expr.iter().filter(|e| expr_outputs_block_num(e)).count(),
-        1
+        p.expr.len(),
+        3,
+        "_block_num prepended + block_num() preserved + cnt"
+    );
+    assert!(
+        expr_outputs_block_num(&p.expr[0]),
+        "_block_num at position 0"
+    );
+    assert!(
+        matches!(&p.expr[1], Expr::Alias(a) if a.name == BLOCK_NUM_UDF_SCHEMA_NAME),
+        "block_num() preserved at position 1"
     );
 }
 
@@ -410,15 +419,12 @@ fn test_propagate_aggregate_block_num_udf_in_group_key_outer_projection_gets_pre
 
 #[test]
 fn test_propagate_aggregate_only_group_by_block_num_no_outer_projection() {
-    // SELECT _block_num, COUNT(id) AS cnt FROM t GROUP BY _block_num
+    // SELECT block_num(), COUNT(id) AS cnt FROM t GROUP BY block_num()
     // (Aggregate is the top-level plan, no extra Projection wrapping it)
-    // → Aggregate output already has _block_num as first group key; plan unchanged
+    // → Aggregate output already has block_num() as first group key; plan unchanged
     use datafusion::functions_aggregate::count::count;
     let plan = LogicalPlanBuilder::from(simple_scan("t"))
-        .aggregate(
-            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
-            vec![count(col("id")).alias("cnt")],
-        )
+        .aggregate(vec![block_num_call()], vec![count(col("id")).alias("cnt")])
         .unwrap()
         .build()
         .unwrap();
@@ -441,7 +447,7 @@ async fn test_propagate_aggregate_block_num_udf_in_select_and_group_key() {
     //
     // DataFusion's SQL planner normalises `block_num()` in the outer SELECT to
     // `col("block_num()")` — a plain Column reference to the Aggregate output.
-    // `is_block_num_udf_or_normalized` handles this normalised form as well as the
+    // `is_block_num_udf` handles this normalised form as well as the
     // raw UDF, so both the Aggregate group key and the Projection expression are replaced.
     //
     // Two-copies: the Projection gets _block_num prepended (system column) plus the
@@ -548,11 +554,11 @@ async fn test_sql_propagate_udf_in_projection_over_join() {
 
 #[test]
 fn test_propagate_distinct_on_block_num_in_select_no_prepend() {
-    // DISTINCT ON (_block_num) SELECT _block_num, id  (_block_num already in SELECT)
+    // DISTINCT ON (block_num()) SELECT _block_num, id  (_block_num already in SELECT)
     // → no prepend; select_expr is unchanged
     let plan = LogicalPlanBuilder::from(simple_scan("t"))
         .distinct_on(
-            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
+            vec![block_num_call()],
             vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME), col("id")],
             None,
         )
@@ -577,14 +583,10 @@ fn test_propagate_distinct_on_block_num_in_select_no_prepend() {
 
 #[test]
 fn test_propagate_distinct_on_block_num_not_in_select_gets_prepended() {
-    // DISTINCT ON (_block_num) SELECT id, value  (no _block_num in SELECT)
+    // DISTINCT ON (block_num()) SELECT id, value  (no _block_num in SELECT)
     // → _block_num prepended to select_expr
     let plan = LogicalPlanBuilder::from(simple_scan("t"))
-        .distinct_on(
-            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
-            vec![col("id"), col("value")],
-            None,
-        )
+        .distinct_on(vec![block_num_call()], vec![col("id"), col("value")], None)
         .unwrap()
         .build()
         .unwrap();
