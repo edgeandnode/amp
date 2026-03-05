@@ -6,7 +6,7 @@ license-file.workspace = true
 
 [features]
 # JSON Schema generation support for Firehose dataset manifest validation.
-schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
+schemars = ["dep:schemars", "datasets-common/schemars", "datasets-raw/schemars", "dep:serde_json"]
 
 [dependencies]
 amp-providers-firehose = { path = "../../core/providers-firehose" }

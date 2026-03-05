@@ -110,11 +110,7 @@ pub async fn handler(
             Error::GetDataset(err)
         })?;
 
-    if !dataset
-        .tables()
-        .iter()
-        .any(|t| t.name() == &payload.table_name)
-    {
+    if !dataset.has_table(&payload.table_name) {
         tracing::debug!(
             table_name = %payload.table_name,
             dataset_reference = %payload.dataset,

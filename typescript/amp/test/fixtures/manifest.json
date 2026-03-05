@@ -57,7 +57,7 @@
           ]
         }
       },
-      "network": "anvil"
+      "network": "derived"
     },
     "transfers": {
       "input": {
@@ -105,7 +105,7 @@
           ]
         }
       },
-      "network": "anvil"
+      "network": "derived"
     }
   },
   "functions": {}

@@ -112,7 +112,9 @@ use common::{
     retryable::RetryableErrorExt as _,
 };
 use datasets_common::{
-    dataset::Dataset as _, hash_reference::HashReference, table_name::TableName,
+    dataset::{Dataset as _, Table as _},
+    hash_reference::HashReference,
+    table_name::TableName,
 };
 use datasets_raw::{
     client::{

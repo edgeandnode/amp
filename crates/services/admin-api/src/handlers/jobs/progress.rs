@@ -150,10 +150,7 @@ pub async fn handler(
         let table_name: TableName = job_table.table_name.clone().into();
 
         // Find the table configuration
-        let table_config = dataset
-            .tables()
-            .iter()
-            .find(|t| t.name().as_str() == table_name.as_str());
+        let table_config = dataset.get_table(&table_name);
 
         let table_config = match table_config {
             Some(config) => config,

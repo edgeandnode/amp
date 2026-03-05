@@ -2,26 +2,23 @@
 //!
 //! # Downcasting
 //!
-//! The `Dataset` trait supports downcasting via the [`downcast_rs`] crate. This allows
-//! converting `&dyn Dataset` back to a concrete type like `&solana::Dataset`.
+//! Both [`Dataset`] and [`Table`] support downcasting via the [`downcast_rs`] crate.
+//! This allows converting trait objects back to concrete types.
 //!
-//! Available methods on `dyn Dataset`:
+//! Available methods on `dyn Dataset` and `dyn Table`:
 //! - `is::<T>()` - Check if the trait object wraps type `T`
 //! - `downcast_ref::<T>()` - Get `Option<&T>`
-//! - `downcast::<T>()` - Convert `Box<dyn Dataset>` to `Result<Box<T>, Box<dyn Dataset>>`
-//! - `downcast_arc::<T>()` - Convert `Arc<dyn Dataset>` to `Result<Arc<T>, Arc<dyn Dataset>>`
+//! - `downcast::<T>()` - Convert `Box<dyn _>` to `Result<Box<T>, Box<dyn _>>`
+//! - `downcast_arc::<T>()` - Convert `Arc<dyn _>` to `Result<Arc<T>, Arc<dyn _>>`
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use datafusion::arrow::datatypes::SchemaRef;
 use downcast_rs::{DowncastSync, impl_downcast};
 
 use crate::{
-    block_num::{BlockNum, RESERVED_BLOCK_NUM_COLUMN_NAME},
-    dataset_kind_str::DatasetKindStr,
-    hash_reference::HashReference,
-    network_id::NetworkId,
-    table_name::TableName,
+    block_num::BlockNum, dataset_kind_str::DatasetKindStr, hash_reference::HashReference,
+    network_id::NetworkId, table_name::TableName,
 };
 
 /// Core trait representing a dataset definition.
@@ -43,7 +40,16 @@ pub trait Dataset: DowncastSync {
     fn kind(&self) -> DatasetKindStr;
 
     /// Returns the tables defined in this dataset.
-    fn tables(&self) -> &[Table];
+    fn tables(&self) -> &[Arc<dyn Table>];
+
+    /// Returns the names of all tables in this dataset.
+    fn table_names(&self) -> Vec<TableName>;
+
+    /// Finds a table by name, returning a reference to its `Arc`.
+    fn get_table(&self, name: &TableName) -> Option<&Arc<dyn Table>>;
+
+    /// Returns `true` if the dataset contains a table with the given name.
+    fn has_table(&self, name: &TableName) -> bool;
 
     /// Returns the starting block number for this dataset, if specified.
     ///
@@ -60,65 +66,34 @@ pub trait Dataset: DowncastSync {
 // Implement downcasting for `Dataset`.
 impl_downcast!(sync Dataset);
 
-/// Represents a table definition within a dataset.
+/// Trait representing a table definition within a dataset.
 ///
-/// A table consists of a name, an Arrow schema defining its columns, the network
-/// it belongs to, and metadata about its natural sort order. Tables are the primary
-/// data containers within datasets and are used by the query engine for planning
-/// and execution.
+/// A table consists of a name, an Arrow schema defining its columns, an optional
+/// network association, and metadata about its natural sort order. Tables are the
+/// primary data containers within datasets and are used by the query engine for
+/// planning and execution.
 ///
-/// # Sort Order
+/// Concrete implementations exist in `datasets-raw` (with network) and
+/// `datasets-derived` (without network).
 ///
-/// Every table is naturally sorted by at least the `_block_num` column, which is
-/// automatically added to the `sorted_by` set during construction. This ensures
-/// consistent block-ordered data access across all tables.
-#[derive(Clone, Hash, PartialEq, Eq, Debug, serde::Deserialize)]
-pub struct Table {
-    /// Bare table name (e.g., "blocks", "transactions").
-    name: TableName,
-    /// Arrow schema defining the table's columns and their data types.
-    schema: SchemaRef,
-    /// Network identifier (e.g., "mainnet", "sepolia").
-    network: NetworkId,
-    /// Column names by which this table is naturally sorted.
-    sorted_by: BTreeSet<String>,
-}
-
-impl Table {
-    /// Creates a new table definition. Automatically adds `_block_num` to `sorted_by`.
-    pub fn new(
-        name: TableName,
-        schema: SchemaRef,
-        network: NetworkId,
-        sorted_by: Vec<String>,
-    ) -> Self {
-        let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
-        sorted_by.insert(RESERVED_BLOCK_NUM_COLUMN_NAME.to_string());
-        Self {
-            name,
-            schema,
-            network,
-            sorted_by,
-        }
-    }
-
+/// This trait extends [`DowncastSync`] to enable downcasting `dyn Table` to concrete types.
+pub trait Table: DowncastSync + std::fmt::Debug {
     /// Returns the bare table name (without schema or dataset prefix).
-    pub fn name(&self) -> &TableName {
-        &self.name
-    }
+    fn name(&self) -> &TableName;
 
     /// Returns the Arrow schema defining this table's columns and types.
-    pub fn schema(&self) -> &SchemaRef {
-        &self.schema
-    }
+    fn schema(&self) -> &SchemaRef;
 
-    /// Returns the network this table is associated with (e.g., `"mainnet"`).
-    pub fn network(&self) -> &NetworkId {
-        &self.network
+    /// Returns the network this table is associated with, if any.
+    ///
+    /// Raw tables always have a network; derived tables return `None`.
+    fn network(&self) -> Option<&NetworkId> {
+        None
     }
 
     /// Returns column names by which this table is naturally sorted. Always includes `_block_num`.
-    pub fn sorted_by(&self) -> &BTreeSet<String> {
-        &self.sorted_by
-    }
+    fn sorted_by(&self) -> &BTreeSet<String>;
 }
+
+// Implement downcasting for `Table`.
+impl_downcast!(sync Table);

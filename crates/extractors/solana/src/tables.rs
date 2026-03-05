@@ -1,6 +1,6 @@
 use amp_providers_common::network_id::NetworkId;
 use datasets_common::{block_range::BlockRange, network_id::NetworkId as DatasetNetworkId};
-use datasets_raw::rows::Rows;
+use datasets_raw::{dataset::Table, rows::Rows};
 use solana_clock::Slot;
 
 use crate::error::RowConversionError;
@@ -14,7 +14,7 @@ pub mod transactions;
 /// Maximum number of ASCII characters in a base58-encoded 32-byte hash.
 pub(crate) const BASE58_ENCODED_HASH_LEN: usize = 44;
 
-pub fn all(network: &DatasetNetworkId) -> Vec<datasets_common::dataset::Table> {
+pub fn all(network: &DatasetNetworkId) -> Vec<Table> {
     vec![
         block_headers::table(network.clone()),
         block_rewards::table(network.clone()),

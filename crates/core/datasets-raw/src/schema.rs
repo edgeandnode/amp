@@ -11,7 +11,9 @@ use datafusion::arrow::{
     datatypes::{DataType, Field, Schema},
     util::pretty::pretty_format_batches,
 };
-use datasets_common::dataset::Table;
+use datasets_common::dataset::Table as _;
+
+use crate::dataset::Table;
 
 /// Convert a collection of tables into a markdown-formatted schema document.
 ///

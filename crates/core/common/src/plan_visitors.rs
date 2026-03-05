@@ -403,12 +403,13 @@ pub fn find_cross_network_join(
     let table_to_network: BTreeMap<DFTableReference, NetworkId> = catalog
         .entries()
         .iter()
-        .map(|(physical_table, sql_schema_name)| {
+        .filter_map(|(physical_table, sql_schema_name)| {
+            let network = physical_table.network()?.clone();
             let table_ref = TableReference::Partial {
                 schema: Arc::new(sql_schema_name.to_string()),
                 table: Arc::new(physical_table.table_name().clone()),
             };
-            (table_ref.into(), physical_table.network().clone())
+            Some((table_ref.into(), network))
         })
         .collect();
 

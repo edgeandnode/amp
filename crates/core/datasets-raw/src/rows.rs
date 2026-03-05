@@ -7,8 +7,10 @@ use arrow::{
 use datasets_common::{
     block_num::{BlockNum, RESERVED_BLOCK_NUM_COLUMN_NAME},
     block_range::BlockRange,
-    dataset::Table,
+    dataset::Table as _,
 };
+
+use crate::dataset::Table;
 
 pub struct Rows(Vec<TableRows>);
 
@@ -53,7 +55,7 @@ impl TableRows {
             table: table_name,
             source,
         })?;
-        Ok(TableRows { table, rows, range })
+        Ok(Self { table, rows, range })
     }
 
     pub fn block_num(&self) -> BlockNum {

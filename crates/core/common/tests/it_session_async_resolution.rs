@@ -48,9 +48,9 @@ use datafusion::{
     logical_expr::{ColumnarValue, ScalarUDF, Volatility, create_udf},
 };
 use datasets_common::{
-    dataset::Table as DatasetTable, hash_reference::HashReference, network_id::NetworkId,
-    table_name::TableName,
+    hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
 };
+use datasets_raw::dataset::Table as DatasetTable;
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{config::DEFAULT_POOL_MAX_CONNECTIONS, physical_table_revision::LocationId};
 use object_store::{ObjectStore, memory::InMemory};
@@ -545,7 +545,7 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
         data_store.clone(),
         hash_ref,
         None,
-        dataset_table,
+        Arc::new(dataset_table),
         revision,
     ));
 

@@ -27,12 +27,13 @@
 use std::path::PathBuf;
 
 use datasets_common::{
-    dataset::Table,
+    dataset::Table as _,
     dataset_kind_str::DatasetKindStr,
     manifest::{ArrowSchema, Field, TableSchema},
     network_id::NetworkId,
 };
 use datasets_derived::DerivedDatasetKind;
+use datasets_raw::{dataset::Table, manifest::Table as ManifestTable};
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use firehose_datasets::FirehoseDatasetKind;
 use monitoring::logging;
@@ -166,7 +167,10 @@ fn generate_evm_rpc_manifest(
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table = evm_rpc_datasets::Table::new(schema, network.clone());
+            let manifest_table = ManifestTable {
+                schema,
+                network: network.clone(),
+            };
             (table.name().to_string(), manifest_table)
         })
         .collect();
@@ -193,7 +197,10 @@ fn generate_solana_manifest(
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table = solana_datasets::Table::new(schema, network.clone());
+            let manifest_table = ManifestTable {
+                schema,
+                network: network.clone(),
+            };
             (table.name().to_string(), manifest_table)
         })
         .collect();
@@ -220,7 +227,10 @@ fn generate_firehose_manifest(
         .iter()
         .map(|table| {
             let schema = table_schema_from_logical_table(table);
-            let manifest_table = firehose_datasets::Table::new(schema, network.clone());
+            let manifest_table = ManifestTable {
+                schema,
+                network: network.clone(),
+            };
             (table.name().to_string(), manifest_table)
         })
         .collect();

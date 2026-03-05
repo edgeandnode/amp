@@ -5,7 +5,10 @@ use axum::{
     http::StatusCode,
 };
 use common::datasets_cache::GetDatasetError;
-use datasets_common::{name::Name, namespace::Namespace, reference::Reference, revision::Revision};
+use datasets_common::{
+    name::Name, namespace::Namespace, reference::Reference, revision::Revision,
+    table_name::TableName,
+};
 use monitoring::logging;
 
 use crate::{
@@ -102,11 +105,7 @@ pub async fn handler(
         .await
         .map_err(Error::GetDataset)?;
 
-    let tables = dataset
-        .tables()
-        .iter()
-        .map(|table| table.name().to_string())
-        .collect();
+    let tables = dataset.table_names();
     let finalized_blocks_only = dataset.finalized_blocks_only();
     let kind = dataset.kind().to_string();
     let start_block = dataset.start_block().unwrap_or(0);
@@ -145,7 +144,8 @@ pub struct DatasetInfo {
     /// Finalized blocks only
     pub finalized_blocks_only: bool,
     /// Tables
-    pub tables: Vec<String>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
+    pub tables: Vec<TableName>,
 }
 
 /// Errors that can occur when getting a dataset

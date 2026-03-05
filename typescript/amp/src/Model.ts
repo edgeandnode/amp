@@ -305,7 +305,7 @@ export class TableInput extends Schema.Class<TableInput>("TableInput")({
 export class Table extends Schema.Class<Table>("Table")({
   input: TableInput,
   schema: TableSchema,
-  network: Network,
+  network: Network.pipe(Schema.optional),
 }) {}
 
 export const RawDatasetTable = Schema.Struct({

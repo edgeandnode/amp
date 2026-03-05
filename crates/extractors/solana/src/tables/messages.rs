@@ -1,14 +1,14 @@
 use std::sync::{Arc, LazyLock};
 
 use datasets_common::{
-    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, dataset::Table,
-    network_id::NetworkId,
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
 };
 use datasets_raw::{
     arrow::{
         ArrayRef, DataType, Field, Fields, ListBuilder, Schema, SchemaRef, StringBuilder,
         StructBuilder, UInt8Builder, UInt32Builder, UInt64Builder,
     },
+    dataset::Table,
     rows::{TableRowError, TableRows},
 };
 use solana_clock::Slot;
