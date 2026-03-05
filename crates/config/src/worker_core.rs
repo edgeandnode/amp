@@ -295,6 +295,10 @@ impl From<&CompactorConfig> for amp_worker_core::CompactorConfig {
 pub struct CompactionAlgorithmConfig {
     /// Base cooldown duration in seconds between compaction runs (default: 1024).
     pub cooldown_duration: ConfigDuration<1024>,
+    /// Allow compaction of recently created segments (default: false).
+    /// When false, segments must wait for the cooldown period before compaction.
+    /// When true, segments can be compacted immediately with same-generation segments.
+    pub immediate_compaction: bool,
     /// Eager compaction limits (flattened fields: `overflow`, `bytes`, `rows`).
     #[serde(
         flatten,
@@ -309,6 +313,7 @@ impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
             cooldown_duration: ConfigDuration::default(),
+            immediate_compaction: false,
             eager_compaction_limit: SizeLimitConfig::default_eager_limit(),
         }
     }
@@ -318,6 +323,7 @@ impl From<&CompactionAlgorithmConfig> for amp_worker_core::CompactionAlgorithmCo
     fn from(config: &CompactionAlgorithmConfig) -> Self {
         Self {
             cooldown_duration: (&config.cooldown_duration).into(),
+            immediate_compaction: config.immediate_compaction,
             eager_compaction_limit: (&config.eager_compaction_limit).into(),
         }
     }

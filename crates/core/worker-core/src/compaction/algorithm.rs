@@ -160,6 +160,7 @@ use crate::{
 /// ## Fields
 /// - `cooldown_duration`: The base duration used to calculate
 ///   the cooldown period for files based on their generation.
+/// - `immediate_compaction`: Whether to allow compaction of recently created segments.
 /// - `target_partition_size`: The upper bound for segment size limits.
 ///   Files exceeding this limit will not be compacted together. This
 ///   value must be non-unbounded.
@@ -170,6 +171,8 @@ pub struct CompactionAlgorithm {
     /// The amount of time a file must wait before it can be
     /// compacted with files of different generations.
     pub cooldown_duration: Duration,
+    /// Whether to allow compaction of recently created segments.
+    pub immediate_compaction: bool,
     /// The upper bound for segment size limits. Files exceeding this limit
     /// will not be compacted together. This value must be non-unbounded.
     pub target_partition_size: SegmentSizeLimit,
@@ -246,7 +249,9 @@ impl CompactionAlgorithm {
         } else if state == FileState::Hot {
             // For hot files, only compact if size limit is not exceeded,
             // and both files share the same generation.
-            group.size.generation == candidate.size.generation && !*size_exceeded
+            self.immediate_compaction
+                && group.size.generation == candidate.size.generation
+                && !*size_exceeded
         } else {
             // For cold files, compact regardless of generation,
             // as long as size limit is not exceeded.
@@ -301,6 +306,7 @@ impl<'a> From<&'a ParquetConfig> for CompactionAlgorithm {
     fn from(config: &'a ParquetConfig) -> Self {
         CompactionAlgorithm {
             cooldown_duration: config.compactor.algorithm.cooldown_duration.clone().into(),
+            immediate_compaction: config.compactor.algorithm.immediate_compaction,
             target_partition_size: SegmentSizeLimit::from(&config.target_size),
             eager_compaction_limit: SegmentSizeLimit::from(
                 &config.compactor.algorithm.eager_compaction_limit,

@@ -143,6 +143,11 @@
           "description": "Base cooldown duration in seconds between compaction runs (default: 1024).",
           "$ref": "#/$defs/ConfigDuration"
         },
+        "immediate_compaction": {
+          "description": "Allow compaction of recently created segments (default: false).\nWhen false, segments must wait for the cooldown period before compaction.\nWhen true, segments can be compacted immediately with same-generation segments.",
+          "type": "boolean",
+          "default": false
+        },
         "metadata_concurrency": {
           "description": "Maximum concurrent metadata operations (default: 2).",
           "type": "integer",

@@ -107,6 +107,8 @@ impl Default for CompactorConfig {
 pub struct CompactionAlgorithmConfig {
     /// Base cooldown duration in seconds (default: 1024.0)
     pub cooldown_duration: ConfigDuration<1024>,
+    /// Allow compaction of recently created segments (default: false)
+    pub immediate_compaction: bool,
     /// Eager compaction limits
     pub eager_compaction_limit: SizeLimitConfig,
 }
@@ -115,6 +117,7 @@ impl Default for CompactionAlgorithmConfig {
     fn default() -> Self {
         Self {
             cooldown_duration: ConfigDuration::default(),
+            immediate_compaction: false,
             eager_compaction_limit: SizeLimitConfig {
                 bytes: 0,
                 ..Default::default()
