@@ -4,14 +4,7 @@
 //! validation, defaults, and JSON Schema generation (`schemars`). Worker-core's
 //! config types are plain domain structs constructed from these via `From` impls.
 
-use std::time::Duration;
-
-use amp_common::metadata::Overflow;
-use serde::Deserialize as _;
-
-// ---------------------------------------------------------------------------
-// ParquetConfig
-// ---------------------------------------------------------------------------
+use std::{num::NonZeroU64, time::Duration};
 
 /// Parquet writer and file configuration.
 ///
@@ -39,13 +32,12 @@ pub struct ParquetConfig {
         default,
         deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
     )]
-    #[cfg_attr(feature = "schemars", schemars(with = "SizeLimitConfig"))]
     pub target_size: SizeLimitConfig,
     /// Compaction settings.
     #[serde(default)]
     pub compactor: CompactorConfig,
     /// Garbage collection settings.
-    #[serde(alias = "garbage_collector", default)]
+    #[serde(default, alias = "garbage_collector")]
     pub collector: CollectorConfig,
     /// Maximum wall-clock time before closing a segment, in seconds (default: 600 = 10 min).
     #[serde(default)]
@@ -67,6 +59,14 @@ impl Default for ParquetConfig {
     }
 }
 
+fn default_cache_size_mb() -> u64 {
+    1024 // 1 GB default cache size
+}
+
+fn default_max_row_group_mb() -> u64 {
+    512 // 512 MB default row group size
+}
+
 impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
     fn from(config: &ParquetConfig) -> Self {
         Self {
@@ -82,10 +82,6 @@ impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Compression
-// ---------------------------------------------------------------------------
-
 /// Parquet compression algorithm.
 ///
 /// Parsed from a case-insensitive string with the following accepted values:
@@ -95,8 +91,8 @@ impl From<&ParquetConfig> for amp_worker_core::ParquetConfig {
 /// | `zstd`             | Zstandard at the default level (1)              |
 /// | `zstd(N)`          | Zstandard at level N (1–22)                     |
 /// | `lz4`              | LZ4 raw                                         |
-/// | `gzip`             | Gzip at the parquet-default level                |
-/// | `brotli`           | Brotli at the parquet-default level              |
+/// | `gzip`             | Gzip at the parquet-default level               |
+/// | `brotli`           | Brotli at the parquet-default level             |
 /// | `snappy`           | Snappy                                          |
 /// | `uncompressed`     | No compression                                  |
 ///
@@ -243,10 +239,6 @@ impl From<&Compression> for amp_common::parquet::basic::Compression {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CompactorConfig
-// ---------------------------------------------------------------------------
-
 /// File compaction configuration.
 ///
 /// Controls concurrency, intervals, and algorithm parameters for merging
@@ -294,10 +286,6 @@ impl From<&CompactorConfig> for amp_worker_core::CompactorConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CompactionAlgorithmConfig
-// ---------------------------------------------------------------------------
-
 /// Compaction algorithm tuning parameters.
 ///
 /// Controls cooldown between compaction runs and eager compaction size limits.
@@ -335,10 +323,6 @@ impl From<&CompactionAlgorithmConfig> for amp_worker_core::CompactionAlgorithmCo
     }
 }
 
-// ---------------------------------------------------------------------------
-// CollectorConfig
-// ---------------------------------------------------------------------------
-
 /// Garbage collection configuration for expired Parquet segment files.
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -362,10 +346,6 @@ impl From<&CollectorConfig> for amp_worker_core::CollectorConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SizeLimitConfig
-// ---------------------------------------------------------------------------
-
 /// Size-based limits for Parquet file partitioning and compaction.
 ///
 /// Contains only user-configurable fields. Runtime-internal fields (`file_count`,
@@ -376,7 +356,6 @@ pub struct SizeLimitConfig {
     /// Overflow multiplier: 1x target size (default: `"1"`), can use `"1.5"` for 1.5x, etc.
     ///
     /// Accepts an integer, float, or fraction string (e.g. `1`, `1.5`, `"3/2"`).
-    #[cfg_attr(feature = "schemars", schemars(with = "OverflowSchema"))]
     pub overflow: Overflow,
     /// Target bytes per file (default: 2147483648 = 2 GB for target_size, 0 for eager limits).
     pub bytes: u64,
@@ -399,17 +378,13 @@ impl From<&SizeLimitConfig> for amp_worker_core::SizeLimitConfig {
         Self {
             file_count: 0,
             generation: 0,
-            overflow: config.overflow,
+            overflow: config.overflow.into(),
             blocks: 0,
             bytes: config.bytes,
             rows: config.rows,
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// ConfigDuration
-// ---------------------------------------------------------------------------
 
 /// Duration in seconds with a compile-time default.
 ///
@@ -435,7 +410,10 @@ impl<'de, const DEFAULT_SECS: u64> serde::Deserialize<'de> for ConfigDuration<DE
     where
         D: serde::Deserializer<'de>,
     {
-        deserialize_duration(deserializer).map(|opt| opt.map_or_else(Self::default, Self))
+        <Option<f64>>::deserialize(deserializer)?
+            .map(|secs| Duration::try_from_secs_f64(secs).map_err(serde::de::Error::custom))
+            .transpose()
+            .map(|opt| opt.map_or_else(Self::default, Self))
     }
 }
 
@@ -458,10 +436,6 @@ impl<const N: u64> From<&ConfigDuration<N>> for amp_worker_core::ConfigDuration<
         d.0.into()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
 
 /// Deserialization helper for partial `SizeLimitConfig` overrides.
 #[derive(Debug, serde::Deserialize)]
@@ -493,7 +467,8 @@ impl SizeLimitConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        SizeLimitHelper::deserialize(deserializer).map(|helper| helper.apply_to(base))
+        serde::Deserialize::deserialize(deserializer)
+            .map(|helper: SizeLimitHelper| helper.apply_to(base))
     }
 
     fn deserialize_eager_limit<'de, D>(deserializer: D) -> Result<Self, D::Error>
@@ -511,47 +486,452 @@ impl SizeLimitConfig {
     }
 }
 
-/// Schemars helper: JSON schema for the `Overflow` type.
+/// Config-local overflow multiplier for deserialization.
 ///
-/// Defined locally because the `common` crate no longer carries a schemars dependency.
-#[cfg(feature = "schemars")]
-mod overflow_schema {
-    pub(super) struct OverflowSchema;
+/// Accepts integers, floats, and fraction strings (e.g. `1`, `1.5`, `"3/2"`).
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schemars",
+    schemars(
+        description = r#"Overflow multiplier as an integer, float, or fraction (e.g. 1, 1.5, "3/2")"#,
+        schema_with = "overflow_schema"
+    )
+)]
+pub struct Overflow(pub NonZeroU64, pub NonZeroU64);
 
-    impl schemars::JsonSchema for OverflowSchema {
-        fn schema_name() -> std::borrow::Cow<'static, str> {
-            "Overflow".into()
+impl Default for Overflow {
+    fn default() -> Self {
+        Self(NonZeroU64::new(1).unwrap(), NonZeroU64::new(1).unwrap())
+    }
+}
+
+impl From<Overflow> for amp_worker_core::compaction::Overflow {
+    fn from(value: Overflow) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl std::str::FromStr for Overflow {
+    type Err = OverflowParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err(OverflowParseError::Empty);
         }
 
-        fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-            schemars::json_schema!({
-                "oneOf": [
-                    { "type": "integer", "minimum": 1 },
-                    { "type": "number", "exclusiveMinimum": 0 },
-                    { "type": "string" }
-                ],
-                "description": "Overflow multiplier as an integer, float, or fraction (e.g. 1, 1.5, \"3/2\")"
-            })
+        if let Some((n, d)) = s.split_once('/') {
+            let n: u64 = n
+                .trim()
+                .parse()
+                .map_err(OverflowParseError::InvalidNumerator)?;
+            let d: u64 = d
+                .trim()
+                .parse()
+                .map_err(OverflowParseError::InvalidDenominator)?;
+            let nz_n = NonZeroU64::new(n).ok_or(OverflowParseError::ZeroNumerator)?;
+            let nz_d = NonZeroU64::new(d).ok_or(OverflowParseError::ZeroDenominator)?;
+            Ok(Self(nz_n, nz_d))
+        } else if let Ok(value) = s.parse::<u64>() {
+            let nz_n = NonZeroU64::new(value).ok_or(OverflowParseError::ZeroNumerator)?;
+            Ok(Self(nz_n, NonZeroU64::new(1).unwrap()))
+        } else {
+            let value: f64 = s.parse().map_err(OverflowParseError::InvalidFloat)?;
+            if value <= 0.0 || value.is_nan() || value.is_infinite() {
+                return Err(OverflowParseError::NotPositive);
+            }
+            Ok(amp_worker_core::compaction::Overflow::from(value).into())
         }
     }
 }
 
+impl From<amp_worker_core::compaction::Overflow> for Overflow {
+    fn from(value: amp_worker_core::compaction::Overflow) -> Self {
+        Self(value.0, value.1)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Overflow {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct OverflowVisitor;
+
+        impl serde::de::Visitor<'_> for OverflowVisitor {
+            type Value = Overflow;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an integer, float, or fraction string (e.g. 1, 1.5, \"3/2\")")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Overflow, E> {
+                let nz =
+                    NonZeroU64::new(value).ok_or_else(|| E::custom("overflow must be non-zero"))?;
+                Ok(Overflow(nz, NonZeroU64::new(1).unwrap()))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Overflow, E> {
+                let value: u64 = value
+                    .try_into()
+                    .map_err(|_| E::custom("overflow must be a positive integer"))?;
+                self.visit_u64(value)
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Overflow, E> {
+                if value.is_nan() || value.is_infinite() || value <= 0.0 {
+                    return Err(E::custom(format!(
+                        "overflow float must be finite and positive, got {value}"
+                    )));
+                }
+                Ok(amp_worker_core::compaction::Overflow::from(value).into())
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Overflow, E> {
+                value.parse().map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_any(OverflowVisitor)
+    }
+}
+
 #[cfg(feature = "schemars")]
-use overflow_schema::OverflowSchema;
-
-fn default_cache_size_mb() -> u64 {
-    1024 // 1 GB default cache size
+fn overflow_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "number", "exclusiveMinimum": 0 },
+            { "type": "string" }
+        ]
+    })
 }
 
-fn default_max_row_group_mb() -> u64 {
-    512 // 512 MB default row group size
+/// Errors that can occur when parsing an [`Overflow`] from a string.
+#[derive(Debug, thiserror::Error)]
+pub enum OverflowParseError {
+    /// The input string was empty or contained only whitespace.
+    #[error("input is empty")]
+    Empty,
+    /// The numerator in a `"n/d"` fraction could not be parsed as an integer.
+    #[error("invalid numerator")]
+    InvalidNumerator(#[source] std::num::ParseIntError),
+    /// The denominator in a `"n/d"` fraction could not be parsed as an integer.
+    #[error("invalid denominator")]
+    InvalidDenominator(#[source] std::num::ParseIntError),
+    /// The numerator resolved to zero, which is not a valid overflow multiplier.
+    #[error("numerator must be non-zero")]
+    ZeroNumerator,
+    /// The denominator resolved to zero, which would cause a division-by-zero.
+    #[error("denominator must be non-zero")]
+    ZeroDenominator,
+    /// The input looked like a float but could not be parsed as `f64`.
+    #[error("invalid float")]
+    InvalidFloat(#[source] std::num::ParseFloatError),
+    /// The parsed float value was not positive (zero, negative, NaN, or infinite).
+    #[error("value must be positive")]
+    NotPositive,
 }
 
-fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    <Option<f64>>::deserialize(deserializer)?
-        .map(|secs| Duration::try_from_secs_f64(secs).map_err(serde::de::Error::custom))
-        .transpose()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_str_with_simple_fraction_parses_correctly() {
+        //* Given
+        let input = "3/2";
+
+        //* When
+        let result: Overflow = input.parse().expect("should parse valid fraction");
+
+        //* Then
+        assert_eq!(result.0.get(), 3, "numerator should be 3");
+        assert_eq!(result.1.get(), 2, "denominator should be 2");
+    }
+
+    #[test]
+    fn from_str_with_unreduced_fraction_parses_correctly() {
+        //* Given
+        let input = "12345/10000";
+
+        //* When
+        let result: Overflow = input.parse().expect("should parse valid fraction");
+
+        //* Then
+        assert_eq!(result.0.get(), 12345, "numerator should be 12345");
+        assert_eq!(result.1.get(), 10000, "denominator should be 10000");
+    }
+
+    #[test]
+    fn from_str_with_integer_parses_correctly() {
+        //* Given
+        let input = "3";
+
+        //* When
+        let result: Overflow = input.parse().expect("should parse integer");
+
+        //* Then
+        assert_eq!(result.0.get(), 3, "numerator should be 3");
+        assert_eq!(result.1.get(), 1, "denominator should be 1");
+    }
+
+    #[test]
+    fn from_str_with_one_parses_correctly() {
+        //* Given
+        let input = "1";
+
+        //* When
+        let result: Overflow = input.parse().expect("should parse integer one");
+
+        //* Then
+        assert_eq!(result.0.get(), 1, "numerator should be 1");
+        assert_eq!(result.1.get(), 1, "denominator should be 1");
+    }
+
+    #[test]
+    fn from_str_with_float_parses_correctly() {
+        //* Given
+        let input = "1.5";
+
+        //* When
+        let result: Overflow = input.parse().expect("should parse float");
+
+        //* Then
+        assert_eq!(result.0.get(), 3, "numerator should be 3");
+        assert_eq!(result.1.get(), 2, "denominator should be 2");
+    }
+
+    #[test]
+    fn from_str_with_decimal_float_parses_correctly() {
+        //* Given
+        let input = "1.2345";
+
+        //* When
+        let result: Overflow = input.parse().expect("should parse decimal float");
+
+        //* Then
+        assert_eq!(result.0.get(), 2469, "numerator should be 2469");
+        assert_eq!(result.1.get(), 2000, "denominator should be 2000");
+    }
+
+    #[test]
+    fn from_str_with_empty_string_returns_error() {
+        //* Given
+        let input = "";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("empty string should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::Empty),
+            "expected Empty, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn from_str_with_whitespace_returns_error() {
+        //* Given
+        let input = "  ";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("whitespace-only string should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::Empty),
+            "expected Empty, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn from_str_with_zero_returns_error() {
+        //* Given
+        let input = "0";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("zero should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::ZeroNumerator),
+            "expected ZeroNumerator, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn from_str_with_zero_numerator_returns_error() {
+        //* Given
+        let input = "0/1";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("zero numerator should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::ZeroNumerator),
+            "expected ZeroNumerator, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn from_str_with_zero_denominator_returns_error() {
+        //* Given
+        let input = "1/0";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("zero denominator should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::ZeroDenominator),
+            "expected ZeroDenominator, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn from_str_with_non_numeric_returns_error() {
+        //* Given
+        let input = "abc";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("non-numeric input should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::InvalidFloat(_)),
+            "expected InvalidFloat, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn from_str_with_negative_value_returns_error() {
+        //* Given
+        let input = "-1";
+
+        //* When
+        let result = input.parse::<Overflow>();
+
+        //* Then
+        let err = result.expect_err("negative value should fail to parse");
+        assert!(
+            matches!(err, OverflowParseError::NotPositive),
+            "expected NotPositive, got {err:?}"
+        );
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[allow(dead_code)]
+    struct Config {
+        overflow: Overflow,
+    }
+
+    #[test]
+    fn deserialize_with_float_parses_correctly() {
+        //* Given
+        let json = r#"{"overflow": 1.5}"#;
+
+        //* When
+        let config: Config = serde_json::from_str(json).expect("should deserialize float");
+
+        //* Then
+        assert_eq!(config.overflow.0.get(), 3, "numerator should be 3");
+        assert_eq!(config.overflow.1.get(), 2, "denominator should be 2");
+    }
+
+    #[test]
+    fn deserialize_with_integer_parses_correctly() {
+        //* Given
+        let json = r#"{"overflow": 3}"#;
+
+        //* When
+        let config: Config = serde_json::from_str(json).expect("should deserialize integer");
+
+        //* Then
+        assert_eq!(config.overflow.0.get(), 3, "numerator should be 3");
+        assert_eq!(config.overflow.1.get(), 1, "denominator should be 1");
+    }
+
+    #[test]
+    fn deserialize_with_fraction_string_parses_correctly() {
+        //* Given
+        let json = r#"{"overflow": "3/2"}"#;
+
+        //* When
+        let config: Config =
+            serde_json::from_str(json).expect("should deserialize fraction string");
+
+        //* Then
+        assert_eq!(config.overflow.0.get(), 3, "numerator should be 3");
+        assert_eq!(config.overflow.1.get(), 2, "denominator should be 2");
+    }
+
+    #[test]
+    fn deserialize_with_float_string_parses_correctly() {
+        //* Given
+        let json = r#"{"overflow": "1.2345"}"#;
+
+        //* When
+        let config: Config = serde_json::from_str(json).expect("should deserialize float string");
+
+        //* Then
+        assert_eq!(config.overflow.0.get(), 2469, "numerator should be 2469");
+        assert_eq!(config.overflow.1.get(), 2000, "denominator should be 2000");
+    }
+
+    #[test]
+    fn deserialize_with_zero_integer_returns_error() {
+        //* Given
+        let json = r#"{"overflow": 0}"#;
+
+        //* When
+        let result = serde_json::from_str::<Config>(json);
+
+        //* Then
+        result.expect_err("zero integer should fail to deserialize");
+    }
+
+    #[test]
+    fn deserialize_with_negative_integer_returns_error() {
+        //* Given
+        let json = r#"{"overflow": -1}"#;
+
+        //* When
+        let result = serde_json::from_str::<Config>(json);
+
+        //* Then
+        result.expect_err("negative integer should fail to deserialize");
+    }
+
+    #[test]
+    fn deserialize_with_zero_float_returns_error() {
+        //* Given
+        let json = r#"{"overflow": 0.0}"#;
+
+        //* When
+        let result = serde_json::from_str::<Config>(json);
+
+        //* Then
+        result.expect_err("zero float should fail to deserialize");
+    }
+
+    #[test]
+    fn deserialize_with_zero_string_returns_error() {
+        //* Given
+        let json = r#"{"overflow": "0"}"#;
+
+        //* When
+        let result = serde_json::from_str::<Config>(json);
+
+        //* Then
+        result.expect_err("zero string should fail to deserialize");
+    }
 }

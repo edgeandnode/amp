@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, atomic::Ordering::SeqCst},
 };
 
-pub use algorithm::{CompactionAlgorithm, SegmentSizeLimit};
+pub use algorithm::{CompactionAlgorithm, Overflow, SegmentSizeLimit};
 use amp_data_store::DataStore;
 pub use collector::{Collector, CollectorProperties};
 use common::{Timestamp, physical_table::PhysicalTable};

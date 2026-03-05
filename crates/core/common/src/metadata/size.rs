@@ -1,11 +1,7 @@
 use std::{
     array::TryFromSliceError,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
-    iter::FromIterator,
-    mem::swap,
-    num::{NonZero, NonZeroI64, NonZeroU64},
+    num::NonZeroI64,
     ops::{Add, AddAssign, Deref, Mul, Not},
-    str::FromStr,
 };
 
 use chrono::{DateTime, Utc};
@@ -14,7 +10,6 @@ use datafusion::{
     parquet::{arrow::arrow_reader::ArrowReaderMetadata, file::metadata::RowGroupMetaData},
 };
 use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
-use serde::{Deserialize, Serialize};
 
 use crate::metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta};
 
@@ -74,8 +69,8 @@ impl Deref for Generation {
     }
 }
 
-impl Display for Generation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl std::fmt::Display for Generation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -89,283 +84,6 @@ impl From<u64> for Generation {
 impl From<Generation> for u64 {
     fn from(val: Generation) -> Self {
         val.0
-    }
-}
-
-/// Represents a ratio of two integers, for example `3/2` or `1.5`. Simplifies
-/// floating point math into integer math for more predictable behavior. This
-/// is used while making a best-effort decision on whether to compact segments
-/// based on their [`SegmentSize`].
-///
-/// For example, an Overflow of `4/3` means two segments should be compacted
-/// if their combined size is at least `4/3` of the upper bound segment size.
-/// This means that if the upper bound is `300MB`, two segments should be
-/// compacted if their combined size is at least `400MB`. This helps to avoid
-/// situations where a tiny segment (e.g. `2MB`) is attempting to merge with a
-/// large segment (e.g. `299MB`), which would result in a segment of `301MB`
-/// and thus exceed the upper bound by a small margin.
-///
-/// Overflows may be specified as either a `u64`,`f64`, or a fraction. When
-/// specified as a `u64`, the denominator is assumed to be `1`. When specified
-/// as a `f64`, it is converted to a fraction with a denominator of `PRECISION`
-/// and then reduced to its simplest form.
-///
-/// # Generics
-///
-/// - `PRECISION`: The precision to use when converting a `f64` to a fraction.
-///   Defaults to `10000`. This means that a `f64` value of `1.2345` would be
-///   converted to `12345/10000` and then reduced to `2469/2000` represented as
-///   `Overflow(2469, 2000)`.
-///
-/// # Member Variables
-/// - `0`: The numerator of the overflow.
-/// - `1`: The denominator of the overflow.
-#[derive(Clone, Copy)]
-pub struct Overflow(pub NonZeroU64, pub NonZeroU64);
-
-impl Overflow {
-    const PRECISION: u64 = 10_000;
-
-    pub fn new<T: TryInto<u64>, U: TryInto<u64>>(n: T, d: U) -> Self {
-        if let Ok(n) = n.try_into()
-            && let Ok(d) = d.try_into()
-            && let Some(nz_n) = NonZeroU64::new(n)
-            && let Some(nz_d) = NonZeroU64::new(d)
-        {
-            let mut overflow = Self(nz_n, nz_d);
-            overflow.reduce();
-
-            overflow
-        } else {
-            Self::default()
-        }
-    }
-
-    #[inline]
-    pub fn soft_limit<T: TryInto<u64> + TryFrom<u64> + Copy>(&self, value: T) -> T {
-        if let Ok(value) = value.try_into()
-            && let Some(value) = value.checked_mul(self.0.get())
-            && let Some(value) = value.checked_div(self.1.get())
-            && let Ok(value) = value.try_into()
-        {
-            value
-        } else {
-            value
-        }
-    }
-
-    #[inline]
-    pub fn reduce(&mut self) {
-        let mut gcd = self.0.get();
-        let mut b = self.1.get();
-
-        if b > gcd {
-            swap(&mut gcd, &mut b);
-        }
-
-        let mut temp;
-
-        while b != 0 {
-            temp = gcd;
-            gcd = b;
-            b = temp % b;
-        }
-
-        if let Some(n) = self.0.get().checked_div(gcd)
-            && let Some(d) = self.1.get().checked_div(gcd)
-            && let Some(nz_n) = NonZeroU64::new(n)
-            && let Some(nz_d) = NonZeroU64::new(d)
-        {
-            self.0 = nz_n;
-            self.1 = nz_d;
-        }
-    }
-}
-
-impl Default for Overflow {
-    fn default() -> Self {
-        Self(NonZeroU64::new(1).unwrap(), NonZeroU64::new(1).unwrap())
-    }
-}
-
-impl Debug for Overflow {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "Overflow( {self}, precision: {} )", Self::PRECISION)
-    }
-}
-
-impl Display for Overflow {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        if self.1.get() == 1 {
-            write!(f, "{}", self.0.get())
-        } else {
-            write!(f, "{}/{}", self.0.get(), self.1.get())
-        }
-    }
-}
-
-impl From<f64> for Overflow {
-    /// Converts a floating point number to an `Overflow` ratio.
-    /// The float is multiplied by the `PRECISION` constant to
-    /// convert it to a fraction, then reduced to its simplest form.
-    /// If the float is infinite, NaN, or non-positive, or if
-    /// the `PRECISION` is `0`, the default `Overflow(1, 1)` is returned.
-    ///
-    /// # Panics
-    /// This function does not panic. If the float is invalid,
-    /// it returns the default `Overflow(1, 1)`.
-    fn from(value: f64) -> Self {
-        if !(value.is_nan() || value.is_infinite() || value <= 0.0)
-            && let Ok(value) = value.mul_checked(Self::PRECISION as f64)
-        {
-            let scaled = value.round() as u64;
-
-            let mut overflow = Self::new(scaled, Self::PRECISION);
-            overflow.reduce();
-
-            overflow
-        } else {
-            tracing::warn!("Overflow value {value} is too large or invalid, using default of 1");
-            Self::default()
-        }
-    }
-}
-
-impl From<u64> for Overflow {
-    /// Converts a whole number to an `Overflow` ratio with a denominator of `1`.
-    /// If the number is `0`, the default `Overflow(1, 1)` is returned.
-    fn from(value: u64) -> Self {
-        Self::new(value, 1)
-    }
-}
-
-impl FromStr for Overflow {
-    type Err = String;
-    fn from_str(v: &str) -> Result<Self, Self::Err> {
-        let is_fractional =
-            v.matches('/').count() == 1 && v.split('/').all(|part| !part.trim().is_empty());
-        let is_decimal = v.contains('.') && v.parse::<f64>().is_ok();
-
-        if is_fractional && is_decimal {
-            Err("Overflow cannot be both a decimal and a fraction".into())
-        } else if is_fractional {
-            let parts = v.trim().split('/').map(str::trim).collect::<Vec<&str>>();
-
-            let numerator = parts[0]
-                .trim()
-                .parse::<u64>()
-                .map(NonZeroU64::new)
-                .ok()
-                .flatten()
-                .ok_or_else(|| String::from("Invalid numerator in overflow fraction"))?;
-
-            let denominator = parts[1]
-                .trim()
-                .parse::<u64>()
-                .ok()
-                .and_then(NonZero::new)
-                .ok_or_else(|| String::from("Invalid denominator in overflow fraction"))?;
-
-            let mut overflow = Self::new(numerator, denominator.get());
-            overflow.reduce();
-
-            Ok(overflow)
-        } else if is_decimal {
-            let parts = v.trim().split('.').map(str::trim).collect::<Vec<&str>>();
-            let integer_part = parts[0];
-            let fractional_part = parts[1];
-            let mut fractional_length = parts[1].len().min(Self::PRECISION.to_string().len() - 1);
-
-            while fractional_length > 0 {
-                if let Some(precision) = 10u64.checked_pow(fractional_length as u32) {
-                    let numerator_part =
-                        integer_part.to_string() + &fractional_part[..fractional_length];
-
-                    let numerator = numerator_part
-                        .parse::<u64>()
-                        .map_err(|_| format!("Invalid overflow decimal: {numerator_part}"))?;
-
-                    let mut overflow = Self::new(numerator, precision);
-                    overflow.reduce();
-
-                    return Ok(overflow);
-                } else {
-                    fractional_length -= 1;
-                }
-            }
-
-            Err(String::from("Invalid overflow decimal"))
-        } else {
-            let value = v
-                .trim()
-                .parse::<u64>()
-                .map_err(|_| String::from("Invalid overflow value"))?;
-            Ok(Self::from(value))
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Overflow {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct OverflowVisitor;
-        impl<'de> serde::de::Visitor<'de> for OverflowVisitor {
-            type Value = Overflow;
-
-            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-                formatter.write_str("a positive integer or float representing overflow")
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(Overflow::from(value))
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                if let Ok(v) = u64::try_from(v)
-                    && let Some(v) = NonZero::new(v)
-                {
-                    Ok(Overflow::from(v.get()))
-                } else {
-                    Err(E::custom("Overflow must be a positive integer"))
-                }
-            }
-
-            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(Overflow::from(value))
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Overflow::from_str(v).map_err(E::custom)
-            }
-        }
-        deserializer.deserialize_any(OverflowVisitor)
-    }
-}
-
-impl Serialize for Overflow {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        if self.1.get() == 1 {
-            serializer.serialize_u64(self.0.get())
-        } else {
-            serializer.serialize_str(&self.to_string())
-        }
     }
 }
 
@@ -579,8 +297,8 @@ impl AddAssign for SegmentSize {
     }
 }
 
-impl Display for SegmentSize {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+impl std::fmt::Display for SegmentSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut size_string = (0..6)
             .filter_map(|i| match i {
                 0 if self.length != 0 => Some(format!("length: {}, ", self.length)),
@@ -852,122 +570,6 @@ mod test {
             schema::types::{ColumnDescriptor, ColumnPath, SchemaDescriptor, Type},
         },
     };
-
-    #[test]
-    fn overflow_from_f64() {
-        use super::Overflow;
-        let overflow: Overflow = 1.5f64.into();
-        assert_eq!(overflow.0.get(), 3);
-        assert_eq!(overflow.1.get(), 2);
-
-        let overflow: Overflow = 2.0f64.into();
-        assert_eq!(overflow.0.get(), 2);
-        assert_eq!(overflow.1.get(), 1);
-
-        let overflow: Overflow = 0.0f64.into();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 1);
-
-        let overflow: Overflow = (-1.0f64).into();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 1);
-
-        let overflow: Overflow = f64::INFINITY.into();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 1);
-
-        let overflow: Overflow = f64::NAN.into();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 1);
-
-        let overflow: Overflow = 1.2345f64.into();
-        assert_eq!(overflow.0.get(), 2469);
-        assert_eq!(overflow.1.get(), 2000);
-
-        let overflow: super::Overflow = (1.0 / 3.0).into();
-        assert_eq!(overflow.0.get(), 3_333);
-        assert_eq!(overflow.1.get(), 10_000);
-    }
-
-    #[test]
-    fn overflow_from_u64() {
-        use super::Overflow;
-
-        let overflow: Overflow = 3u64.into();
-        assert_eq!(overflow.0.get(), 3);
-        assert_eq!(overflow.1.get(), 1);
-        let overflow: Overflow = 0u64.into();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 1);
-    }
-
-    #[test]
-    fn overflow_reduce() {
-        use super::Overflow;
-
-        let mut overflow = Overflow::new(12345, 10000);
-        overflow.reduce();
-        assert_eq!(overflow.0.get(), 2469);
-        assert_eq!(overflow.1.get(), 2000);
-        let mut overflow = Overflow::new(2, 4);
-        overflow.reduce();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 2);
-        let mut overflow = Overflow::new(0, 4);
-        overflow.reduce();
-        assert_eq!(overflow.0.get(), 1);
-        assert_eq!(overflow.1.get(), 1);
-        let mut overflow = super::Overflow::new(250, 100);
-        overflow.reduce();
-        assert_eq!(overflow.0.get(), 5);
-        assert_eq!(overflow.1.get(), 2);
-    }
-
-    #[test]
-    fn serde_overflow() {
-        use serde::{Deserialize, Serialize};
-
-        use super::Overflow;
-
-        #[derive(Deserialize, Serialize, Debug)]
-        struct Config {
-            overflow: Overflow,
-        }
-
-        let json = r#"{"overflow": 1.5}"#;
-        let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.overflow.0.get(), 3);
-        assert_eq!(config.overflow.1.get(), 2);
-
-        let config = Config {
-            overflow: "12345/10000".parse().unwrap(),
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        assert_eq!(json, r#"{"overflow":"2469/2000"}"#);
-
-        let config: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(config.overflow.0.get(), 2469);
-        assert_eq!(config.overflow.1.get(), 2000);
-
-        let config = Config {
-            overflow: 3u64.into(),
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        assert_eq!(json, r#"{"overflow":3}"#);
-
-        let config: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(config.overflow.0.get(), 3);
-        assert_eq!(config.overflow.1.get(), 1);
-
-        let config = Config {
-            overflow: "1.2345".parse().unwrap(),
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        assert_eq!(json, r#"{"overflow":"2469/2000"}"#);
-        let config: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(config.overflow.0.get(), 2469);
-        assert_eq!(config.overflow.1.get(), 2000);
-    }
 
     /// Create a Parquet metadata object for testing.
     ///
