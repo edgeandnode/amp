@@ -157,8 +157,8 @@ impl TreeNodeRewriter for BlockNumPropagator {
         use LogicalPlan::*;
 
         // Check that the op is actually incremental
-        let op_kind =
-            incremental_op_kind(&node, BlockNumForm::Udf).map_err(|e| DataFusionError::External(e.into()))?;
+        let op_kind = incremental_op_kind(&node, BlockNumForm::Udf)
+            .map_err(|e| DataFusionError::External(e.into()))?;
 
         // Step 1: Replace block_num() UDF in all expressions of this node using
         // the currently accumulated _block_num expression.

@@ -120,7 +120,9 @@ impl TreeNodeRewriter for Incrementalizer {
         use RelationRange::*;
 
         // TThe incrementalizer must run after _block_num propagation, so `BlockNumForm::Propagated`
-        match incremental_op_kind(&node, BlockNumForm::Propagated).map_err(|e| DataFusionError::External(e.into()))? {
+        match incremental_op_kind(&node, BlockNumForm::Propagated)
+            .map_err(|e| DataFusionError::External(e.into()))?
+        {
             IncrementalOpKind::Linear => Ok(Transformed::no(node)),
             IncrementalOpKind::InnerJoin => {
                 let LogicalPlan::Join(join) = node else {
@@ -327,10 +329,7 @@ pub fn incremental_op_kind(
             // An aggregate is incrementally valid when _block_num is the first group-by key.
             // This also handles DISTINCT ON (_block_num, ...) which DataFusion's optimizer
             // rewrites to an Aggregate with _block_num as the first group-by key.
-            let first_group_ok = agg
-                .group_expr
-                .first()
-                .is_some_and(|e| form.matches(e));
+            let first_group_ok = agg.group_expr.first().is_some_and(|e| form.matches(e));
             if first_group_ok {
                 Ok(Linear)
             } else {

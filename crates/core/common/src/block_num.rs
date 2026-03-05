@@ -3,9 +3,7 @@ use std::any::Any;
 use datafusion::{
     arrow::datatypes::DataType,
     error::Result,
-    logical_expr::{
-        ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-    },
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
     prelude::Expr,
 };
 
