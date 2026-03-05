@@ -1,7 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
-use common::metadata::Overflow;
 use datafusion::parquet::basic::{Compression, ZstdLevel};
+
+use crate::compaction::Overflow;
 
 /// Configuration specific to dump operations
 ///

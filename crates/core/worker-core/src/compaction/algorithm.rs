@@ -1,5 +1,7 @@
 use std::{
     fmt::{Debug, Display, Formatter},
+    mem::swap,
+    num::NonZeroU64,
     ops::{Deref, Not},
     time::Duration,
 };
@@ -7,8 +9,144 @@ use std::{
 use common::{
     Timestamp,
     arrow::array::ArrowNativeTypeOp,
-    metadata::{Generation, Overflow, SegmentSize},
+    metadata::{Generation, SegmentSize},
 };
+
+/// Represents a ratio of two integers, for example `3/2` or `1.5`. Simplifies
+/// floating point math into integer math for more predictable behavior. This
+/// is used while making a best-effort decision on whether to compact segments
+/// based on their [`SegmentSize`].
+///
+/// For example, an Overflow of `4/3` means two segments should be compacted
+/// if their combined size is at least `4/3` of the upper bound segment size.
+/// This means that if the upper bound is `300MB`, two segments should be
+/// compacted if their combined size is at least `400MB`. This helps to avoid
+/// situations where a tiny segment (e.g. `2MB`) is attempting to merge with a
+/// large segment (e.g. `299MB`), which would result in a segment of `301MB`
+/// and thus exceed the upper bound by a small margin.
+///
+/// Overflows may be specified as either a `u64` or `f64`. When specified as a
+/// `u64`, the denominator is assumed to be `1`. When specified as a `f64`, it
+/// is converted to a fraction with a denominator of `PRECISION` and then
+/// reduced to its simplest form.
+///
+/// # Member Variables
+/// - `0`: The numerator of the overflow.
+/// - `1`: The denominator of the overflow.
+#[derive(Clone, Copy)]
+pub struct Overflow(pub NonZeroU64, pub NonZeroU64);
+
+impl Overflow {
+    const PRECISION: u64 = 10_000;
+
+    pub fn new<T: TryInto<u64>, U: TryInto<u64>>(n: T, d: U) -> Self {
+        if let Ok(n) = n.try_into()
+            && let Ok(d) = d.try_into()
+            && let Some(nz_n) = NonZeroU64::new(n)
+            && let Some(nz_d) = NonZeroU64::new(d)
+        {
+            let mut overflow = Self(nz_n, nz_d);
+            overflow.reduce();
+
+            overflow
+        } else {
+            Self::default()
+        }
+    }
+
+    #[inline]
+    pub fn soft_limit<T: TryInto<u64> + TryFrom<u64> + Copy>(&self, value: T) -> T {
+        if let Ok(value) = value.try_into()
+            && let Some(value) = value.checked_mul(self.0.get())
+            && let Some(value) = value.checked_div(self.1.get())
+            && let Ok(value) = value.try_into()
+        {
+            value
+        } else {
+            value
+        }
+    }
+
+    #[inline]
+    pub fn reduce(&mut self) {
+        let mut gcd = self.0.get();
+        let mut b = self.1.get();
+
+        if b > gcd {
+            swap(&mut gcd, &mut b);
+        }
+
+        let mut temp;
+
+        while b != 0 {
+            temp = gcd;
+            gcd = b;
+            b = temp % b;
+        }
+
+        if let Some(n) = self.0.get().checked_div(gcd)
+            && let Some(d) = self.1.get().checked_div(gcd)
+            && let Some(nz_n) = NonZeroU64::new(n)
+            && let Some(nz_d) = NonZeroU64::new(d)
+        {
+            self.0 = nz_n;
+            self.1 = nz_d;
+        }
+    }
+}
+
+impl Default for Overflow {
+    fn default() -> Self {
+        Self(NonZeroU64::new(1).unwrap(), NonZeroU64::new(1).unwrap())
+    }
+}
+
+impl std::fmt::Debug for Overflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Overflow( {self}, precision: {} )", Self::PRECISION)
+    }
+}
+
+impl std::fmt::Display for Overflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.1.get() == 1 {
+            write!(f, "{}", self.0.get())
+        } else {
+            write!(f, "{}/{}", self.0.get(), self.1.get())
+        }
+    }
+}
+
+impl From<f64> for Overflow {
+    /// Converts a floating point number to an `Overflow` ratio.
+    /// The float is multiplied by the `PRECISION` constant to
+    /// convert it to a fraction, then reduced to its simplest form.
+    /// If the float is infinite, NaN, or non-positive, the default
+    /// `Overflow(1, 1)` is returned.
+    fn from(value: f64) -> Self {
+        if !(value.is_nan() || value.is_infinite() || value <= 0.0)
+            && let Ok(value) = value.mul_checked(Self::PRECISION as f64)
+        {
+            let scaled = value.round() as u64;
+
+            let mut overflow = Self::new(scaled, Self::PRECISION);
+            overflow.reduce();
+
+            overflow
+        } else {
+            tracing::warn!("Overflow value {value} is too large or invalid, using default of 1");
+            Self::default()
+        }
+    }
+}
+
+impl From<u64> for Overflow {
+    /// Converts a whole number to an `Overflow` ratio with a denominator of `1`.
+    /// If the number is `0`, the default `Overflow(1, 1)` is returned.
+    fn from(value: u64) -> Self {
+        Self::new(value, 1)
+    }
+}
 
 use crate::{
     compaction::{compactor::CompactionGroup, plan::CompactionFile},
@@ -279,6 +417,7 @@ pub struct SegmentSizeLimit(
     /// The size limit for the file
     /// If a limit is set to -1, it means that dimension is not considered for the limit.
     pub SegmentSize,
+    /// Overflow multiplier applied to size thresholds when evaluating compaction candidates.
     pub Overflow,
 );
 
@@ -561,38 +700,109 @@ impl Not for TestResult {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Not;
+
+    use super::{
+        TestResult::{Activated as A, Skipped as S},
+        *,
+    };
 
     #[test]
-    fn segment_size_limit_display() {
-        let limit = super::SegmentSizeLimit::new(100, 1000, 0, 2, 2, 1.5);
+    fn overflow_from_f64_with_various_values_converts_correctly() {
+        let overflow: Overflow = 1.5f64.into();
+        assert_eq!(overflow.0.get(), 3);
+        assert_eq!(overflow.1.get(), 2);
+
+        let overflow: Overflow = 2.0f64.into();
+        assert_eq!(overflow.0.get(), 2);
+        assert_eq!(overflow.1.get(), 1);
+
+        let overflow: Overflow = 0.0f64.into();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 1);
+
+        let overflow: Overflow = (-1.0f64).into();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 1);
+
+        let overflow: Overflow = f64::INFINITY.into();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 1);
+
+        let overflow: Overflow = f64::NAN.into();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 1);
+
+        let overflow: Overflow = 1.2345f64.into();
+        assert_eq!(overflow.0.get(), 2469);
+        assert_eq!(overflow.1.get(), 2000);
+
+        let overflow: Overflow = (1.0 / 3.0).into();
+        assert_eq!(overflow.0.get(), 3_333);
+        assert_eq!(overflow.1.get(), 10_000);
+    }
+
+    #[test]
+    fn overflow_from_u64_with_various_values_converts_correctly() {
+        let overflow: Overflow = 3u64.into();
+        assert_eq!(overflow.0.get(), 3);
+        assert_eq!(overflow.1.get(), 1);
+        let overflow: Overflow = 0u64.into();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 1);
+    }
+
+    #[test]
+    fn reduce_with_various_fractions_simplifies_correctly() {
+        let mut overflow = Overflow::new(12345, 10000);
+        overflow.reduce();
+        assert_eq!(overflow.0.get(), 2469);
+        assert_eq!(overflow.1.get(), 2000);
+        let mut overflow = Overflow::new(2, 4);
+        overflow.reduce();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 2);
+        let mut overflow = Overflow::new(0, 4);
+        overflow.reduce();
+        assert_eq!(overflow.0.get(), 1);
+        assert_eq!(overflow.1.get(), 1);
+        let mut overflow = Overflow::new(250, 100);
+        overflow.reduce();
+        assert_eq!(overflow.0.get(), 5);
+        assert_eq!(overflow.1.get(), 2);
+    }
+
+    #[test]
+    fn segment_size_limit_display_with_various_configs_formats_correctly() {
+        let limit = SegmentSizeLimit::new(100, 1000, 0, 2, 2, 1.5);
         assert_eq!(
             format!("{limit}"),
             "{ length: 2, blocks: 100, bytes: 1000, generation: 2, overflow: 3/2 }",
             "We are testing if the overflow of 1.5 is correctly represented as 3/2 and if the rows limit is omitted because it is 0"
         );
 
-        let limit = super::SegmentSizeLimit::new(100, 1000, 0, 2, 0, 1u64);
+        let limit = SegmentSizeLimit::new(100, 1000, 0, 2, 0, 1u64);
         assert_eq!(
             format!("{limit}"),
             "{ length: 2, blocks: 100, bytes: 1000 }",
             "We are testing if the overflow, rows, and generation limits are omitted because they are 1, 0, and 0 respectively"
         );
 
-        let limit = super::SegmentSizeLimit::new(0, 0, 0, 0, 0, 3u64);
+        let limit = SegmentSizeLimit::new(0, 0, 0, 0, 0, 3u64);
         assert_eq!(
             format!("{limit}"),
             "{ unbounded }",
             "We are testing if the limit is correctly represented as unbounded which means the overflow is omitted even though it is 3"
         );
 
-        let limit = super::SegmentSizeLimit::new(100, 1000, 0, 2, 0, 4u64);
+        let limit = SegmentSizeLimit::new(100, 1000, 0, 2, 0, 4u64);
         assert_eq!(
             format!("{limit}"),
             "{ length: 2, blocks: 100, bytes: 1000, overflow: 4 }",
             "We are testing if the generation and rows limits are omitted because they are both 0, overflow is shown as 4"
         );
 
-        let limit = super::SegmentSizeLimit::default();
+        let limit = SegmentSizeLimit::default();
 
         assert_eq!(
             format!("{limit}"),
@@ -602,8 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn test_result_and() {
-        use super::TestResult::{Activated as A, Skipped as S};
+    fn and_with_all_variant_combinations_returns_expected() {
         assert_eq!(A(true).and(A(true)), A(true));
         assert_eq!(A(true).and(A(false)), A(false));
         assert_eq!(A(false).and(A(true)), A(false));
@@ -616,8 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn test_result_or() {
-        use super::TestResult::{Activated as A, Skipped as S};
+    fn or_with_all_variant_combinations_returns_expected() {
         assert_eq!(A(true).or(A(true)), A(true));
         assert_eq!(A(true).or(A(false)), A(true));
         assert_eq!(A(false).or(A(true)), A(true));
@@ -630,18 +838,14 @@ mod tests {
     }
 
     #[test]
-    fn test_result_not() {
-        use std::ops::Not;
-
-        use super::TestResult::{Activated as A, Skipped as S};
+    fn not_with_all_variants_returns_inverted() {
         assert_eq!(A(true).not(), A(false));
         assert_eq!(A(false).not(), A(true));
         assert_eq!(S.not(), S);
     }
 
     #[test]
-    fn test_result_deref() {
-        use super::TestResult::{Activated as A, Skipped as S};
+    fn deref_with_all_variants_returns_expected_bool() {
         assert!(*A(true));
         assert!(!*A(false));
         assert!(!*S);

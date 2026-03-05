@@ -14,9 +14,7 @@ pub mod parquet;
 mod size;
 
 use self::parquet::{PARQUET_METADATA_KEY, ParquetMeta};
-pub use self::size::{
-    Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt,
-};
+pub use self::size::{Generation, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt};
 
 #[instrument(skip(object_meta, store), err)]
 pub async fn extract_footer_bytes_from_file(
