@@ -32,6 +32,7 @@ use crate::{
 /// - `INVALID_JOB_ID`: The provided ID is not a valid job identifier
 /// - `JOB_NOT_FOUND`: No job exists with the given ID
 /// - `GET_JOB_ERROR`: Failed to retrieve job from scheduler (database error)
+/// - `GET_DESCRIPTOR_ERROR`: Failed to retrieve job descriptor from metadata database
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -64,7 +65,19 @@ pub async fn handler(
     };
 
     match ctx.scheduler.get_job(id).await {
-        Ok(Some(job)) => Ok(Json(job.into())),
+        Ok(Some(job)) => {
+            let mut job_info: JobInfo = job.into();
+            let descriptor = ctx
+                .scheduler
+                .get_job_descriptor(id)
+                .await
+                .map_err(Error::GetDescriptor)?;
+            job_info.descriptor = descriptor.map(|descriptor| {
+                // SAFETY: descriptor is valid JSON from trusted sources
+                serde_json::from_str(descriptor.as_str()).unwrap()
+            });
+            Ok(Json(job_info))
+        }
         Ok(None) => Err(Error::NotFound { id }.into()),
         Err(err) => {
             tracing::debug!(error = %err, error_source = logging::error_source(&err), job_id=?id, "failed to get job");
@@ -112,6 +125,13 @@ pub enum Error {
     /// - Connection pool is exhausted or unavailable
     #[error("failed to get job")]
     GetJob(#[source] scheduler::GetJobError),
+
+    /// Failed to get job descriptor
+    ///
+    /// This occurs when:
+    /// - The job descriptor is not found
+    #[error("failed to get job descriptor")]
+    GetDescriptor(#[source] scheduler::GetJobDescriptorError),
 }
 
 impl IntoErrorResponse for Error {
@@ -120,6 +140,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidId { .. } => "INVALID_JOB_ID",
             Error::NotFound { .. } => "JOB_NOT_FOUND",
             Error::GetJob(_) => "GET_JOB_ERROR",
+            Error::GetDescriptor(_) => "GET_DESCRIPTOR_ERROR",
         }
     }
 
@@ -128,6 +149,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidId { .. } => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::GetJob(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetDescriptor(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

@@ -1,3 +1,4 @@
+mod it_admin_api_datasets_deploy;
 mod it_admin_api_datasets_list_jobs;
 mod it_admin_api_datasets_manifest;
 mod it_admin_api_datasets_register;

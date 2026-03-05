@@ -22,7 +22,7 @@ async fn register_job_creates_with_scheduled_status() {
     let job_desc = raw_descriptor(&job_desc_json);
 
     //* When
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* Then
     let job = jobs::sql::get_by_id(&conn, job_id)
@@ -32,8 +32,12 @@ async fn register_job_creates_with_scheduled_status() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
+    let desc = job_events::get_latest_descriptor(&conn, job_id)
+        .await
+        .expect("Failed to get job descriptor")
+        .expect("Job descriptor not found");
     let roundtripped: serde_json::Value =
-        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+        serde_json::from_str(desc.as_str()).expect("Failed to parse descriptor");
     assert_eq!(roundtripped, job_desc_json);
 }
 
@@ -50,14 +54,14 @@ async fn get_jobs_for_node_filters_by_node_id() {
 
     // Register jobs
     let job_desc1 = raw_descriptor(&serde_json::json!({ "job": 1 }));
-    let job_id1 = register_job(&conn, &job_desc1, &worker_id_main, None).await;
+    let job_id1 = register_job(&conn, &job_desc1, &worker_id_main, None, None).await;
 
     let job_desc2 = raw_descriptor(&serde_json::json!({ "job": 2 }));
-    let job_id2 = register_job(&conn, &job_desc2, &worker_id_main, None).await;
+    let job_id2 = register_job(&conn, &job_desc2, &worker_id_main, None, None).await;
 
     // Register a job for a different worker to ensure it's not retrieved
     let job_desc_other = raw_descriptor(&serde_json::json!({ "job": "other" }));
-    let job_id_other = register_job(&conn, &job_desc_other, &worker_id_other, None).await;
+    let job_id_other = register_job(&conn, &job_desc_other, &worker_id_other, None, None).await;
 
     //* When
     let jobs_list = jobs::sql::get_by_node_id_and_statuses(
@@ -95,20 +99,40 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_desc = raw_descriptor(&serde_json::json!({ "key": "value" }));
 
     // Active jobs
-    let job_id_scheduled =
-        register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Scheduled)).await;
+    let job_id_scheduled = register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        None,
+        Some(JobStatus::Scheduled),
+    )
+    .await;
 
-    let job_id_running = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Running)).await;
+    let job_id_running =
+        register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Running)).await;
 
     // Terminal state jobs (should not be retrieved)
-    register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Completed)).await;
+    register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        None,
+        Some(JobStatus::Completed),
+    )
+    .await;
 
-    register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Error)).await;
+    register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Error)).await;
 
-    let job_id_stop_requested =
-        register_job(&conn, &job_desc, &worker_id, Some(JobStatus::StopRequested)).await;
+    let job_id_stop_requested = register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        None,
+        Some(JobStatus::StopRequested),
+    )
+    .await;
 
-    register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Stopped)).await;
+    register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Stopped)).await;
 
     //* When
     let active_jobs = jobs::sql::get_by_node_id_and_statuses(
@@ -156,7 +180,7 @@ async fn get_job_by_id_returns_job() {
     });
     let job_desc = raw_descriptor(&job_desc_json);
 
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     let job = jobs::sql::get_by_id(&conn, job_id)
@@ -168,8 +192,12 @@ async fn get_job_by_id_returns_job() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.node_id, worker_id);
     assert_eq!(job.status, JobStatus::Scheduled);
+    let desc = job_events::get_latest_descriptor(&conn, job_id)
+        .await
+        .expect("Failed to get job descriptor")
+        .expect("Job descriptor not found");
     let roundtripped: serde_json::Value =
-        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+        serde_json::from_str(desc.as_str()).expect("Failed to parse descriptor");
     assert_eq!(roundtripped, job_desc_json);
 }
 
@@ -185,7 +213,7 @@ async fn get_job_includes_timestamps() {
     });
     let job_desc = raw_descriptor(&job_desc_json);
 
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     let job = jobs::sql::get_by_id(&conn, job_id)
@@ -197,8 +225,12 @@ async fn get_job_includes_timestamps() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.node_id, worker_id);
     assert_eq!(job.status, JobStatus::Scheduled);
+    let desc = job_events::get_latest_descriptor(&conn, job_id)
+        .await
+        .expect("Failed to get job descriptor")
+        .expect("Job descriptor not found");
     let roundtripped: serde_json::Value =
-        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+        serde_json::from_str(desc.as_str()).expect("Failed to parse descriptor");
     assert_eq!(roundtripped, job_desc_json);
     assert!(job.created_at <= job.updated_at);
 }
@@ -235,7 +267,7 @@ async fn list_jobs_first_page_respects_limit() {
             "table": "test-table",
         }));
 
-        let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+        let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
         job_ids.push(job_id);
 
         // Small delay to ensure different timestamps
@@ -275,7 +307,7 @@ async fn list_jobs_next_page_uses_cursor() {
             "table": "test-table",
         }));
 
-        let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+        let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
         all_job_ids.push(job_id);
 
         // Small delay to ensure different timestamps
@@ -318,7 +350,7 @@ async fn delete_by_id_and_statuses_deletes_matching_job() {
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     let deleted = jobs::sql::delete_by_id_and_statuses(&conn, job_id, [JobStatus::Scheduled])
@@ -342,7 +374,7 @@ async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    let job_id = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Running)).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Running)).await;
 
     //* When
     let deleted = jobs::sql::delete_by_id_and_statuses(&conn, job_id, [JobStatus::Scheduled])
@@ -368,9 +400,23 @@ async fn delete_by_status_deletes_all_matching_jobs() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create 3 jobs, 2 will be Completed, 1 will be Running
-    let job_id1 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Completed)).await;
-    let job_id2 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Completed)).await;
-    let job_id3 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Running)).await;
+    let job_id1 = register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        None,
+        Some(JobStatus::Completed),
+    )
+    .await;
+    let job_id2 = register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        None,
+        Some(JobStatus::Completed),
+    )
+    .await;
+    let job_id3 = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Running)).await;
 
     //* When
     let deleted_count = jobs::sql::delete_by_status(&conn, [JobStatus::Completed])
@@ -411,10 +457,17 @@ async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create 4 jobs with different statuses
-    let job_id1 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Completed)).await;
-    let job_id2 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Error)).await;
-    let job_id3 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Stopped)).await;
-    let job_id4 = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Running)).await;
+    let job_id1 = register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        None,
+        Some(JobStatus::Completed),
+    )
+    .await;
+    let job_id2 = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Error)).await;
+    let job_id3 = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Stopped)).await;
+    let job_id4 = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Running)).await;
 
     //* When
     let deleted_count = jobs::sql::delete_by_status(
@@ -464,7 +517,7 @@ async fn get_failed_jobs_ready_for_retry_returns_eligible_jobs() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
-    let job_id = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Error)).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Error)).await;
 
     // Wait longer than initial backoff (1 second)
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -489,7 +542,7 @@ async fn get_failed_jobs_ready_for_retry_excludes_not_ready() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
-    register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Error)).await;
+    register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Error)).await;
 
     //* When (immediately check, before backoff expires)
     let ready_jobs = jobs::sql::get_failed_jobs_ready_for_retry(&conn)
@@ -509,7 +562,7 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job
-    let job_id = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Error)).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Error)).await;
 
     // Insert 3 SCHEDULED events (simulating initial schedule + 2 retries)
     for _ in 0..3 {
@@ -541,7 +594,7 @@ async fn get_failed_jobs_handles_missing_attempts() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
     // Create a failed (recoverable) job WITHOUT any SCHEDULED events (edge case)
-    let job_id = register_job(&conn, &job_desc, &worker_id, Some(JobStatus::Error)).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, Some(JobStatus::Error)).await;
 
     // Wait longer than initial backoff (1 second for retry_index 0)
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -570,10 +623,10 @@ async fn reschedule_updates_status_and_worker() {
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "job"}));
 
-    let job_id = register_job(&conn, &job_desc, &worker_id1, Some(JobStatus::Error)).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id1, None, Some(JobStatus::Error)).await;
 
     //* When
-    job_status::sql::reschedule(&conn, job_id, &worker_id2)
+    job_status::sql::reschedule(&conn, job_id, &worker_id2, &job_desc.into())
         .await
         .expect("Failed to reschedule job");
 

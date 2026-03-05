@@ -1,6 +1,6 @@
 //! Error types for metadata database operations
 
-use crate::{db::ConnError, physical_table::events::LocationNotifSendError};
+use crate::{db::ConnError, jobs::JobStatus, physical_table::events::LocationNotifSendError};
 
 /// Errors that can occur when interacting with the metadata database
 ///
@@ -150,6 +150,17 @@ pub enum Error {
     /// See `JobStatusUpdateError` for specific transition validation errors.
     #[error("Job status update error: {0}")]
     JobStatusUpdate(#[source] crate::job_status::JobStatusUpdateError),
+
+    /// A job event detail was not provided for a status that requires one.
+    ///
+    /// The `Scheduled`, `Error`, and `Fatal` statuses require an accompanying
+    /// detail when recording a job event. This error is returned when the
+    /// detail is `None` for one of those statuses.
+    #[error("Job detail is required for {status} event")]
+    JobDetailRequired {
+        /// The status of the job event
+        status: JobStatus,
+    },
 
     /// Failed to get active physical table by location ID
     ///

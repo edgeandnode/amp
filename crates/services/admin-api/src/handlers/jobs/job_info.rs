@@ -1,6 +1,9 @@
 //! Job information types for API responses
 
+use std::collections::HashMap;
+
 use amp_worker_core::jobs::job_id::JobId;
+use metadata_db::jobs::JobDescriptorRawOwned;
 use worker::job::Job;
 
 /// Represents job information for the API response
@@ -28,22 +31,35 @@ pub struct JobInfo {
     pub status: String,
     /// Job descriptor containing job-specific parameters as JSON
     #[cfg_attr(feature = "utoipa", schema(value_type = serde_json::Value))]
-    pub descriptor: serde_json::Value,
+    pub descriptor: Option<serde_json::Value>,
+}
+
+impl JobInfo {
+    /// Attach descriptors to a list of jobs by matching job IDs.
+    pub fn attach_descriptors(
+        jobs: &mut [JobInfo],
+        descriptors: Vec<(JobId, JobDescriptorRawOwned)>,
+    ) {
+        let descriptor_map: HashMap<_, _> =
+            descriptors.iter().map(|(id, desc)| (*id, desc)).collect();
+        for job in jobs {
+            if let Some(desc) = descriptor_map.get(&job.id) {
+                // SAFETY: descriptor is validated JSON from the database
+                job.descriptor = Some(serde_json::from_str(desc.as_str()).unwrap());
+            }
+        }
+    }
 }
 
 impl From<Job> for JobInfo {
     fn from(value: Job) -> Self {
-        // SAFETY: This is safe because the descriptor is validated JSON from the database.
-        let descriptor =
-            serde_json::from_str(value.desc.as_str()).expect("job descriptor should be valid JSON");
-
         Self {
             id: value.id,
             created_at: value.created_at.to_rfc3339(),
             updated_at: value.updated_at.to_rfc3339(),
             node_id: value.node_id.to_string(),
             status: value.status.to_string(),
-            descriptor,
+            descriptor: None,
         }
     }
 }

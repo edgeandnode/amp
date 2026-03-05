@@ -156,7 +156,7 @@ async fn get_by_location_id_with_details_returns_revision_with_writer_when_assig
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"operation": "write"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     let table_name = TableName::from_ref_unchecked("writer_table");
     let path = TablePath::from_ref_unchecked("test-dataset/writer_table/writer-assigned-revision");
@@ -409,7 +409,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
 
     let job_desc = raw_descriptor(&serde_json::json!({"operation": "write"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     let table_name = TableName::from_ref_unchecked("output_table");
 

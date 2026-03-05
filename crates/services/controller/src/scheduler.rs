@@ -24,23 +24,25 @@
 //! - Implements atomic job operations with database transactions
 //! - Selects workers randomly from active worker pool
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use admin_api::scheduler::{
-    DeleteJobError, DeleteJobsByStatusError, GetJobError, GetWorkerError, JobDescriptor,
-    ListJobsByDatasetError, ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError,
-    SchedulerJobs, SchedulerWorkers, StopJobError,
+    DeleteJobError, DeleteJobsByStatusError, GetJobDescriptorError, GetJobError, GetWorkerError,
+    JobDescriptor, ListJobDescriptorsError, ListJobsByDatasetError, ListJobsError,
+    ListWorkersError, NodeSelector, ScheduleJobError, SchedulerJobs, SchedulerWorkers,
+    StopJobError,
 };
 use amp_worker_core::{
     jobs::{job_id::JobId, status::JobStatus},
     node_id::NodeId,
 };
 use async_trait::async_trait;
-use datasets_common::{
-    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
-};
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{
-    Error as MetadataDbError, MetadataDb, job_status::JobStatusUpdateError, workers::Worker,
+    Error as MetadataDbError, MetadataDb,
+    job_status::JobStatusUpdateError,
+    jobs::{IdempotencyKey, JobDescriptorRawOwned},
+    workers::Worker,
 };
 use monitoring::logging;
 use rand::seq::IndexedRandom as _;
@@ -72,24 +74,16 @@ impl Scheduler {
     ///
     /// Checks for existing scheduled or running jobs to avoid duplicates, selects an available
     /// worker node (either randomly, by exact worker_id, or by matching a glob pattern) and registers the job in the metadata database.
+    ///
+    /// If an active job with the same idempotency key exists and its descriptor matches,
+    /// the existing job ID is returned. If the descriptor differs, an `ActiveJobConflict`
+    /// error is returned.
     async fn schedule_job_impl(
         &self,
-        hash_reference: HashReference,
+        idempotency_key: IdempotencyKey<'static>,
         job_descriptor: JobDescriptor,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
-        // Avoid re-scheduling jobs in a scheduled or running state.
-        // TODO: Deduplicate jobs based on an idempotency key (not in the job descriptor)
-        let existing_jobs =
-            metadata_db::jobs::get_by_dataset(&self.metadata_db, hash_reference.hash())
-                .await
-                .map_err(ScheduleJobError::CheckExistingJobs)?;
-        for job in existing_jobs {
-            if matches!(job.status.into(), JobStatus::Scheduled | JobStatus::Running) {
-                return Ok(job.id.into());
-            }
-        }
-
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Register the job in the metadata db.
@@ -139,18 +133,63 @@ impl Scheduler {
             .await
             .map_err(ScheduleJobError::BeginTransaction)?;
 
-        let job_id = metadata_db::jobs::register(&mut tx, &node_id, job_descriptor)
+        // A concurrent request may have scheduled this job between the pre-tx
+        // optimization check and this point.
+        let existing_in_tx = metadata_db::jobs::get_by_idempotency_key(&mut tx, &idempotency_key)
+            .await
+            .map_err(ScheduleJobError::CheckExistingJobs)?;
+
+        if let Some(existing) = active_job(existing_in_tx.as_ref()) {
+            let existing_desc =
+                metadata_db::job_events::get_latest_descriptor(&mut tx, &existing.id.into())
+                    .await
+                    .map_err(ScheduleJobError::GetLatestDescriptor)?
+                    .ok_or(ScheduleJobError::DescriptorNotFound(existing.id.into()))?;
+
+            if job_descriptor == existing_desc {
+                return Ok(existing.id.into());
+            } else {
+                return Err(ScheduleJobError::ActiveJobConflict {
+                    job_id: existing.id.into(),
+                });
+            }
+        }
+
+        let scheduled_job_status = JobStatus::Scheduled;
+        let detail_raw: metadata_db::jobs::JobDescriptorRaw<'static> = job_descriptor.into();
+        let detail: metadata_db::job_events::EventDetail<'static> = detail_raw.into();
+
+        let job_id: JobId = metadata_db::jobs::register(&mut tx, idempotency_key, &node_id)
             .await
             .map(Into::into)
             .map_err(ScheduleJobError::RegisterJob)?;
 
-        metadata_db::job_status::register(&mut tx, job_id, &node_id, JobStatus::Scheduled.into())
+        if existing_in_tx.is_some() {
+            // Previous job exists but is inactive (completed/failed) — reschedule it
+            metadata_db::job_status::reschedule(&mut tx, job_id, &node_id, &detail)
+                .await
+                .map_err(ScheduleJobError::RescheduleJobStatus)?;
+        } else {
+            metadata_db::job_status::register(
+                &mut tx,
+                job_id,
+                &node_id,
+                scheduled_job_status,
+                Some(detail.clone()),
+            )
             .await
             .map_err(ScheduleJobError::RegisterJobStatus)?;
+        }
 
-        metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Scheduled, None)
-            .await
-            .map_err(ScheduleJobError::RegisterJobEvent)?;
+        metadata_db::job_events::register(
+            &mut tx,
+            job_id,
+            &node_id,
+            scheduled_job_status,
+            Some(detail),
+        )
+        .await
+        .map_err(ScheduleJobError::RegisterJobEvent)?;
 
         metadata_db::workers::send_job_notif(&mut tx, node_id, &JobNotification::start(job_id))
             .await
@@ -252,11 +291,25 @@ impl Scheduler {
             return Ok(());
         }
 
+        // Batch-fetch descriptors for all failed jobs to avoid N+1 queries
+        let job_ids: Vec<metadata_db::jobs::JobId> = failed_jobs.iter().map(|j| j.job.id).collect();
+        let descriptor_list =
+            metadata_db::job_events::list_latest_descriptors(&self.metadata_db, &job_ids)
+                .await
+                .map_err(ReconcileFailedJobsError::GetLatestDescriptor)?;
+        let descriptors: HashMap<_, _> = descriptor_list.into_iter().collect();
+
         for job_with_retry in failed_jobs {
             let job = &job_with_retry.job;
             let job_id: JobId = job.id.into();
             let retry_index = job_with_retry.next_retry_index;
-
+            let Some(descriptor_raw) = descriptors.get(&job.id).cloned() else {
+                tracing::error!(
+                    job_id = %job_id,
+                    "descriptor not found for failed job, skipping retry"
+                );
+                continue;
+            };
             let result: Result<(), RescheduleJobError> = async {
                 let mut tx = self
                     .metadata_db
@@ -264,9 +317,16 @@ impl Scheduler {
                     .await
                     .map_err(RescheduleJobError::BeginTransaction)?;
 
-                metadata_db::jobs::reschedule(&mut tx, job.id, job.node_id.clone(), retry_index)
-                    .await
-                    .map_err(RescheduleJobError::RescheduleJob)?;
+                // Registers in job_status and job_events
+                metadata_db::jobs::reschedule(
+                    &mut tx,
+                    job.id,
+                    job.node_id.clone(),
+                    descriptor_raw,
+                    retry_index,
+                )
+                .await
+                .map_err(RescheduleJobError::RescheduleJob)?;
 
                 metadata_db::workers::send_job_notif(
                     &mut tx,
@@ -308,6 +368,13 @@ pub enum ReconcileFailedJobsError {
     /// no retry scheduling can proceed.
     #[error("failed to get failed jobs ready for retry")]
     GetFailedJobsReadyForRetry(#[source] metadata_db::Error),
+
+    /// Failed to get the latest job descriptor for a job
+    ///
+    /// This occurs when the database query to retrieve the latest job descriptor
+    /// fails. Without this descriptor, the job cannot be rescheduled.
+    #[error("failed to get latest job descriptor")]
+    GetLatestDescriptor(#[source] metadata_db::Error),
 }
 
 /// Errors that occur when rescheduling a single failed job for retry
@@ -351,11 +418,11 @@ pub enum RescheduleJobError {
 impl SchedulerJobs for Scheduler {
     async fn schedule_job(
         &self,
-        dataset_reference: HashReference,
+        idempotency_key: IdempotencyKey<'static>,
         job_descriptor: JobDescriptor,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError> {
-        self.schedule_job_impl(dataset_reference, job_descriptor, worker_id)
+        self.schedule_job_impl(idempotency_key, job_descriptor, worker_id)
             .await
     }
 
@@ -432,15 +499,50 @@ impl SchedulerJobs for Scheduler {
         name: &Name,
         hash: &Hash,
     ) -> Result<Vec<Job>, ListJobsByDatasetError> {
-        let jobs =
-            metadata_db::jobs::list_by_dataset_reference(&self.metadata_db, namespace, name, hash)
-                .await
-                .map_err(ListJobsByDatasetError)?
-                .into_iter()
-                .map(Into::into)
-                .collect();
+        let jobs = metadata_db::job_status::list_by_dataset_reference(
+            &self.metadata_db,
+            namespace,
+            name,
+            hash,
+        )
+        .await
+        .map_err(ListJobsByDatasetError)?
+        .into_iter()
+        .map(Into::into)
+        .collect();
         Ok(jobs)
     }
+
+    async fn get_job_descriptor(
+        &self,
+        job_id: JobId,
+    ) -> Result<Option<JobDescriptorRawOwned>, GetJobDescriptorError> {
+        let descriptor = metadata_db::job_events::get_latest_descriptor(&self.metadata_db, &job_id)
+            .await
+            .map_err(GetJobDescriptorError)?;
+        Ok(descriptor)
+    }
+
+    async fn list_job_descriptors(
+        &self,
+        job_ids: Vec<JobId>,
+    ) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, ListJobDescriptorsError> {
+        let job_ids: Vec<metadata_db::jobs::JobId> =
+            job_ids.into_iter().map(|id| id.into()).collect();
+        let descriptors: Vec<(JobId, JobDescriptorRawOwned)> =
+            metadata_db::job_events::list_latest_descriptors(&self.metadata_db, &job_ids)
+                .await
+                .map_err(ListJobDescriptorsError)?
+                .into_iter()
+                .map(|(job_id, descriptor)| (job_id.into(), descriptor))
+                .collect();
+        Ok(descriptors)
+    }
+}
+
+/// Return a reference to the job if it is still active (scheduled or running).
+fn active_job(job: Option<&metadata_db::jobs::Job>) -> Option<&metadata_db::jobs::Job> {
+    job.filter(|j| matches!(j.status.into(), JobStatus::Scheduled | JobStatus::Running))
 }
 
 #[async_trait]

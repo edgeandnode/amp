@@ -1,6 +1,7 @@
 //! DB integration tests for the workers queue
 
 use crate::{
+    job_events,
     jobs::{self, JobStatus},
     tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
     workers::WorkerNodeId,
@@ -23,7 +24,7 @@ async fn schedule_and_retrieve_job() {
 
     //* When
     // Register the job
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     // Get the job
     let job = jobs::get_by_id(&conn, job_id)
@@ -35,8 +36,12 @@ async fn schedule_and_retrieve_job() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
+    let desc = job_events::get_latest_descriptor(&conn, job_id)
+        .await
+        .expect("Failed to get job descriptor")
+        .expect("Job descriptor not found");
     let roundtripped: serde_json::Value =
-        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+        serde_json::from_str(desc.as_str()).expect("Failed to parse descriptor");
     assert_eq!(roundtripped, job_desc_json);
 }
 
@@ -55,7 +60,7 @@ async fn pagination_traverses_all_jobs_ordered() {
             "table": "test-table",
         }));
 
-        let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+        let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
         created_job_ids.push(job_id);
     }
 

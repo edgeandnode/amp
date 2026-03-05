@@ -3,9 +3,11 @@
 use sqlx::{Executor, Postgres};
 
 use crate::{
+    datasets::{DatasetName, DatasetNamespace},
     job_events::EventDetail,
     job_status::{JobStatus, JobStatusUpdateError},
-    jobs::JobId,
+    jobs::{Job, JobId},
+    manifests::ManifestHash,
     workers::WorkerNodeId,
 };
 
@@ -19,19 +21,21 @@ pub async fn insert<'c, E>(
     job_id: JobId,
     node_id: &WorkerNodeId<'_>,
     status: JobStatus,
+    detail: Option<EventDetail<'_>>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO jobs_status (job_id, node_id, status, updated_at)
-        VALUES ($1, $2, $3, (timezone('UTC', now())))
+        INSERT INTO jobs_status (job_id, node_id, status, detail, updated_at)
+        VALUES ($1, $2, $3, $4, (timezone('UTC', now())))
         ON CONFLICT (job_id) DO NOTHING
     "#};
     sqlx::query(query)
         .bind(job_id)
         .bind(node_id)
         .bind(status)
+        .bind(detail)
         .execute(exe)
         .await?;
     Ok(())
@@ -111,6 +115,7 @@ pub async fn reschedule<'c, E>(
     exe: E,
     job_id: JobId,
     new_node_id: &WorkerNodeId<'_>,
+    detail: &EventDetail<'_>,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -120,6 +125,7 @@ where
         SET
             status = $3,
             node_id = $2,
+            detail = $4,
             updated_at = timezone('UTC', now())
         WHERE job_id = $1
     "#};
@@ -128,8 +134,47 @@ where
         .bind(job_id)
         .bind(new_node_id)
         .bind(JobStatus::Scheduled)
+        .bind(detail)
         .execute(exe)
         .await?;
 
     Ok(())
+}
+
+/// List jobs by dataset reference (namespace, name, and manifest hash)
+///
+/// Queries the job descriptor JSONB field directly, avoiding joins to physical_tables.
+pub async fn list_by_dataset_reference<'c, E>(
+    exe: E,
+    dataset_namespace: DatasetNamespace<'_>,
+    dataset_name: DatasetName<'_>,
+    manifest_hash: ManifestHash<'_>,
+) -> Result<Vec<Job>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            je.job_id as id,
+            js.node_id,
+            js.status,
+            je.detail as descriptor,
+            je.created_at,
+            js.updated_at
+        FROM jobs_status js
+        INNER JOIN job_events je ON js.job_id = je.job_id
+        WHERE je.detail->>'dataset_namespace' = $1
+          AND je.detail->>'dataset_name' = $2
+          AND je.detail->>'manifest_hash' = $3
+          AND je.event_type = $4
+        ORDER BY je.id ASC
+    "#};
+    let res = sqlx::query_as(query)
+        .bind(&dataset_namespace)
+        .bind(&dataset_name)
+        .bind(&manifest_hash)
+        .bind(JobStatus::Scheduled)
+        .fetch_all(exe)
+        .await?;
+    Ok(res)
 }

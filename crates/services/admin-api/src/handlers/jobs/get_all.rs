@@ -56,6 +56,7 @@ pub struct QueryParams {
 /// - `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value (>1000)
 /// - `LIMIT_INVALID`: Limit is zero
 /// - `LIST_JOBS_ERROR`: Failed to list jobs from scheduler (database error)
+/// - `LIST_JOB_DESCRIPTORS_ERROR`: Failed to list job descriptors from metadata database
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -128,11 +129,24 @@ pub async fn handler(
 
     // Determine next cursor (ID of the last job in this page)
     let next_cursor = jobs.last().map(|job| job.id);
-    let jobs = jobs
+    let mut jobs: Vec<JobInfo> = jobs
         .into_iter()
         .take(limit)
         .map(Into::into)
         .collect::<Vec<_>>();
+
+    let job_ids: Vec<JobId> = jobs.iter().map(|job| job.id).collect::<Vec<_>>();
+
+    let descriptors = ctx
+        .scheduler
+        .list_job_descriptors(job_ids)
+        .await
+        .map_err(|err| {
+            tracing::debug!(error = %err, error_source = logging::error_source(&err), "failed to list job descriptors");
+            Error::ListJobDescriptors(err)
+        })?;
+
+    JobInfo::attach_descriptors(&mut jobs, descriptors);
 
     Ok(Json(JobsResponse { jobs, next_cursor }))
 }
@@ -237,6 +251,15 @@ pub enum Error {
     /// - Connection pool is exhausted or unavailable
     #[error("failed to list jobs")]
     ListJobs(#[source] scheduler::ListJobsError),
+
+    /// Failed to list job descriptors
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during job descriptor listing query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to list job descriptors")]
+    ListJobDescriptors(#[source] scheduler::ListJobDescriptorsError),
 }
 
 impl IntoErrorResponse for Error {
@@ -246,6 +269,7 @@ impl IntoErrorResponse for Error {
             Error::LimitTooLarge { .. } => "LIMIT_TOO_LARGE",
             Error::LimitInvalid => "LIMIT_INVALID",
             Error::ListJobs(_) => "LIST_JOBS_ERROR",
+            Error::ListJobDescriptors(_) => "LIST_JOB_DESCRIPTORS_ERROR",
         }
     }
 
@@ -255,6 +279,7 @@ impl IntoErrorResponse for Error {
             Error::LimitTooLarge { .. } => StatusCode::BAD_REQUEST,
             Error::LimitInvalid => StatusCode::BAD_REQUEST,
             Error::ListJobs(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ListJobDescriptors(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

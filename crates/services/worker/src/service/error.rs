@@ -238,6 +238,16 @@ pub enum SpawnJobError {
     /// - Job already in a terminal state (completed, failed, stopped)
     #[error("failed to update job status to RUNNING: {0}")]
     StatusUpdateFailed(#[source] metadata_db::Error),
+
+    /// Failed to get latest job descriptor.
+    ///
+    /// This occurs when querying the metadata database for the job's descriptor fails.
+    ///
+    /// Common causes include:
+    /// - Database connection failures
+    /// - Database query execution errors
+    #[error("failed to get latest job descriptor: {0}")]
+    GetLatestJobDescriptorFailed(#[source] metadata_db::Error),
 }
 
 /// Errors that can occur when aborting a job.

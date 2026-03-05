@@ -15,7 +15,7 @@ async fn register_inserts_event() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "event"}));
 
     //* When
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* Then
     let attempts = job_events::get_attempts_for_job(&conn, job_id)
@@ -31,19 +31,31 @@ async fn get_attempts_returns_only_scheduled_events() {
     //* Given
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
-    let job_desc = raw_descriptor(&serde_json::json!({"test": "filter"}));
+    let sample_job_desc = raw_descriptor(&serde_json::json!({"test": "filter"}));
 
     // Insert a mix of event types
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &sample_job_desc, &worker_id, None, None).await;
     job_events::register(&conn, job_id, &worker_id, JobStatus::Running, None)
         .await
         .expect("Failed to register RUNNING");
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Error, None)
-        .await
-        .expect("Failed to register ERROR");
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Scheduled, None)
-        .await
-        .expect("Failed to register second SCHEDULED");
+    job_events::register(
+        &conn,
+        job_id,
+        &worker_id,
+        JobStatus::Error,
+        Some(sample_job_desc.clone().into()),
+    )
+    .await
+    .expect("Failed to register ERROR");
+    job_events::register(
+        &conn,
+        job_id,
+        &worker_id,
+        JobStatus::Scheduled,
+        Some(sample_job_desc.into()),
+    )
+    .await
+    .expect("Failed to register second SCHEDULED");
 
     //* When
     let attempts = job_events::get_attempts_for_job(&conn, job_id)
@@ -64,12 +76,18 @@ async fn get_attempts_scoped_to_job() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "scope"}));
 
     // Insert events for both jobs
-    let job_id_1 = register_job(&conn, &job_desc, &worker_id, None).await;
-    job_events::register(&conn, job_id_1, &worker_id, JobStatus::Scheduled, None)
-        .await
-        .expect("Failed to register second event for job 1");
+    let job_id_1 = register_job(&conn, &job_desc, &worker_id, None, None).await;
+    job_events::register(
+        &conn,
+        job_id_1,
+        &worker_id,
+        JobStatus::Scheduled,
+        Some(job_desc.clone().into()),
+    )
+    .await
+    .expect("Failed to register second event for job 1");
 
-    let job_id_2 = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id_2 = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     let attempts_1 = job_events::get_attempts_for_job(&conn, job_id_1)

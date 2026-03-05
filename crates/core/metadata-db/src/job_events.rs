@@ -13,7 +13,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 use crate::{
     Error,
     db::Executor,
-    jobs::{JobId, JobStatus},
+    jobs::{JobDescriptorRawOwned, JobId, JobStatus},
     workers::WorkerNodeId,
 };
 
@@ -44,6 +44,7 @@ where
 {
     let status = status.into();
     let detail: Option<EventDetail<'_>> = detail.into();
+
     sql::insert(exe, job_id.into(), node_id, status, detail.as_ref())
         .await
         .map_err(Error::Database)
@@ -75,6 +76,39 @@ where
     E: Executor<'c>,
 {
     sql::get_attempts_for_job(exe, job_id.into())
+        .await
+        .map_err(Error::Database)
+}
+
+/// Get the most recent descriptor from a job's SCHEDULED events.
+///
+/// Returns `None` if no SCHEDULED event with a detail exists for the job.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_latest_descriptor<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<Option<JobDescriptorRawOwned>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_latest_descriptor(exe, job_id.into())
+        .await
+        .map_err(Error::Database)
+}
+
+/// Get latest job descriptor for each of the given jobs
+///
+/// Returns one `(job_id, detail)` pair per job, using the most recent
+/// SCHEDULED event in `job_events`.
+#[tracing::instrument(skip(exe), err)]
+pub async fn list_latest_descriptors<'c, E>(
+    exe: E,
+    job_ids: &[JobId],
+) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::list_latest_descriptors(exe, job_ids)
         .await
         .map_err(Error::Database)
 }

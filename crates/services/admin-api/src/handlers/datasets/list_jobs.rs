@@ -1,6 +1,7 @@
 //! Dataset jobs listing handler
 
 use amp_datasets_registry::error::ResolveRevisionError;
+use amp_worker_core::jobs::job_id::JobId;
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -38,6 +39,7 @@ use crate::{
 /// - `DATASET_NOT_FOUND`: Dataset revision does not exist
 /// - `RESOLVE_REVISION_ERROR`: Failed to resolve dataset revision (database error)
 /// - `LIST_JOBS_ERROR`: Failed to list jobs from metadata database (database error)
+/// - `LIST_JOB_DESCRIPTORS_ERROR`: Failed to list job descriptors from metadata database
 ///
 /// This handler:
 /// - Validates and extracts the dataset reference from the URL path
@@ -114,7 +116,21 @@ pub async fn handler(
             Error::ListJobs(err)
         })?;
 
-    let jobs = jobs.into_iter().map(Into::into).collect::<Vec<_>>();
+    let mut jobs: Vec<JobInfo> = jobs.into_iter().map(Into::into).collect::<Vec<_>>();
+    let job_ids: Vec<JobId> = jobs.iter().map(|job| job.id).collect::<Vec<_>>();
+    let descriptors = ctx
+        .scheduler
+        .list_job_descriptors(job_ids)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to list job descriptors"
+            );
+            Error::ListJobDescriptors(err)
+        })?;
+    JobInfo::attach_descriptors(&mut jobs, descriptors);
 
     Ok(Json(JobsResponse { jobs }))
 }
@@ -177,6 +193,16 @@ pub enum Error {
     /// - Metadata database query for jobs filtered by manifest hash fails
     #[error("failed to list jobs for dataset")]
     ListJobs(#[source] scheduler::ListJobsByDatasetError),
+
+    /// Failed to list job descriptors from the metadata database
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    /// - Metadata database query for job descriptors fails
+    #[error("failed to list job descriptors")]
+    ListJobDescriptors(#[source] scheduler::ListJobDescriptorsError),
 }
 
 impl IntoErrorResponse for Error {
@@ -186,6 +212,7 @@ impl IntoErrorResponse for Error {
             Error::ResolveRevision(_) => "RESOLVE_REVISION_ERROR",
             Error::DatasetNotFound { .. } => "DATASET_NOT_FOUND",
             Error::ListJobs(_) => "LIST_JOBS_ERROR",
+            Error::ListJobDescriptors(_) => "LIST_JOB_DESCRIPTORS_ERROR",
         }
     }
 
@@ -195,6 +222,7 @@ impl IntoErrorResponse for Error {
             Error::ResolveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetNotFound { .. } => StatusCode::NOT_FOUND,
             Error::ListJobs(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ListJobDescriptors(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
