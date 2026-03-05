@@ -6,6 +6,7 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
+amp-parquet = { path = "../amp-parquet" }
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
@@ -20,7 +21,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
-parquet-ext = { path = "../../parquet-ext", features = ["async", "zstd"] }
 
 [dev-dependencies]
 opentelemetry.workspace = true

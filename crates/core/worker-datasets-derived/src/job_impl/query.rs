@@ -1,14 +1,16 @@
 use std::{sync::Arc, time::Instant};
 
 use amp_data_store::file_name::FileName;
+use amp_parquet::{
+    commit::{CommitMetadataError, commit_metadata},
+    generation::Generation,
+    retry::RetryableErrorExt as _,
+    writer::{ParquetFileWriter, ParquetFileWriterCloseError, ParquetFileWriterOutput},
+};
 use amp_worker_core::{
     Ctx, WriterProperties,
     compaction::{AmpCompactor, AmpCompactorTaskError},
     metrics,
-    parquet_writer::{
-        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
-        ParquetFileWriterOutput, commit_metadata,
-    },
     progress::{ProgressReporter, ProgressUpdate},
     retryable::RetryableErrorExt,
 };
@@ -18,13 +20,12 @@ use common::{
     cursor::Cursor,
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
-    metadata::Generation,
-    parquet::errors::ParquetError,
     physical_table::PhysicalTable,
     streaming_query::{
         QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
     },
 };
+use datafusion::parquet::errors::ParquetError;
 use futures::StreamExt as _;
 use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
@@ -81,7 +82,9 @@ pub async fn materialize_sql_query(
         ctx.data_store.clone(),
         buf_writer,
         filename,
-        physical_table.clone(),
+        physical_table.schema(),
+        physical_table.table_ref_compact(),
+        &*physical_table,
         opts.max_row_group_bytes,
         opts.parquet.clone(),
     )
@@ -190,7 +193,9 @@ pub async fn materialize_sql_query(
                     ctx.data_store.clone(),
                     buf_writer,
                     filename,
-                    physical_table.clone(),
+                    physical_table.schema(),
+                    physical_table.table_ref_compact(),
+                    &*physical_table,
                     opts.max_row_group_bytes,
                     opts.parquet.clone(),
                 )

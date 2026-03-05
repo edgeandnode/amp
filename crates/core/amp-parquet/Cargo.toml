@@ -1,20 +1,21 @@
 [package]
-name = "amp-worker-datasets-derived"
+name = "amp-parquet"
 edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
-amp-parquet = { path = "../amp-parquet" }
-common = { path = "../common" }
+bytes.workspace = true
 datafusion.workspace = true
+datafusion-datasource.workspace = true
 datasets-common = { path = "../datasets-common" }
-datasets-derived = { path = "../datasets-derived" }
-amp-worker-core = { path = "../worker-core" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
+object_store.workspace = true
+parquet-ext = { path = "../../parquet-ext", features = ["async", "zstd"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+url.workspace = true

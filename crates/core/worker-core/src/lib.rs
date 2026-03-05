@@ -16,7 +16,6 @@ pub mod config;
 pub mod jobs;
 pub mod metrics;
 pub mod node_id;
-pub mod parquet_writer;
 pub mod progress;
 pub mod retryable;
 pub mod tasks;
@@ -43,10 +42,15 @@ use crate::{
 /// Dataset dump context
 #[derive(Clone)]
 pub struct Ctx {
+    /// Worker configuration (intervals, timeouts, etc.).
     pub config: Config,
+    /// Connection pool for the metadata database.
     pub metadata_db: MetadataDb,
+    /// In-memory cache of resolved dataset definitions.
     pub datasets_cache: DatasetsCache,
+    /// Cache of compiled ethcall UDF definitions.
     pub ethcall_udfs_cache: EthCallUdfsCache,
+    /// Object store abstraction for reading/writing Parquet files.
     pub data_store: DataStore,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
@@ -55,13 +59,21 @@ pub struct Ctx {
 }
 
 #[derive(Debug, Clone)]
+/// Parquet writing and compaction configuration resolved from [`ParquetConfig`].
 pub struct WriterProperties {
+    /// Low-level Parquet encoding settings (compression, bloom filters, etc.).
     pub parquet: ParquetWriterProperties,
+    /// Compaction algorithm and scheduling configuration.
     pub compactor: CompactorProperties,
+    /// Garbage-collection scheduling configuration.
     pub collector: CollectorProperties,
+    /// Target segment size limit that triggers file splits.
     pub partition: SegmentSizeLimit,
+    /// Maximum in-memory cache size in bytes for Parquet footer metadata.
     pub cache_size_mb: usize,
+    /// Maximum uncompressed size of a single row group before flushing.
     pub max_row_group_bytes: usize,
+    /// Wall-clock duration after which an open segment is flushed.
     pub segment_flush_interval: Duration,
 }
 

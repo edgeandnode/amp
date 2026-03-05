@@ -6,11 +6,8 @@ use std::{
     time::Duration,
 };
 
-use common::{
-    Timestamp,
-    arrow::array::ArrowNativeTypeOp,
-    metadata::{Generation, SegmentSize},
-};
+use amp_parquet::{generation::Generation, timestamp::Timestamp};
+use common::{arrow::array::ArrowNativeTypeOp, metadata::SegmentSize};
 
 /// Represents a ratio of two integers, for example `3/2` or `1.5`. Simplifies
 /// floating point math into integer math for more predictable behavior. This

@@ -1,11 +1,10 @@
 use amp_data_store::{PhyTableRevisionFileMetadata, file_name::FileName};
+use amp_parquet::meta::ParquetMeta;
 use metadata_db::{
     files::{FileId, FileMetadataWithDetails as FileMetadataRow},
     physical_table_revision::LocationId,
 };
 use object_store::{ObjectMeta, path::Path};
-
-use crate::metadata::parquet::ParquetMeta;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {

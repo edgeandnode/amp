@@ -1,92 +1,19 @@
 use std::{
     array::TryFromSliceError,
     num::NonZeroI64,
-    ops::{Add, AddAssign, Deref, Mul, Not},
+    ops::{Add, AddAssign, Mul, Not},
 };
 
+use amp_parquet::{
+    generation::Generation,
+    meta::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+};
 use chrono::{DateTime, Utc};
 use datafusion::{
     arrow::array::ArrowNativeTypeOp,
     parquet::{arrow::arrow_reader::ArrowReaderMetadata, file::metadata::RowGroupMetaData},
 };
 use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
-
-use crate::metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta};
-
-/// Represents the generation of a file, used to track how many times it has been compacted.
-/// Each compaction operation increments the generation by 1.
-/// A generation of 0 indicates the file is in its original, raw state.
-/// This is useful for compaction algorithms that may want to prioritize
-/// or treat files differently based on their generation.
-///
-/// # Examples
-/// ```
-/// # use common::metadata::size::Generation;
-/// # use std::ops::{Add, AddAssign};
-/// let mut generation = Generation::default(); // Raw file
-/// assert_eq!(*generation, 0u64);
-/// assert!(generation.is_raw());
-/// generation += 1_u64; // First compaction
-/// assert_eq!(*generation, 1u64);
-/// assert!(!generation.is_raw());
-/// let second_generation = generation + 1_u64; // Second compaction
-/// assert_eq!(*second_generation, 2u64);
-/// assert!(!second_generation.is_raw());
-/// assert!(second_generation > generation);
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct Generation(u64);
-
-impl Generation {
-    pub fn is_raw(&self) -> bool {
-        self.0 == 0
-    }
-
-    pub fn is_compacted(&self) -> bool {
-        self.0 > 0
-    }
-}
-
-impl Add<u64> for Generation {
-    type Output = Self;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        Self(self.0.saturating_add(rhs))
-    }
-}
-
-impl AddAssign<u64> for Generation {
-    fn add_assign(&mut self, rhs: u64) {
-        self.0 = self.0.saturating_add(rhs);
-    }
-}
-
-impl Deref for Generation {
-    type Target = u64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Generation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<u64> for Generation {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-impl From<Generation> for u64 {
-    fn from(val: Generation) -> Self {
-        val.0
-    }
-}
-
 /// Represents the size of a Segment (one or more parquet files) in four dimensions: blocks, bytes, rows, and count.
 ///
 /// This struct is used to track file sizes for compaction operations, allowing the
@@ -100,7 +27,8 @@ impl From<Generation> for u64 {
 /// # Examples
 ///
 /// ```
-/// # use common::metadata::{SegmentSize, Generation};
+/// # use common::metadata::SegmentSize;
+/// # use amp_parquet::generation::Generation;
 /// // Create a SegmentSize representing a file with 1000 blocks, 1MB of data, and 5000 rows
 /// let size = SegmentSize {
 ///     length: 1,
@@ -342,7 +270,7 @@ impl<'a> From<&'a ArrowReaderMetadata> for SegmentSize {
             })
             .and_then(|kv| kv.value.as_deref())
             .and_then(|v| v.parse::<u64>().ok())
-            .map(Generation)
+            .map(Generation::from)
             .unwrap_or_default();
 
         let created_at = file_metadata
@@ -553,30 +481,30 @@ mod test {
     use std::sync::Arc;
 
     use amp_data_store::file_name::FileName;
+    use amp_parquet::{
+        meta::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+        timestamp::Timestamp,
+    };
     use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
 
-    use crate::{
-        Timestamp,
-        metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
-        parquet::{
-            basic::{Repetition, Type as PhysicalType},
-            file::{
-                metadata::{
-                    ColumnChunkMetaData, FileMetaData, KeyValue, ParquetMetaData,
-                    ParquetMetaDataBuilder, RowGroupMetaData,
-                },
-                statistics::Statistics,
+    use crate::parquet::{
+        basic::{Repetition, Type as PhysicalType},
+        file::{
+            metadata::{
+                ColumnChunkMetaData, FileMetaData, KeyValue, ParquetMetaData,
+                ParquetMetaDataBuilder, RowGroupMetaData,
             },
-            schema::types::{ColumnDescriptor, ColumnPath, SchemaDescriptor, Type},
+            statistics::Statistics,
         },
+        schema::types::{ColumnDescriptor, ColumnPath, SchemaDescriptor, Type},
     };
 
     /// Create a Parquet metadata object for testing.
     ///
     /// # Sanity Check
     /// ```
+    /// use amp_parquet::timestamp::Timestamp;
     /// use amp_worker_core::compaction::size::test;
-    /// use common::Timestamp;
     /// let now = Timestamp::now();
     /// let meta = test::parquet_meta(1000, 3, 400, 100, 10000, 2u64.into(), now);
     /// assert_eq!(meta.file_metadata().num_rows(), 3000);
@@ -787,8 +715,8 @@ mod test {
     }
 
     #[test]
-    fn segment_size_calc() {
-        use crate::metadata::{ArrowReaderOptions, size::ArrowReaderMetadata};
+    fn segment_size_from_metadata_with_valid_parquet_computes_correctly() {
+        use crate::parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 
         let options = ArrowReaderOptions::new().with_page_index(true);
         let now = Timestamp::now();
@@ -808,7 +736,7 @@ mod test {
     }
 
     #[test]
-    fn segment_size_display() {
+    fn segment_size_display_with_populated_and_default_formats_correctly() {
         let now = Timestamp::now();
         let created_at = now.0.as_micros();
         let created_at_dt =

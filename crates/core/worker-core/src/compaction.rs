@@ -12,8 +12,9 @@ use std::{
 
 pub use algorithm::{CompactionAlgorithm, Overflow, SegmentSizeLimit};
 use amp_data_store::DataStore;
+use amp_parquet::timestamp::Timestamp;
 pub use collector::{Collector, CollectorProperties};
-use common::{Timestamp, physical_table::PhysicalTable};
+use common::physical_table::PhysicalTable;
 pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
 use futures::FutureExt;

@@ -1,23 +1,13 @@
-use std::sync::Arc;
-
-use amp_data_store::{DataStore, HeadInObjectStoreError, file_name::FileName};
-use common::{
-    BlockRange, Timestamp,
-    arrow::array::RecordBatch,
-    metadata::{
-        Generation, extract_footer_bytes_from_file,
-        parquet::{
-            GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
-        },
-    },
+use amp_data_store::{DataStore, HeadInObjectStoreError, PhyTableRevision, file_name::FileName};
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
     parquet::{
         errors::ParquetError,
         file::{metadata::KeyValue, properties::WriterProperties as ParquetWriterProperties},
     },
-    physical_table::PhysicalTable,
 };
+use datasets_common::{block_range::BlockRange, table_name::TableName};
 use metadata_db::{
-    MetadataDb,
     files::{FileId, FooterBytes},
     physical_table_revision::LocationId,
 };
@@ -25,127 +15,68 @@ use object_store::{ObjectMeta, buffered::BufWriter};
 use parquet_ext::arrow::async_writer::AsyncArrowWriter;
 use url::Url;
 
-use crate::retryable::RetryableErrorExt;
+use crate::{
+    footer::extract_footer_bytes_from_file,
+    generation::Generation,
+    meta::{
+        GENERATION_METADATA_KEY, PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta,
+    },
+    retry::RetryableErrorExt,
+    timestamp::Timestamp,
+};
 
-pub async fn commit_metadata(
-    metadata_db: &MetadataDb,
-    parquet_meta: ParquetMeta,
-    ObjectMeta {
-        size: object_size,
-        e_tag: object_e_tag,
-        version: object_version,
-        ..
-    }: ObjectMeta,
-    location_id: LocationId,
-    url: &Url,
-    footer: FooterBytes,
-) -> Result<(), CommitMetadataError> {
-    let file_name = parquet_meta.filename.clone();
-    let parquet_meta = serde_json::to_value(parquet_meta)
-        .map_err(CommitMetadataError::SerializeParquetMetadata)?;
-    metadata_db::files::register(
-        metadata_db,
-        location_id,
-        url,
-        file_name,
-        object_size,
-        object_e_tag,
-        object_version,
-        parquet_meta,
-        &footer,
-    )
-    .await
-    .map_err(CommitMetadataError::Register)?;
-
-    // Notify that the dataset has been changed
-    tracing::trace!("notifying location change for location_id: {}", location_id);
-    metadata_db::physical_table::send_location_change_notif(metadata_db, location_id)
-        .await
-        .map_err(CommitMetadataError::Notify)?;
-
-    Ok(())
+/// Identifies the storage target for a Parquet file: which table revision to write into and where.
+pub struct WriterTarget<'a> {
+    pub table_name: &'a TableName,
+    pub location_id: LocationId,
+    pub revision: &'a PhyTableRevision,
+    pub url: &'a Url,
 }
 
-/// Errors that occur when committing file metadata to the database
-///
-/// This error type is used by `commit_metadata()`.
-#[derive(Debug, thiserror::Error)]
-pub enum CommitMetadataError {
-    /// Failed to register file metadata in the database
-    ///
-    /// This error occurs when inserting the file metadata record into the
-    /// metadata database fails.
-    ///
-    /// Common causes:
-    /// - Database connection lost
-    /// - Constraint violation (duplicate file ID)
-    /// - Transaction timeout
-    #[error("Failed to register file metadata")]
-    Register(#[source] metadata_db::Error),
-
-    /// Failed to serialize parquet metadata to JSON
-    ///
-    /// This error occurs when converting the parquet metadata structure
-    /// to a JSON string for storage in the database.
-    ///
-    /// Common causes:
-    /// - Invalid UTF-8 in metadata fields
-    /// - Serialization of non-serializable types
-    #[error("Failed to serialize parquet metadata")]
-    SerializeParquetMetadata(#[source] serde_json::Error),
-
-    /// Failed to notify subscribers of location change
-    ///
-    /// This error occurs when publishing a notification about the new file
-    /// to the database notification channel fails.
-    ///
-    /// Common causes:
-    /// - Database connection lost
-    /// - Notification channel unavailable
-    /// - Payload too large
-    #[error("Failed to notify location change")]
-    Notify(#[source] metadata_db::Error),
-}
-
-impl RetryableErrorExt for CommitMetadataError {
-    fn is_retryable(&self) -> bool {
-        match self {
-            Self::Register(_) => true,
-            Self::SerializeParquetMetadata(_) => false,
-            Self::Notify(_) => true,
-        }
-    }
-}
-
+/// Writes RecordBatches into a Parquet file on the object store, embedding Amp metadata on close.
 pub struct ParquetFileWriter {
     store: DataStore,
     writer: AsyncArrowWriter<BufWriter>,
     filename: FileName,
-    table: Arc<PhysicalTable>,
+    table_ref_compact: String,
+    table_name: TableName,
+    location_id: LocationId,
+    revision: PhyTableRevision,
+    url: Url,
     max_row_group_bytes: usize,
     rows_written: usize,
 }
 
 impl ParquetFileWriter {
-    pub fn new(
+    /// Creates a new writer that will stream record batches into the given buffered writer.
+    #[expect(clippy::too_many_arguments)]
+    pub fn new<'a>(
         store: DataStore,
         writer: BufWriter,
         filename: FileName,
-        table: Arc<PhysicalTable>,
+        schema: SchemaRef,
+        table_ref_compact: impl AsRef<str>,
+        target: impl Into<WriterTarget<'a>>,
         max_row_group_bytes: usize,
         prop: ParquetWriterProperties,
     ) -> Result<Self, ParquetError> {
-        let writer = AsyncArrowWriter::try_new(writer, table.schema(), Some(prop))?;
+        let target = target.into();
+        let writer = AsyncArrowWriter::try_new(writer, schema, Some(prop))?;
         Ok(Self {
             store,
             writer,
             filename,
-            table,
+            table_ref_compact: table_ref_compact.as_ref().to_owned(),
+            table_name: target.table_name.clone(),
+            location_id: target.location_id,
+            revision: target.revision.clone(),
+            url: target.url.clone(),
             max_row_group_bytes,
             rows_written: 0,
         })
     }
 
+    /// Appends a record batch, flushing the row group when it approaches the configured size limit.
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
         self.rows_written += batch.num_rows();
         self.writer.write(batch).await?;
@@ -164,8 +95,9 @@ impl ParquetFileWriter {
         Ok(())
     }
 
+    /// Flushes remaining data, writes Amp metadata into the Parquet footer, and returns the output.
     #[must_use = "Dropping without closing the writer will result in an incomplete Parquet file."]
-    #[tracing::instrument(skip_all, fields(table = %self.table.table_ref_compact(), location = %self.table.location_id()), err)]
+    #[tracing::instrument(skip_all, fields(table = %self.table_ref_compact, location = %self.location_id), err)]
     pub async fn close(
         mut self,
         range: BlockRange,
@@ -178,7 +110,7 @@ impl ParquetFileWriter {
             .map_err(ParquetFileWriterCloseError::Flush)?;
 
         let parquet_meta = ParquetMeta {
-            table: self.table.table_name().to_string(),
+            table: self.table_name.to_string(),
             filename: self.filename.clone(),
             created_at: Timestamp::now(),
             ranges: vec![range.clone()],
@@ -212,7 +144,7 @@ impl ParquetFileWriter {
 
         let object_meta = self
             .store
-            .head_revision_file_in_object_store(self.table.revision(), &self.filename)
+            .head_revision_file_in_object_store(&self.revision, &self.filename)
             .await
             .map_err(ParquetFileWriterCloseError::HeadObject)?;
 
@@ -229,30 +161,28 @@ impl ParquetFileWriter {
             .await
             .map_err(ParquetFileWriterCloseError::ExtractFooter)?;
 
-        let location_id = self.table.location_id();
-        let url = self.table.url().clone();
-
         Ok(ParquetFileWriterOutput {
             parquet_meta,
             object_meta,
-            location_id,
-            url,
+            location_id: self.location_id,
+            url: self.url,
             parent_ids,
             footer,
         })
     }
 
-    // This is calculate as:
-    // size of row groups flushed to storage + encoded (but uncompressed) size of the in progress row group
+    /// Total bytes written: flushed row groups plus the in-progress row group's encoded size.
     pub fn bytes_written(&self) -> usize {
         self.writer.bytes_written() + self.writer.in_progress_size()
     }
 
+    /// Total number of rows written across all batches.
     pub fn rows_written(&self) -> usize {
         self.rows_written
     }
 }
 
+/// Formats a byte count as a human-readable string (B, KiB, MiB, or GiB).
 fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
@@ -268,6 +198,7 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Output produced by closing a [`ParquetFileWriter`], containing all data needed to commit the file.
 pub struct ParquetFileWriterOutput {
     pub parquet_meta: ParquetMeta,
     pub object_meta: ObjectMeta,
@@ -343,6 +274,7 @@ pub enum ParquetFileWriterCloseError {
 }
 
 impl RetryableErrorExt for ParquetFileWriterCloseError {
+    /// Returns `true` for I/O errors that may succeed on retry; serialization errors are fatal.
     fn is_retryable(&self) -> bool {
         match self {
             Self::Flush(_) => true,

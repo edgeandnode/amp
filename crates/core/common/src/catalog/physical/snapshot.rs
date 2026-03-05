@@ -1,6 +1,7 @@
 use std::{pin::pin, sync::Arc};
 
 use amp_data_store::{DataStore, GetCachedMetadataError};
+use amp_parquet::reader;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
@@ -20,7 +21,6 @@ use datafusion::{
 use datafusion_datasource::compute_all_files_statistics;
 use futures::{Stream, StreamExt as _};
 
-use super::reader;
 use crate::{
     BlockRange,
     catalog::logical::LogicalTable,

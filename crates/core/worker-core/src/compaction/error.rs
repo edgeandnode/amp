@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use amp_parquet::{retry::RetryableErrorExt as _, writer::ParquetFileWriterCloseError};
 use common::{
     parquet::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
@@ -12,9 +13,7 @@ use metadata_db::files::FileId;
 use object_store::{Error as ObjectStoreError, path::Error as PathError};
 use tokio::task::JoinError;
 
-use crate::{
-    WriterProperties, parquet_writer::ParquetFileWriterCloseError, retryable::RetryableErrorExt,
-};
+use crate::{WriterProperties, retryable::RetryableErrorExt};
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
 pub type CollectionResult<T> = Result<T, CollectorError>;
