@@ -1,5 +1,5 @@
 use std::{
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroU64},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -493,6 +493,10 @@ impl BlockStreamer for Client {
             })
             .await?;
         Ok(block.map(|b| b.header.number))
+    }
+
+    fn bucket_size(&self) -> Option<NonZeroU64> {
+        None
     }
 
     async fn wait_for_cleanup(self) -> Result<(), CleanupError> {

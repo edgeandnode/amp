@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroU64,
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -268,6 +269,10 @@ impl BlockStreamer for Client {
                 metrics.record_stream_duration(duration, &provider, &network);
             }
         }
+    }
+
+    fn bucket_size(&self) -> Option<NonZeroU64> {
+        None
     }
 
     async fn wait_for_cleanup(self) -> Result<(), CleanupError> {

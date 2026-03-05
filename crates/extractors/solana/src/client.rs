@@ -7,7 +7,7 @@
 //! Learn more about the Old Faithful archive here: <https://docs.old-faithful.net/>.
 
 use std::{
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroU64},
     path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
@@ -362,6 +362,11 @@ impl BlockStreamer for Client {
             Err(e) if rpc_client::is_block_missing_err(&e) => Ok(None),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn bucket_size(&self) -> Option<NonZeroU64> {
+        const _: () = assert!(solana_clock::DEFAULT_SLOTS_PER_EPOCH > 0);
+        NonZeroU64::new(solana_clock::DEFAULT_SLOTS_PER_EPOCH)
     }
 
     async fn wait_for_cleanup(self) -> Result<(), CleanupError> {

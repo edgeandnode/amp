@@ -81,6 +81,7 @@
 
 use std::{
     collections::BTreeMap,
+    num::NonZeroU64,
     ops::RangeInclusive,
     sync::{
         Arc, Mutex,
@@ -614,8 +615,16 @@ async fn dump_ranges<S: BlockStreamer + Send + Sync>(
     );
 
     // Split them across the target number of writers as to balance the number of blocks per writer.
-    let missing_dataset_ranges =
-        split_and_partition(missing_dataset_ranges, max_writers as u64, 2000);
+    let missing_dataset_ranges = if let Some(bucket_size) = client.bucket_size() {
+        split_and_partition_bucketed(
+            missing_dataset_ranges,
+            max_writers as u64,
+            2000,
+            bucket_size,
+        )
+    } else {
+        split_and_partition(missing_dataset_ranges, max_writers as u64, 2000)
+    };
 
     // Extract table names for progress reporting
     let table_names: Vec<TableName> = tables.iter().map(|(t, _)| t.table_name().clone()).collect();
@@ -796,13 +805,12 @@ fn split_and_partition(
         return vec![];
     }
 
-    let range_blocks = |r: &RangeInclusive<BlockNum>| -> u64 { (*r.end() - *r.start()) + 1 };
-    let total_blocks =
-        |ranges: &[RangeInclusive<BlockNum>]| -> u64 { ranges.iter().map(range_blocks).sum() };
     let target_partition_blocks = total_blocks(&ranges).div_ceil(n).max(min_partition_blocks);
+
     let mut partitions: Vec<Vec<RangeInclusive<BlockNum>>> = Default::default();
     let mut current_partition: Vec<RangeInclusive<BlockNum>> = Default::default();
     let mut capacity = target_partition_blocks;
+
     while !ranges.is_empty() {
         let len = range_blocks(&ranges[0]);
         if len > capacity {
@@ -824,13 +832,107 @@ fn split_and_partition(
     assert!(
         partitions
             .iter()
-            .all(|p| total_blocks(p) >= min_partition_blocks)
+            .all(|p| total_blocks(p) >= min_partition_blocks),
+        "Partition contains fewer blocks than min_partition_blocks"
     );
     if !current_partition.is_empty() {
         partitions.push(current_partition);
     }
-    assert!(partitions.len() <= n as usize);
+    assert!(
+        partitions.len() <= n as usize,
+        "Number of partitions exceeds requested maximum"
+    );
     partitions
+}
+
+/// Partition ranges like [split_and_partition], while making sure not to split `bucket_size`
+/// buckets across partitions. This is important for some clients (e.g. Solana) which require that
+/// all blocks in a bucket are fetched by the same client instance.
+///
+/// Block ranges are first split at bucket boundaries (buckets are `[0..N-1]`, `[N..2N-1]`,
+/// `[2N..3N-1]`, etc.) and the partitioning ensures that no bucket is split across multiple
+/// partitions. Multiple buckets may share a partition to stay within the `n` partition limit.
+fn split_and_partition_bucketed(
+    ranges: Vec<RangeInclusive<BlockNum>>,
+    n: u64,
+    min_partition_blocks: u64,
+    bucket_size: NonZeroU64,
+) -> Vec<Vec<RangeInclusive<BlockNum>>> {
+    if ranges.is_empty() {
+        return vec![];
+    }
+
+    let bucket_size = bucket_size.get();
+    let target_partition_blocks = total_blocks(&ranges).div_ceil(n).max(min_partition_blocks);
+
+    // Phase 1: Split ranges at bucket boundaries.
+    let mut split_ranges = Vec::new();
+    for range in ranges {
+        let (mut start, end) = range.into_inner();
+        while start <= end {
+            debug_assert!(
+                start < u64::MAX - bucket_size,
+                "overflow in bucketed partition, start: {start}, bucket_size: {bucket_size}"
+            );
+            let this_bucket_end = ((start / bucket_size) + 1) * bucket_size - 1;
+            let this_end = this_bucket_end.min(end);
+            split_ranges.push(start..=this_end);
+            start = this_end + 1;
+        }
+    }
+
+    // Phase 2: Partition buckets into at most n partitions, keeping buckets together.
+    let mut partitions: Vec<Vec<RangeInclusive<BlockNum>>> = Vec::new();
+    let mut current_partition: Vec<RangeInclusive<BlockNum>> = Vec::new();
+    let mut current_partition_blocks = 0u64;
+
+    let mut ranges_iter = split_ranges.into_iter().peekable();
+    while let Some(range) = ranges_iter.next() {
+        let range_end = *range.end();
+        let len = range_blocks(&range);
+        current_partition.push(range);
+        current_partition_blocks += len;
+
+        if current_partition_blocks >= target_partition_blocks {
+            let next_range_is_in_same_bucket = ranges_iter.peek().is_some_and(|next_range| {
+                let next_range_bucket = *next_range.start() / bucket_size;
+                let current_range_bucket = range_end / bucket_size;
+                next_range_bucket == current_range_bucket
+            });
+
+            if !next_range_is_in_same_bucket {
+                partitions.push(std::mem::take(&mut current_partition));
+                current_partition_blocks = 0;
+            }
+        }
+    }
+
+    assert!(
+        partitions
+            .iter()
+            .all(|p| total_blocks(p) >= min_partition_blocks),
+        "Partition contains fewer blocks than min_partition_blocks"
+    );
+
+    if !current_partition.is_empty() {
+        partitions.push(current_partition);
+    }
+
+    assert!(
+        partitions.len() <= n as usize,
+        "Number of partitions exceeds requested maximum"
+    );
+
+    // Phase 3: Merge adjacent ranges within each partition (since splitting at bucket
+    // boundaries may have created adjacent ranges).
+    partitions.into_iter().map(merge_ranges).collect()
+}
+
+fn range_blocks(r: &RangeInclusive<BlockNum>) -> u64 {
+    (*r.end() - *r.start()) + 1
+}
+fn total_blocks(ranges: &[RangeInclusive<BlockNum>]) -> u64 {
+    ranges.iter().map(range_blocks).sum()
 }
 
 /// A partition of a raw dataset dump job that processes a subset of block ranges.
@@ -1163,6 +1265,7 @@ mod test {
         ProgressReporter, ProgressUpdate, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     };
     use datasets_common::table_name::TableName;
+    use rstest::rstest;
 
     use super::*;
 
@@ -1443,6 +1546,97 @@ mod test {
         assert_eq!(
             super::split_and_partition(vec![1..=100], 4, 10),
             vec![[1..=25], [26..=50], [51..=75], [76..=100]],
+        );
+    }
+
+    #[rstest]
+    #[case::empty_input(
+        vec![], // input
+        4, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![] // expected
+    )]
+    #[case::one_range_one_bucket(
+        vec![0..=5], // input       
+        4, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=5]] // expected
+    )]
+    #[case::two_ranges_one_bucket(
+        vec![1..=4, 6..=9], // input
+        4, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![1..=4, 6..=9]] // expected
+    )]
+    #[case::one_range_three_buckets(
+        vec![0..=39], // input
+        2, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=19], vec![20..=39]] // expected
+    )]
+    #[case::range_splits_bucket_is_not_one_partition(
+        vec![8..=12], // input
+        4, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![8..=9], vec![10..=12]] // expected
+    )]
+    #[case::two_ranges_already_aligned(
+        vec![0..=9, 10..=19], // input
+        4, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=9], vec![10..=19]] // expected
+    )]
+    #[case::min_partition_blocks_greater_than_bucket_size(
+        vec![0..=5], // input
+        4, // n
+        10, // min_partition_blocks
+        NonZeroU64::new(3).unwrap(), // bucket_size
+        vec![vec![0..=5]] // expected
+    )]
+    #[case::single_partition_all_buckets_merged(
+        vec![0..=9, 10..=19, 20..=29], // input
+        1, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=29]] // expected
+    )]
+    #[case::non_contiguous_ranges_with_gaps(
+        vec![5..=15, 25..=35], // input
+        2, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![5..=15], vec![25..=35]] // expected
+    )]
+    #[case::n_greater_than_buckets(
+        vec![0..=9, 10..=19], // input
+        10, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(10).unwrap(), // bucket_size
+        vec![vec![0..=9], vec![10..=19]] // expected
+    )]
+    #[case::adjacent_ranges_should_merge(
+        vec![0..=9, 10..=19], // input
+        2, // n
+        1, // min_partition_blocks
+        NonZeroU64::new(20).unwrap(), // bucket_size
+        vec![vec![0..=19]] // expected
+    )]
+    fn split_and_partition_bucketed(
+        #[case] input: Vec<std::ops::RangeInclusive<u64>>,
+        #[case] n: u64,
+        #[case] min_partition_blocks: u64,
+        #[case] bucket_size: NonZeroU64,
+        #[case] expected: Vec<Vec<std::ops::RangeInclusive<u64>>>,
+    ) {
+        assert_eq!(
+            super::split_and_partition_bucketed(input, n, min_partition_blocks, bucket_size),
+            expected
         );
     }
 
