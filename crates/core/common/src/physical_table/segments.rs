@@ -340,6 +340,21 @@ fn chains(mut segments: Vec<Segment>) -> Option<Chains> {
         let mut fork_segments = vec![fork_end];
         for segment in non_canonical.iter().rev() {
             if segment.adjacent(fork_segments.first().unwrap()) {
+                // Stop if adding this segment would extend the fork past the divergence point.
+                // A segment that ends at the same block with the same hash as a canonical segment
+                // is a logical duplicate of canonical data, not part of an actual chain split.
+                let duplicates_canonical = canonical.0.iter().rev().any(|canonical_seg| {
+                    std::iter::zip(&segment.ranges, &canonical_seg.ranges).all(
+                        |(segment_range, canonical_range)| {
+                            segment_range.end() == canonical_range.end()
+                                && segment_range.hash == canonical_range.hash
+                        },
+                    )
+                });
+                if duplicates_canonical {
+                    break;
+                }
+
                 fork_segments.insert(0, segment.clone());
             }
         }
@@ -686,6 +701,40 @@ mod test {
                     test_segment(4..=5, (1, 1), 1),
                     test_segment(6..=7, (1, 1), 2),
                     test_segment(8..=9, (1, 1), 3),
+                ])),
+            })
+        );
+
+        // Regression test: fork should not extend back past the actual divergence point.
+        // This avoids incidents where unrelated old segments happen to form a valid fork chain.
+        //
+        // Scenario:
+        // - Canonical: [0-5] → [6-10] (compacted with stale hash, newer timestamp wins)
+        // - Non-canonical: [3-5] → [6-10] → [11-15] (post-reorg chain extending past canonical)
+        // - The segment [3-5] chains backwards from [6-10] but duplicates canonical data
+        //   (ends at block 5 with the same hash as canonical's [0-5]), so it's excluded.
+        //
+        // The fix ensures fork building stops when a segment duplicates canonical data
+        // (same end block and hash), as it represents the same chain state, not a divergence.
+        assert_eq!(
+            super::chains(vec![
+                // Canonical chain segments
+                test_segment(0..=5, (0, 0), 0),
+                test_segment(6..=10, (0, 0), 2), // Compacted, newer timestamp, stale hash
+                // Non-canonical segments that form a chain
+                test_segment(3..=5, (0, 0), 0), // Duplicates canonical [0-5], excluded
+                test_segment(6..=10, (0, 1), 1), // Post-reorg segment (different hash)
+                test_segment(11..=15, (1, 1), 1), // Extends past canonical
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=5, (0, 0), 0),
+                    test_segment(6..=10, (0, 0), 2),
+                ]),
+                // Fork correctly starts at block 6, not block 3.
+                fork: Some(Chain(vec![
+                    test_segment(6..=10, (0, 1), 1),
+                    test_segment(11..=15, (1, 1), 1),
                 ])),
             })
         );
