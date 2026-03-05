@@ -15,7 +15,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::table_name::TableName;
-use datasets_derived::{deps::SELF_REF_KEYWORD, func_name::FuncName, manifest::Function};
+use datasets_derived::{deps::SELF_REF_KEYWORD, func_name::FuncName, function::Function};
 use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 use parking_lot::RwLock;
 
@@ -57,35 +57,34 @@ impl SelfSchemaProvider {
         &self.udfs
     }
 
-    /// Creates a provider from manifest function definitions (no tables).
+    /// Creates a provider from manifest functions (no tables).
     ///
-    /// Builds UDFs from all manifest functions.
+    /// Functions are already validated at deserialization time.
     pub fn from_manifest_udfs(
-        schema_name: String,
         isolate_pool: IsolatePool,
-        manifest_udfs: &BTreeMap<FuncName, Function>,
+        functions: &BTreeMap<FuncName, Function>,
     ) -> Self {
-        let udfs: Vec<ScalarUDF> = manifest_udfs
+        let scalar_udfs: Vec<ScalarUDF> = functions
             .iter()
-            .map(|(func_name, func_def)| {
+            .map(|(name, function)| {
                 AsyncScalarUDF::new(Arc::new(JsUdf::new(
                     isolate_pool.clone(),
                     Some(SELF_REF_KEYWORD.to_string()),
-                    func_def.source.source.clone(),
-                    func_def.source.filename.clone().into(),
-                    Arc::from(func_name.as_str()),
-                    func_def
+                    function.source.source.clone(),
+                    function.source.filename.clone(),
+                    Arc::from(name.as_str()),
+                    function
                         .input_types
                         .iter()
                         .map(|dt| dt.clone().into_arrow())
                         .collect(),
-                    func_def.output_type.clone().into_arrow(),
+                    function.output_type.clone().into_arrow(),
                 )))
                 .into_scalar_udf()
             })
             .collect();
 
-        Self::new(schema_name, vec![], udfs)
+        Self::new(SELF_REF_KEYWORD.to_string(), vec![], scalar_udfs)
     }
 }
 

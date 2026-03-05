@@ -1,19 +1,16 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
-use datafusion::{
-    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
-    sql::parser,
-};
+use datafusion::sql::parser;
 use datasets_common::{
     block_num::BlockNum, dataset::Table, dataset_kind_str::DatasetKindStr,
     hash_reference::HashReference, table_name::TableName,
 };
-use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 
 use crate::{
     DerivedDatasetKind, Manifest,
     deps::{DepAlias, DepReference},
-    function::{Function, FunctionSource},
+    func_name::FuncName,
+    function::Function,
     manifest::TableInput,
     sql::{ResolveTableReferencesError, TableReference, resolve_table_references},
 };
@@ -46,28 +43,13 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> Result<Dataset, 
     let tables = sort_tables_by_dependencies(unsorted_tables, &queries)
         .map_err(DatasetError::SortTableDependencies)?;
 
-    // Convert manifest functions into logical functions
-    let functions = manifest
-        .functions
-        .into_iter()
-        .map(|(name, f)| Function {
-            name: name.into_inner(),
-            input_types: f.input_types.into_iter().map(|dt| dt.0).collect(),
-            output_type: f.output_type.0,
-            source: FunctionSource {
-                source: f.source.source,
-                filename: f.source.filename,
-            },
-        })
-        .collect();
-
     Ok(Dataset::new(
         reference,
         manifest.dependencies,
         DerivedDatasetKind,
         false,
         tables,
-        functions,
+        manifest.functions,
     ))
 }
 
@@ -80,7 +62,7 @@ pub struct Dataset {
     kind: DerivedDatasetKind,
     dependencies: BTreeMap<DepAlias, DepReference>,
     tables: Vec<Table>,
-    functions: Vec<Function>,
+    functions: BTreeMap<FuncName, Function>,
     finalized_blocks_only: bool,
 }
 
@@ -92,7 +74,7 @@ impl Dataset {
         kind: DerivedDatasetKind,
         finalized_blocks_only: bool,
         tables: Vec<Table>,
-        functions: Vec<Function>,
+        functions: BTreeMap<FuncName, Function>,
     ) -> Self {
         Self {
             reference,
@@ -112,30 +94,11 @@ impl Dataset {
         &self.dependencies
     }
 
-    /// Looks up a user-defined function by name.
+    /// Looks up a function by name.
     ///
-    /// Returns the [`ScalarUDF`] for the function if found. This is used
-    /// for derived datasets that define custom JavaScript functions.
-    ///
-    /// Returns `None` if the function name is not found.
-    pub fn function_by_name(
-        &self,
-        schema: String,
-        name: &str,
-        isolate_pool: IsolatePool,
-    ) -> Option<ScalarUDF> {
-        self.functions.iter().find(|f| f.name == name).map(|f| {
-            AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                isolate_pool,
-                schema,
-                f.source.source.clone(),
-                f.source.filename.clone().into(),
-                f.name.clone().into(),
-                f.input_types.clone(),
-                f.output_type.clone(),
-            )))
-            .into_scalar_udf()
-        })
+    /// Returns the [`Function`] definition if found.
+    pub fn function_by_name(&self, name: &str) -> Option<&Function> {
+        self.functions.get(name)
     }
 }
 

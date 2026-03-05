@@ -17,11 +17,11 @@ use datafusion::{
         TableProvider,
     },
     error::DataFusionError,
-    logical_expr::ScalarUDF,
+    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
 };
 use datasets_common::{dataset::Dataset, table_name::TableName};
 use datasets_derived::{dataset::Dataset as DerivedDataset, func_name::ETH_CALL_FUNCTION_NAME};
-use js_runtime::isolate_pool::IsolatePool;
+use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 use parking_lot::RwLock;
 
 use crate::{
@@ -177,7 +177,22 @@ impl FuncSchemaProvider for DatasetSchemaProvider {
 
         // Try to get UDF from derived dataset
         let udf = self.dataset.downcast_ref::<DerivedDataset>().and_then(|d| {
-            d.function_by_name(self.schema_name.clone(), name, self.isolate_pool.clone())
+            d.function_by_name(name).map(|function| {
+                AsyncScalarUDF::new(Arc::new(JsUdf::new(
+                    self.isolate_pool.clone(),
+                    self.schema_name.clone(),
+                    function.source.source.clone(),
+                    function.source.filename.clone(),
+                    Arc::from(name),
+                    function
+                        .input_types
+                        .iter()
+                        .map(|dt| dt.clone().into_arrow())
+                        .collect(),
+                    function.output_type.clone().into_arrow(),
+                )))
+                .into_scalar_udf()
+            })
         });
 
         if let Some(udf) = udf {

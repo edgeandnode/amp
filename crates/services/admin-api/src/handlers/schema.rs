@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use common::{
-    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
+    amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider, AsyncSchemaProvider},
     context::plan::{PlanContextBuilder, is_user_input_error},
     exec_env::default_session_config,
     incrementalizer::NonIncrementalQueryError,
@@ -21,7 +21,8 @@ use datasets_common::{
 use datasets_derived::{
     deps::{DepAlias, DepReference, HashOrVersion},
     func_name::FuncName,
-    manifest::{Function, TableSchema},
+    function::Function,
+    manifest::TableSchema,
 };
 use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
@@ -212,12 +213,9 @@ pub async fn handler(
 
     // Create planning context with self-schema provider
     let session_config = default_session_config().map_err(Error::SessionConfig)?;
-    let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
-        Arc::new(SelfSchemaProvider::from_manifest_udfs(
-            datasets_derived::deps::SELF_REF_KEYWORD.to_string(),
-            IsolatePool::dummy(),
-            &functions,
-        ));
+    let self_schema: Arc<dyn AsyncSchemaProvider> = Arc::new(
+        SelfSchemaProvider::from_manifest_udfs(IsolatePool::dummy(), &functions),
+    );
     let amp_catalog = Arc::new(
         AmpCatalogProvider::new(
             ctx.datasets_cache.clone(),
