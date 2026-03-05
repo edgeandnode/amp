@@ -266,7 +266,7 @@ impl Service {
             let stream = QueryResultStream::Incremental {
                 stream: query
                     .into_stream()
-                    .map_err(|err| Error::StreamingExecutionError(err))
+                    .map_err(Error::StreamingExecutionError)
                     .boxed(),
                 schema,
             };
