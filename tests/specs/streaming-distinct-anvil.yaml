@@ -16,11 +16,11 @@
 # DISTINCT ON over plain blocks (with a non-block_num column)
 - name: register_distinct_stream
   stream: |
-    SELECT DISTINCT ON (_block_num) _block_num, block_num, gas_used
+    SELECT DISTINCT ON (block_num()) block_num(), block_num, gas_used
     FROM (
-      SELECT _block_num, block_num, gas_used FROM anvil_rpc.blocks
+      SELECT block_num(), block_num, gas_used FROM anvil_rpc.blocks
       UNION ALL
-      SELECT _block_num, block_num, gas_used FROM anvil_rpc.blocks
+      SELECT block_num(), block_num, gas_used FROM anvil_rpc.blocks
     )
     SETTINGS stream = true
 
@@ -29,22 +29,22 @@
   take: 4
   results: |
     [
-      {"_block_num": 0, "block_num": 0, "gas_used": 0},
-      {"_block_num": 1, "block_num": 1, "gas_used": 0},
-      {"_block_num": 2, "block_num": 2, "gas_used": 0},
-      {"_block_num": 3, "block_num": 3, "gas_used": 0}
+      {"block_num()": 0, "block_num": 0, "gas_used": 0},
+      {"block_num()": 1, "block_num": 1, "gas_used": 0},
+      {"block_num()": 2, "block_num": 2, "gas_used": 0},
+      {"block_num()": 3, "block_num": 3, "gas_used": 0}
     ]
 
-# GROUP BY with _block_num as the first group column
+# GROUP BY with block_num() as the first group column
 - name: register_group_by_stream
   stream: |
     SELECT COUNT(*) AS cnt
     FROM (
-      SELECT _block_num, block_num FROM anvil_rpc.blocks
+      SELECT block_num(), block_num FROM anvil_rpc.blocks
       UNION ALL
-      SELECT _block_num, block_num FROM anvil_rpc.blocks
+      SELECT block_num(), block_num FROM anvil_rpc.blocks
     )
-    GROUP BY _block_num, block_num
+    GROUP BY block_num(), block_num
     SETTINGS stream = true
 
 - name: take_initial_group_by
@@ -97,8 +97,8 @@
   take: 2
   results: |
     [
-      {"_block_num": 4, "block_num": 4, "gas_used": 0},
-      {"_block_num": 5, "block_num": 5, "gas_used": 0}
+      {"block_num()": 4, "block_num": 4, "gas_used": 0},
+      {"block_num()": 5, "block_num": 5, "gas_used": 0}
     ]
 
 - name: take_incremental_group_by

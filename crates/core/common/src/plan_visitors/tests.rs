@@ -1190,6 +1190,49 @@ fn test_propagate_block_num_through_subquery_alias_in_join() {
     );
 }
 
+// ── Udf-mode rejects raw _block_num in GROUP BY / DISTINCT ON ─────────────
+
+#[test]
+fn test_propagate_rejects_group_by_raw_block_num_col() {
+    // GROUP BY _block_num (without block_num() UDF) must be rejected by the
+    // propagator, which uses BlockNumForm::Udf.  Users must write block_num().
+    use datafusion::functions_aggregate::count::count;
+    let plan = LogicalPlanBuilder::from(simple_scan("t"))
+        .aggregate(
+            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
+            vec![count(col("id")).alias("cnt")],
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let err = propagate_block_num(plan).unwrap_err().to_string();
+    assert!(
+        err.contains("Aggregate"),
+        "should reject raw _block_num GROUP BY, got: {err}"
+    );
+}
+
+#[test]
+fn test_propagate_rejects_distinct_on_raw_block_num_col() {
+    // DISTINCT ON (_block_num) (without block_num() UDF) must be rejected.
+    let plan = LogicalPlanBuilder::from(simple_scan("t"))
+        .distinct_on(
+            vec![col(RESERVED_BLOCK_NUM_COLUMN_NAME)],
+            vec![col("id"), col("value")],
+            None,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let err = propagate_block_num(plan).unwrap_err().to_string();
+    assert!(
+        err.contains("Distinct"),
+        "should reject raw _block_num DISTINCT ON, got: {err}"
+    );
+}
+
 // ── Output schema + data tests ────────────────────────────────────────────
 
 #[tokio::test]

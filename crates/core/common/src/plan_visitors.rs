@@ -23,7 +23,7 @@ use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::Net
 
 use crate::{
     block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf},
-    incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
+    incrementalizer::{BlockNumForm, NonIncrementalQueryError, incremental_op_kind},
 };
 
 /// Helper function to create a column reference to `_block_num`
@@ -158,7 +158,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
 
         // Check that the op is actually incremental
         let op_kind =
-            incremental_op_kind(&node).map_err(|e| DataFusionError::External(e.into()))?;
+            incremental_op_kind(&node, BlockNumForm::Udf).map_err(|e| DataFusionError::External(e.into()))?;
 
         // Step 1: Replace block_num() UDF in all expressions of this node using
         // the currently accumulated _block_num expression.
@@ -511,7 +511,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
     let mut err: Option<NonIncrementalQueryError> = None;
 
     // TODO: Detect unsupported join stacking, possibly by doing a dry run of the incrementalizer.
-    plan.exists(|node| match incremental_op_kind(node) {
+    plan.exists(|node| match incremental_op_kind(node, BlockNumForm::Udf) {
         Ok(_) => Ok(false),
         Err(e) => {
             err = Some(e);

@@ -1,10 +1,10 @@
-use std::{any::Any, sync::Arc};
+use std::any::Any;
 
 use datafusion::{
     arrow::datatypes::DataType,
     error::Result,
     logical_expr::{
-        ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
     },
     prelude::Expr,
 };
@@ -65,12 +65,4 @@ pub(crate) fn is_block_num_udf(expr: &Expr) -> bool {
         if f.func.name() == BLOCK_NUM_UDF_NAME && f.args.is_empty())
         || matches!(expr, Expr::Column(c)
             if c.relation.is_none() && c.name == BLOCK_NUM_UDF_SCHEMA_NAME)
-}
-
-/// Returns the `Expr` for a `block_num()` UDF call.
-pub(crate) fn block_num_udf() -> Expr {
-    Expr::ScalarFunction(datafusion::logical_expr::expr::ScalarFunction::new_udf(
-        Arc::new(ScalarUDF::from(BlockNumUdf::new())),
-        vec![],
-    ))
 }

@@ -36,10 +36,10 @@
   take: 4
   results: |
     [
-      {"_block_num": 0, "block_num": 0, "gas_used": 0},
-      {"_block_num": 1, "block_num": 1, "gas_used": 0},
-      {"_block_num": 2, "block_num": 2, "gas_used": 0},
-      {"_block_num": 3, "block_num": 3, "gas_used": 0}
+      {"_block_num": 0, "block_num()": 0, "block_num": 0, "gas_used": 0},
+      {"_block_num": 1, "block_num()": 1, "block_num": 1, "gas_used": 0},
+      {"_block_num": 2, "block_num()": 2, "block_num": 2, "gas_used": 0},
+      {"_block_num": 3, "block_num()": 3, "block_num": 3, "gas_used": 0}
     ]
 
 - name: take_initial_group_by_blocks
@@ -79,8 +79,8 @@
   take: 2
   results: |
     [
-      {"_block_num": 4, "block_num": 4, "gas_used": 0},
-      {"_block_num": 5, "block_num": 5, "gas_used": 0}
+      {"_block_num": 4, "block_num()": 4, "block_num": 4, "gas_used": 0},
+      {"_block_num": 5, "block_num()": 5, "block_num": 5, "gas_used": 0}
     ]
 
 - name: take_incremental_group_by_blocks

@@ -10,11 +10,11 @@ export default defineDataset(() => ({
     // DISTINCT ON (_block_num) over a UNION ALL that produces duplicates.
     // Without DISTINCT ON this would return 2 rows per block.
     distinct_blocks: {
-      sql: `SELECT DISTINCT ON (_block_num) _block_num, block_num, gas_used
+      sql: `SELECT DISTINCT ON (block_num()) block_num(), block_num, gas_used
 FROM (
-  SELECT _block_num, block_num, gas_used FROM anvil_rpc.blocks
+  SELECT block_num(), block_num, gas_used FROM anvil_rpc.blocks
   UNION ALL
-  SELECT _block_num, block_num, gas_used FROM anvil_rpc.blocks
+  SELECT block_num(), block_num, gas_used FROM anvil_rpc.blocks
 )`,
       network: "anvil",
     },
@@ -38,11 +38,11 @@ FROM (
     group_by_blocks: {
       sql: `SELECT COUNT(*) AS cnt
 FROM (
-  SELECT _block_num, block_num FROM anvil_rpc.blocks
+  SELECT block_num(), block_num FROM anvil_rpc.blocks
   UNION ALL
-  SELECT _block_num, block_num FROM anvil_rpc.blocks
+  SELECT block_num(), block_num FROM anvil_rpc.blocks
 )
-GROUP BY _block_num, block_num`,
+GROUP BY block_num(), block_num`,
       network: "anvil",
     },
   },
