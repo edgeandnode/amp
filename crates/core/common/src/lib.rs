@@ -4,7 +4,6 @@ pub use datafusion::{arrow, parquet};
 pub use datasets_common::{block_num::BlockNum, block_range::BlockRange, end_block::EndBlock};
 
 pub mod amp_catalog_provider;
-pub mod block_num;
 pub mod catalog;
 pub mod context;
 pub mod cursor;
@@ -25,6 +24,7 @@ pub mod retryable;
 pub mod self_schema_provider;
 pub mod sql;
 pub mod streaming_query;
+pub mod udfs;
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;

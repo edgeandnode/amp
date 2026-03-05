@@ -19,8 +19,8 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    BlockNum, block_num::is_block_num_udf, catalog::physical::snapshot::QueryableSnapshot,
-    plan_visitors::NonIncrementalOp,
+    BlockNum, catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
+    udfs::block_num::is_block_num_udf,
 };
 
 /// Whether to match the pre-propagation `block_num()` UDF only, or also the

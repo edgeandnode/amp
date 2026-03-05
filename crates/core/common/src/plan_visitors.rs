@@ -22,8 +22,8 @@ use datafusion::{
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
 use crate::{
-    block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf},
     incrementalizer::{BlockNumForm, NonIncrementalQueryError, incremental_op_kind},
+    udfs::block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf},
 };
 
 /// Helper function to create a column reference to `_block_num`
@@ -451,7 +451,7 @@ pub fn unproject_special_block_num_column(
 
 /// Returns `true` if the plan contains any `block_num()` UDF calls.
 pub fn plan_has_block_num_udf(plan: &LogicalPlan) -> bool {
-    use crate::block_num::is_block_num_udf;
+    use crate::udfs::block_num::is_block_num_udf;
     let mut found = false;
     let _ = plan.apply(|node| {
         node.apply_expressions(|expr| {
@@ -578,7 +578,7 @@ pub fn find_cross_network_join(
                 schema: Arc::from(&**sql_schema_name),
                 table: Arc::from(physical_table.table_name().as_str()),
             };
-            Some((table_ref.into(), network))
+            Some((table_ref, network))
         })
         .collect();
 

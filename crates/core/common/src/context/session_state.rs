@@ -29,7 +29,6 @@ use datafusion::{
 use futures::future;
 
 use crate::{
-    block_num::BlockNumUdf,
     context::common::INVALID_INPUT_CONTEXT,
     evm::udfs::{
         EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
@@ -37,6 +36,7 @@ use crate::{
     },
     func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
     sql::{FunctionReference, resolve_function_references, resolve_table_references},
+    udfs::block_num::BlockNumUdf,
 };
 
 /// Session state for planning and executing SQL queries.
