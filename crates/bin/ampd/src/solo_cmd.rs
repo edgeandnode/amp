@@ -84,12 +84,18 @@ pub async fn run(
 
     let worker_id = "worker".parse().expect("Invalid worker ID");
 
-    let data_store = DataStore::new(
-        metadata_db.clone(),
-        config.data_store_url.clone(),
-        config.parquet.cache_size_mb,
-    )
-    .map_err(Error::DataStoreCreation)?;
+    let data_store = {
+        let store = DataStore::new(
+            metadata_db.clone(),
+            config.data_store_url.clone(),
+            config.parquet.cache_size_mb,
+        )
+        .map_err(Error::DataStoreCreation)?;
+        match &meter {
+            Some(m) => store.with_meter(m),
+            None => store,
+        }
+    };
 
     let (datasets_registry, providers_registry) = {
         let provider_configs_store = ProviderConfigsStore::new(
