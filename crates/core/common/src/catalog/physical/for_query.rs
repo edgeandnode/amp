@@ -4,7 +4,7 @@
 //! It resolves tables directly from parsed SQL table references, bypassing the
 //! logical catalog.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use amp_data_store::DataStore;
 use datasets_common::{
@@ -12,7 +12,7 @@ use datasets_common::{
     table_name::TableName,
 };
 
-use super::catalog::{Catalog, CatalogTable};
+use super::catalog::Catalog;
 use crate::{
     datasets_cache::{DatasetsCache, GetDatasetError, ResolveRevisionError},
     physical_table::table::PhysicalTable,
@@ -107,7 +107,10 @@ pub async fn create(
             dataset_table,
             revision,
         );
-        entries.push(CatalogTable::new(physical_table.into(), sql_schema_name));
+        entries.push((
+            Arc::from(physical_table),
+            Arc::from(sql_schema_name.as_str()),
+        ));
     }
 
     Ok(Catalog::new(vec![], vec![], entries, Default::default()))

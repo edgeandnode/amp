@@ -4,14 +4,17 @@
 //! It resolves dependency tables from manifest deps and SQL table references,
 //! then adds physical parquet locations.
 
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::{
+    collections::{BTreeMap, btree_map::Entry},
+    sync::Arc,
+};
 
 use amp_data_store::DataStore;
 use datafusion::logical_expr::ScalarUDF;
 use datasets_common::{hash::Hash, hash_reference::HashReference, table_name::TableName};
 use datasets_derived::deps::DepAlias;
 
-use super::catalog::{Catalog, CatalogTable};
+use super::catalog::Catalog;
 use crate::{
     catalog::logical::LogicalTable,
     datasets_cache::{DatasetsCache, GetDatasetError},
@@ -124,7 +127,6 @@ pub async fn create(
                 source,
             })?;
 
-        let sql_schema_name = table.sql_schema_name().to_string();
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             table.dataset_reference().clone(),
@@ -132,7 +134,10 @@ pub async fn create(
             table.table().clone(),
             revision,
         );
-        entries.push(CatalogTable::new(physical_table.into(), sql_schema_name));
+        entries.push((
+            Arc::from(physical_table),
+            Arc::from(table.sql_schema_name()),
+        ));
     }
 
     // Build dep_aliases map

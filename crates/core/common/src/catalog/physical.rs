@@ -4,4 +4,4 @@ pub mod for_query;
 pub mod reader;
 pub mod snapshot;
 
-pub use catalog::{Catalog, CatalogTable, EarliestBlockError};
+pub use catalog::{Catalog, EarliestBlockError};

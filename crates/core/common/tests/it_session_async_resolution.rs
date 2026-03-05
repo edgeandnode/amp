@@ -13,7 +13,7 @@ use amp_object_store::url::ObjectStoreUrl;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use async_trait::async_trait;
 use common::{
-    catalog::physical::{Catalog, CatalogTable},
+    catalog::physical::Catalog,
     context::{
         exec::ExecContextBuilder,
         session::{SessionStateBuilder, is_user_input_error},
@@ -555,7 +555,7 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
     let catalog = Catalog::new(
         vec![],
         vec![],
-        vec![CatalogTable::new(physical_table, "test_schema".to_string())],
+        vec![(physical_table, Arc::from("test_schema"))],
         Default::default(),
     );
 

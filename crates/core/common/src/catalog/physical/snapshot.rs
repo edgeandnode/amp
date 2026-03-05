@@ -20,7 +20,7 @@ use datafusion::{
 use datafusion_datasource::compute_all_files_statistics;
 use futures::{Stream, StreamExt as _};
 
-use super::{catalog::CatalogTable, reader};
+use super::reader;
 use crate::{
     BlockRange,
     catalog::logical::LogicalTable,
@@ -43,7 +43,7 @@ pub struct CatalogSnapshot {
     /// UDFs specific to the datasets corresponding to the resolved tables.
     udfs: Vec<ScalarUDF>,
     /// Each snapshot is paired with its SQL table ref schema string.
-    table_snapshots: Vec<(Arc<PhyTableSnapshot>, String)>,
+    table_snapshots: Vec<(Arc<PhyTableSnapshot>, Arc<str>)>,
 }
 
 impl CatalogSnapshot {
@@ -54,17 +54,16 @@ impl CatalogSnapshot {
     pub async fn from_catalog(
         tables: Vec<LogicalTable>,
         udfs: Vec<ScalarUDF>,
-        entries: &[CatalogTable],
+        entries: &[(Arc<PhysicalTable>, Arc<str>)],
         ignore_canonical_segments: bool,
     ) -> Result<Self, FromCatalogError> {
         let mut table_snapshots = Vec::new();
-        for entry in entries {
-            let snapshot = entry
-                .physical_table()
+        for (physical_table, sql_schema_name) in entries {
+            let snapshot = physical_table
                 .snapshot(ignore_canonical_segments)
                 .await
                 .map_err(FromCatalogError)?;
-            table_snapshots.push((Arc::new(snapshot), entry.sql_schema_name().to_string()));
+            table_snapshots.push((Arc::new(snapshot), Arc::clone(sql_schema_name)));
         }
 
         Ok(Self {
@@ -83,7 +82,7 @@ impl CatalogSnapshot {
     pub fn table_snapshots(&self) -> impl Iterator<Item = (&Arc<PhyTableSnapshot>, &str)> {
         self.table_snapshots
             .iter()
-            .map(|(s, sql)| (s, sql.as_str()))
+            .map(|(snapshot, sql_schema_name)| (snapshot, &**sql_schema_name))
     }
 
     /// Returns the user-defined functions.
@@ -91,14 +90,19 @@ impl CatalogSnapshot {
         &self.udfs
     }
 
-    /// Reconstructs `CatalogTable` entries from the snapshotted data.
+    /// Reconstructs catalog entries from the snapshotted data.
     ///
     /// Useful for rebuilding a `Catalog` from a snapshot (e.g. for forked-chain contexts).
     // TODO: Revisit. Can reconstruct by any other means?
-    pub fn catalog_entries(&self) -> Vec<CatalogTable> {
+    pub fn catalog_entries(&self) -> Vec<(Arc<PhysicalTable>, Arc<str>)> {
         self.table_snapshots
             .iter()
-            .map(|(s, sql)| CatalogTable::new(s.physical_table().clone(), sql.clone()))
+            .map(|(snapshot, sql_schema_name)| {
+                (
+                    snapshot.physical_table().clone(),
+                    Arc::clone(sql_schema_name),
+                )
+            })
             .collect()
     }
 }
