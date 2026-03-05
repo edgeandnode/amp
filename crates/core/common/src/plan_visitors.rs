@@ -575,8 +575,8 @@ pub fn find_cross_network_join(
         .filter_map(|(physical_table, sql_schema_name)| {
             let network = physical_table.network()?.clone();
             let table_ref = TableReference::Partial {
-                schema: Arc::new(sql_schema_name.to_string()),
-                table: Arc::new(physical_table.table_name().clone()),
+                schema: Arc::from(&**sql_schema_name),
+                table: Arc::from(physical_table.table_name().as_str()),
             };
             Some((table_ref.into(), network))
         })
