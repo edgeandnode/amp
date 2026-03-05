@@ -220,7 +220,7 @@ impl CompactionAlgorithm {
         let is_hot = self.is_hot(segment);
 
         match is_hot {
-            TestResult::Skipped => FileState::Hot,
+            TestResult::Skipped => FileState::Cold,
             TestResult::Activated(true) => FileState::Hot,
             TestResult::Activated(false) => FileState::Cold,
         }
