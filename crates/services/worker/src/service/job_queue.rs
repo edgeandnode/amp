@@ -299,7 +299,7 @@ impl JobQueue {
         if fatal {
             (async || {
                 let mut tx = self.metadata_db.begin_txn().await?;
-                metadata_db::job_status::mark_failed_fatal(&mut tx, job_id, &detail).await?;
+                metadata_db::job_status::mark_fatal(&mut tx, job_id, &detail).await?;
                 metadata_db::job_events::register(
                     &mut tx,
                     job_id,
@@ -325,7 +325,7 @@ impl JobQueue {
         } else {
             (async || {
                 let mut tx = self.metadata_db.begin_txn().await?;
-                metadata_db::job_status::mark_failed_recoverable(&mut tx, job_id, &detail).await?;
+                metadata_db::job_status::mark_error(&mut tx, job_id, &detail).await?;
                 metadata_db::job_events::register(
                     &mut tx,
                     job_id,
