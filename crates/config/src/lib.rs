@@ -408,6 +408,10 @@ pub struct EnsureAmpMetadbDirectoryError {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::result_large_err,
+    reason = "figment::Error is a large third-party type used in Jail::expect_with test closures"
+)]
 mod tests {
     use figment::Jail;
 
