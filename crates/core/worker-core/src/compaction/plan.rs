@@ -46,8 +46,6 @@ pub struct CompactionFile {
     pub sendable_stream: SendableRecordBatchStream,
     /// Aggregate size metrics (blocks, bytes, rows, generation) for this file.
     pub size: SegmentSize,
-    /// Whether this file is the last segment in the canonical chain.
-    pub is_tail: bool,
 }
 
 impl CompactionFile {
@@ -55,7 +53,6 @@ impl CompactionFile {
         reader_factory: Arc<AmpReaderFactory>,
         partition_index: usize,
         segment: &Segment,
-        is_tail: bool,
     ) -> CompactionResult<Self> {
         let file_id = segment.id();
         let range = segment.single_range().clone();
@@ -88,7 +85,6 @@ impl CompactionFile {
             range,
             size,
             sendable_stream,
-            is_tail,
         };
 
         Ok(compaction_item)
@@ -126,8 +122,6 @@ pub struct CompactionPlan<'a> {
     table: Arc<PhysicalTable>,
     /// The current group of files being built for compaction.
     current_group: CompactionGroup,
-    /// The file currently being added to the current group.
-    current_file: Option<CompactionFile>,
     /// The next candidate file to consider adding to the current group.
     current_candidate: Option<CompactionFile>,
     /// Indicates whether the stream has been fully processed.
@@ -159,8 +153,7 @@ impl<'a> CompactionPlan<'a> {
             .enumerate()
             .map(move |(partition_index, segment)| {
                 let reader_factory = Arc::clone(&reader_factory);
-                let is_tail = partition_index == size - 1;
-                CompactionFile::try_new(reader_factory, partition_index, segment, is_tail)
+                CompactionFile::try_new(reader_factory, partition_index, segment)
                     .map_err(CompactorError::from)
             })
             .buffered(opts.compactor.metadata_concurrency)
@@ -181,7 +174,6 @@ impl<'a> CompactionPlan<'a> {
             metadata_db,
             store,
             current_group,
-            current_file: None,
             current_candidate: None,
             done: false,
             group_count: 0,
@@ -204,29 +196,14 @@ impl<'a> Stream for CompactionPlan<'a> {
                 // If we're done processing files, return None.
                 if this.done {
                     break None;
-                // If we have a current file, add it to the current group and continue.
-                } else if let Some(current_file) = this.current_file.take() {
-                    this.current_group.push(current_file);
                 // If we have a current candidate, check if it can be added to the current group.
                 } else if let Some(candidate) = this.current_candidate.take() {
-                    // If it can, update the current file and continue.
                     if algorithm.predicate(&this.current_group, &candidate) {
-                        this.current_file = Some(candidate);
-                    // If it can't, and the current group is empty or has a single file,
-                    // start a new group with the candidate as the current file.
-                    } else if this.current_group.is_empty_or_singleton() {
-                        this.current_file = Some(candidate);
-                        this.current_group = CompactionGroup::new_empty(
-                            this.metadata_db.clone(),
-                            this.store.clone(),
-                            this.opts.clone(),
-                            this.table.clone(),
-                            this.metrics.clone(),
-                        );
-                    // If it can't, and the current group has multiple files,
-                    // yield the current group and start a new group with the
-                    // candidate as the current file.
-                    } else {
+                        // Candidate passes predicate - add to current group
+                        this.current_group.push(candidate);
+                    } else if this.current_group.len() >= 2 {
+                        // Candidate fails predicate and group is complete (2+ files)
+                        // Yield the group and requeue the candidate for next group
                         this.current_candidate = Some(candidate);
                         let group = std::mem::replace(
                             &mut this.current_group,
@@ -245,6 +222,16 @@ impl<'a> Stream for CompactionPlan<'a> {
                             group.range()
                         );
                         break Some(group);
+                    } else {
+                        // Candidate fails predicate and group is incomplete (0-1 files)
+                        // Skip candidate and reset to empty group
+                        this.current_group = CompactionGroup::new_empty(
+                            this.metadata_db.clone(),
+                            this.store.clone(),
+                            this.opts.clone(),
+                            this.table.clone(),
+                            this.metrics.clone(),
+                        );
                     }
                 // If we have no current file or candidate, poll the next file from the stream.
                 } else {
@@ -260,15 +247,8 @@ impl<'a> Stream for CompactionPlan<'a> {
                             this.done = true;
                             break None;
                         }
-                        // If the stream is exhausted, and the current group is empty or has
-                        // a single file, we're done.
-                        None if this.current_group.is_empty_or_singleton() => {
-                            this.done = true;
-                            break None;
-                        }
-                        // Otherwise, yield the current group and finish processing by
-                        // setting `done` to true.
-                        None => {
+                        // If the stream is exhausted with a complete group (2+ files), yield it
+                        None if this.current_group.len() >= 2 => {
                             let group = std::mem::replace(
                                 &mut this.current_group,
                                 CompactionGroup::new_empty(
@@ -287,6 +267,11 @@ impl<'a> Stream for CompactionPlan<'a> {
                                 group.range()
                             );
                             break Some(group);
+                        }
+                        // Stream exhausted with incomplete group (0-1 files) - exit without yielding
+                        None => {
+                            this.done = true;
+                            break None;
                         }
                     }
                 }

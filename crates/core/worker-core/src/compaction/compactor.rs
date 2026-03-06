@@ -62,9 +62,9 @@ impl Debug for Compactor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Compactor {{ table: {}, algorithm: {} }}",
+            "Compactor {{ table: {}, algorithm: {:?} }}",
             self.table.table_ref_compact(),
-            self.props.compactor.algorithm.kind()
+            self.props.compactor.algorithm,
         )
     }
 }
@@ -212,10 +212,6 @@ impl CompactionGroup {
     pub fn push(&mut self, file: CompactionFile) {
         self.size += file.size;
         self.streams.push(file);
-    }
-
-    pub fn is_empty_or_singleton(&self) -> bool {
-        self.streams.len() <= 1
     }
 
     async fn write_and_finish(self) -> CompactionResult<ParquetFileWriterOutput> {
