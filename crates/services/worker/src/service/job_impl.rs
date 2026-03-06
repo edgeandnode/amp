@@ -3,8 +3,10 @@
 use std::{future::Future, sync::Arc};
 
 use amp_worker_core::{
-    Ctx, ProgressReporter, jobs::job_id::JobId, metrics::MetricsRegistry,
-    retryable::RetryableErrorExt,
+    Ctx, ProgressReporter,
+    jobs::job_id::JobId,
+    metrics::MetricsRegistry,
+    retryable::{JobErrorExt, RetryableErrorExt},
 };
 use datasets_common::hash_reference::HashReference;
 use tracing::{Instrument, info_span};
@@ -127,6 +129,15 @@ pub(crate) enum JobError {
     /// materialization failures.
     #[error("Failed to materialize derived dataset")]
     MaterializeDerived(#[source] amp_worker_datasets_derived::job_impl::Error),
+}
+
+impl JobErrorExt for JobError {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Self::MaterializeRaw(err) => err.error_code(),
+            Self::MaterializeDerived(err) => err.error_code(),
+        }
+    }
 }
 
 impl RetryableErrorExt for JobError {

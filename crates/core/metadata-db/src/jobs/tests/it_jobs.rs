@@ -513,7 +513,7 @@ async fn get_failed_jobs_calculates_retry_index_from_attempts() {
 
     // Insert 3 SCHEDULED events (simulating initial schedule + 2 retries)
     for _ in 0..3 {
-        job_events::sql::insert(&conn, job_id, &worker_id, JobStatus::Scheduled)
+        job_events::sql::insert(&conn, job_id, &worker_id, JobStatus::Scheduled, None)
             .await
             .expect("Failed to insert SCHEDULED event");
     }

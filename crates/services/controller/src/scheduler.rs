@@ -148,7 +148,7 @@ impl Scheduler {
             .await
             .map_err(ScheduleJobError::RegisterJobStatus)?;
 
-        metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Scheduled.into())
+        metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Scheduled, None)
             .await
             .map_err(ScheduleJobError::RegisterJobEvent)?;
 
@@ -209,7 +209,8 @@ impl Scheduler {
                 &mut tx,
                 job_id,
                 &job.node_id,
-                JobStatus::StopRequested.into(),
+                JobStatus::StopRequested,
+                None,
             )
             .await
             .map_err(StopJobError::RegisterJobEvent)?;

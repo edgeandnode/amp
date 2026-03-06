@@ -17,12 +17,10 @@ use crate::{
     workers::WorkerNodeId,
 };
 
+mod details;
 pub(crate) mod sql;
 
-#[cfg(test)]
-mod tests {
-    mod it_job_events;
-}
+pub use details::{EventDetail, EventDetailOwned};
 
 /// Represents a job attempt derived from SCHEDULED events in job_events
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -38,12 +36,29 @@ pub async fn register<'c, E>(
     exe: E,
     job_id: impl Into<JobId> + std::fmt::Debug,
     node_id: &WorkerNodeId<'_>,
-    status: JobStatus,
+    status: impl Into<JobStatus> + std::fmt::Debug,
+    detail: impl Into<Option<EventDetail<'_>>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
-    sql::insert(exe, job_id.into(), node_id, status)
+    let status = status.into();
+    let detail: Option<EventDetail<'_>> = detail.into();
+    sql::insert(exe, job_id.into(), node_id, status, detail.as_ref())
+        .await
+        .map_err(Error::Database)
+}
+
+/// Count the number of scheduling attempts for a job
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_attempt_count<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+) -> Result<i32, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_attempt_count(exe, job_id.into())
         .await
         .map_err(Error::Database)
 }
@@ -62,4 +77,10 @@ where
     sql::get_attempts_for_job(exe, job_id.into())
         .await
         .map_err(Error::Database)
+}
+
+#[cfg(test)]
+mod tests {
+    mod it_job_errors;
+    mod it_job_events;
 }

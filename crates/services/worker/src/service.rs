@@ -20,8 +20,10 @@ mod job_queue;
 mod job_set;
 
 use amp_worker_core::{
+    error_detail::{ErrorContext, ErrorDetailPayload},
     jobs::{job_id::JobId, status::JobStatus},
     node_id::NodeId,
+    retryable::JobErrorExt as _,
 };
 
 pub use self::error::{
@@ -348,9 +350,19 @@ impl Worker {
                     "job failed with recoverable error"
                 );
 
+                let (error_message, stack_trace) = extract_error_info(&*err);
+                let detail = build_error_detail(
+                    err.error_code(),
+                    &error_message,
+                    stack_trace,
+                    &self.queue,
+                    job_id,
+                )
+                .await;
+
                 // Mark the job as ERROR (retry on failure)
                 self.queue
-                    .mark_job_failed(job_id, /* fatal */ false, &self.node_id)
+                    .mark_job_failed(job_id, /* fatal */ false, &self.node_id, detail)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
@@ -365,9 +377,19 @@ impl Worker {
                     "job failed with fatal error"
                 );
 
+                let (error_message, stack_trace) = extract_error_info(&*err);
+                let detail = build_error_detail(
+                    err.error_code(),
+                    &error_message,
+                    stack_trace,
+                    &self.queue,
+                    job_id,
+                )
+                .await;
+
                 // Mark the job as FATAL (retry on failure)
                 self.queue
-                    .mark_job_failed(job_id, /* fatal */ true, &self.node_id)
+                    .mark_job_failed(job_id, /* fatal */ true, &self.node_id, detail)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
@@ -395,9 +417,14 @@ impl Worker {
                     "job panicked"
                 );
 
+                let (error_message, stack_trace) = extract_error_info(&err);
+                let detail =
+                    build_error_detail("PANIC", &error_message, stack_trace, &self.queue, job_id)
+                        .await;
+
                 // Mark the job as FATAL (retry on failure)
                 self.queue
-                    .mark_job_failed(job_id, /* fatal */ true, &self.node_id)
+                    .mark_job_failed(job_id, /* fatal */ true, &self.node_id, detail)
                     .await
                     .map_err(|error| JobResultError::MarkFailedFailed {
                         job_id,
@@ -408,7 +435,106 @@ impl Worker {
 
         Ok(())
     }
+}
 
+/// Extract error info from an error into owned strings (sync, no Send issues).
+fn extract_error_info(err: &dyn std::error::Error) -> (String, Vec<String>) {
+    let message = err.to_string();
+    let mut stack_trace = Vec::new();
+    let mut current = err.source();
+    while let Some(source) = current {
+        stack_trace.push(source.to_string());
+        current = source.source();
+    }
+    (message, stack_trace)
+}
+
+/// Fetch job context from DB and build error detail JSON.
+async fn build_error_detail(
+    error_code: &str,
+    error_message: &str,
+    stack_trace: Vec<String>,
+    queue: &job_queue::JobQueue,
+    job_id: amp_worker_core::jobs::job_id::JobId,
+) -> metadata_db::job_events::EventDetail<'static> {
+    let (job_result, attempt_result) =
+        tokio::join!(queue.get_job(job_id), queue.get_attempt_count(job_id));
+
+    let (dataset, manifest_hash) = match job_result {
+        Ok(Some(job)) => match serde_json::from_str::<serde_json::Value>(job.desc.as_str()) {
+            Ok(parsed) => {
+                let dataset = match (
+                    parsed["dataset_namespace"].as_str(),
+                    parsed["dataset_name"].as_str(),
+                ) {
+                    (Some(ns), Some(name)) => Some(format!("{ns}/{name}")),
+                    _ => None,
+                };
+                let hash = parsed["manifest_hash"].as_str().map(String::from);
+                (dataset, hash)
+            }
+            Err(err) => {
+                tracing::warn!(%job_id, error = %err, error_source = logging::error_source(&err), "failed to parse job descriptor for error detail");
+                (None, None)
+            }
+        },
+        Ok(None) => (None, None),
+        Err(err) => {
+            tracing::warn!(%job_id, error = %err, error_source = logging::error_source(&err), "failed to fetch job for error detail");
+            (None, None)
+        }
+    };
+
+    let attempt_index = match attempt_result {
+        Ok(count) => Some(count),
+        Err(err) => {
+            tracing::warn!(%job_id, error = %err, error_source = logging::error_source(&err), "failed to fetch attempt count for error detail");
+            None
+        }
+    };
+
+    let has_context = !stack_trace.is_empty()
+        || dataset.is_some()
+        || manifest_hash.is_some()
+        || attempt_index.is_some();
+
+    let payload = ErrorDetailPayload {
+        error_code: error_code.to_owned(),
+        error_message: error_message.to_owned(),
+        error_context: has_context.then_some(ErrorContext {
+            stack_trace,
+            attempt_index,
+            extra: JobErrorContext {
+                dataset,
+                manifest_hash,
+            },
+        }),
+    };
+
+    payload_to_event_detail(&payload)
+}
+
+/// Job-specific error context fields flattened into [`ErrorContext`].
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct JobErrorContext {
+    /// Dataset reference in `namespace/name` format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dataset: Option<String>,
+    /// Manifest content hash of the dataset being processed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_hash: Option<String>,
+}
+
+/// Serialize an [`ErrorDetailPayload`] into an [`EventDetail`] for database storage.
+fn payload_to_event_detail(
+    payload: &ErrorDetailPayload<impl serde::Serialize + serde::de::DeserializeOwned>,
+) -> metadata_db::job_events::EventDetail<'static> {
+    let raw = serde_json::value::to_raw_value(payload)
+        .expect("ErrorDetailPayload should always serialize");
+    metadata_db::job_events::EventDetail::from_owned_unchecked(raw)
+}
+
+impl Worker {
     /// Synchronizes the worker's jobs state with the Metadata DB jobs table state.
     ///
     /// This method ensures the worker remains in sync with the authoritative job state stored
@@ -683,5 +809,60 @@ async fn shutdown_signal() {
             .await
             .expect("Failed to install Ctrl+C handler");
         tracing::info!("shutdown signal");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_to_event_detail_includes_all_fields() {
+        let payload = ErrorDetailPayload {
+            error_code: "GET_DATASET".into(),
+            error_message: "something went wrong".into(),
+            error_context: Some(ErrorContext {
+                stack_trace: vec!["source 1".into(), "source 2".into()],
+                attempt_index: Some(3),
+                extra: JobErrorContext {
+                    dataset: Some("ns/dataset".into()),
+                    manifest_hash: Some("Qm123".into()),
+                },
+            }),
+        };
+
+        let detail = payload_to_event_detail(&payload);
+        let parsed: serde_json::Value =
+            serde_json::from_str(detail.as_str()).expect("detail should be valid JSON");
+
+        assert_eq!(parsed["error_code"], "GET_DATASET");
+        assert_eq!(parsed["error_message"], "something went wrong");
+
+        let ctx = &parsed["error_context"];
+        assert_eq!(ctx["stack_trace"][0], "source 1");
+        assert_eq!(ctx["stack_trace"][1], "source 2");
+        assert_eq!(ctx["dataset"], "ns/dataset");
+        assert_eq!(ctx["manifest_hash"], "Qm123");
+        assert_eq!(ctx["attempt_index"], 3);
+    }
+
+    #[test]
+    fn payload_to_event_detail_omits_empty_context() {
+        let payload: ErrorDetailPayload = ErrorDetailPayload {
+            error_code: "PANIC".into(),
+            error_message: "job panicked".into(),
+            error_context: None,
+        };
+
+        let detail = payload_to_event_detail(&payload);
+        let parsed: serde_json::Value =
+            serde_json::from_str(detail.as_str()).expect("detail should be valid JSON");
+
+        assert_eq!(parsed["error_code"], "PANIC");
+        assert_eq!(parsed["error_message"], "job panicked");
+        assert!(
+            parsed.get("error_context").is_none(),
+            "error_context should be absent when all optional fields are empty"
+        );
     }
 }

@@ -35,13 +35,13 @@ async fn get_attempts_returns_only_scheduled_events() {
 
     // Insert a mix of event types
     let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Running)
+    job_events::register(&conn, job_id, &worker_id, JobStatus::Running, None)
         .await
         .expect("Failed to register RUNNING");
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Error)
+    job_events::register(&conn, job_id, &worker_id, JobStatus::Error, None)
         .await
         .expect("Failed to register ERROR");
-    job_events::register(&conn, job_id, &worker_id, JobStatus::Scheduled)
+    job_events::register(&conn, job_id, &worker_id, JobStatus::Scheduled, None)
         .await
         .expect("Failed to register second SCHEDULED");
 
@@ -65,7 +65,7 @@ async fn get_attempts_scoped_to_job() {
 
     // Insert events for both jobs
     let job_id_1 = register_job(&conn, &job_desc, &worker_id, None).await;
-    job_events::register(&conn, job_id_1, &worker_id, JobStatus::Scheduled)
+    job_events::register(&conn, job_id_1, &worker_id, JobStatus::Scheduled, None)
         .await
         .expect("Failed to register second event for job 1");
 

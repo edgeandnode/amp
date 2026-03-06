@@ -4,7 +4,9 @@ use crate::{
     config::DEFAULT_POOL_MAX_CONNECTIONS,
     datasets::{DatasetName, DatasetNamespace},
     error::Error,
-    job_events, job_status,
+    job_events,
+    job_events::EventDetail,
+    job_status,
     jobs::{self, JobDescriptorRaw, JobStatus},
     manifests::ManifestHash,
     physical_table::{self, TableName},
@@ -14,6 +16,11 @@ use crate::{
 
 /// Default worker ID used by [`setup_test_db`].
 pub const TEST_WORKER_ID: &str = "test-worker";
+
+/// Create a minimal [`EventDetail`] for tests that require a non-optional detail.
+pub fn test_detail() -> EventDetail<'static> {
+    EventDetail::from_value(&serde_json::json!({"error_code": "TEST"}))
+}
 
 /// Helper to create a [`JobDescriptorRaw`] from a [`serde_json::Value`].
 pub fn raw_descriptor(value: &serde_json::Value) -> JobDescriptorRaw<'static> {
@@ -54,7 +61,7 @@ pub async fn register_job(
     let job_id = jobs::register(&mut tx, worker_id, job_desc)
         .await
         .expect("Failed to register job");
-    job_events::register(&mut tx, job_id, worker_id, status)
+    job_events::register(&mut tx, job_id, worker_id, status, None)
         .await
         .expect("Failed to register job event");
     job_status::register(&mut tx, job_id, worker_id, status)

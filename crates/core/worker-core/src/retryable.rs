@@ -17,3 +17,14 @@ pub trait RetryableErrorExt: std::error::Error {
         !self.is_retryable()
     }
 }
+
+/// Extension of [`RetryableErrorExt`] that associates a machine-readable error code with each
+/// error variant.
+///
+/// Error codes use `SCREAMING_SNAKE_CASE` and should uniquely identify the error variant within
+/// the crate so that, when shared by a user or searched in the codebase, the exact error source
+/// can be located.
+pub trait JobErrorExt: RetryableErrorExt {
+    /// A machine-readable error code identifying this specific error variant.
+    fn error_code(&self) -> &'static str;
+}

@@ -584,6 +584,25 @@ impl RetryableErrorExt for Error {
     }
 }
 
+impl amp_worker_core::retryable::JobErrorExt for Error {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Self::GetDataset(_) => "GET_DATASET",
+            Self::NotARawDataset(_) => "NOT_A_RAW_DATASET",
+            Self::GetActivePhysicalTable(_) => "GET_ACTIVE_PHYSICAL_TABLE",
+            Self::RegisterNewPhysicalTable(_) => "REGISTER_NEW_PHYSICAL_TABLE",
+            Self::LockRevisionsForWriter(_) => "LOCK_REVISIONS_FOR_WRITER",
+            Self::ConsistencyCheck { .. } => "CONSISTENCY_CHECK",
+            Self::CreateBlockStreamClient(_) => "CREATE_BLOCK_STREAM_CLIENT",
+            Self::ResolveEndBlock(_) => "RESOLVE_END_BLOCK",
+            Self::LatestBlock(_) => "LATEST_BLOCK",
+            Self::MissingRanges(_) => "MISSING_RANGES",
+            Self::PartitionTask(_) => "PARTITION_TASK",
+            Self::Cleanup(_) => "CLEANUP",
+        }
+    }
+}
+
 /// Dumps block ranges by partitioning them across multiple parallel workers.
 #[instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]

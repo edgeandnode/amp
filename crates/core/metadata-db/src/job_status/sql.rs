@@ -3,6 +3,7 @@
 use sqlx::{Executor, Postgres};
 
 use crate::{
+    job_events::EventDetail,
     job_status::{JobStatus, JobStatusUpdateError},
     jobs::JobId,
     workers::WorkerNodeId,
@@ -47,6 +48,7 @@ pub async fn update_status_if_any_state<'c, E>(
     id: JobId,
     expected_statuses: &[JobStatus],
     new_status: JobStatus,
+    detail: Option<&EventDetail<'_>>,
 ) -> Result<(), JobStatusUpdateError>
 where
     E: Executor<'c, Database = Postgres>,
@@ -66,7 +68,7 @@ where
         ),
         target_job_update AS (
             UPDATE jobs_status
-            SET status = $3, updated_at = timezone('UTC', now())
+            SET status = $3, detail = $4, updated_at = timezone('UTC', now())
             WHERE job_id = $1 AND status = ANY($2)
             RETURNING job_id
         )
@@ -81,6 +83,7 @@ where
         .bind(id)
         .bind(expected_statuses)
         .bind(new_status)
+        .bind(detail)
         .fetch_optional(exe)
         .await
         .map_err(JobStatusUpdateError::Database)?;

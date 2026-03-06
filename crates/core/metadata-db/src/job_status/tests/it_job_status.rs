@@ -3,7 +3,7 @@
 use crate::{
     job_status,
     jobs::{self, JobStatus},
-    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
+    tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db, test_detail},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
 
@@ -331,7 +331,7 @@ async fn mark_failed_recoverable_from_running_succeeds() {
         .expect("Failed to mark running");
 
     //* When
-    job_status::mark_failed_recoverable(&conn, job_id)
+    job_status::mark_failed_recoverable(&conn, job_id, &test_detail())
         .await
         .expect("Failed to mark error");
 
@@ -352,7 +352,7 @@ async fn mark_failed_recoverable_from_scheduled_succeeds() {
     let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     //* When
-    job_status::mark_failed_recoverable(&conn, job_id)
+    job_status::mark_failed_recoverable(&conn, job_id, &test_detail())
         .await
         .expect("Failed to mark error");
 
@@ -376,7 +376,7 @@ async fn mark_failed_fatal_from_running_succeeds() {
         .expect("Failed to mark running");
 
     //* When
-    job_status::mark_failed_fatal(&conn, job_id)
+    job_status::mark_failed_fatal(&conn, job_id, &test_detail())
         .await
         .expect("Failed to mark fatal");
 
@@ -403,7 +403,7 @@ async fn mark_failed_fatal_from_completed_returns_state_conflict() {
         .expect("Failed to mark completed");
 
     //* When
-    let result = job_status::mark_failed_fatal(&conn, job_id).await;
+    let result = job_status::mark_failed_fatal(&conn, job_id, &test_detail()).await;
 
     //* Then
     assert!(result.is_err(), "Should not mark completed job as fatal");
@@ -424,7 +424,7 @@ async fn reschedule_updates_status_and_worker() {
     let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
 
     // Move to Error state so reschedule makes sense
-    job_status::mark_failed_recoverable(&conn, job_id)
+    job_status::mark_failed_recoverable(&conn, job_id, &test_detail())
         .await
         .expect("Failed to mark error");
 
