@@ -19,6 +19,7 @@ use datafusion::{
 use datafusion_datasource::PartitionedFile;
 use futures::future::BoxFuture;
 use metadata_db::{files::FileId, physical_table_revision::LocationId};
+use tracing::Instrument;
 
 /// Factory that creates [`AmpReader`] instances for DataFusion's Parquet scan execution.
 #[derive(Debug, Clone)]
@@ -103,7 +104,13 @@ impl AsyncFileReader for AmpReader {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         let bytes_scanned = range.end - range.start;
         self.file_metrics.bytes_scanned.add(bytes_scanned as usize);
-        self.inner.get_bytes(range)
+        let span = tracing::info_span!(
+            "get_bytes",
+            file_id = %self.file_id,
+            offset = range.start,
+            len = bytes_scanned,
+        );
+        Box::pin(self.inner.get_bytes(range).instrument(span))
     }
 
     /// Reads multiple byte ranges in a single request, recording total bytes scanned.
@@ -113,7 +120,13 @@ impl AsyncFileReader for AmpReader {
     ) -> BoxFuture<'_, ParquetResult<Vec<Bytes>>> {
         let total_bytes: u64 = ranges.iter().map(|r| r.end - r.start).sum();
         self.file_metrics.bytes_scanned.add(total_bytes as usize);
-        self.inner.get_byte_ranges(ranges)
+        let span = tracing::info_span!(
+            "get_byte_ranges",
+            file_id = %self.file_id,
+            num_ranges = ranges.len(),
+            total_bytes = total_bytes,
+        );
+        Box::pin(self.inner.get_byte_ranges(ranges).instrument(span))
     }
 
     /// Returns cached Parquet metadata for this file, avoiding a re-read of the footer.
@@ -124,15 +137,19 @@ impl AsyncFileReader for AmpReader {
         let store = self.store.clone();
         let schema = self.schema.clone();
         let file_id = self.file_id;
+        let span = tracing::info_span!("get_metadata", file_id = %file_id);
 
-        Box::pin(async move {
-            store
-                .get_cached_parquet_metadata(file_id, schema)
-                .await
-                .map(|cached| cached.metadata)
-                .map_err(|err: amp_data_store::GetCachedMetadataError| {
-                    ParquetError::External(err.into())
-                })
-        })
+        Box::pin(
+            async move {
+                store
+                    .get_cached_parquet_metadata(file_id, schema)
+                    .await
+                    .map(|cached| cached.metadata)
+                    .map_err(|err: amp_data_store::GetCachedMetadataError| {
+                        ParquetError::External(err.into())
+                    })
+            }
+            .instrument(span),
+        )
     }
 }
