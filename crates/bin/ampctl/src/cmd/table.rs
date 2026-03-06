@@ -5,6 +5,7 @@ pub mod deactivate;
 pub mod delete;
 pub mod get;
 pub mod list;
+pub mod prune;
 pub mod register;
 pub mod restore;
 pub mod truncate;
@@ -34,6 +35,10 @@ pub enum Commands {
     #[command(after_help = include_str!("table/list__after_help.md"))]
     List(list::Args),
 
+    /// Prune non-canonical segments from a table revision
+    #[command(after_help = include_str!("table/prune__after_help.md"))]
+    Prune(prune::Args),
+
     /// Register an inactive table revision from a given path
     #[command(after_help = include_str!("table/register__after_help.md"))]
     Register(register::Args),
@@ -55,6 +60,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Delete(args) => delete::run(args).await?,
         Commands::Get(args) => get::run(args).await?,
         Commands::List(args) => list::run(args).await?,
+        Commands::Prune(args) => prune::run(args).await?,
         Commands::Register(args) => register::run(args).await?,
         Commands::Restore(args) => restore::run(args).await?,
         Commands::Truncate(args) => truncate::run(args).await?,
