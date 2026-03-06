@@ -259,7 +259,7 @@ pub async fn reschedule(
     job_status::reschedule(&mut *tx, job_id, &new_node_id).await?;
 
     // Insert job event record
-    job_events::register(&mut *tx, job_id, &new_node_id, JobStatus::Scheduled).await?;
+    job_events::register(&mut *tx, job_id, &new_node_id, JobStatus::Scheduled, None).await?;
 
     Ok(())
 }

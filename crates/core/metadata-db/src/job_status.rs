@@ -7,7 +7,7 @@
 //! State transitions are enforced via conditional updates that validate the current
 //! status before applying changes, preventing invalid transitions.
 
-use crate::{Error, db::Executor, jobs::JobId, workers::WorkerNodeId};
+use crate::{Error, db::Executor, job_events::EventDetail, jobs::JobId, workers::WorkerNodeId};
 
 pub(crate) mod sql;
 
@@ -55,6 +55,7 @@ where
         job_id.into(),
         &[JobStatus::Running, JobStatus::Scheduled],
         JobStatus::StopRequested,
+        None,
     )
     .await
     {
@@ -80,9 +81,15 @@ pub async fn mark_running<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Scheduled], JobStatus::Running)
-        .await
-        .map_err(Error::JobStatusUpdate)
+    sql::update_status_if_any_state(
+        exe,
+        id.into(),
+        &[JobStatus::Scheduled],
+        JobStatus::Running,
+        None,
+    )
+    .await
+    .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `STOPPING` only if it's currently `STOP_REQUESTED`
@@ -101,6 +108,7 @@ where
         id.into(),
         &[JobStatus::StopRequested],
         JobStatus::Stopping,
+        None,
     )
     .await
     .map_err(Error::JobStatusUpdate)
@@ -117,9 +125,15 @@ pub async fn mark_stopped<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Stopping], JobStatus::Stopped)
-        .await
-        .map_err(Error::JobStatusUpdate)
+    sql::update_status_if_any_state(
+        exe,
+        id.into(),
+        &[JobStatus::Stopping],
+        JobStatus::Stopped,
+        None,
+    )
+    .await
+    .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `COMPLETED` only if it's currently `RUNNING`
@@ -133,9 +147,15 @@ pub async fn mark_completed<'c, E>(
 where
     E: Executor<'c>,
 {
-    sql::update_status_if_any_state(exe, id.into(), &[JobStatus::Running], JobStatus::Completed)
-        .await
-        .map_err(Error::JobStatusUpdate)
+    sql::update_status_if_any_state(
+        exe,
+        id.into(),
+        &[JobStatus::Running],
+        JobStatus::Completed,
+        None,
+    )
+    .await
+    .map_err(Error::JobStatusUpdate)
 }
 
 /// Conditionally marks a job as `ERROR` from either `RUNNING` or `SCHEDULED` states
@@ -147,6 +167,7 @@ where
 pub async fn mark_failed_recoverable<'c, E>(
     exe: E,
     id: impl Into<JobId> + std::fmt::Debug,
+    detail: &EventDetail<'_>,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -156,6 +177,7 @@ where
         id.into(),
         &[JobStatus::Scheduled, JobStatus::Running],
         JobStatus::Error,
+        Some(detail),
     )
     .await
     .map_err(Error::JobStatusUpdate)
@@ -170,6 +192,7 @@ where
 pub async fn mark_failed_fatal<'c, E>(
     exe: E,
     id: impl Into<JobId> + std::fmt::Debug,
+    detail: &EventDetail<'_>,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
@@ -179,6 +202,7 @@ where
         id.into(),
         &[JobStatus::Scheduled, JobStatus::Running],
         JobStatus::Fatal,
+        Some(detail),
     )
     .await
     .map_err(Error::JobStatusUpdate)

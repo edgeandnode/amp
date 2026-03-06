@@ -6,7 +6,10 @@
 
 use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use backon::{ExponentialBuilder, Retryable};
-use metadata_db::{Error as MetadataDbError, MetadataDb, jobs::JobStatus, workers::WorkerNodeId};
+use metadata_db::{
+    Error as MetadataDbError, MetadataDb, job_events::EventDetail, jobs::JobStatus,
+    workers::WorkerNodeId,
+};
 use monitoring::logging;
 
 use crate::job::Job;
@@ -108,6 +111,25 @@ impl JobQueue {
         Ok(job)
     }
 
+    /// Returns the number of scheduling attempts for a job.
+    ///
+    /// Each SCHEDULED event in the event log represents one attempt.
+    /// Includes automatic retry logic on connection errors.
+    pub async fn get_attempt_count(&self, job_id: JobId) -> Result<i32, MetadataDbError> {
+        (|| metadata_db::job_events::get_attempt_count(&self.metadata_db, job_id))
+            .retry(with_policy())
+            .when(MetadataDbError::is_connection_error)
+            .notify(|err, dur| {
+                tracing::warn!(
+                    job_id = %job_id,
+                    error = %err, error_source = logging::error_source(&err),
+                    "Connection error while getting attempt count. Retrying in {:.1}s",
+                    dur.as_secs_f32()
+                );
+            })
+            .await
+    }
+
     /// Marks a job as `Running`.
     ///
     /// This is called when the worker begins executing a job. Includes automatic
@@ -125,7 +147,7 @@ impl JobQueue {
         (async || {
             let mut tx = self.metadata_db.begin_txn().await?;
             metadata_db::job_status::mark_running(&mut tx, job_id).await?;
-            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Running)
+            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Running, None)
                 .await?;
             tx.commit().await?;
             Ok(())
@@ -160,7 +182,7 @@ impl JobQueue {
         (async || {
             let mut tx = self.metadata_db.begin_txn().await?;
             metadata_db::job_status::mark_stopping(&mut tx, job_id).await?;
-            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Stopping)
+            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Stopping, None)
                 .await?;
             tx.commit().await?;
             Ok(())
@@ -195,7 +217,7 @@ impl JobQueue {
         (async || {
             let mut tx = self.metadata_db.begin_txn().await?;
             metadata_db::job_status::mark_stopped(&mut tx, job_id).await?;
-            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Stopped)
+            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Stopped, None)
                 .await?;
             tx.commit().await?;
             Ok(())
@@ -232,8 +254,14 @@ impl JobQueue {
         (async || {
             let mut tx = self.metadata_db.begin_txn().await?;
             metadata_db::job_status::mark_completed(&mut tx, job_id).await?;
-            metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Completed)
-                .await?;
+            metadata_db::job_events::register(
+                &mut tx,
+                job_id,
+                &node_id,
+                JobStatus::Completed,
+                None,
+            )
+            .await?;
             tx.commit().await?;
             Ok(())
         })
@@ -265,14 +293,21 @@ impl JobQueue {
         job_id: JobId,
         fatal: bool,
         node_id: &NodeId,
+        detail: EventDetail<'static>,
     ) -> Result<(), MetadataDbError> {
         let node_id = WorkerNodeId::from(node_id);
         if fatal {
             (async || {
                 let mut tx = self.metadata_db.begin_txn().await?;
-                metadata_db::job_status::mark_failed_fatal(&mut tx, job_id).await?;
-                metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Fatal)
-                    .await?;
+                metadata_db::job_status::mark_failed_fatal(&mut tx, job_id, &detail).await?;
+                metadata_db::job_events::register(
+                    &mut tx,
+                    job_id,
+                    &node_id,
+                    JobStatus::Fatal,
+                    detail.to_owned(),
+                )
+                .await?;
                 tx.commit().await?;
                 Ok(())
             })
@@ -290,9 +325,15 @@ impl JobQueue {
         } else {
             (async || {
                 let mut tx = self.metadata_db.begin_txn().await?;
-                metadata_db::job_status::mark_failed_recoverable(&mut tx, job_id).await?;
-                metadata_db::job_events::register(&mut tx, job_id, &node_id, JobStatus::Error)
-                    .await?;
+                metadata_db::job_status::mark_failed_recoverable(&mut tx, job_id, &detail).await?;
+                metadata_db::job_events::register(
+                    &mut tx,
+                    job_id,
+                    &node_id,
+                    JobStatus::Error,
+                    detail.to_owned(),
+                )
+                .await?;
                 tx.commit().await?;
                 Ok(())
             })

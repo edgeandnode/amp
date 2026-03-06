@@ -401,6 +401,22 @@ impl RetryableErrorExt for Error {
     }
 }
 
+impl amp_worker_core::retryable::JobErrorExt for Error {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Self::GetDataset(_) => "GET_DATASET",
+            Self::GetActivePhysicalTable(_) => "GET_ACTIVE_PHYSICAL_TABLE",
+            Self::RegisterNewPhysicalTable(_) => "REGISTER_NEW_PHYSICAL_TABLE",
+            Self::LockRevisionsForWriter(_) => "LOCK_REVISIONS_FOR_WRITER",
+            Self::CreateQueryEnv(_) => "CREATE_QUERY_ENV",
+            Self::ConsistencyCheck { .. } => "CONSISTENCY_CHECK",
+            Self::GetDerivedManifest(_) => "GET_DERIVED_MANIFEST",
+            Self::MaterializeTable { .. } => "MATERIALIZE_TABLE",
+            Self::ParallelTasksFailed(_) => "PARALLEL_TASKS_FAILED",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use amp_worker_core::block_ranges::ResolutionError;
