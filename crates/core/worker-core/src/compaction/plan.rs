@@ -198,25 +198,12 @@ impl<'a> Stream for CompactionPlan<'a> {
                     break None;
                 // If we have a current candidate, check if it can be added to the current group.
                 } else if let Some(candidate) = this.current_candidate.take() {
-                    // If it can, update the current file and continue.
                     if algorithm.predicate(&this.current_group, &candidate) {
+                        // Candidate passes predicate - add to current group
                         this.current_group.push(candidate);
-                    // If it can't, and the current group is empty or has a single file,
-                    // start a new group with the candidate as the current file.
-                    } else if this.current_group.is_empty_or_singleton() {
-                        this.current_group = CompactionGroup::new_empty(
-                            this.metadata_db.clone(),
-                            this.store.clone(),
-                            this.opts.clone(),
-                            this.table.clone(),
-                            this.metrics.clone(),
-                        );
-                        // Requeue the candidate so the predicate is re-evaluated against the fresh group.
-                        this.current_candidate = Some(candidate);
-                    // If it can't, and the current group has multiple files,
-                    // yield the current group and start a new group with the
-                    // candidate as the current file.
-                    } else {
+                    } else if this.current_group.len() >= 2 {
+                        // Candidate fails predicate and group is complete (2+ files)
+                        // Yield the group and requeue the candidate for next group
                         this.current_candidate = Some(candidate);
                         let group = std::mem::replace(
                             &mut this.current_group,
@@ -235,6 +222,16 @@ impl<'a> Stream for CompactionPlan<'a> {
                             group.range()
                         );
                         break Some(group);
+                    } else {
+                        // Candidate fails predicate and group is incomplete (0-1 files)
+                        // Skip candidate and reset to empty group
+                        this.current_group = CompactionGroup::new_empty(
+                            this.metadata_db.clone(),
+                            this.store.clone(),
+                            this.opts.clone(),
+                            this.table.clone(),
+                            this.metrics.clone(),
+                        );
                     }
                 // If we have no current file or candidate, poll the next file from the stream.
                 } else {
@@ -250,15 +247,8 @@ impl<'a> Stream for CompactionPlan<'a> {
                             this.done = true;
                             break None;
                         }
-                        // If the stream is exhausted, and the current group is empty or has
-                        // a single file, we're done.
-                        None if this.current_group.is_empty_or_singleton() => {
-                            this.done = true;
-                            break None;
-                        }
-                        // Otherwise, yield the current group and finish processing by
-                        // setting `done` to true.
-                        None => {
+                        // If the stream is exhausted with a complete group (2+ files), yield it
+                        None if this.current_group.len() >= 2 => {
                             let group = std::mem::replace(
                                 &mut this.current_group,
                                 CompactionGroup::new_empty(
@@ -277,6 +267,11 @@ impl<'a> Stream for CompactionPlan<'a> {
                                 group.range()
                             );
                             break Some(group);
+                        }
+                        // Stream exhausted with incomplete group (0-1 files) - exit without yielding
+                        None => {
+                            this.done = true;
+                            break None;
                         }
                     }
                 }

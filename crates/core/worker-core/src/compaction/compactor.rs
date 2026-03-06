@@ -214,10 +214,6 @@ impl CompactionGroup {
         self.streams.push(file);
     }
 
-    pub fn is_empty_or_singleton(&self) -> bool {
-        self.streams.len() <= 1
-    }
-
     async fn write_and_finish(self) -> CompactionResult<ParquetFileWriterOutput> {
         let range = {
             let start_range = &self
