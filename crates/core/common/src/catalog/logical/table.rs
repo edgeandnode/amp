@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use datasets_common::{dataset::Table, hash_reference::HashReference, table_name::TableName};
@@ -15,22 +15,21 @@ pub struct LogicalTable {
     /// which this table is registered in the catalog and referenced in SQL queries.
     sql_schema_name: String,
     dataset_reference: HashReference,
-    table: Table,
+    table: Arc<dyn Table>,
 }
 
 impl LogicalTable {
-    pub fn new(sql_schema_name: String, dataset_reference: HashReference, table: Table) -> Self {
+    pub fn new(
+        sql_schema_name: String,
+        dataset_reference: HashReference,
+        table: Arc<dyn Table>,
+    ) -> Self {
         Self {
             table,
             sql_schema_name,
             dataset_reference,
         }
     }
-
-    pub fn table(&self) -> &Table {
-        &self.table
-    }
-
     /// Returns the schema of the table.
     pub fn schema(&self) -> &ArrowSchemaRef {
         self.table.schema()

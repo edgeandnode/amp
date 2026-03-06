@@ -98,15 +98,8 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
               })
             }
 
-            if (tableSchema.networks.length != 1) {
-              throw new ManifestBuilderError({
-                cause: undefined,
-                message: `Expected 1 network for SQL query, got ${tableSchema.networks}`,
-                table: name,
-              })
-            }
-
-            const network = Model.Network.make(tableSchema.networks[0])
+            // TODO: Remove this once network is fully dropped from derived tables
+            const network = Model.Network.make("derived")
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({ input, schema: tableSchema.schema, network })
 

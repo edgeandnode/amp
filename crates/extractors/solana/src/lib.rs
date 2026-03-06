@@ -17,10 +17,7 @@ use std::collections::BTreeMap;
 
 use amp_providers_common::provider_name::ProviderName;
 use amp_providers_solana::config::AuthHeaderName;
-use datasets_common::{
-    block_num::BlockNum, hash_reference::HashReference, manifest::TableSchema,
-    network_id::NetworkId,
-};
+use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
 
 mod client;
 mod dataset_kind;
@@ -32,6 +29,7 @@ pub mod tables;
 
 pub use amp_providers_solana::config::{self, SolanaProviderConfig, UseArchive};
 use datasets_raw::dataset::Dataset as RawDataset;
+pub use datasets_raw::manifest::Table;
 use solana_client::rpc_config::CommitmentConfig;
 
 pub use self::{
@@ -39,23 +37,6 @@ pub use self::{
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
 };
 use crate::error::ClientError;
-
-/// Table definition for raw datasets.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Table {
-    /// Arrow schema for this table.
-    pub schema: TableSchema,
-    /// Network for this table.
-    pub network: NetworkId,
-}
-
-impl Table {
-    /// Create a new table with the given schema and network.
-    pub fn new(schema: TableSchema, network: NetworkId) -> Self {
-        Self { schema, network }
-    }
-}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]

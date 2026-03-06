@@ -15,7 +15,7 @@ use common::{
     BlockNum, BlockRange, arrow::array::RecordBatch, catalog::physical::Catalog,
     metadata::Generation, parquet::errors::ParquetError, physical_table::PhysicalTable,
 };
-use datasets_common::table_name::TableName;
+use datasets_common::{dataset::Table as _, table_name::TableName};
 use datasets_raw::rows::TableRows;
 use metadata_db::MetadataDb;
 

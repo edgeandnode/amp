@@ -1,5 +1,4 @@
 {
-  "network": "mainnet",
   "kind": "manifest",
   "dependencies": {
     "eth_firehose": "_/eth_firehose@0.0.0"
@@ -45,8 +44,7 @@
             }
           ]
         }
-      },
-      "network": "mainnet"
+      }
     }
   },
   "functions": {}

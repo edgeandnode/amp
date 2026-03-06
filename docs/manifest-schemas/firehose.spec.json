@@ -87,7 +87,7 @@
       "minLength": 1
     },
     "Table": {
-      "description": "Table definition for raw datasets.",
+      "description": "Table definition for raw dataset manifests.",
       "type": "object",
       "properties": {
         "network": {

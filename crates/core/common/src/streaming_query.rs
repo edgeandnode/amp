@@ -10,8 +10,11 @@ use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use amp_data_store::DataStore;
 use datafusion::{common::cast::as_fixed_size_binary_array, error::DataFusionError};
 use datasets_common::{
-    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, dataset::Dataset, hash_reference::HashReference,
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME,
+    dataset::{Dataset, Table},
+    hash_reference::HashReference,
     network_id::NetworkId,
+    table_name::TableName,
 };
 use datasets_derived::{dataset::Dataset as DerivedDataset, deps::SELF_REF_KEYWORD};
 use datasets_raw::dataset::Dataset as RawDataset;
@@ -1188,13 +1191,10 @@ async fn resolve_blocks_table(
     dataset: Arc<RawDataset>,
     data_store: DataStore,
 ) -> Result<(Arc<PhysicalTable>, Arc<str>), ResolveBlocksTableError> {
-    let table = dataset
-        .tables()
-        .iter()
-        .find(|t| t.name() == "blocks")
-        .ok_or_else(|| {
-            ResolveBlocksTableError::BlocksTableNotFound(dataset.reference().to_string())
-        })?;
+    let blocks_name: TableName = "blocks".parse().expect("valid table name");
+    let table = dataset.get_table(&blocks_name).ok_or_else(|| {
+        ResolveBlocksTableError::BlocksTableNotFound(dataset.reference().to_string())
+    })?;
 
     let revision = data_store
         .get_table_active_revision(dataset.reference(), table.name())
@@ -1212,7 +1212,7 @@ async fn resolve_blocks_table(
         data_store,
         dataset.reference().clone(),
         dataset.start_block(),
-        table.clone(),
+        Arc::clone(table) as Arc<dyn Table>,
         revision,
     );
     Ok((

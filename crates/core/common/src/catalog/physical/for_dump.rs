@@ -75,14 +75,12 @@ pub async fn create(
                         source: err,
                     })?;
 
-                let dataset_table = dataset
-                    .tables()
-                    .iter()
-                    .find(|t| t.name() == table)
-                    .ok_or_else(|| CreateCatalogError::TableNotFoundInDataset {
+                let dataset_table = dataset.get_table(table).ok_or_else(|| {
+                    CreateCatalogError::TableNotFoundInDataset {
                         table_name: table.as_ref().clone(),
                         reference: dataset_ref.clone(),
-                    })?;
+                    }
+                })?;
 
                 let resolved_table = LogicalTable::new(
                     schema.to_string(),
@@ -127,11 +125,15 @@ pub async fn create(
                 source,
             })?;
 
+        let table_def = dataset
+            .get_table(table_name)
+            .expect("table validated in Phase 1");
+
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             table.dataset_reference().clone(),
             dataset.start_block(),
-            table.table().clone(),
+            Arc::clone(table_def),
             revision,
         );
         entries.push((

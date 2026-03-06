@@ -5,33 +5,15 @@
 
 use std::collections::BTreeMap;
 
-use datasets_common::{
-    block_num::BlockNum, hash_reference::HashReference, manifest::TableSchema,
-    network_id::NetworkId,
-};
+use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
 use datasets_raw::dataset::Dataset as RawDataset;
 
 mod dataset_kind;
 pub mod tables;
 
+pub use datasets_raw::manifest::Table;
+
 pub use self::dataset_kind::{FirehoseDatasetKind, FirehoseDatasetKindError};
-
-/// Table definition for raw datasets.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Table {
-    /// Arrow schema for this table.
-    pub schema: TableSchema,
-    /// Network for this table.
-    pub network: NetworkId,
-}
-
-impl Table {
-    /// Create a new table with the given schema and network.
-    pub fn new(schema: TableSchema, network: NetworkId) -> Self {
-        Self { schema, network }
-    }
-}
 
 /// Firehose dataset manifest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

@@ -252,7 +252,7 @@ impl CompactionGroup {
             self.store,
             buf_writer,
             filename,
-            Arc::clone(&self.table),
+            self.table.clone(),
             self.props.max_row_group_bytes,
             self.props.parquet.clone(),
         )

@@ -32,14 +32,14 @@ pub struct PhysicalTable {
     /// Table name.
     table_name: TableName,
 
-    /// Network identifier.
-    network: NetworkId,
+    /// Network identifier (if the table has one).
+    network: Option<NetworkId>,
 
     /// Data store for accessing metadata database and object storage.
     store: DataStore,
 
-    /// Table definition (schema, network, sorted_by).
-    table: Table,
+    /// Table definition (schema, sorted_by, optional network).
+    table: Arc<dyn Table>,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -52,7 +52,7 @@ impl PhysicalTable {
         store: DataStore,
         dataset_reference: HashReference,
         dataset_start_block: Option<BlockNum>,
-        table: Table,
+        table: Arc<dyn Table>,
         revision: PhyTableRevision,
     ) -> Self {
         Self {
@@ -60,7 +60,7 @@ impl PhysicalTable {
             dataset_reference,
             dataset_start_block,
             table_name: table.name().clone(),
-            network: table.network().clone(),
+            network: table.network().cloned(),
             store,
             table,
         }
@@ -77,8 +77,8 @@ impl PhysicalTable {
         &self.table_name
     }
 
-    pub fn network(&self) -> &NetworkId {
-        &self.network
+    pub fn network(&self) -> Option<&NetworkId> {
+        self.network.as_ref()
     }
 
     pub fn url(&self) -> &Url {
@@ -101,7 +101,7 @@ impl PhysicalTable {
         &self.revision
     }
 
-    pub fn table(&self) -> &Table {
+    pub fn table(&self) -> &Arc<dyn Table> {
         &self.table
     }
 

@@ -76,15 +76,12 @@ pub async fn create(
             })?;
 
         // Find the table in the dataset
-        let dataset_table = dataset
-            .tables()
-            .iter()
-            .find(|t| t.name() == table.as_ref())
-            .ok_or_else(|| CreateCatalogError::DatasetTableNotFound {
+        let dataset_table = dataset.get_table(table.as_ref()).ok_or_else(|| {
+            CreateCatalogError::DatasetTableNotFound {
                 dataset: hash_ref.clone(),
                 table: (**table).clone(),
-            })?
-            .clone();
+            }
+        })?;
 
         // Get physical revision
         let revision = data_store
@@ -104,7 +101,7 @@ pub async fn create(
             data_store.clone(),
             hash_ref,
             dataset.start_block(),
-            dataset_table,
+            dataset_table.clone(),
             revision,
         );
         entries.push((

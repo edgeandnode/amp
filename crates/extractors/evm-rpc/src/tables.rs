@@ -1,6 +1,9 @@
 use amp_providers_evm_rpc::tables::transactions;
-use datasets_common::{dataset::Table, network_id::NetworkId};
-use datasets_raw::evm::tables::{blocks, logs};
+use datasets_common::network_id::NetworkId;
+use datasets_raw::{
+    dataset::Table,
+    evm::tables::{blocks, logs},
+};
 
 pub fn all(network: &NetworkId) -> Vec<Table> {
     vec![

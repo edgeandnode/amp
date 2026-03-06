@@ -5,7 +5,7 @@ version.workspace = true
 license-file.workspace = true
 
 [features]
-schemars = ["dep:schemars", "datasets-common/schemars"]
+schemars = ["dep:schemars", "datasets-common/schemars", "datasets-raw/schemars"]
 
 [dependencies]
 amp-providers-common = { path = "../../core/providers-common" }

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 // Re-export schema types from datasets-common
 pub use datasets_common::manifest::{ArrowSchema, Field, TableSchema};
-use datasets_common::{network_id::NetworkId, table_name::TableName};
+use datasets_common::table_name::TableName;
 
 use crate::{
     dataset_kind::DerivedDatasetKind,
@@ -43,7 +43,7 @@ pub struct Manifest {
 
 /// Table definition within a derived dataset.
 ///
-/// Defines a table with its input source, schema, and network.
+/// Defines a table with its input source and schema.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Table {
@@ -51,8 +51,6 @@ pub struct Table {
     pub input: TableInput,
     /// Arrow schema definition for the table
     pub schema: TableSchema,
-    /// Network this table belongs to
-    pub network: NetworkId,
 }
 
 /// Input source for a table definition.

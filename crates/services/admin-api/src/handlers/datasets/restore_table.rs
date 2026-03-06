@@ -156,9 +156,7 @@ pub async fn handler(
 
     // Validate the table exists in the dataset manifest
     dataset
-        .tables()
-        .iter()
-        .find(|t| *t.name() == table_name)
+        .get_table(&table_name)
         .ok_or_else(|| Error::TableNotInManifest {
             table: table_name.clone(),
         })?;

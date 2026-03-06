@@ -5,13 +5,13 @@ use arrow::{
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
 use datasets_common::{
-    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, dataset::Table,
-    network_id::NetworkId,
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
 };
 
 use crate::{
     Timestamp,
     arrow::TimestampArrayBuilder,
+    dataset::Table,
     evm::{
         BYTES32_TYPE, Bytes32, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EvmAddress as Address,
         helpers::{Bytes32ArrayBuilder, EvmAddressArrayBuilder},

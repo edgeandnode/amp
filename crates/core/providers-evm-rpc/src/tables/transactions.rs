@@ -1,8 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use datasets_common::{
-    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, dataset::Table,
-    network_id::NetworkId,
+    block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
 };
 use datasets_raw::{
     Timestamp,
@@ -11,6 +10,7 @@ use datasets_raw::{
         Int32Builder, ListBuilder, Schema, SchemaRef, StringBuilder, StructBuilder,
         TimestampArrayBuilder, UInt32Builder, UInt64Builder,
     },
+    dataset::Table,
     evm::{
         BYTES32_TYPE, Bytes32, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
         EvmAddress as Address, EvmCurrency,

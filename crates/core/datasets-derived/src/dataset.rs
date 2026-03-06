@@ -1,9 +1,15 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
-use datafusion::sql::parser;
+use datafusion::{arrow::datatypes::SchemaRef, sql::parser};
 use datasets_common::{
-    block_num::BlockNum, dataset::Table, dataset_kind_str::DatasetKindStr,
-    hash_reference::HashReference, table_name::TableName,
+    block_num::{BlockNum, RESERVED_BLOCK_NUM_COLUMN_NAME},
+    dataset::Table as TableTrait,
+    dataset_kind_str::DatasetKindStr,
+    hash_reference::HashReference,
+    table_name::TableName,
 };
 
 use crate::{
@@ -34,11 +40,11 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> Result<Dataset, 
         queries
     };
 
-    // Convert manifest tables into logical tables
+    // Convert manifest tables into logical tables (without network — derived tables don't have one)
     let unsorted_tables: Vec<Table> = manifest
         .tables
         .into_iter()
-        .map(|(name, table)| Table::new(name, table.schema.arrow.into(), table.network, vec![]))
+        .map(|(name, table)| Table::new(name, table.schema.arrow.into(), vec![]))
         .collect();
     let tables = sort_tables_by_dependencies(unsorted_tables, &queries)
         .map_err(DatasetError::SortTableDependencies)?;
@@ -61,7 +67,7 @@ pub struct Dataset {
     reference: HashReference,
     kind: DerivedDatasetKind,
     dependencies: BTreeMap<DepAlias, DepReference>,
-    tables: Vec<Table>,
+    tables: Vec<Arc<dyn TableTrait>>,
     functions: BTreeMap<FuncName, Function>,
     finalized_blocks_only: bool,
 }
@@ -76,6 +82,10 @@ impl Dataset {
         tables: Vec<Table>,
         functions: BTreeMap<FuncName, Function>,
     ) -> Self {
+        let tables: Vec<Arc<dyn TableTrait>> = tables
+            .into_iter()
+            .map(|t| Arc::new(t) as Arc<dyn TableTrait>)
+            .collect();
         Self {
             reference,
             dependencies,
@@ -111,8 +121,20 @@ impl datasets_common::dataset::Dataset for Dataset {
         self.kind.into()
     }
 
-    fn tables(&self) -> &[Table] {
+    fn tables(&self) -> &[Arc<dyn TableTrait>] {
         &self.tables
+    }
+
+    fn table_names(&self) -> Vec<TableName> {
+        self.tables.iter().map(|t| t.name().clone()).collect()
+    }
+
+    fn get_table(&self, name: &TableName) -> Option<&Arc<dyn TableTrait>> {
+        self.tables.iter().find(|t| t.name() == name)
+    }
+
+    fn has_table(&self, name: &TableName) -> bool {
+        self.tables.iter().any(|t| t.name() == name)
     }
 
     fn start_block(&self) -> Option<BlockNum> {
@@ -142,19 +164,52 @@ pub enum DatasetError {
     SortTableDependencies(#[source] SortTablesByDependenciesError),
 }
 
+/// A table definition for a derived dataset. Has no network association.
+#[derive(Clone, Debug)]
+pub struct Table {
+    name: TableName,
+    schema: SchemaRef,
+    sorted_by: BTreeSet<String>,
+}
+
+impl Table {
+    /// Creates a new derived table definition. Automatically adds `_block_num` to `sorted_by`.
+    pub fn new(name: TableName, schema: SchemaRef, sorted_by: Vec<String>) -> Self {
+        let mut sorted_by: BTreeSet<String> = sorted_by.into_iter().collect();
+        sorted_by.insert(RESERVED_BLOCK_NUM_COLUMN_NAME.to_string());
+        Self {
+            name,
+            schema,
+            sorted_by,
+        }
+    }
+}
+
+impl TableTrait for Table {
+    fn name(&self) -> &TableName {
+        &self.name
+    }
+
+    fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    fn sorted_by(&self) -> &BTreeSet<String> {
+        &self.sorted_by
+    }
+}
+
 /// Sort tables by their SQL dependencies using topological ordering.
 ///
 /// Analyzes table queries to determine dependencies and returns tables in dependency order.
 /// Tables with no dependencies come first, followed by tables that depend on them.
-pub fn sort_tables_by_dependencies(
+fn sort_tables_by_dependencies(
     tables: Vec<Table>,
     queries: &BTreeMap<TableName, parser::Statement>,
 ) -> Result<Vec<Table>, SortTablesByDependenciesError> {
     // Map of table name -> Table
-    let table_map = tables
-        .into_iter()
-        .map(|t| (t.name().clone(), t))
-        .collect::<BTreeMap<TableName, Table>>();
+    let table_map: BTreeMap<TableName, Table> =
+        tables.into_iter().map(|t| (t.name().clone(), t)).collect();
 
     // Dependency map: table -> [tables it depends on]
     let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();

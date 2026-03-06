@@ -4,11 +4,7 @@
 //! requiring a data store. Tables are resolved as [`PlanTable`] instances
 //! that expose schema information only.
 
-use std::{
-    any::Any,
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{any::Any, collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use datafusion::{
@@ -74,9 +70,11 @@ impl TableSchemaProvider for DatasetSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let mut names: BTreeSet<String> = self.tables.read().keys().cloned().collect();
-        names.extend(self.dataset.tables().iter().map(|t| t.name().to_string()));
-        names.into_iter().collect()
+        self.dataset
+            .table_names()
+            .into_iter()
+            .map(|n| n.to_string())
+            .collect()
     }
 
     async fn table(&self, name: &str) -> Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
@@ -93,12 +91,7 @@ impl TableSchemaProvider for DatasetSchemaProvider {
         })?;
 
         // Find table in dataset
-        let Some(dataset_table) = self
-            .dataset
-            .tables()
-            .iter()
-            .find(|t| t.name() == &table_name)
-        else {
+        let Some(dataset_table) = self.dataset.get_table(&table_name) else {
             return Ok(None);
         };
 
@@ -123,10 +116,7 @@ impl TableSchemaProvider for DatasetSchemaProvider {
             return false;
         };
 
-        self.dataset
-            .tables()
-            .iter()
-            .any(|t| t.name() == &table_name)
+        self.dataset.has_table(&table_name)
     }
 }
 

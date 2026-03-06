@@ -22,6 +22,7 @@ clap.workspace = true
 console = "0.16.1"
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
+datasets-raw = { path = "../../core/datasets-raw" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 monitoring = { path = "../../core/monitoring" }
