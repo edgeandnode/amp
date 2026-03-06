@@ -121,6 +121,7 @@ use datasets_raw::{
         BlockStreamError, BlockStreamer, BlockStreamerExt as _, CleanupError, LatestBlockError,
     },
     dataset::Dataset as RawDataset,
+    rows::Rows,
 };
 use futures::TryStreamExt as _;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, physical_table_revision::LocationId};
@@ -1024,6 +1025,14 @@ impl<S: BlockStreamer> DumpPartition<S> {
         Ok(())
     }
 
+    #[instrument(
+        skip_all,
+        err,
+        fields(
+            start_block = %range.start(),
+            end_block = %range.end(),
+        )
+    )]
     async fn run_range(&self, range: RangeInclusive<BlockNum>) -> Result<(), RunRangeError> {
         let stream = {
             let block_streamer = self.block_streamer.clone();
@@ -1071,34 +1080,46 @@ impl<S: BlockStreamer> DumpPartition<S> {
             }
             prev_block_num = Some(cur_block_num);
 
-            for table_rows in dataset_rows {
-                if let Some(ref metrics) = self.metrics {
-                    let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                    let table_name = table_rows.table.name();
-                    let physical_table = self
-                        .catalog
-                        .physical_tables()
-                        .find(|t| t.table_name() == table_name)
-                        .expect("table should exist");
-                    let location_id = *physical_table.location_id();
-                    // Record rows only (bytes tracked separately in writer)
-                    metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
-                    // Update latest block gauge
-                    metrics.set_latest_block(cur_block_num, table_name.to_string(), location_id);
-                }
-
-                writer
-                    .write(table_rows)
-                    .await
-                    .map_err(RunRangeError::Write)?;
-            }
-
-            self.progress_tracker.block_covered(cur_block_num);
+            self.process_block(cur_block_num, dataset_rows, &mut writer)
+                .await?;
         }
 
         // Close the last part file for each table, checking for any errors.
         writer.close().await.map_err(RunRangeError::Close)?;
 
+        Ok(())
+    }
+
+    #[instrument(skip_all, err, fields(block_num = %block_num))]
+    async fn process_block(
+        &self,
+        block_num: BlockNum,
+        dataset_rows: Rows,
+        writer: &mut RawDatasetWriter,
+    ) -> Result<(), RunRangeError> {
+        for table_rows in dataset_rows {
+            if let Some(ref metrics) = self.metrics {
+                let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
+                let table_name = table_rows.table.name();
+                let physical_table = self
+                    .catalog
+                    .physical_tables()
+                    .find(|t| t.table_name() == table_name)
+                    .expect("table should exist");
+                let location_id = *physical_table.location_id();
+                // Record rows only (bytes tracked separately in writer)
+                metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
+                // Update latest block gauge
+                metrics.set_latest_block(block_num, table_name.to_string(), location_id);
+            }
+
+            writer
+                .write(table_rows)
+                .await
+                .map_err(RunRangeError::Write)?;
+        }
+
+        self.progress_tracker.block_covered(block_num);
         Ok(())
     }
 }

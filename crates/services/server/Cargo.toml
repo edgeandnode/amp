@@ -26,3 +26,4 @@ tokio = { workspace = true, features = ["net"] }
 tonic.workspace = true
 tower-http = { version = "0.6.2", features = ["compression-gzip", "cors"] }
 tracing.workspace = true
+tracing-futures.workspace = true

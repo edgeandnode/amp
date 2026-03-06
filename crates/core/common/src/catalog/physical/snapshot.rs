@@ -237,6 +237,27 @@ impl QueryableSnapshot {
             .with_statistics(metadata.statistics);
         Ok(pf)
     }
+
+    /// Resolves file metadata and computes statistics for the scan plan.
+    #[tracing::instrument(skip_all, err, fields(files = self.resolved_files.len()))]
+    async fn resolve_file_groups(
+        &self,
+        target_partitions: usize,
+        table_schema: SchemaRef,
+    ) -> DataFusionResult<(Vec<FileGroup>, datafusion::common::Statistics)> {
+        let file_count = self.resolved_files.len();
+        let file_stream =
+            futures::stream::iter(self.resolved_files.iter()).then(|f| self.to_partitioned_file(f));
+        let partitioned = round_robin(file_stream, file_count, target_partitions)
+            .await
+            .map_err(|e| DataFusionError::External(e.into()))?;
+        Ok(compute_all_files_statistics(
+            partitioned,
+            table_schema,
+            true,
+            false,
+        )?)
+    }
 }
 
 #[async_trait::async_trait]
@@ -272,15 +293,9 @@ impl TableProvider for QueryableSnapshot {
 
         let target_partitions = state.config_options().execution.target_partitions;
         let table_schema = self.physical_table.schema();
-        let (file_groups, statistics) = {
-            let file_count = self.resolved_files.len();
-            let file_stream = futures::stream::iter(self.resolved_files.iter())
-                .then(|f| self.to_partitioned_file(f));
-            let partitioned = round_robin(file_stream, file_count, target_partitions)
-                .await
-                .map_err(|e| DataFusionError::External(e.into()))?;
-            compute_all_files_statistics(partitioned, table_schema.clone(), true, false)?
-        };
+        let (file_groups, statistics) = self
+            .resolve_file_groups(target_partitions, table_schema.clone())
+            .await?;
         if statistics.num_rows == Precision::Absent {
             // This log likely signifies a bug in our statistics fetching.
             tracing::warn!("Table has no row count statistics. Queries may be inefficient.");

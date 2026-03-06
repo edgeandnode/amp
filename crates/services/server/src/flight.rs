@@ -66,6 +66,7 @@ use serde_json::json;
 use thiserror::Error;
 use tonic::{Request, Response, Status, service::Routes};
 use tracing::instrument;
+use tracing_futures::Instrument;
 
 use crate::{
     config::Config, metrics::MetricsRegistry,
@@ -182,6 +183,7 @@ impl Service {
                 .for_catalog(catalog, false)
                 .await
                 .map_err(Error::CreateExecContext)?;
+
             let plan = plan.attach_to(&ctx).map_err(Error::AttachPlan)?;
 
             let block_ranges = ctx
@@ -208,6 +210,8 @@ impl Service {
                 block_ranges,
             };
 
+            let span = tracing::Span::current();
+            let stream = instrument_query_result_stream(stream, span);
             if let Some(metrics) = &self.metrics {
                 Ok(track_query_metrics(stream, metrics, query_start_time))
             } else {
@@ -261,6 +265,8 @@ impl Service {
                 schema,
             };
 
+            let span = tracing::Span::current();
+            let stream = instrument_query_result_stream(stream, span);
             if let Some(metrics) = &self.metrics {
                 Ok(track_query_metrics(stream, metrics, query_start_time))
             } else {
@@ -271,7 +277,7 @@ impl Service {
 }
 
 impl Service {
-    #[instrument(skip(self))]
+    #[instrument(skip(self), err)]
     async fn get_flight_info(
         &self,
         descriptor: FlightDescriptor,
@@ -378,7 +384,7 @@ impl Service {
         Ok(info)
     }
 
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err, fields(query = tracing::field::Empty, is_streaming = tracing::field::Empty))]
     async fn do_get(&self, ticket: Ticket) -> Result<TonicStream<FlightData>, Error> {
         let (ticket, _) =
             bincode::decode_from_slice::<AmpTicket, _>(&ticket.ticket, bincode::config::standard())
@@ -395,7 +401,8 @@ impl Service {
             .parse::<SqlStr>()
             .map_err(|err| Error::InvalidQuery(err.to_string()))?;
 
-        tracing::debug!("SQL query: {}", sql_str);
+        tracing::Span::current().record("query", &sql_str as &str);
+        tracing::Span::current().record("is_streaming", ticket.is_streaming);
 
         let stream = self
             .execute_query(
@@ -405,7 +412,9 @@ impl Service {
             )
             .await?;
 
-        Ok(flight_data_stream(stream))
+        let span = tracing::Span::current();
+        let flight_stream = flight_data_stream(stream);
+        Ok(flight_stream.instrument(span).boxed())
     }
 }
 
@@ -492,7 +501,7 @@ impl FlightService for Service {
         Err(Status::unimplemented("get_schema"))
     }
 
-    #[instrument(skip(self, request), fields(request_id = tracing::field::Empty))]
+    #[instrument(skip(self, request), err, fields(request_id = tracing::field::Empty))]
     async fn do_get(
         &self,
         request: Request<Ticket>,
@@ -509,7 +518,8 @@ impl FlightService for Service {
 
         let ticket = request.into_inner();
         let data_stream = self.do_get(ticket).await?;
-        Ok(Response::new(data_stream))
+        let span = tracing::Span::current();
+        Ok(Response::new(data_stream.instrument(span).boxed()))
     }
 
     async fn do_put(
@@ -593,6 +603,32 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
 }
 
 /// Wrap a query result stream with metrics tracking
+/// Wraps the inner stream of a [`QueryResultStream`] so that the given span is
+/// entered on every poll and stays alive until the stream is dropped.
+fn instrument_query_result_stream(
+    stream: QueryResultStream,
+    span: tracing::Span,
+) -> QueryResultStream {
+    match stream {
+        QueryResultStream::NonIncremental {
+            stream: inner,
+            schema,
+            block_ranges,
+        } => QueryResultStream::NonIncremental {
+            stream: inner.instrument(span).boxed(),
+            schema,
+            block_ranges,
+        },
+        QueryResultStream::Incremental {
+            stream: inner,
+            schema,
+        } => QueryResultStream::Incremental {
+            stream: inner.instrument(span).boxed(),
+            schema,
+        },
+    }
+}
+
 fn track_query_metrics(
     stream: QueryResultStream,
     metrics: &Arc<MetricsRegistry>,
