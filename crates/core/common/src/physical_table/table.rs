@@ -1,6 +1,7 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use amp_data_store::{DataStore, PhyTableRevision, physical_table::PhyTableRevisionPath};
+use amp_parquet::{meta::ParquetMeta, writer::WriterTarget};
 use datafusion::arrow::datatypes::SchemaRef;
 use datasets_common::{
     dataset::Table, hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
@@ -10,7 +11,6 @@ use url::Url;
 
 use crate::{
     BlockNum,
-    metadata::parquet::ParquetMeta,
     physical_table::{
         file::FileMetadata,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
@@ -228,6 +228,17 @@ impl PhysicalTable {
             Arc::new(self.clone()),
             canonical_segments,
         ))
+    }
+}
+
+impl<'a> From<&'a PhysicalTable> for WriterTarget<'a> {
+    fn from(table: &'a PhysicalTable) -> Self {
+        Self {
+            table_name: &table.table_name,
+            location_id: table.revision.location_id,
+            revision: &table.revision,
+            url: table.revision.url.inner(),
+        }
     }
 }
 

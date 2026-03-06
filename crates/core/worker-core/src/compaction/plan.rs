@@ -7,9 +7,9 @@ use std::{
 };
 
 use amp_data_store::DataStore;
+use amp_parquet::reader::AmpReaderFactory;
 use common::{
     BlockRange,
-    catalog::physical::reader::AmpReaderFactory,
     metadata::SegmentSize,
     parquet::arrow::{
         ParquetRecordBatchStreamBuilder,
@@ -36,11 +36,17 @@ use crate::{
     metrics::MetricsRegistry,
 };
 
+/// A single Parquet file opened for compaction, carrying its record-batch stream and sizing info.
 pub struct CompactionFile {
+    /// Identifier of this file in the metadata database.
     pub file_id: FileId,
+    /// Block range covered by this file.
     pub range: BlockRange,
+    /// Async stream of record batches read from the file.
     pub sendable_stream: SendableRecordBatchStream,
+    /// Aggregate size metrics (blocks, bytes, rows, generation) for this file.
     pub size: SegmentSize,
+    /// Whether this file is the last segment in the canonical chain.
     pub is_tail: bool,
 }
 

@@ -4,12 +4,13 @@ use std::{
     time::Duration,
 };
 
+use amp_parquet::generation::Generation;
 use amp_worker_core::{
     compaction::{AmpCompactor, SegmentSizeLimit},
     parquet_opts,
 };
 use anyhow::Result;
-use common::{datasets_cache::DatasetsCache, metadata::Generation};
+use common::datasets_cache::DatasetsCache;
 use datasets_common::reference::Reference;
 use monitoring::logging;
 

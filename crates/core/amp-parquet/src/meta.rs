@@ -19,24 +19,32 @@
 //! See also: metadata-consistency
 
 use amp_data_store::file_name::FileName;
-use datasets_common::block_range::BlockRange;
-use serde::{Deserialize, Serialize};
+use datasets_common::{block_num::BlockNum, block_range::BlockRange};
 
-use crate::{Timestamp, cursor::Watermark};
+use crate::timestamp::Timestamp;
 
+/// A watermark represents a monotonically increasing block number in materialized parquet segments.
+pub type Watermark = BlockNum;
+
+/// Key used to store [`ParquetMeta`] JSON in the Parquet file's key-value metadata.
 pub const PARQUET_METADATA_KEY: &str = "nozzle_metadata";
+/// Key used to store the list of parent file IDs in the Parquet key-value metadata.
 pub const PARENT_FILE_ID_METADATA_KEY: &str = "parent_file_ids";
+/// Key used to store the compaction generation number in the Parquet key-value metadata.
 pub const GENERATION_METADATA_KEY: &str = "generation";
 
 /// File metadata stored in the metadata DB and the KV metadata of the corresponding parquet file.
 /// Modifying the serialization of this struct may break compatibility with existing parquet files
 /// that have been dumped.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParquetMeta {
+    /// The table name this file belongs to.
     pub table: String,
+    /// The object store filename for this Parquet segment.
     pub filename: FileName,
+    /// When this file was created.
     pub created_at: Timestamp,
-    // for now, this list should contain exactly 1 entry
+    /// Block ranges covered by this file (currently exactly one entry).
     pub ranges: Vec<BlockRange>,
     /// For single-network segments, this is `None` as the watermark equals the end block number.
     /// For multi-network segments, this represents the cumulative watermark at the end of

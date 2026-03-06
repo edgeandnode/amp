@@ -20,14 +20,19 @@ use datafusion_datasource::PartitionedFile;
 use futures::future::BoxFuture;
 use metadata_db::{files::FileId, physical_table_revision::LocationId};
 
+/// Factory that creates [`AmpReader`] instances for DataFusion's Parquet scan execution.
 #[derive(Debug, Clone)]
 pub struct AmpReaderFactory {
+    /// The physical table revision location this factory reads from.
     pub location_id: LocationId,
+    /// Object store used to read Parquet files.
     pub store: DataStore,
+    /// Arrow schema shared across all files read by this factory.
     pub schema: SchemaRef,
 }
 
 impl AmpReaderFactory {
+    /// Retrieves cached Parquet metadata for the given file, deserializing the footer if needed.
     pub async fn get_cached_metadata(
         &self,
         file: FileId,
@@ -39,6 +44,7 @@ impl AmpReaderFactory {
 }
 
 impl ParquetFileReaderFactory for AmpReaderFactory {
+    /// Creates an [`AmpReader`] for a partitioned file, wiring up metrics and cached metadata.
     fn create_reader(
         &self,
         partition_index: usize,
@@ -76,22 +82,31 @@ impl ParquetFileReaderFactory for AmpReaderFactory {
     }
 }
 
+/// Async Parquet file reader that serves byte ranges from the object store and metadata from cache.
 pub struct AmpReader {
+    /// The physical table revision location being read.
     pub location_id: LocationId,
+    /// Identifier of the Parquet file in the metadata database.
     pub file_id: FileId,
+    /// DataFusion metrics (bytes scanned, etc.) for this file read.
     pub file_metrics: ParquetFileMetrics,
+    /// Underlying object-store reader that fetches byte ranges.
     pub inner: ParquetObjectReader,
+    /// Object store used for cached metadata lookups.
     pub store: DataStore,
+    /// Arrow schema for deserializing record batches.
     pub schema: SchemaRef,
 }
 
 impl AsyncFileReader for AmpReader {
+    /// Reads a contiguous byte range from the underlying object store, recording bytes scanned.
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         let bytes_scanned = range.end - range.start;
         self.file_metrics.bytes_scanned.add(bytes_scanned as usize);
         self.inner.get_bytes(range)
     }
 
+    /// Reads multiple byte ranges in a single request, recording total bytes scanned.
     fn get_byte_ranges(
         &mut self,
         ranges: Vec<Range<u64>>,
@@ -101,6 +116,7 @@ impl AsyncFileReader for AmpReader {
         self.inner.get_byte_ranges(ranges)
     }
 
+    /// Returns cached Parquet metadata for this file, avoiding a re-read of the footer.
     fn get_metadata<'a>(
         &'a mut self,
         _options: Option<&'a ArrowReaderOptions>,

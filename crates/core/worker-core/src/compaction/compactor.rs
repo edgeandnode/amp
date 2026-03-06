@@ -9,10 +9,11 @@ use std::{
 };
 
 use amp_data_store::{DataStore, file_name::FileName};
-use common::{
-    BlockNum, BlockRange, catalog::physical::reader::AmpReaderFactory, metadata::SegmentSize,
-    physical_table::PhysicalTable,
+use amp_parquet::{
+    reader::AmpReaderFactory,
+    writer::{ParquetFileWriter, ParquetFileWriterOutput},
 };
+use common::{BlockNum, BlockRange, metadata::SegmentSize, physical_table::PhysicalTable};
 use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
 use monitoring::logging;
@@ -25,7 +26,6 @@ use crate::{
     },
     config::ParquetConfig,
     metrics::MetricsRegistry,
-    parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
 };
 
 #[derive(Debug, Clone)]
@@ -252,7 +252,9 @@ impl CompactionGroup {
             self.store,
             buf_writer,
             filename,
-            self.table.clone(),
+            self.table.schema(),
+            self.table.table_ref_compact(),
+            &*self.table,
             self.props.max_row_group_bytes,
             self.props.parquet.clone(),
         )
@@ -308,13 +310,11 @@ impl CompactionGroup {
             );
         }
 
-        output
-            .commit_metadata(&metadata_db)
+        commit_compaction_metadata(&output, &metadata_db)
             .await
             .map_err(CompactorError::metadata_commit_error)?;
 
-        output
-            .upsert_gc_manifest(&metadata_db, duration)
+        upsert_gc_manifest(&output, &metadata_db, duration)
             .await
             .map_err(CompactorError::manifest_update_error(&output.parent_ids))?;
 
@@ -348,36 +348,45 @@ impl CompactionGroup {
     }
 }
 
-impl ParquetFileWriterOutput {
-    async fn commit_metadata(&self, metadata_db: &MetadataDb) -> Result<(), metadata_db::Error> {
-        let location_id = self.location_id;
-        let file_name = self.object_meta.location.filename().unwrap().to_string();
-        let file_name = FileName::new_unchecked(file_name);
-        let object_size = self.object_meta.size;
-        let object_e_tag = self.object_meta.e_tag.clone();
-        let object_version = self.object_meta.version.clone();
-        let parquet_meta = serde_json::to_value(&self.parquet_meta).unwrap();
-        let footer = &self.footer;
+/// Registers the compacted file's metadata in the database.
+async fn commit_compaction_metadata(
+    output: &ParquetFileWriterOutput,
+    metadata_db: &MetadataDb,
+) -> Result<(), metadata_db::Error> {
+    let location_id = output.location_id;
+    let file_name = output.object_meta.location.filename().unwrap().to_string();
+    let file_name = FileName::new_unchecked(file_name);
+    let object_size = output.object_meta.size;
+    let object_e_tag = output.object_meta.e_tag.clone();
+    let object_version = output.object_meta.version.clone();
+    let parquet_meta = serde_json::to_value(&output.parquet_meta).unwrap();
+    let footer = &output.footer;
 
-        metadata_db::files::register(
-            metadata_db,
-            location_id,
-            &self.url,
-            file_name,
-            object_size,
-            object_e_tag,
-            object_version,
-            parquet_meta,
-            footer,
-        )
-        .await
-    }
+    metadata_db::files::register(
+        metadata_db,
+        location_id,
+        &output.url,
+        file_name,
+        object_size,
+        object_e_tag,
+        object_version,
+        parquet_meta,
+        footer,
+    )
+    .await
+}
 
-    async fn upsert_gc_manifest(
-        &self,
-        metadata_db: &MetadataDb,
-        duration: Duration,
-    ) -> Result<(), metadata_db::Error> {
-        metadata_db::gc::upsert(metadata_db, self.location_id, &self.parent_ids, duration).await
-    }
+/// Records the parent file IDs in the GC manifest so they can be collected after compaction.
+async fn upsert_gc_manifest(
+    output: &ParquetFileWriterOutput,
+    metadata_db: &MetadataDb,
+    duration: Duration,
+) -> Result<(), metadata_db::Error> {
+    metadata_db::gc::upsert(
+        metadata_db,
+        output.location_id,
+        &output.parent_ids,
+        duration,
+    )
+    .await
 }

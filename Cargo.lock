@@ -30,6 +30,7 @@ version = "0.1.0"
 dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
+ "amp-parquet",
  "amp-providers-common",
  "amp-providers-registry",
  "amp-worker-core",
@@ -1039,6 +1040,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-parquet"
+version = "0.1.0"
+dependencies = [
+ "amp-data-store",
+ "bytes",
+ "datafusion",
+ "datafusion-datasource",
+ "datasets-common",
+ "futures",
+ "metadata-db",
+ "object_store",
+ "parquet-ext",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "amp-providers-common"
 version = "0.1.0"
 dependencies = [
@@ -1171,6 +1192,7 @@ name = "amp-worker-core"
 version = "0.1.0"
 dependencies = [
  "amp-data-store",
+ "amp-parquet",
  "common",
  "datafusion",
  "datasets-common",
@@ -1180,7 +1202,6 @@ dependencies = [
  "object_store",
  "opentelemetry",
  "parking_lot",
- "parquet-ext",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1194,6 +1215,7 @@ name = "amp-worker-datasets-derived"
 version = "0.1.0"
 dependencies = [
  "amp-data-store",
+ "amp-parquet",
  "amp-worker-core",
  "common",
  "datafusion",
@@ -1212,9 +1234,11 @@ name = "amp-worker-datasets-raw"
 version = "0.1.0"
 dependencies = [
  "amp-data-store",
+ "amp-parquet",
  "amp-providers-registry",
  "amp-worker-core",
  "common",
+ "datafusion",
  "datasets-common",
  "datasets-raw",
  "futures",
@@ -2971,6 +2995,7 @@ dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
  "amp-object-store",
+ "amp-parquet",
  "amp-providers-registry",
  "arrow",
  "async-stream",
@@ -12721,6 +12746,7 @@ dependencies = [
  "amp-data-store",
  "amp-datasets-registry",
  "amp-object-store",
+ "amp-parquet",
  "amp-providers-registry",
  "amp-worker-core",
  "ampctl",

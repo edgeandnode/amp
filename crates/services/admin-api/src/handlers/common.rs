@@ -4,13 +4,13 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
+use amp_parquet::footer::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file};
 use common::{
     amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider, AsyncSchemaProvider},
     context::plan::PlanContextBuilder,
     datasets_cache::{DatasetsCache, GetDatasetError},
     ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::default_session_config,
-    metadata::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file},
     self_schema_provider::SelfSchemaProvider,
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,

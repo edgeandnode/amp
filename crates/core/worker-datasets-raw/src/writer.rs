@@ -1,20 +1,20 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 
 use amp_data_store::{DataStore, file_name::FileName};
+use amp_parquet::{
+    commit::{CommitMetadataError, commit_metadata},
+    generation::Generation,
+    retry::RetryableErrorExt as _,
+    writer::{ParquetFileWriter, ParquetFileWriterCloseError, ParquetFileWriterOutput},
+};
 use amp_worker_core::{
     WriterProperties,
     compaction::{AmpCompactor, AmpCompactorTaskError},
     metrics,
-    parquet_writer::{
-        CommitMetadataError, ParquetFileWriter, ParquetFileWriterCloseError,
-        ParquetFileWriterOutput, commit_metadata,
-    },
     retryable::RetryableErrorExt,
 };
-use common::{
-    BlockNum, BlockRange, arrow::array::RecordBatch, catalog::physical::Catalog,
-    metadata::Generation, parquet::errors::ParquetError, physical_table::PhysicalTable,
-};
+use common::{BlockNum, BlockRange, catalog::physical::Catalog, physical_table::PhysicalTable};
+use datafusion::{arrow::array::RecordBatch, parquet::errors::ParquetError};
 use datasets_common::{dataset::Table as _, table_name::TableName};
 use datasets_raw::rows::TableRows;
 use metadata_db::MetadataDb;
@@ -239,7 +239,9 @@ impl RawTableWriter {
                     store.clone(),
                     buf_writer,
                     filename,
-                    table.clone(),
+                    table.schema(),
+                    table.table_ref_compact(),
+                    &*table,
                     opts.max_row_group_bytes,
                     opts.parquet.clone(),
                 )?)
@@ -294,7 +296,9 @@ impl RawTableWriter {
                         self.store.clone(),
                         buf_writer,
                         filename,
-                        self.table.clone(),
+                        self.table.schema(),
+                        self.table.table_ref_compact(),
+                        &*self.table,
                         self.opts.max_row_group_bytes,
                         self.opts.parquet.clone(),
                     )
@@ -354,7 +358,9 @@ impl RawTableWriter {
                     self.store.clone(),
                     buf_writer,
                     filename,
-                    self.table.clone(),
+                    self.table.schema(),
+                    self.table.table_ref_compact(),
+                    &*self.table,
                     self.opts.max_row_group_bytes,
                     self.opts.parquet.clone(),
                 )
@@ -547,7 +553,7 @@ fn limit_ranges(
 #[cfg(test)]
 mod test {
     #[test]
-    fn limit_ranges() {
+    fn limit_ranges_with_various_lengths_splits_correctly() {
         // shorter than max_len
         assert_eq!(super::limit_ranges(vec![1..=5], 10), vec![1..=5]);
         // exactly equal to max_len

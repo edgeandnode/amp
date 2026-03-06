@@ -18,6 +18,7 @@ amp-config = { path = "../crates/config" }
 amp-data-store = { path = "../crates/core/data-store" }
 amp-datasets-registry = { path = "../crates/core/datasets-registry" }
 amp-object-store = { path = "../crates/core/object-store" }
+amp-parquet = { path = "../crates/core/amp-parquet" }
 amp-providers-registry = { path = "../crates/core/providers-registry" }
 amp-worker-core = { path = "../crates/core/worker-core" }
 amp-client-admin = { package = "admin-client", path = "../crates/clients/admin" }
