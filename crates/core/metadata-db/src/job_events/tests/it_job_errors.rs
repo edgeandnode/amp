@@ -83,7 +83,7 @@ async fn register_event_without_detail_stores_null_succeeds() {
 }
 
 #[tokio::test]
-async fn mark_failed_recoverable_persists_detail_to_jobs_status_succeeds() {
+async fn mark_error_persists_detail_to_jobs_status_succeeds() {
     //* Given
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
@@ -97,7 +97,7 @@ async fn mark_failed_recoverable_persists_detail_to_jobs_status_succeeds() {
     let detail = EventDetail::from_value(&detail_value);
 
     //* When
-    job_status::mark_failed_recoverable(&conn, job_id, &detail)
+    job_status::mark_error(&conn, job_id, &detail)
         .await
         .expect("Failed to mark recoverable with detail");
 
@@ -120,7 +120,7 @@ async fn mark_failed_recoverable_persists_detail_to_jobs_status_succeeds() {
 }
 
 #[tokio::test]
-async fn mark_failed_fatal_persists_detail_to_jobs_status_succeeds() {
+async fn mark_fatal_persists_detail_to_jobs_status_succeeds() {
     //* Given
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
@@ -137,7 +137,7 @@ async fn mark_failed_fatal_persists_detail_to_jobs_status_succeeds() {
     let detail = EventDetail::from_value(&detail_value);
 
     //* When
-    job_status::mark_failed_fatal(&conn, job_id, &detail)
+    job_status::mark_fatal(&conn, job_id, &detail)
         .await
         .expect("Failed to mark fatal with detail");
 

@@ -164,7 +164,7 @@ where
 ///
 /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_failed_recoverable<'c, E>(
+pub async fn mark_error<'c, E>(
     exe: E,
     id: impl Into<JobId> + std::fmt::Debug,
     detail: &EventDetail<'_>,
@@ -189,7 +189,7 @@ where
 ///
 /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
 #[tracing::instrument(skip(exe), err)]
-pub async fn mark_failed_fatal<'c, E>(
+pub async fn mark_fatal<'c, E>(
     exe: E,
     id: impl Into<JobId> + std::fmt::Debug,
     detail: &EventDetail<'_>,
