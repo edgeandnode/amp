@@ -30,7 +30,7 @@ use amp_worker_core::{
 use async_trait::async_trait;
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{
-    job_events::{EventDetail, EventDetailOwned},
+    job_events::{EventDetail, EventDetailOwned, JobEvent},
     jobs::IdempotencyKey,
     workers::Worker,
 };
@@ -132,6 +132,14 @@ pub trait SchedulerJobs: Send + Sync {
         job_id: JobId,
         status: JobStatus,
     ) -> Result<Option<EventDetailOwned>, GetJobDetailError>;
+
+    /// Get all lifecycle events for a job.
+    ///
+    /// Returns the complete audit trail ordered by event id ascending.
+    async fn get_events_for_job(
+        &self,
+        job_id: JobId,
+    ) -> Result<Vec<JobEvent>, GetEventsForJobError>;
 }
 
 /// Invariant-preserving bridge between typed worker job descriptors and the scheduler.
@@ -502,6 +510,16 @@ pub struct ListJobDescriptorsError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct GetJobDetailError(#[source] pub metadata_db::Error);
+
+/// Error when getting events for a job from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct GetEventsForJobError(#[source] pub metadata_db::Error);
 
 /// Trait for querying worker information
 ///

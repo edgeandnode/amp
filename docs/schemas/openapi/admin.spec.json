@@ -1074,6 +1074,69 @@
         }
       }
     },
+    "/jobs/{id}/events": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs/{id}/events` endpoint",
+        "description": "Retrieves all lifecycle events for a specific job from the event log.\n\n## Path Parameters\n- `id`: The unique identifier of the job\n\n## Response\n- **200 OK**: Returns all events for the job\n- **400 Bad Request**: Invalid job ID format\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler\n- `GET_JOB_EVENTS_ERROR`: Failed to retrieve job events from the database",
+        "operationId": "get_job_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved job events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{id}/progress": {
       "get": {
         "tags": [
@@ -2735,6 +2798,57 @@
           "url": {
             "type": "string",
             "description": "Base location URL (e.g., \"s3://bucket/path/\") - combine with file_name for full file URL"
+          }
+        }
+      },
+      "JobEventInfo": {
+        "type": "object",
+        "description": "A single job lifecycle event.",
+        "required": [
+          "id",
+          "created_at",
+          "node_id",
+          "event_type"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Event timestamp in ISO 8601 / RFC 3339 format"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Event type (e.g., SCHEDULED, RUNNING, COMPLETED, ERROR, FATAL, STOPPED)"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Event ID"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the worker node that recorded this event"
+          }
+        }
+      },
+      "JobEventsResponse": {
+        "type": "object",
+        "description": "Response body for GET /jobs/{id}/events endpoint.",
+        "required": [
+          "job_id",
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobEventInfo"
+            },
+            "description": "List of lifecycle events"
+          },
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Job ID"
           }
         }
       },

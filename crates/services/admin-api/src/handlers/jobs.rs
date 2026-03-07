@@ -2,6 +2,7 @@
 
 pub mod delete;
 pub mod delete_by_id;
+pub mod events;
 pub mod get_all;
 pub mod get_by_id;
 pub mod job_info;
