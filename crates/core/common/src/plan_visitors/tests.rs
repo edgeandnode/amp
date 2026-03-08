@@ -1270,3 +1270,126 @@ async fn test_propagate_output_join() {
     let csv = to_csv(&batches);
     assert_eq!(csv, "_block_num,block_num(),id\n5,5,1\n10,10,2\n");
 }
+
+// ── Stacked join detection tests ─────────────────────────────────────────
+
+#[test]
+fn is_incremental_rejects_stacked_inner_joins() {
+    //* Given — (A JOIN B) JOIN C — stacked inner joins
+    let ab_join = LogicalPlanBuilder::from(simple_scan("a"))
+        .join(
+            simple_scan("b"),
+            JoinType::Inner,
+            (
+                vec![Column::from_qualified_name("a.id")],
+                vec![Column::from_qualified_name("b.id")],
+            ),
+            None,
+        )
+        .expect("failed to create ab join")
+        .build()
+        .expect("failed to build ab join");
+
+    let stacked_plan = LogicalPlanBuilder::from(ab_join)
+        .join(
+            simple_scan("c"),
+            JoinType::Inner,
+            (
+                vec![Column::from_qualified_name("a.id")],
+                vec![Column::from_qualified_name("c.id")],
+            ),
+            None,
+        )
+        .expect("failed to create stacked join")
+        .build()
+        .expect("failed to build stacked plan");
+
+    //* When
+    let result = is_incremental(&stacked_plan);
+
+    //* Then
+    assert!(
+        matches!(
+            &result,
+            Err(NonIncrementalQueryError::NonIncremental(
+                NonIncrementalOp::StackedJoins
+            ))
+        ),
+        "stacked inner joins should be rejected: {result:?}"
+    );
+}
+
+#[test]
+fn is_incremental_accepts_single_inner_join() {
+    //* Given — single inner join (no stacking)
+    let plan = LogicalPlanBuilder::from(simple_scan("a"))
+        .join(
+            simple_scan("b"),
+            JoinType::Inner,
+            (
+                vec![Column::from_qualified_name("a.id")],
+                vec![Column::from_qualified_name("b.id")],
+            ),
+            None,
+        )
+        .expect("failed to create join")
+        .build()
+        .expect("failed to build plan");
+
+    //* When
+    let result = is_incremental(&plan);
+
+    //* Then
+    assert!(
+        result.is_ok(),
+        "single inner join should be accepted as incremental: {result:?}"
+    );
+}
+
+#[test]
+fn is_incremental_rejects_stacked_joins_through_subquery_alias() {
+    //* Given — (A JOIN B) AS sub JOIN C — SubqueryAlias between two joins
+    let ab_join = LogicalPlanBuilder::from(simple_scan("a"))
+        .join(
+            simple_scan("b"),
+            JoinType::Inner,
+            (
+                vec![Column::from_qualified_name("a.id")],
+                vec![Column::from_qualified_name("b.id")],
+            ),
+            None,
+        )
+        .expect("failed to create ab join")
+        .alias("sub")
+        .expect("failed to alias ab join")
+        .build()
+        .expect("failed to build ab subquery");
+
+    let stacked_plan = LogicalPlanBuilder::from(ab_join)
+        .join(
+            simple_scan("c"),
+            JoinType::Inner,
+            (
+                vec![Column::from_qualified_name("sub.id")],
+                vec![Column::from_qualified_name("c.id")],
+            ),
+            None,
+        )
+        .expect("failed to create stacked join")
+        .build()
+        .expect("failed to build stacked plan");
+
+    //* When
+    let result = is_incremental(&stacked_plan);
+
+    //* Then
+    assert!(
+        matches!(
+            &result,
+            Err(NonIncrementalQueryError::NonIncremental(
+                NonIncrementalOp::StackedJoins
+            ))
+        ),
+        "stacked joins through subquery should be rejected: {result:?}"
+    );
+}
