@@ -52,6 +52,7 @@ use crate::{
     plan_visitors::{
         find_cross_network_join, order_by_block_num, unproject_special_block_num_column,
     },
+    retryable::RetryableErrorExt,
     self_schema_provider::SelfSchemaProvider,
     sql::TableReference,
     sql_str::SqlStr,
@@ -954,6 +955,26 @@ pub enum StreamingQueryExecutionError {
     /// This occurs when the item cannot be streamed.
     #[error("failed to stream item: {0}")]
     StreamItem(#[source] DataFusionError),
+}
+
+impl RetryableErrorExt for StreamingQueryExecutionError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Plan-level failures are permanent — the query structure won't change on retry.
+            Self::IncrementalizePlan(_)
+            | Self::AttachPlan(_)
+            | Self::UnprojectSpecialBlockNumColumn(_) => false,
+
+            // Task-level failures are transient.
+            Self::StreamingTaskFailedToJoin(_) | Self::TaskTimeout => true,
+
+            // Execution failures are generally transient (I/O, timeouts, etc.).
+            Self::CreateExecContext(_)
+            | Self::NextMicrobatchRange(_)
+            | Self::ExecutePlan(_)
+            | Self::StreamItem(_) => true,
+        }
+    }
 }
 
 /// Errors that occur when determining the next microbatch range

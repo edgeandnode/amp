@@ -21,8 +21,10 @@ use common::{
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     physical_table::PhysicalTable,
+    retryable::RetryableErrorExt as _,
     streaming_query::{
-        QueryMessage, StreamingQuery, message_stream_with_block_complete::MessageStreamError,
+        QueryMessage, StreamingQuery, StreamingQueryExecutionError,
+        message_stream_with_block_complete::MessageStreamError,
     },
 };
 use datafusion::parquet::errors::ParquetError;
@@ -279,8 +281,12 @@ impl RetryableErrorExt for MaterializeSqlQueryError {
             Self::CommitMetadata(err) => err.is_retryable(),
             Self::Compactor(err) => err.is_retryable(),
 
-            // Transient query execution failure — recoverable
-            Self::StreamingQuery(_) => true,
+            // Delegate to the inner error when possible; default to retryable
+            // for transient streaming failures.
+            Self::StreamingQuery(err) => match err.downcast_ref::<StreamingQueryExecutionError>() {
+                Some(inner) => inner.is_retryable(),
+                None => true,
+            },
         }
     }
 }
