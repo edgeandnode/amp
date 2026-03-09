@@ -251,12 +251,7 @@ impl QueryableSnapshot {
         let partitioned = round_robin(file_stream, file_count, target_partitions)
             .await
             .map_err(|e| DataFusionError::External(e.into()))?;
-        compute_all_files_statistics(
-            partitioned,
-            table_schema,
-            true,
-            false,
-        )
+        compute_all_files_statistics(partitioned, table_schema, true, false)
     }
 }
 
