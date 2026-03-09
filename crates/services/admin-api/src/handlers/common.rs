@@ -298,6 +298,14 @@ pub async fn validate_derived_manifest(
             },
         })?;
 
+        // Reject tables whose SQL references no source tables (e.g., `SELECT 1`).
+        // Derived tables must reference at least one external dependency or sibling table.
+        if table_refs.is_empty() {
+            return Err(ManifestValidationError::NoTableReferences {
+                table_name: table_name.clone(),
+            });
+        }
+
         // Validate dependency aliases in table references before catalog creation
         for table_ref in &table_refs {
             if let TableReference::Partial { schema, .. } = table_ref
@@ -462,6 +470,17 @@ pub enum ManifestValidationError {
         alias: String,
         #[source]
         source: GetDatasetError,
+    },
+
+    /// Table SQL does not reference any source tables
+    ///
+    /// This occurs when a derived table's SQL query contains no table references
+    /// (e.g., `SELECT 1`). Derived tables must reference at least one external
+    /// dependency or sibling table via `self.<table_name>`.
+    #[error("Table '{table_name}' does not reference any source tables")]
+    NoTableReferences {
+        /// The table whose SQL query contains no table references
+        table_name: TableName,
     },
 
     /// Catalog-qualified table reference in SQL query

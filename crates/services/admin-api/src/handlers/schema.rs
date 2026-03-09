@@ -12,6 +12,7 @@ use common::{
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
     self_schema_provider::SelfSchemaProvider,
+    sql::{ResolveTableReferencesError, resolve_table_references},
     sql_str::SqlStr,
 };
 use datafusion::sql::parser::Statement;
@@ -19,7 +20,7 @@ use datasets_common::{
     hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
 };
 use datasets_derived::{
-    deps::{DepAlias, DepReference, HashOrVersion},
+    deps::{DepAlias, DepAliasError, DepReference, HashOrVersion},
     func_name::FuncName,
     function::Function,
     manifest::TableSchema,
@@ -55,6 +56,7 @@ use crate::{
 /// - `INVALID_TABLE_SQL`: SQL syntax error in table definition
 /// - `NON_INCREMENTAL_QUERY`: SQL query is non-incremental
 /// - `TABLE_REFERENCE_RESOLUTION`: Failed to extract table references from SQL
+/// - `NO_TABLE_REFERENCES`: Table SQL does not reference any source tables
 /// - `FUNCTION_REFERENCE_RESOLUTION`: Failed to extract function references from SQL
 /// - `DEPENDENCY_NOT_FOUND`: Referenced dependency does not exist
 /// - `DEPENDENCY_MANIFEST_LINK_CHECK`: Failed to verify manifest link for dependency
@@ -233,6 +235,20 @@ pub async fn handler(
     // Infer schema for each table and extract networks
     let mut schemas = BTreeMap::new();
     for (table_name, stmt) in statements {
+        // Extract table references and reject tables with no source tables
+        let table_refs = resolve_table_references::<DepAlias>(&stmt).map_err(|err| {
+            Error::TableReferenceResolution {
+                table_name: table_name.clone(),
+                source: err,
+            }
+        })?;
+        if table_refs.is_empty() {
+            return Err(Error::NoTableReferences {
+                table_name: table_name.clone(),
+            }
+            .into());
+        }
+
         let plan = planning_ctx.statement_to_plan(stmt).await.map_err(|err| {
             Error::SchemaPlanInference {
                 table_name: table_name.clone(),
@@ -410,6 +426,29 @@ enum Error {
         source: amp_datasets_registry::error::ResolveRevisionError,
     },
 
+    /// Failed to extract table references from SQL query
+    ///
+    /// This occurs when extracting table references from the parsed SQL fails,
+    /// typically due to unsupported table reference formats.
+    #[error("Failed to extract table references for table '{table_name}': {source}")]
+    TableReferenceResolution {
+        /// The table whose SQL query failed table reference extraction
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError<DepAliasError>,
+    },
+
+    /// Table SQL does not reference any source tables
+    ///
+    /// This occurs when a derived table's SQL query contains no table references
+    /// (e.g., `SELECT 1`). Derived tables must reference at least one external
+    /// dependency or sibling table via `self.<table_name>`.
+    #[error("Table '{table_name}' does not reference any source tables")]
+    NoTableReferences {
+        /// The table whose SQL query contains no table references
+        table_name: TableName,
+    },
+
     /// Failed to create DataFusion session configuration
     #[error("failed to create session config")]
     SessionConfig(#[source] datafusion::error::DataFusionError),
@@ -458,6 +497,8 @@ impl IntoErrorResponse for Error {
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
             Error::DependencyManifestLinkCheck { .. } => "DEPENDENCY_MANIFEST_LINK_CHECK",
             Error::DependencyVersionResolution { .. } => "DEPENDENCY_VERSION_RESOLUTION",
+            Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
+            Error::NoTableReferences { .. } => "NO_TABLE_REFERENCES",
             Error::SessionConfig(_) => "SESSION_CONFIG_ERROR",
             Error::SchemaPlanInference { source, .. } if is_user_input_error(source) => {
                 "INVALID_PLAN"
@@ -475,6 +516,8 @@ impl IntoErrorResponse for Error {
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
             Error::DependencyManifestLinkCheck { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DependencyVersionResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
+            Error::NoTableReferences { .. } => StatusCode::BAD_REQUEST,
             Error::SessionConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SchemaPlanInference { source, .. } if is_user_input_error(source) => {
                 StatusCode::BAD_REQUEST
