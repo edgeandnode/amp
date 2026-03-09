@@ -5,6 +5,7 @@ pub mod inspect;
 pub mod list;
 pub mod manifest;
 pub mod register;
+pub mod rematerialize;
 pub mod restore;
 pub mod versions;
 
@@ -46,6 +47,18 @@ pub enum Commands {
     #[command(after_help = include_str!("dataset/manifest__after_help.md"))]
     Manifest(manifest::Args),
 
+    /// Rematerialize a block range for a raw dataset
+    ///
+    /// Re-extracts the specified block range for a dataset. This is useful for:
+    /// - Fixing corrupted data
+    /// - Updating extraction logic for historical blocks
+    /// - Recovering from extraction errors
+    ///
+    /// If an active materialization job exists, it will be notified to process the range.
+    /// If no active job exists, a new temporary job will be created.
+    #[command(alias = "remat")]
+    Rematerialize(rematerialize::Args),
+
     /// Restore dataset physical tables from object storage
     ///
     /// Re-indexes physical table metadata from object storage into the metadata
@@ -65,6 +78,7 @@ pub async fn run(command: Commands) -> anyhow::Result<()> {
         Commands::Inspect(args) => inspect::run(args).await?,
         Commands::Versions(args) => versions::run(args).await?,
         Commands::Manifest(args) => manifest::run(args).await?,
+        Commands::Rematerialize(args) => rematerialize::run(args).await?,
         Commands::Restore(args) => restore::run(args).await?,
     }
     Ok(())

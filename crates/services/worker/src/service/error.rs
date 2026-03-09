@@ -370,6 +370,21 @@ pub enum NotificationError {
         job_id: JobId,
         source: AbortJobError,
     },
+
+    /// Failed to handle a rematerialize notification.
+    ///
+    /// This occurs when processing a `Rematerialize` action for a job. The action
+    /// instructs a running job to re-extract a specified block range.
+    ///
+    /// Common causes include:
+    /// - Job is not currently running
+    /// - Job's rematerialize channel is closed
+    /// - Job is not processing rematerialize requests
+    #[error("failed to handle rematerialize action for job {job_id}")]
+    RematerializeActionFailed {
+        job_id: JobId,
+        source: super::job_set::SendRematerializeError,
+    },
 }
 
 /// Errors that can occur when handling a start action.

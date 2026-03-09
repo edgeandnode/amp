@@ -128,6 +128,21 @@ impl MetadataDb {
         let tx = self.pool.begin().await.map_err(Error::Database)?;
         Ok(Transaction::new(tx))
     }
+
+    /// Send a job notification to a worker node.
+    ///
+    /// This is a convenience wrapper around [`workers::send_job_notif`].
+    #[instrument(skip(self, payload), err)]
+    pub async fn send_job_notif<T>(
+        &self,
+        node_id: impl Into<workers::WorkerNodeIdOwned> + std::fmt::Debug,
+        payload: &T,
+    ) -> Result<(), Error>
+    where
+        T: serde::Serialize,
+    {
+        workers::send_job_notif(&self.pool, node_id, payload).await
+    }
 }
 
 // Implement sqlx::Executor for &MetadataDb by delegating to the pool

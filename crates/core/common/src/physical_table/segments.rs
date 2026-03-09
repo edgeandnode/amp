@@ -432,6 +432,59 @@ fn block_range_intersection(
     }
 }
 
+/// Aligns a block range to segment boundaries by expanding it to include all segments
+/// that overlap with the requested range.
+///
+/// This ensures that when rematerializing data, we re-extract complete segments rather
+/// than creating partial overlaps. The newer files will automatically become canonical
+/// via timestamp-based resolution in `canonical_chain()`.
+///
+/// For single-network segments (raw datasets), returns the expanded range that covers
+/// all overlapping segments. For multi-network segments, this function will panic.
+///
+/// Returns the original range if there are no overlapping segments.
+pub fn align_to_segment_boundaries(
+    segments: &[Segment],
+    requested: RangeInclusive<BlockNum>,
+) -> RangeInclusive<BlockNum> {
+    // Invariant: this function only works for single-network segments (raw datasets)
+    if let Some(first_segment) = segments.first() {
+        assert_eq!(
+            first_segment.ranges.len(),
+            1,
+            "align_to_segment_boundaries only supports single-network segments"
+        );
+    }
+
+    let mut aligned_start: Option<BlockNum> = None;
+    let mut aligned_end: Option<BlockNum> = None;
+
+    // Find all segments that overlap with the requested range
+    for segment in segments {
+        assert_eq!(segment.ranges.len(), 1);
+        let segment_range = &segment.ranges[0].numbers;
+
+        // Check if this segment overlaps with the requested range
+        if block_range_intersection(requested.clone(), segment_range.clone()).is_some() {
+            // Expand the aligned range to include this entire segment
+            aligned_start = Some(match aligned_start {
+                None => *segment_range.start(),
+                Some(start) => BlockNum::min(start, *segment_range.start()),
+            });
+            aligned_end = Some(match aligned_end {
+                None => *segment_range.end(),
+                Some(end) => BlockNum::max(end, *segment_range.end()),
+            });
+        }
+    }
+
+    // If no segments overlap, return the original requested range
+    match (aligned_start, aligned_end) {
+        (Some(start), Some(end)) => start..=end,
+        _ => requested,
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::ops::RangeInclusive;
@@ -1031,5 +1084,154 @@ mod test {
             super::merge_ranges(vec![1..=5, 7..=10]),
             vec![1..=5, 7..=10]
         );
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_no_segments() {
+        // With no segments, should return the original range
+        let segments = vec![];
+        let requested = 100..=200;
+        let aligned = super::align_to_segment_boundaries(&segments, requested.clone());
+        assert_eq!(aligned, requested);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_no_overlap() {
+        // Segments that don't overlap with requested range should return original range
+        let segments = vec![
+            test_segment(0..=50, (0, 0), 100),
+            test_segment(51..=99, (0, 0), 100),
+            test_segment(300..=400, (0, 0), 100),
+        ];
+        let requested = 150..=200;
+        let aligned = super::align_to_segment_boundaries(&segments, requested.clone());
+        assert_eq!(aligned, requested);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_single_overlap() {
+        // Requested range overlaps with single segment - should expand to segment boundaries
+        let segments = vec![
+            test_segment(0..=50, (0, 0), 100),
+            test_segment(51..=150, (0, 0), 200),
+            test_segment(151..=300, (0, 0), 300),
+        ];
+        let requested = 100..=120;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover the entire segment [51..150]
+        assert_eq!(aligned, 51..=150);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_multiple_overlaps() {
+        // Requested range overlaps with multiple segments - should expand to cover all
+        let segments = vec![
+            test_segment(0..=100, (0, 0), 100),
+            test_segment(101..=200, (0, 0), 200),
+            test_segment(201..=300, (0, 0), 300),
+            test_segment(301..=400, (0, 0), 400),
+        ];
+        let requested = 150..=250;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover segments [101..200] and [201..300]
+        assert_eq!(aligned, 101..=300);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_fully_contained() {
+        // Requested range fully contained within a segment - should expand to segment
+        let segments = vec![
+            test_segment(0..=50, (0, 0), 100),
+            test_segment(51..=200, (0, 0), 200),
+            test_segment(201..=300, (0, 0), 300),
+        ];
+        let requested = 100..=150;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover the entire segment [51..200]
+        assert_eq!(aligned, 51..=200);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_spans_gap() {
+        // Requested range spans a gap between segments - should expand to both boundaries
+        let segments = vec![
+            test_segment(0..=100, (0, 0), 100),
+            test_segment(201..=300, (0, 0), 200),
+        ];
+        let requested = 80..=220;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover both segments: [0..100] and [201..300]
+        assert_eq!(aligned, 0..=300);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_exact_match() {
+        // Requested range exactly matches segment boundaries
+        let segments = vec![
+            test_segment(0..=100, (0, 0), 100),
+            test_segment(101..=200, (0, 0), 200),
+            test_segment(201..=300, (0, 0), 300),
+        ];
+        let requested = 101..=200;
+        let aligned = super::align_to_segment_boundaries(&segments, requested.clone());
+        // Should return the same range as it already matches segment boundaries
+        assert_eq!(aligned, requested);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_partial_at_start() {
+        // Requested range starts at segment start but doesn't reach the end
+        let segments = vec![
+            test_segment(0..=100, (0, 0), 100),
+            test_segment(101..=200, (0, 0), 200),
+        ];
+        let requested = 101..=150;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover the entire segment [101..200]
+        assert_eq!(aligned, 101..=200);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_partial_at_end() {
+        // Requested range ends at segment end but doesn't start at the beginning
+        let segments = vec![
+            test_segment(0..=100, (0, 0), 100),
+            test_segment(101..=200, (0, 0), 200),
+        ];
+        let requested = 150..=200;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover the entire segment [101..200]
+        assert_eq!(aligned, 101..=200);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_covers_all() {
+        // Requested range covers all segments - but doesn't extend beyond them
+        let segments = vec![
+            test_segment(100..=200, (0, 0), 100),
+            test_segment(201..=300, (0, 0), 200),
+            test_segment(301..=400, (0, 0), 300),
+        ];
+        let requested = 0..=500;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // When request is wider than all segments, should still only cover the segments
+        // The function expands to segment boundaries, not to the request boundaries
+        // Since segments are [100..200], [201..300], [301..400], aligned should be [100..400]
+        // But actually the requested range overlaps all segments, so it expands to their full extent
+        // which is 100..400, not 0..500
+        assert_eq!(aligned, 100..=400);
+    }
+
+    #[test]
+    fn test_align_to_segment_boundaries_single_block() {
+        // Requested range is a single block within a segment
+        let segments = vec![
+            test_segment(0..=100, (0, 0), 100),
+            test_segment(101..=200, (0, 0), 200),
+        ];
+        let requested = 150..=150;
+        let aligned = super::align_to_segment_boundaries(&segments, requested);
+        // Should expand to cover the entire segment [101..200]
+        assert_eq!(aligned, 101..=200);
     }
 }

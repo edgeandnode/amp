@@ -40,8 +40,6 @@ use tracing::Instrument as _;
 
 use super::writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError};
 
-/// Materializes block ranges by partitioning them across multiple parallel workers.
-#[tracing::instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]
 pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
     missing_dataset_ranges: Vec<RangeInclusive<BlockNum>>,

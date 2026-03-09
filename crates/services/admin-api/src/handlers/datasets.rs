@@ -10,5 +10,6 @@ pub mod list_all;
 pub mod list_jobs;
 pub mod list_versions;
 pub mod register;
+pub mod rematerialize;
 pub mod restore;
 pub mod restore_table;

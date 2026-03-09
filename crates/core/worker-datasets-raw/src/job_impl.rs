@@ -83,7 +83,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use amp_data_store::retryable::RetryableErrorExt as _;
 use amp_providers_registry::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
-    Ctx, EndBlock, ResolvedEndBlock,
+    Ctx, EndBlock, RematerializeRequest, ResolvedEndBlock,
     block_ranges::resolve_end_block,
     check::consistency_check,
     compaction::AmpCompactor,
@@ -104,6 +104,7 @@ use datasets_raw::{
     client::{BlockStreamer as _, BlockStreamerExt as _, CleanupError, LatestBlockError},
     dataset::Dataset as RawDataset,
 };
+use tokio::sync::mpsc;
 
 mod ranges;
 mod writer;
@@ -119,6 +120,7 @@ pub async fn execute(
     end: EndBlock,
     writer: impl Into<Option<metadata_db::jobs::JobId>>,
     progress_reporter: Option<Arc<dyn ProgressReporter>>,
+    mut rematerialize_rx: mpsc::Receiver<RematerializeRequest>,
 ) -> Result<(), Error> {
     let dataset = ctx
         .datasets_cache
@@ -281,6 +283,17 @@ pub async fn execute(
     // We wrap the loop in a block to handle errors and emit failure events.
     let materialize_result: Result<(), Error> = async {
         loop {
+            // Check for rematerialize requests (non-blocking)
+            let mut rematerialize_requests: Vec<RematerializeRequest> = vec![];
+            while let Ok(request) = rematerialize_rx.try_recv() {
+                tracing::info!(
+                    start_block = request.start_block,
+                    end_block = request.end_block,
+                    "received rematerialize request"
+                );
+                rematerialize_requests.push(request);
+            }
+
             let Some(latest_block) = client
                 .latest_block(finalized_blocks_only)
                 .await
@@ -307,22 +320,50 @@ pub async fn execute(
                     None => latest_block,
                     Some(end) => BlockNum::min(end, latest_block),
                 };
-                let missing_ranges = table
+                let mut missing_ranges = table
                     .missing_ranges(start..=end)
                     .await
                     .map_err(Error::MissingRanges)?;
+
+                // Process rematerialize requests for this table
+                if !rematerialize_requests.is_empty() {
+                    // Get segments for alignment
+                    let segments = table.segments().await.map_err(Error::GetSegments)?;
+
+                    for request in &rematerialize_requests {
+                        use common::physical_table::segments::align_to_segment_boundaries;
+
+                        let requested_range = request.start_block..=request.end_block;
+
+                        // Align the range to segment boundaries to ensure clean re-extraction
+                        let aligned_range = align_to_segment_boundaries(&segments, requested_range);
+
+                        tracing::info!(
+                            table = %table.table_name(),
+                            requested_start = request.start_block,
+                            requested_end = request.end_block,
+                            aligned_start = aligned_range.start(),
+                            aligned_end = aligned_range.end(),
+                            "aligned rematerialize range to segment boundaries"
+                        );
+
+                        missing_ranges.push(aligned_range);
+                    }
+                }
+
                 let table_name = table.table_name();
                 missing_ranges_by_table.insert(table_name.clone(), missing_ranges);
                 compactors_by_table.insert(table_name.clone(), Arc::clone(compactor));
             }
 
-            // Use the union of missing table block ranges.
+            // Use the union of missing table block ranges (including rematerialize ranges).
             let missing_dataset_ranges = {
                 let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
                     .values()
                     .flatten()
                     .cloned()
                     .collect();
+
                 merge_ranges(ranges)
             };
 
@@ -503,6 +544,15 @@ pub enum Error {
     #[error("Failed to get missing block ranges for table")]
     MissingRanges(#[source] MissingRangesError),
 
+    /// Failed to get segments for table
+    ///
+    /// This occurs when fetching segment information for a table fails, typically
+    /// during rematerialize range alignment. Common causes:
+    /// - Data store connectivity issues
+    /// - Corrupted file metadata
+    #[error("Failed to get segments for table")]
+    GetSegments(#[source] common::physical_table::GetSegmentsError),
+
     /// A partition task execution failed
     ///
     /// This occurs when one of the parallel partition tasks fails during execution
@@ -556,6 +606,9 @@ impl RetryableErrorExt for Error {
             // Delegate to inner error classification
             Self::MissingRanges(err) => err.is_retryable(),
 
+            // Delegate to inner error classification
+            Self::GetSegments(err) => err.is_retryable(),
+
             // Partition tasks — delegate to TryWaitAllError classification
             Self::PartitionTask(err) => err.is_retryable(),
 
@@ -578,6 +631,7 @@ impl amp_worker_core::retryable::JobErrorExt for Error {
             Self::ResolveEndBlock(_) => "RESOLVE_END_BLOCK",
             Self::LatestBlock(_) => "LATEST_BLOCK",
             Self::MissingRanges(_) => "MISSING_RANGES",
+            Self::GetSegments(_) => "GET_SEGMENTS",
             Self::PartitionTask(_) => "PARTITION_TASK",
             Self::Cleanup(_) => "CLEANUP",
         }

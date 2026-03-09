@@ -3,8 +3,11 @@ use std::{
     future::Future,
 };
 
-use amp_worker_core::{jobs::job_id::JobId, retryable::RetryableErrorExt};
-use tokio::task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet};
+use amp_worker_core::{RematerializeRequest, jobs::job_id::JobId, retryable::RetryableErrorExt};
+use tokio::{
+    sync::mpsc,
+    task::{AbortHandle, Id as TaskId, JoinError as TokioJoinError, JoinSet},
+};
 
 use super::job_impl::JobError;
 
@@ -27,6 +30,9 @@ pub struct JobSet {
 
     /// The set of jobs that are spawned and managed by the worker.
     jobs: JoinSet<Result<(), JobError>>,
+
+    /// Channel senders for sending rematerialize requests to running jobs.
+    rematerialize_senders: BTreeMap<JobId, mpsc::Sender<RematerializeRequest>>,
 }
 
 impl JobSet {
@@ -34,12 +40,41 @@ impl JobSet {
         self.job_id_to_handle.contains_key(job_id)
     }
 
-    /// Spawn a new job and register it in the set
-    pub(super) fn spawn(
+    /// Create a channel for a job that will be spawned
+    ///
+    /// Returns a receiver for rematerialize requests that should be passed to the job future.
+    /// The sender is stored internally and will be used when the job is spawned.
+    pub(super) fn create_job_channel(
+        &mut self,
+        job_id: JobId,
+    ) -> mpsc::Receiver<RematerializeRequest> {
+        // Create a channel for rematerialize requests (bounded to apply backpressure)
+        let (tx, rx) = mpsc::channel(100);
+
+        // Store the sender - will be linked when spawn_with_existing_channel is called
+        let old_sender = self.rematerialize_senders.insert(job_id, tx);
+
+        debug_assert!(
+            old_sender.is_none(),
+            "Channel for job #{job_id} already exists"
+        );
+
+        rx
+    }
+
+    /// Spawn a job that already has a channel created via `create_job_channel`
+    ///
+    /// The receiver from `create_job_channel` should be passed to the job future.
+    pub(super) fn spawn_with_existing_channel(
         &mut self,
         job_id: JobId,
         job_fut: impl Future<Output = Result<(), JobError>> + Send + 'static,
     ) {
+        debug_assert!(
+            self.rematerialize_senders.contains_key(&job_id),
+            "Channel for job #{job_id} must be created before spawning"
+        );
+
         let handle = self.jobs.spawn(job_fut);
 
         // Register the IDs and the handle
@@ -50,6 +85,28 @@ impl JobSet {
             old_task_id.is_none() && old_job_id.is_none(),
             "Job #{job_id} is already tracked by the set"
         );
+    }
+
+    /// Send a rematerialize request to a running job
+    ///
+    /// Returns `Ok(())` if the request was sent successfully, or an error if:
+    /// - The job is not running
+    /// - The channel is closed (job has finished or crashed)
+    /// - The channel is full (job is not processing requests)
+    pub(super) async fn send_rematerialize(
+        &self,
+        job_id: &JobId,
+        request: RematerializeRequest,
+    ) -> Result<(), SendRematerializeError> {
+        let sender = self
+            .rematerialize_senders
+            .get(job_id)
+            .ok_or(SendRematerializeError::JobNotFound)?;
+
+        sender
+            .send(request)
+            .await
+            .map_err(|_| SendRematerializeError::ChannelClosed)
     }
 
     /// Abort a job by its ID
@@ -90,6 +147,7 @@ impl JobSet {
             .job_id_to_handle
             .remove(&job_id)
             .unwrap_or_else(|| panic!("Job ID {job_id} is not tracked by the set"));
+        let _sender = self.rematerialize_senders.remove(&job_id);
 
         let next = match result {
             // The job completed successfully
@@ -128,4 +186,15 @@ pub enum JoinError {
     /// The job panicked
     #[error("Job panicked: {0}")]
     Panicked(TokioJoinError),
+}
+
+/// Error type for sending rematerialize requests
+#[derive(Debug, thiserror::Error)]
+pub enum SendRematerializeError {
+    /// The job is not running
+    #[error("job not found")]
+    JobNotFound,
+    /// The channel is closed (job has finished)
+    #[error("channel closed")]
+    ChannelClosed,
 }

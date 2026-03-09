@@ -20,6 +20,7 @@ mod job_queue;
 mod job_set;
 
 use amp_worker_core::{
+    RematerializeRequest,
     error_detail::{ErrorContext, ErrorDetailPayload},
     jobs::{job_id::JobId, status::JobStatus},
     node_id::NodeId,
@@ -311,6 +312,32 @@ impl Worker {
                     .map_err(|error| NotificationError::StopActionFailed {
                         job_id,
                         source: error,
+                    })
+            }
+            JobAction::Rematerialize {
+                start_block,
+                end_block,
+            } => {
+                tracing::info!(
+                    node_id=%self.node_id,
+                    %job_id,
+                    start_block,
+                    end_block,
+                    "rematerialize request received"
+                );
+
+                // Send the rematerialize request to the running job
+                let request = RematerializeRequest {
+                    start_block,
+                    end_block,
+                };
+
+                self.job_set
+                    .send_rematerialize(&job_id, request)
+                    .await
+                    .map_err(|err| NotificationError::RematerializeActionFailed {
+                        job_id,
+                        source: err,
                     })
             }
         }
@@ -621,9 +648,14 @@ impl Worker {
         // the dump layer where table names are known, ensuring partition key consistency
         // with sync.progress events.
 
-        let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc);
+        // Spawn the job first to get the rematerialize receiver
+        let rematerialize_rx = self.job_set.create_job_channel(job_id);
 
-        self.job_set.spawn(job_id, job_fut);
+        // Create the job future with the rematerialize receiver
+        let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc, rematerialize_rx);
+
+        // Spawn the job
+        self.job_set.spawn_with_existing_channel(job_id, job_fut);
 
         Ok(())
     }

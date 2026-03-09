@@ -174,7 +174,7 @@ impl PhysicalTable {
         Ok(canonical)
     }
 
-    pub(crate) async fn segments(&self) -> Result<Vec<Segment>, GetSegmentsError> {
+    pub async fn segments(&self) -> Result<Vec<Segment>, GetSegmentsError> {
         let raw_files = self
             .store
             .get_revision_files(&self.revision)

@@ -3,12 +3,13 @@
 use std::{future::Future, sync::Arc};
 
 use amp_worker_core::{
-    Ctx, ProgressReporter,
+    Ctx, ProgressReporter, RematerializeRequest,
     jobs::job_id::JobId,
     metrics::MetricsRegistry,
     retryable::{JobErrorExt, RetryableErrorExt},
 };
 use datasets_common::hash_reference::HashReference;
+use tokio::sync::mpsc;
 use tracing::{Instrument, info_span};
 
 use crate::{
@@ -24,6 +25,7 @@ pub(super) fn new(
     job_ctx: WorkerJobCtx,
     job_id: JobId,
     job_desc: JobDescriptor,
+    rematerialize_rx: mpsc::Receiver<RematerializeRequest>,
 ) -> impl Future<Output = Result<(), JobError>> {
     let reference = match &job_desc {
         JobDescriptor::MaterializeRaw(desc) => HashReference::new(
@@ -80,6 +82,7 @@ pub(super) fn new(
                     desc.end_block,
                     writer,
                     progress_reporter,
+                    rematerialize_rx,
                 )
                 .instrument(
                     info_span!("materialize_raw_job", %job_id, dataset = %format!("{reference:#}")),

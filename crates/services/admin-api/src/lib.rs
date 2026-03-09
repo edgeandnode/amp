@@ -43,6 +43,10 @@ pub fn router(ctx: Ctx) -> Router<()> {
             post(datasets::deploy::handler),
         )
         .route(
+            "/datasets/{namespace}/{name}/versions/{revision}/rematerialize",
+            post(datasets::rematerialize::handler),
+        )
+        .route(
             "/datasets/{namespace}/{name}/versions/{revision}/restore",
             post(datasets::restore::handler),
         )
@@ -132,6 +136,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::get_manifest::handler,
         handlers::datasets::register::handler,
         handlers::datasets::deploy::handler,
+        handlers::datasets::rematerialize::handler,
         handlers::datasets::restore::handler,
         handlers::datasets::restore_table::handler,
         handlers::datasets::delete::handler,
@@ -193,6 +198,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::register::RegisterResponse,
         handlers::datasets::deploy::DeployRequest,
         handlers::datasets::deploy::DeployResponse,
+        handlers::datasets::rematerialize::RematerializeRequest,
+        handlers::datasets::rematerialize::RematerializeResponse,
         handlers::datasets::restore::RestoreResponse,
         handlers::datasets::restore::RestoredTableInfo,
         handlers::datasets::restore_table::RestoreTablePayload,

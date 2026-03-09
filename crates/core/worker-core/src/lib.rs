@@ -34,6 +34,20 @@ pub use self::{
         SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     },
 };
+
+/// A rematerialize request for a running job.
+///
+/// This struct is passed from the worker service to the dump loop via an mpsc channel.
+/// It instructs the dump loop to re-extract a specific block range, even if that range
+/// has already been extracted. The new files will automatically become canonical via
+/// timestamp-based resolution.
+#[derive(Debug, Clone)]
+pub struct RematerializeRequest {
+    /// The starting block number (inclusive) to re-extract.
+    pub start_block: u64,
+    /// The ending block number (inclusive) to re-extract.
+    pub end_block: u64,
+}
 use crate::{
     compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit},
     config::Config,

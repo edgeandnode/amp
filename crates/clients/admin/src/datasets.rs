@@ -594,6 +594,159 @@ impl<'a> DatasetsClient<'a> {
         }
     }
 
+    /// Rematerialize a block range for a raw dataset.
+    ///
+    /// POSTs to `/datasets/{namespace}/{name}/versions/{version}/rematerialize` endpoint.
+    ///
+    /// This triggers re-extraction of the specified block range. If an active job exists
+    /// for the dataset, it will receive a rematerialize notification. If no active job exists,
+    /// a new temporary job will be created.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RematerializeError`] for network errors, API errors (400/404/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(dataset_ref = %dataset_ref, start_block, end_block))]
+    pub async fn rematerialize(
+        &self,
+        dataset_ref: &Reference,
+        start_block: u64,
+        end_block: u64,
+    ) -> Result<RematerializeResponse, RematerializeError> {
+        let namespace = dataset_ref.namespace();
+        let name = dataset_ref.name();
+        let version = dataset_ref.revision();
+
+        let url = self
+            .client
+            .base_url()
+            .join(&format!(
+                "datasets/{}/{}/versions/{}/rematerialize",
+                namespace, name, version
+            ))
+            .expect("valid URL");
+
+        tracing::debug!("sending rematerialize request");
+
+        let request_body = RematerializeRequest {
+            start_block,
+            end_block,
+        };
+
+        let response = self
+            .client
+            .http()
+            .post(url.as_str())
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|err| RematerializeError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            202 => {
+                let rematerialize_response = response
+                    .json::<RematerializeResponse>()
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(
+                            status = %status,
+                            error = %err,
+                            error_source = logging::error_source(&err),
+                            "failed to parse success response"
+                        );
+                        RematerializeError::UnexpectedResponse {
+                            status: status.as_u16(),
+                            message: format!("Failed to parse response: {}", err),
+                        }
+                    })?;
+
+                tracing::debug!(
+                    job_id = %rematerialize_response.job_id,
+                    new_job = rematerialize_response.new_job_created,
+                    "rematerialize request accepted"
+                );
+                Ok(rematerialize_response)
+            }
+            400 | 404 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    RematerializeError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    RematerializeError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH" => Err(RematerializeError::InvalidPath(error_response.into())),
+                    "INVALID_BODY" => Err(RematerializeError::InvalidBody(error_response.into())),
+                    "DATASET_NOT_RAW" => {
+                        Err(RematerializeError::DatasetNotRaw(error_response.into()))
+                    }
+                    "DATASET_NOT_FOUND" => {
+                        Err(RematerializeError::DatasetNotFound(error_response.into()))
+                    }
+                    "INVALID_BLOCK_RANGE" => {
+                        Err(RematerializeError::InvalidBlockRange(error_response.into()))
+                    }
+                    "RESOLVE_REVISION_ERROR" => Err(RematerializeError::ResolveRevisionError(
+                        error_response.into(),
+                    )),
+                    "GET_DATASET_ERROR" => {
+                        Err(RematerializeError::GetDatasetError(error_response.into()))
+                    }
+                    "FIND_ACTIVE_JOB_ERROR" => Err(RematerializeError::FindActiveJobError(
+                        error_response.into(),
+                    )),
+                    "NO_ACTIVE_JOB" => Err(RematerializeError::NoActiveJob(error_response.into())),
+                    "NOTIFY_WORKER_ERROR" => {
+                        Err(RematerializeError::NotifyWorkerError(error_response.into()))
+                    }
+                    "SCHEDULER_ERROR" => {
+                        Err(RematerializeError::SchedulerError(error_response.into()))
+                    }
+                    _ => Err(RematerializeError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(RematerializeError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
     /// List all registered datasets.
     ///
     /// GETs from `/datasets` endpoint.
@@ -2186,4 +2339,121 @@ pub enum NodeSelectorParseError {
     /// fails node ID validation rules.
     #[error("invalid glob pattern")]
     InvalidGlob(#[source] InvalidGlobError),
+}
+
+/// Request body for rematerialize endpoint.
+#[derive(Debug, serde::Serialize)]
+struct RematerializeRequest {
+    start_block: u64,
+    end_block: u64,
+}
+
+/// Response body from rematerialize endpoint.
+#[derive(Debug, serde::Deserialize)]
+pub struct RematerializeResponse {
+    /// The ID of the job processing the rematerialize request
+    pub job_id: JobId,
+    /// Whether a new job was created (true) or existing job notified (false)
+    pub new_job_created: bool,
+}
+
+/// Errors that can occur when rematerializing a dataset.
+#[derive(Debug, thiserror::Error)]
+pub enum RematerializeError {
+    /// Invalid path parameters (400, INVALID_PATH)
+    ///
+    /// This occurs when:
+    /// - The namespace, name, or revision in the URL path is invalid
+    /// - Path parameter parsing fails
+    #[error("invalid path")]
+    InvalidPath(#[source] ApiError),
+
+    /// Invalid request body (400, INVALID_BODY)
+    ///
+    /// This occurs when:
+    /// - The request body is not valid JSON
+    /// - The JSON structure doesn't match the expected schema
+    /// - Required fields are missing or have invalid types
+    #[error("invalid body")]
+    InvalidBody(#[source] ApiError),
+
+    /// Dataset is not a raw dataset (400, DATASET_NOT_RAW)
+    ///
+    /// This occurs when:
+    /// - Attempting to rematerialize a derived dataset
+    /// - Only raw datasets can be rematerialized
+    #[error("dataset is not a raw dataset")]
+    DatasetNotRaw(#[source] ApiError),
+
+    /// Dataset or revision not found (404, DATASET_NOT_FOUND)
+    ///
+    /// This occurs when:
+    /// - The specified dataset doesn't exist
+    /// - The specified revision doesn't exist for this dataset
+    #[error("dataset not found")]
+    DatasetNotFound(#[source] ApiError),
+
+    /// Invalid block range (400, INVALID_BLOCK_RANGE)
+    ///
+    /// This occurs when:
+    /// - start_block is greater than end_block
+    /// - Block range is outside dataset bounds
+    #[error("invalid block range")]
+    InvalidBlockRange(#[source] ApiError),
+
+    /// Failed to resolve revision (500, RESOLVE_REVISION_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to resolve revision to manifest hash
+    /// - Database connection issues
+    #[error("resolve revision error")]
+    ResolveRevisionError(#[source] ApiError),
+
+    /// Failed to load dataset (500, GET_DATASET_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to load dataset configuration from manifest
+    /// - Manifest parsing errors
+    #[error("get dataset error")]
+    GetDatasetError(#[source] ApiError),
+
+    /// Failed to find active job (500, FIND_ACTIVE_JOB_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to query jobs from database
+    /// - Database connection issues
+    #[error("find active job error")]
+    FindActiveJobError(#[source] ApiError),
+
+    /// No active job found (404, NO_ACTIVE_JOB)
+    ///
+    /// This occurs when:
+    /// - No active materialization job exists for the dataset
+    /// - Job scheduling would be required but is not yet implemented
+    #[error("no active job found")]
+    NoActiveJob(#[source] ApiError),
+
+    /// Failed to send rematerialize notification (500, NOTIFY_WORKER_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to send notification via PostgreSQL NOTIFY
+    /// - Database connection issues
+    #[error("notify worker error")]
+    NotifyWorkerError(#[source] ApiError),
+
+    /// Failed to schedule temporary job (500, SCHEDULER_ERROR)
+    ///
+    /// This occurs when:
+    /// - Failed to create or schedule rematerialize job
+    /// - Scheduler is unavailable or overloaded
+    #[error("scheduler error")]
+    SchedulerError(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
 }

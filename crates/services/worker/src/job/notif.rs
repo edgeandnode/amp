@@ -3,7 +3,7 @@
 use amp_worker_core::jobs::job_id::JobId;
 
 /// The payload of a job notification (without `node_id`, which is in the wrapper)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Notification {
     pub job_id: JobId,
     pub action: Action,
@@ -27,12 +27,24 @@ impl Notification {
             action: Action::Stop,
         }
     }
+
+    /// Create a new rematerialize action
+    #[must_use]
+    pub fn rematerialize(job_id: JobId, start_block: u64, end_block: u64) -> Self {
+        Self {
+            job_id,
+            action: Action::Rematerialize {
+                start_block,
+                end_block,
+            },
+        }
+    }
 }
 
 /// Job notification actions
 ///
 /// These actions coordinate the jobs state and the write lock on the output table locations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Action {
     /// Start the job
     ///
@@ -44,33 +56,28 @@ pub enum Action {
     /// Stop the job: mark the job as stopped and release the locations by deleting
     /// the row from the `jobs` table.
     Stop,
-}
 
-impl Action {
-    /// Returns the string representation of the action
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Start => "START",
-            Self::Stop => "STOP",
-        }
-    }
+    /// Rematerialize a block range
+    ///
+    /// Re-extract the specified block range for the dataset. New files will have
+    /// newer timestamps and automatically become the canonical segments.
+    Rematerialize {
+        /// Start block of the range (inclusive)
+        start_block: u64,
+        /// End block of the range (inclusive)
+        end_block: u64,
+    },
 }
 
 impl std::fmt::Display for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.as_str().fmt(f)
-    }
-}
-
-impl std::str::FromStr for Action {
-    type Err = Box<dyn std::error::Error + Send + Sync>;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            s if s.eq_ignore_ascii_case("START") => Ok(Self::Start),
-            s if s.eq_ignore_ascii_case("STOP") => Ok(Self::Stop),
-            _ => Err(format!("Invalid action variant: {s}").into()),
+        match self {
+            Self::Start => write!(f, "START"),
+            Self::Stop => write!(f, "STOP"),
+            Self::Rematerialize {
+                start_block,
+                end_block,
+            } => write!(f, "REMATERIALIZE({start_block}..{end_block})"),
         }
     }
 }
@@ -80,7 +87,27 @@ impl serde::Serialize for Action {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.as_str())
+        use serde::ser::SerializeMap;
+
+        match self {
+            Self::Start => serializer.serialize_str("START"),
+            Self::Stop => serializer.serialize_str("STOP"),
+            Self::Rematerialize {
+                start_block,
+                end_block,
+            } => {
+                // Serialize as: {"REMATERIALIZE": {"start_block": N, "end_block": M}}
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(
+                    "REMATERIALIZE",
+                    &RematerializePayload {
+                        start_block: *start_block,
+                        end_block: *end_block,
+                    },
+                )?;
+                map.end()
+            }
+        }
     }
 }
 
@@ -89,9 +116,63 @@ impl<'de> serde::Deserialize<'de> for Action {
     where
         D: serde::Deserializer<'de>,
     {
-        let s: &str = serde::Deserialize::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        use serde::de::{self, MapAccess, Visitor};
+
+        struct ActionVisitor;
+
+        impl<'de> Visitor<'de> for ActionVisitor {
+            type Value = Action;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(r#""START", "STOP", or {"REMATERIALIZE": {...}}"#)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Action, E>
+            where
+                E: de::Error,
+            {
+                match value {
+                    s if s.eq_ignore_ascii_case("START") => Ok(Action::Start),
+                    s if s.eq_ignore_ascii_case("STOP") => Ok(Action::Stop),
+                    _ => Err(de::Error::unknown_variant(
+                        value,
+                        &["START", "STOP", "REMATERIALIZE"],
+                    )),
+                }
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Action, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let Some(key) = map.next_key::<String>()? else {
+                    return Err(de::Error::custom("expected action type"));
+                };
+
+                if key.eq_ignore_ascii_case("REMATERIALIZE") {
+                    let payload: RematerializePayload = map.next_value()?;
+                    Ok(Action::Rematerialize {
+                        start_block: payload.start_block,
+                        end_block: payload.end_block,
+                    })
+                } else {
+                    Err(de::Error::unknown_variant(
+                        &key,
+                        &["START", "STOP", "REMATERIALIZE"],
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ActionVisitor)
     }
+}
+
+/// Payload for the rematerialize action
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct RematerializePayload {
+    start_block: u64,
+    end_block: u64,
 }
 
 #[cfg(test)]
@@ -99,72 +180,114 @@ mod tests {
     use super::*;
 
     #[test]
-    fn valid_action_string_parsing_succeeds() {
-        // Uppercase
-        let start_upper: Result<Action, _> = "START".parse();
-        assert!(
-            matches!(start_upper, Ok(Action::Start)),
-            "Expected START to parse as Action::Start"
-        );
+    fn action_serialization_start() {
+        let action = Action::Start;
+        let json = serde_json::to_string(&action).unwrap();
+        assert_eq!(json, r#""START""#);
+    }
 
-        let stop_upper: Result<Action, _> = "STOP".parse();
-        assert!(
-            matches!(stop_upper, Ok(Action::Stop)),
-            "Expected STOP to parse as Action::Stop"
-        );
+    #[test]
+    fn action_serialization_stop() {
+        let action = Action::Stop;
+        let json = serde_json::to_string(&action).unwrap();
+        assert_eq!(json, r#""STOP""#);
+    }
 
-        // Test case-insensitive parsing
-        let start_lower: Result<Action, _> = "start".parse();
-        assert!(
-            matches!(start_lower, Ok(Action::Start)),
-            "Expected start to parse as Action::Start"
-        );
-
-        let stop_lower: Result<Action, _> = "stop".parse();
-        assert!(
-            matches!(stop_lower, Ok(Action::Stop)),
-            "Expected stop to parse as Action::Stop"
+    #[test]
+    fn action_serialization_rematerialize() {
+        let action = Action::Rematerialize {
+            start_block: 1000000,
+            end_block: 2000000,
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "REMATERIALIZE": {
+                    "start_block": 1000000,
+                    "end_block": 2000000
+                }
+            })
         );
     }
 
     #[test]
-    fn invalid_action_string_parsing_fails() {
-        // Completely invalid strings
-        let invalid_upper: Result<Action, _> = "INVALID".parse();
-        assert!(invalid_upper.is_err(), "Expected INVALID to fail parsing");
+    fn action_deserialization_start() {
+        let action: Action = serde_json::from_str(r#""START""#).unwrap();
+        assert!(matches!(action, Action::Start));
 
-        let invalid_lower: Result<Action, _> = "invalid".parse();
-        assert!(invalid_lower.is_err(), "Expected invalid to fail parsing");
+        // Case-insensitive
+        let action: Action = serde_json::from_str(r#""start""#).unwrap();
+        assert!(matches!(action, Action::Start));
+    }
 
-        // Empty string
-        let empty: Result<Action, _> = "".parse();
-        assert!(empty.is_err(), "Expected empty string to fail parsing");
+    #[test]
+    fn action_deserialization_stop() {
+        let action: Action = serde_json::from_str(r#""STOP""#).unwrap();
+        assert!(matches!(action, Action::Stop));
 
-        // Similar but wrong action names
-        let pause_upper: Result<Action, _> = "PAUSE".parse();
-        assert!(pause_upper.is_err(), "Expected PAUSE to fail parsing");
+        // Case-insensitive
+        let action: Action = serde_json::from_str(r#""stop""#).unwrap();
+        assert!(matches!(action, Action::Stop));
+    }
 
-        let run_upper: Result<Action, _> = "RUN".parse();
-        assert!(run_upper.is_err(), "Expected RUN to fail parsing");
+    #[test]
+    fn action_deserialization_rematerialize() {
+        let json = r#"{"REMATERIALIZE": {"start_block": 1000000, "end_block": 2000000}}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            action,
+            Action::Rematerialize {
+                start_block: 1000000,
+                end_block: 2000000
+            }
+        ));
 
-        let begin_lower: Result<Action, _> = "begin".parse();
-        assert!(begin_lower.is_err(), "Expected begin to fail parsing");
+        // Case-insensitive
+        let json = r#"{"rematerialize": {"start_block": 500, "end_block": 1000}}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            action,
+            Action::Rematerialize {
+                start_block: 500,
+                end_block: 1000
+            }
+        ));
+    }
 
-        let end_lower: Result<Action, _> = "end".parse();
-        assert!(end_lower.is_err(), "Expected end to fail parsing");
+    #[test]
+    fn action_deserialization_invalid() {
+        let result: Result<Action, _> = serde_json::from_str(r#""INVALID""#);
+        assert!(result.is_err());
 
-        // Numeric strings
-        let numeric: Result<Action, _> = "123".parse();
-        assert!(numeric.is_err(), "Expected 123 to fail parsing");
+        let result: Result<Action, _> = serde_json::from_str(r#"{"UNKNOWN": {}}"#);
+        assert!(result.is_err());
+    }
 
-        // Extended action names
-        let start_now_upper: Result<Action, _> = "START_NOW".parse();
-        assert!(
-            start_now_upper.is_err(),
-            "Expected START_NOW to fail parsing"
+    #[test]
+    fn notification_serialization_roundtrip() {
+        let notif = Notification::start(JobId::from(metadata_db::jobs::JobId::from_i64_unchecked(
+            123,
+        )));
+        let json = serde_json::to_string(&notif).unwrap();
+        let parsed: Notification = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, notif);
+
+        let notif = Notification::stop(JobId::from(metadata_db::jobs::JobId::from_i64_unchecked(
+            456,
+        )));
+        let json = serde_json::to_string(&notif).unwrap();
+        let parsed: Notification = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, notif);
+
+        let notif = Notification::rematerialize(
+            JobId::from(metadata_db::jobs::JobId::from_i64_unchecked(789)),
+            1000,
+            2000,
         );
-
-        let stop_now_upper: Result<Action, _> = "STOP_NOW".parse();
-        assert!(stop_now_upper.is_err(), "Expected STOP_NOW to fail parsing");
+        let json = serde_json::to_string(&notif).unwrap();
+        let parsed: Notification = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, notif);
     }
 }
