@@ -61,7 +61,7 @@ impl Ampctl {
         &self,
         dataset_ref: &Reference,
         manifest_content: &str,
-    ) -> Result<()> {
+    ) -> Result<amp_client_admin::datasets::RegisterResponse> {
         let fqn = dataset_ref.as_fqn();
         let revision = dataset_ref.revision().as_version();
 

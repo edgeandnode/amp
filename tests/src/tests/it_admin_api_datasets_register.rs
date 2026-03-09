@@ -353,7 +353,7 @@ impl TestCtx {
         name: &Name,
         version: impl Into<Option<&Version>>,
         manifest: &str,
-    ) -> Result<(), RegisterError> {
+    ) -> Result<client::datasets::RegisterResponse, RegisterError> {
         let fqn = FullyQualifiedName::new(namespace.clone(), name.clone());
         let manifest_json: Box<RawValue> =
             serde_json::from_str(manifest).expect("failed to parse manifest JSON");

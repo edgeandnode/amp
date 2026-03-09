@@ -7,8 +7,9 @@ use amp_worker_core::{
     node_id::{InvalidIdError, NodeId, validate_node_id},
 };
 use datasets_common::{
-    fqn::FullyQualifiedName, hash::Hash, name::Name, namespace::Namespace, reference::Reference,
-    revision::Revision, version::Version,
+    dataset_kind_str::DatasetKindStr, fqn::FullyQualifiedName, hash::Hash, name::Name,
+    namespace::Namespace, reference::Reference, revision::Revision, table_name::TableName,
+    version::Version,
 };
 use monitoring::logging;
 use serde_json::value::RawValue;
@@ -154,7 +155,7 @@ impl<'a> DatasetsClient<'a> {
         fqn: &FullyQualifiedName,
         version: Option<&Version>,
         manifest: impl Into<HashOrManifestJson>,
-    ) -> Result<(), RegisterError> {
+    ) -> Result<RegisterResponse, RegisterError> {
         let url = self
             .client
             .base_url()
@@ -186,7 +187,16 @@ impl<'a> DatasetsClient<'a> {
         tracing::debug!(status = %status, "Received API response");
 
         match status.as_u16() {
-            201 => Ok(()),
+            201 => {
+                let body: RegisterResponse = response.json().await.map_err(|err| {
+                    tracing::error!(error = %err, error_source = logging::error_source(&err), "Failed to parse register response");
+                    RegisterError::UnexpectedResponse {
+                        status: 201,
+                        message: format!("Failed to parse register response: {}", err),
+                    }
+                })?;
+                Ok(body)
+            }
             400 | 409 | 500 => {
                 let text = response.text().await.map_err(|err| {
                     tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
@@ -1232,6 +1242,27 @@ impl<'a> DatasetsClient<'a> {
             }
         }
     }
+}
+
+/// Response body from POST /datasets endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegisterResponse {
+    /// Dataset namespace
+    pub namespace: Namespace,
+    /// Dataset name
+    pub name: Name,
+    /// Version of the dataset, if provided during registration
+    pub version: Option<Version>,
+    /// Manifest hash
+    pub manifest_hash: Hash,
+    /// Dataset kind
+    pub kind: DatasetKindStr,
+    /// Starting block
+    pub start_block: u64,
+    /// Finalized blocks only
+    pub finalized_blocks_only: bool,
+    /// Tables
+    pub tables: Vec<TableName>,
 }
 
 /// Request body for POST /datasets endpoint.

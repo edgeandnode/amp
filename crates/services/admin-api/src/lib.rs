@@ -188,6 +188,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::datasets::list_versions::VersionsResponse,
         handlers::datasets::list_versions::VersionInfo,
         handlers::datasets::register::RegisterRequest,
+        handlers::datasets::register::RegisterResponse,
         handlers::datasets::deploy::DeployRequest,
         handlers::datasets::deploy::DeployResponse,
         handlers::datasets::restore::RestoreResponse,

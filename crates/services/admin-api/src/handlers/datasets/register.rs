@@ -4,11 +4,15 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
+use common::datasets_cache::GetDatasetError;
 use datasets_common::{
+    dataset_kind_str::DatasetKindStr,
     hash::{Hash, hash},
+    hash_reference::HashReference,
     manifest::Manifest as CommonManifest,
     name::Name,
     namespace::Namespace,
+    table_name::TableName,
     version::Version,
 };
 use datasets_derived::DerivedDatasetKind;
@@ -113,7 +117,7 @@ use crate::{
         operation_id = "datasets_register",
         request_body = RegisterRequest,
         responses(
-            (status = 201, description = "Dataset successfully registered or updated"),
+            (status = 201, description = "Dataset successfully registered or updated", body = RegisterResponse),
             (status = 400, description = "Invalid request format or manifest", body = crate::handlers::error::ErrorResponse),
             (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
         )
@@ -122,7 +126,7 @@ use crate::{
 pub async fn handler(
     State(ctx): State<Ctx>,
     payload: Result<Json<RegisterRequest>, JsonRejection>,
-) -> Result<StatusCode, ErrorResponse> {
+) -> Result<(StatusCode, Json<RegisterResponse>), ErrorResponse> {
     let RegisterRequest {
         namespace,
         name,
@@ -265,9 +269,9 @@ pub async fn handler(
     );
 
     // Step 3: Tag the manifest with version, if provided
-    if let Some(version) = version {
+    if let Some(ref version) = version {
         ctx.datasets_registry
-            .set_dataset_version_tag(&namespace, &name, &version, &manifest_hash)
+            .set_dataset_version_tag(&namespace, &name, version, &manifest_hash)
             .await
             .map_err(|err| {
                 tracing::error!(
@@ -290,7 +294,61 @@ pub async fn handler(
         );
     }
 
-    Ok(StatusCode::CREATED)
+    // Fetch dataset info from cache to populate response
+    let hash_ref = HashReference::new(namespace.clone(), name.clone(), manifest_hash.clone());
+    let dataset = ctx
+        .datasets_cache
+        .get_dataset(&hash_ref)
+        .await
+        .map_err(Error::GetDataset)?;
+
+    let tables = dataset.table_names();
+    let finalized_blocks_only = dataset.finalized_blocks_only();
+    let kind = dataset.kind();
+    let start_block = dataset.start_block().unwrap_or(0);
+
+    Ok((
+        StatusCode::CREATED,
+        Json(RegisterResponse {
+            namespace,
+            name,
+            version,
+            manifest_hash,
+            kind,
+            start_block,
+            finalized_blocks_only,
+            tables,
+        }),
+    ))
+}
+
+/// Response payload for dataset registration
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct RegisterResponse {
+    /// Dataset namespace
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub namespace: Namespace,
+    /// Dataset name
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub name: Name,
+    /// Version of the dataset, if provided during registration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub version: Option<Version>,
+    /// Manifest hash
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub manifest_hash: Hash,
+    /// Dataset kind
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub kind: DatasetKindStr,
+    /// Starting block
+    pub start_block: u64,
+    /// Finalized blocks only
+    pub finalized_blocks_only: bool,
+    /// Tables
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
+    pub tables: Vec<TableName>,
 }
 
 /// Request payload for dataset registration
@@ -464,6 +522,10 @@ pub enum Error {
     /// - The hash is valid format but no manifest is stored with that hash
     #[error("manifest with hash '{0}' not found")]
     ManifestNotFound(Hash),
+
+    /// Failed to get dataset info after registration
+    #[error("Failed to get dataset info: {0}")]
+    GetDataset(#[source] GetDatasetError),
 }
 
 impl IntoErrorResponse for Error {
@@ -477,6 +539,7 @@ impl IntoErrorResponse for Error {
             Error::VersionTaggingError(_) => "VERSION_TAGGING_ERROR",
             Error::UnsupportedDatasetKind(_) => "UNSUPPORTED_DATASET_KIND",
             Error::ManifestNotFound(_) => "MANIFEST_NOT_FOUND",
+            Error::GetDataset(_) => "GET_DATASET_ERROR",
         }
     }
 
@@ -490,6 +553,7 @@ impl IntoErrorResponse for Error {
             Error::VersionTaggingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
             Error::ManifestNotFound(_) => StatusCode::NOT_FOUND,
+            Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
