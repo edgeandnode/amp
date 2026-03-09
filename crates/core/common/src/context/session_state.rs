@@ -36,6 +36,7 @@ use crate::{
     },
     func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
     sql::{FunctionReference, resolve_function_references, resolve_table_references},
+    udfs::block_num::BlockNumUdf,
 };
 
 /// Session state for planning and executing SQL queries.
@@ -383,6 +384,7 @@ impl Default for SessionState {
 /// Returns the built-in scalar UDFs registered in every session state.
 fn builtin_udfs() -> Vec<ScalarUDF> {
     vec![
+        BlockNumUdf::new().into(),
         EvmDecodeLog::new().into(),
         EvmDecodeLog::new().with_deprecated_name().into(),
         EvmTopic::new().into(),

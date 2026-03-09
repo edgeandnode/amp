@@ -4,14 +4,14 @@ use datafusion::{
     catalog::TableProvider,
     common::{
         DFSchemaRef, JoinType,
-        tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter},
+        tree_node::{Transformed, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter},
     },
     datasource::{TableType, source_as_provider},
     error::DataFusionError,
     logical_expr::{
         EmptyRelation, Join as JoinStruct, LogicalPlan, TableScan, Union as UnionStruct,
     },
-    prelude::{col, lit},
+    prelude::{Expr, col, lit},
     sql::TableReference,
 };
 use datasets_common::block_num::RESERVED_BLOCK_NUM_COLUMN_NAME;
@@ -20,7 +20,31 @@ use tracing::instrument;
 
 use crate::{
     BlockNum, catalog::physical::snapshot::QueryableSnapshot, plan_visitors::NonIncrementalOp,
+    udfs::block_num::is_block_num_udf,
 };
+
+/// Whether to match the pre-propagation `block_num()` UDF only, or also the
+/// post-propagation `col("_block_num")` form.
+///
+/// - `Udf`: only `block_num()` / `col("block_num()")` — for validating raw user queries.
+/// - `Propagated`: also `col("_block_num")` — for the incrementalizer which runs after
+///   the propagator has replaced `block_num()` with `_block_num`.
+#[derive(Clone, Copy)]
+pub enum BlockNumForm {
+    Udf,
+    Propagated,
+}
+
+impl BlockNumForm {
+    pub fn matches(self, expr: &Expr) -> bool {
+        match self {
+            BlockNumForm::Udf => is_block_num_udf(expr),
+            BlockNumForm::Propagated => {
+                matches!(expr, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME)
+            }
+        }
+    }
+}
 
 /// Assuming that output table has been synced up to `start - 1`, and that the input tables are immutable (all of our tables currently are), this will return the _incremental version_ of `plan` that computes the microbatch `[start, end]`.
 ///
@@ -95,7 +119,10 @@ impl TreeNodeRewriter for Incrementalizer {
         use LogicalPlan::*;
         use RelationRange::*;
 
-        match incremental_op_kind(&node).map_err(|e| DataFusionError::External(e.into()))? {
+        // TThe incrementalizer must run after _block_num propagation, so `BlockNumForm::Propagated`
+        match incremental_op_kind(&node, BlockNumForm::Propagated)
+            .map_err(|e| DataFusionError::External(e.into()))?
+        {
             IncrementalOpKind::Linear => Ok(Transformed::no(node)),
             IncrementalOpKind::InnerJoin => {
                 let LogicalPlan::Join(join) = node else {
@@ -257,6 +284,7 @@ pub enum IncrementalOpKind {
 
 pub fn incremental_op_kind(
     node: &LogicalPlan,
+    form: BlockNumForm,
 ) -> Result<IncrementalOpKind, NonIncrementalQueryError> {
     use IncrementalOpKind::*;
     use LogicalPlan::*;
@@ -296,8 +324,36 @@ pub fn incremental_op_kind(
 
         // Operations that are supported only in batch queries
         Limit(_) => Err(NonIncremental(NonIncrementalOp::Limit)),
-        Aggregate(_) => Err(NonIncremental(NonIncrementalOp::Aggregate)),
-        Distinct(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+
+        Aggregate(agg) => {
+            // An aggregate is incrementally valid when _block_num is the first group-by key.
+            // This also handles DISTINCT ON (_block_num, ...) which DataFusion's optimizer
+            // rewrites to an Aggregate with _block_num as the first group-by key.
+            let first_group_ok = agg.group_expr.first().is_some_and(|e| form.matches(e));
+            if first_group_ok {
+                Ok(Linear)
+            } else {
+                Err(NonIncremental(NonIncrementalOp::Aggregate))
+            }
+        }
+        Distinct(distinct) => {
+            use datafusion::logical_expr::Distinct as DistinctEnum;
+            match distinct {
+                // SELECT DISTINCT ON (_block_num, ...) is locally incrementalizable:
+                // since on_expr starts with _block_num and microbatches never overlap in
+                // _block_num values, deduplication can be applied per microbatch.
+                // Also accepts block_num() UDF which will be replaced during propagation.
+                DistinctEnum::On(on) => {
+                    let first_on_ok = on.on_expr.first().is_some_and(|e| form.matches(e));
+                    if first_on_ok {
+                        Ok(Linear)
+                    } else {
+                        Err(NonIncremental(NonIncrementalOp::Distinct))
+                    }
+                }
+                DistinctEnum::All(_) => Err(NonIncremental(NonIncrementalOp::Distinct)),
+            }
+        }
         Sort(_) => Err(NonIncremental(NonIncrementalOp::Sort)),
         Window(_) => Err(NonIncremental(NonIncrementalOp::Window)),
         RecursiveQuery(_) => Err(NonIncremental(NonIncrementalOp::RecursiveQuery)),

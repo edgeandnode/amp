@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     sync::Arc,
 };
 
@@ -12,17 +13,17 @@ use datafusion::{
     functions::core::expr_fn::greatest,
     logical_expr::{
         Join as JoinStruct, LogicalPlan, LogicalPlanBuilder, Sort,
-        SubqueryAlias as SubqueryAliasStruct, Union as UnionStruct, expr::physical_name,
+        SubqueryAlias as SubqueryAliasStruct, Union as UnionStruct,
     },
     physical_plan::ExecutionPlan,
     prelude::{Expr, col, lit},
-    sql::{TableReference as DFTableReference, utils::UNNEST_PLACEHOLDER},
+    sql::{TableReference, utils::UNNEST_PLACEHOLDER},
 };
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
 use crate::{
-    incrementalizer::{NonIncrementalQueryError, incremental_op_kind},
-    sql::TableReference,
+    incrementalizer::{BlockNumForm, NonIncrementalQueryError, incremental_op_kind},
+    udfs::block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf},
 };
 
 /// Helper function to create a column reference to `_block_num`
@@ -34,19 +35,22 @@ fn block_num_col() -> Expr {
 /// names are reserved for special columns.
 pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), DataFusionError> {
     plan.apply(|node| {
-        if let LogicalPlan::Projection(projection) = node {
-            for expr in projection.expr.iter() {
-                if let Expr::Alias(alias) = expr
+        node.apply_expressions(|expr| {
+            expr.apply(|e| {
+                if let Expr::Alias(alias) = e
                     && alias.name.starts_with('_')
-                    && !alias.name.starts_with(UNNEST_PLACEHOLDER) // DF built-in we want to allow
-                     {
-                        return plan_err!(
-                            "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
-                            alias.name
-                        );
-                    }
-            }
-        }
+                    && !alias.name.starts_with(UNNEST_PLACEHOLDER)
+                // DF built-in we want to allow
+                {
+                    return plan_err!(
+                        "expression contains a column alias starting with '_': '{}'. \
+                         Underscore-prefixed names are reserved. Please rename your column",
+                        alias.name
+                    );
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })
+        })?;
         Ok(TreeNodeRecursion::Continue)
     })?;
     Ok(())
@@ -153,62 +157,158 @@ impl TreeNodeRewriter for BlockNumPropagator {
         use LogicalPlan::*;
 
         // Check that the op is actually incremental
-        let op_kind =
-            incremental_op_kind(&node).map_err(|e| DataFusionError::External(e.into()))?;
+        let op_kind = incremental_op_kind(&node, BlockNumForm::Udf)
+            .map_err(|e| DataFusionError::External(e.into()))?;
 
+        // Step 1: Replace block_num() UDF in all expressions of this node using
+        // the currently accumulated _block_num expression.
+        //
+        // Unwrap: `next_block_num_expr` is only `None` at initialization; any
+        // leaf node (TableScan, EmptyRelation, Values) unconditionally sets it.
+        // The unwrap_or fallback is only reached for the leaf nodes themselves,
+        // where block_num() cannot appear, so the replacement is always a no-op.
+        let block_num_expr = {
+            let raw = self
+                .next_block_num_expr
+                .clone()
+                .unwrap_or_else(block_num_col);
+            if raw != block_num_col() {
+                raw.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
+            } else {
+                raw
+            }
+        };
+        // Step 1 replaces block_num() UDF in expressions.
+        //
+        // Output-column positions (Projection.expr, DistinctOn.select_expr) use
+        // `replace_udf_select`: when block_num() IS the entire expression it gets
+        // aliased as BLOCK_NUM_UDF_SCHEMA_NAME (preserving the user's output column
+        // name); when block_num() is nested inside a larger expression (e.g.
+        // `block_num() + 1`) the alias would be swallowed by the outer expression
+        // anyway, so the plain unaliased replacement is used there.
+        //
+        // All other positions (sort keys, Aggregate group keys, Filter …) always use
+        // the unaliased replacement via `replace_udf`.
+        use datafusion::logical_expr::Distinct as DistinctKind;
+        let select_replacement = block_num_expr.clone().alias(BLOCK_NUM_UDF_SCHEMA_NAME);
+        let replace_udf = |e: Expr, repl: &Expr| {
+            e.transform(|e| {
+                if is_block_num_udf(&e) {
+                    Ok(Transformed::yes(repl.clone()))
+                } else {
+                    Ok(Transformed::no(e))
+                }
+            })
+        };
+        let replace_udf_select = |e: Expr| -> Result<Transformed<Expr>, DataFusionError> {
+            if is_block_num_udf(&e) {
+                Ok(Transformed::yes(select_replacement.clone()))
+            } else {
+                replace_udf(e, &block_num_expr)
+            }
+        };
+        let (was_replaced, node) = match node {
+            Distinct(DistinctKind::On(mut on)) => {
+                // on_expr / sort_expr are sort keys — unaliased.
+                // select_expr is named output — top-level-aware alias.
+                let mut changed = false;
+                for e in std::mem::take(&mut on.on_expr) {
+                    let t = replace_udf(e, &block_num_expr)?;
+                    changed |= t.transformed;
+                    on.on_expr.push(t.data);
+                }
+                for e in std::mem::take(&mut on.select_expr) {
+                    let t = replace_udf_select(e)?;
+                    changed |= t.transformed;
+                    on.select_expr.push(t.data);
+                }
+                if let Some(sort_exprs) = on.sort_expr.take() {
+                    let mut new_sort = Vec::with_capacity(sort_exprs.len());
+                    for mut s in sort_exprs {
+                        let t = replace_udf(s.expr, &block_num_expr)?;
+                        changed |= t.transformed;
+                        s.expr = t.data;
+                        new_sort.push(s);
+                    }
+                    on.sort_expr = Some(new_sort);
+                }
+                let node = if changed {
+                    Distinct(DistinctKind::On(on)).recompute_schema()?
+                } else {
+                    Distinct(DistinctKind::On(on))
+                };
+                (changed, node)
+            }
+            node => {
+                let is_projection = matches!(node, Projection(_));
+                let r = node.map_expressions(|e| {
+                    if is_projection {
+                        replace_udf_select(e)
+                    } else {
+                        replace_udf(e, &block_num_expr)
+                    }
+                })?;
+                let was = r.transformed;
+                let node = if was {
+                    r.data.recompute_schema()?
+                } else {
+                    r.data
+                };
+                (was, node)
+            }
+        };
+
+        // Step 2: Handle actual propagation of _block_num value.
         match node {
             Projection(mut projection) => {
-                let block_num_expr = {
-                    // Set the `next_block_num_expr` and take the current one.
-                    //
-                    // Unwrap: `next_block_num_expr` is only `None` at initialization.
-                    // When visiting any leaf plan, we unconditionally set it.
-                    let mut expr = self.next_block_num_expr.replace(block_num_col()).unwrap();
-
-                    // Use an alias if it would not be redundant
-                    if expr != block_num_col() {
-                        expr = expr.alias(RESERVED_BLOCK_NUM_COLUMN_NAME)
-                    }
-                    expr
-                };
-
-                // Deal with any existing projection that resolves to `_block_num`
-                for existing_expr in projection.expr.iter() {
-                    // Unwrap: `physical_name` never errors
-                    if physical_name(existing_expr).unwrap() != RESERVED_BLOCK_NUM_COLUMN_NAME {
-                        continue;
-                    }
-
-                    // If the user already correctly selected `RESERVED_BLOCK_NUM_COLUMN_NAME`, we don't need to modify the projection.
-                    // We do a best effort to detect correct selections:
-                    // - If the expression is identical to the generated one, it is trivially correct.
-                    // - If the input is a single table and the expression is simply `_block_num`, qualified or not, it is also correct.
-                    if existing_expr == &block_num_expr {
-                        return Ok(Transformed::no(LogicalPlan::Projection(projection)));
-                    } else if matches!(existing_expr, Expr::Column(_))
-                        && block_num_expr == block_num_col()
-                    {
-                        // Both the user expression and the generated one are simple column references to `_block_num`.
-                        // But they were not equal, probably due to qualifiers. If there is only one input table, we can ignore the qualifier difference.
-                        let input_schema = projection.input.schema();
-                        let input_qualifiers: BTreeSet<&DFTableReference> =
-                            input_schema.iter().filter_map(|x| x.0).collect();
-
-                        if input_qualifiers.len() <= 1 {
-                            return Ok(Transformed::no(LogicalPlan::Projection(projection)));
+                // Over a join, each input table contributes its own `_block_num`; a bare
+                // column reference (e.g. from `SELECT *` or `SELECT t.*`) picks one
+                // arbitrarily.  Users must write `block_num()` instead so the propagator
+                // can replace it with `greatest(left._block_num, right._block_num)`.
+                //
+                // This check gives this case a nicer error message.
+                let input_qualifiers: BTreeSet<&TableReference> = projection
+                    .input
+                    .schema()
+                    .iter()
+                    .filter_map(|(q, _)| q)
+                    .collect();
+                if input_qualifiers.len() > 1 {
+                    for expr in projection.expr.iter() {
+                        if matches!(expr, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME)
+                        {
+                            return plan_err!(
+                                "selecting `{}` from a multi-table context (e.g. a join) is ambiguous. \
+                                 Use the `block_num()` function instead to get the correct value, \
+                                 or use explicit column names instead of `*` to omit `{}`",
+                                RESERVED_BLOCK_NUM_COLUMN_NAME,
+                                RESERVED_BLOCK_NUM_COLUMN_NAME
+                            );
                         }
                     }
+                }
 
-                    // But If we cannot be sure that the `_block_num` selection is correct, we reject the query.
-                    //
-                    // Many cases of this would currently be caught by `fn forbid_underscore_prefixed_aliases`.
-                    return Err(df_err(
-                        "Invalid select of `_block_num`. To fix this error, alias the column or \
-                        if using `*`, consider explicitly selecting the columns you need."
-                            .to_string(),
+                // Consume next_block_num_expr: reset to block_num_col() so parent nodes
+                // see a simple _block_num column reference from this projection's output.
+                self.next_block_num_expr = Some(block_num_col());
+
+                // In the trivial single-table case (`block_num_expr` is just
+                // `col("_block_num")`), skip auto-prepend when the projection already
+                // contains `_block_num`.  For joins the expr is non-trivial (e.g.
+                // `greatest(...)`) so we always prepend and let DF report any ambiguity.
+                if block_num_expr == block_num_col()
+                    && projection
+                        .expr
+                        .iter()
+                        .any(|e| matches!(e, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME))
+                {
+                    return Ok(Transformed::new_transformed(
+                        LogicalPlan::Projection(projection),
+                        was_replaced,
                     ));
                 }
 
+                // Auto-prepend the _block_num expression.
                 projection.expr.insert(0, block_num_expr);
                 projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
@@ -229,7 +329,7 @@ impl TreeNodeRewriter for BlockNumPropagator {
 
             Join(ref join) => {
                 self.next_block_num_expr = Some(block_num_for_join(join)?);
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             TableScan(ref scan) => {
@@ -238,13 +338,13 @@ impl TreeNodeRewriter for BlockNumPropagator {
                     return Err(df_err(format!("Scan should not have projection: {scan:?}")));
                 }
                 self.next_block_num_expr = Some(block_num_col());
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             // Constants are formally produced "before block 0" but hopefully it's correct enough to assign them 0.
             EmptyRelation(_) | Values(_) => {
                 self.next_block_num_expr = Some(lit(0));
-                Ok(Transformed::no(node))
+                Ok(Transformed::new_transformed(node, was_replaced))
             }
 
             // SubqueryAlias caches its schema - we need to rebuild it to reflect schema changes in its input.
@@ -256,24 +356,70 @@ impl TreeNodeRewriter for BlockNumPropagator {
                 Ok(Transformed::yes(LogicalPlan::SubqueryAlias(rebuilt)))
             }
 
-            // These DfTableReferencenodes do not cache schema and are not leaves, so we can leave them as-is
+            // These nodes do not cache schema and are not leaves. block_num() UDF in their
+            // expressions (e.g. `WHERE block_num() > 100`) is handled by the replacement above.
             Filter(_) | Repartition(_) | Subquery(_) | Explain(_) | Analyze(_)
-            | DescribeTable(_) | Unnest(_) => Ok(Transformed::no(node)),
+            | DescribeTable(_) | Unnest(_) => Ok(Transformed::new_transformed(node, was_replaced)),
+
+            // DISTINCT ON (_block_num) is incrementally valid: the DistinctOn node has a
+            // cached schema field that must be rebuilt to include _block_num after propagation.
+            Distinct(distinct) => {
+                match distinct {
+                    DistinctKind::On(mut on) => {
+                        // Consume next_block_num_expr.
+                        self.next_block_num_expr = Some(block_num_col());
+
+                        // In the trivial single-table case, skip auto-prepend when
+                        // _block_num is already in the select list.
+                        if block_num_expr == block_num_col()
+                            && on
+                                .select_expr
+                                .iter()
+                                .any(|e| matches!(e, Expr::Column(c) if c.name == RESERVED_BLOCK_NUM_COLUMN_NAME))
+                        {
+                            return Ok(Transformed::new_transformed(
+                                LogicalPlan::Distinct(DistinctKind::On(on)),
+                                was_replaced,
+                            ));
+                        }
+
+                        // Prepend _block_num to select_expr and rebuild the cached schema.
+                        on.select_expr.insert(0, block_num_expr);
+                        on.schema = prepend_special_block_num_field(&on.schema);
+                        Ok(Transformed::yes(LogicalPlan::Distinct(DistinctKind::On(
+                            on,
+                        ))))
+                    }
+                    DistinctKind::All(_) => Err(df_err(format!(
+                        "incremental_op_kind should have already rejected Distinct::All: {:?}",
+                        op_kind
+                    ))),
+                }
+            }
+
+            // GROUP BY _block_num, ... — _block_num is already the first group key so it
+            // appears naturally in the aggregate's output schema. Just update
+            // next_block_num_expr for the parent and leave the node unchanged.
+            Aggregate(_) => {
+                self.next_block_num_expr = Some(block_num_col());
+                Ok(Transformed::new_transformed(node, was_replaced))
+            }
 
             // These variants would have already errored in `incremental_op_kind` above
-            Limit(_) | Aggregate(_) | Distinct(_) | Sort(_) | Window(_) | RecursiveQuery(_)
-            | Statement(_) | Dml(_) | Ddl(_) | Copy(_) | Extension(_) => {
-                unreachable!(
-                    "incremental_op_kind should have already rejected this node type: {:?}",
-                    op_kind
-                )
-            }
+            Limit(_) | Sort(_) | Window(_) | RecursiveQuery(_) | Statement(_) | Dml(_) | Ddl(_)
+            | Copy(_) | Extension(_) => Err(df_err(format!(
+                "incremental_op_kind should have already rejected this node type: {:?}",
+                op_kind
+            ))),
         }
     }
 }
 
 /// Propagate the `RESERVED_BLOCK_NUM_COLUMN_NAME` column through the logical plan.
 pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
+    // The transformation relies on the invariants of `forbid_underscore_prefixed_aliases`
+    // to prevent conflicts between user-selected columns and the propagated `_block_num` column.
+    forbid_underscore_prefixed_aliases(&plan)?;
     let mut propagator = BlockNumPropagator::new();
     plan.rewrite(&mut propagator).map(|t| t.data)
 }
@@ -303,6 +449,29 @@ pub fn unproject_special_block_num_column(
     builder.project(expr)?.build()
 }
 
+/// Returns `true` if the plan contains any `block_num()` UDF calls.
+pub fn plan_has_block_num_udf(plan: &LogicalPlan) -> bool {
+    use crate::udfs::block_num::is_block_num_udf;
+    let mut found = false;
+    let _ = plan.apply(|node| {
+        node.apply_expressions(|expr| {
+            expr.apply(|e| {
+                if is_block_num_udf(e) {
+                    found = true;
+                    return Ok(TreeNodeRecursion::Stop);
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })
+        })?;
+        if found {
+            Ok(TreeNodeRecursion::Stop)
+        } else {
+            Ok(TreeNodeRecursion::Continue)
+        }
+    });
+    found
+}
+
 /// Reasons why a logical plan cannot be materialized incrementally
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NonIncrementalOp {
@@ -322,8 +491,8 @@ pub enum NonIncrementalOp {
     RecursiveQuery,
 }
 
-impl std::fmt::Display for NonIncrementalOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NonIncrementalOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use NonIncrementalOp::*;
         match self {
             Limit => write!(f, "Limit"),
@@ -342,7 +511,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
     let mut err: Option<NonIncrementalQueryError> = None;
 
     // TODO: Detect unsupported join stacking, possibly by doing a dry run of the incrementalizer.
-    plan.exists(|node| match incremental_op_kind(node) {
+    plan.exists(|node| match incremental_op_kind(node, BlockNumForm::Udf) {
         Ok(_) => Ok(false),
         Err(e) => {
             err = Some(e);
@@ -360,7 +529,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
 
 pub fn extract_table_references_from_plan(
     plan: &LogicalPlan,
-) -> Result<Vec<DFTableReference>, DataFusionError> {
+) -> Result<Vec<TableReference>, DataFusionError> {
     let mut refs = BTreeSet::new();
 
     plan.apply(|node| {
@@ -382,11 +551,11 @@ pub fn extract_table_references_from_plan(
 #[derive(Debug, Clone)]
 pub struct CrossNetworkJoinInfo {
     /// Networks involved in the cross-network join
-    pub networks: BTreeSet<NetworkId>,
+    pub networks: BTreeSet<datasets_common::network_id::NetworkId>,
 }
 
-impl std::fmt::Display for CrossNetworkJoinInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for CrossNetworkJoinInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "join across multiple networks: {:?}", self.networks)
     }
 }
@@ -400,16 +569,16 @@ pub fn find_cross_network_join(
     plan: &LogicalPlan,
     catalog: &crate::catalog::physical::Catalog,
 ) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
-    let table_to_network: BTreeMap<DFTableReference, NetworkId> = catalog
+    let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
         .entries()
         .iter()
         .filter_map(|(physical_table, sql_schema_name)| {
             let network = physical_table.network()?.clone();
             let table_ref = TableReference::Partial {
-                schema: Arc::new(sql_schema_name.to_string()),
-                table: Arc::new(physical_table.table_name().clone()),
+                schema: Arc::from(&**sql_schema_name),
+                table: Arc::from(physical_table.table_name().as_str()),
             };
-            Some((table_ref.into(), network))
+            Some((table_ref, network))
         })
         .collect();
 
@@ -489,386 +658,4 @@ fn df_err(msg: String) -> DataFusionError {
 }
 
 #[cfg(test)]
-mod tests {
-    use datafusion::{
-        arrow::{
-            array,
-            datatypes::{DataType, Field, Schema},
-        },
-        common::Column,
-        datasource::{MemTable, provider_as_source},
-        logical_expr::{JoinType, LogicalPlanBuilder},
-        physical_planner::PhysicalPlanner,
-    };
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_propagate_block_num_with_qualified_wildcard() {
-        // Create two tables that both contain RESERVED_BLOCK_NUM_COLUMN_NAME columns
-        let foo_schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
-            Field::new("foo_value", DataType::Utf8, false),
-        ]));
-
-        let bar_schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
-            Field::new("bar_value", DataType::Utf8, false),
-        ]));
-
-        let ids = array::Int32Array::from(vec![1, 2, 3]);
-        let foo_values = array::StringArray::from(vec!["foo1", "foo2", "foo3"]);
-        let bar_values = array::StringArray::from(vec!["bar1", "bar2", "bar3"]);
-        let block_nums = array::UInt64Array::from(vec![10, 20, 30]);
-        let foo_batch = datafusion::arrow::record_batch::RecordBatch::try_new(
-            foo_schema.clone(),
-            vec![
-                Arc::new(ids.clone()),
-                Arc::new(block_nums.clone()),
-                Arc::new(foo_values),
-            ],
-        )
-        .unwrap();
-        let bar_batch = datafusion::arrow::record_batch::RecordBatch::try_new(
-            bar_schema.clone(),
-            vec![Arc::new(ids), Arc::new(block_nums), Arc::new(bar_values)],
-        )
-        .unwrap();
-
-        // Create memory tables
-        let foo_table = MemTable::try_new(foo_schema.clone(), vec![vec![foo_batch]]).unwrap();
-        let bar_table = MemTable::try_new(bar_schema.clone(), vec![vec![bar_batch]]).unwrap();
-
-        // Build a logical plan with `SELECT foo.* FROM foo JOIN bar ON foo.id = bar.id`
-        let foo_scan =
-            LogicalPlanBuilder::scan("foo", provider_as_source(Arc::new(foo_table)), None)
-                .unwrap()
-                .build()
-                .unwrap();
-
-        let bar_scan =
-            LogicalPlanBuilder::scan("bar", provider_as_source(Arc::new(bar_table)), None)
-                .unwrap()
-                .build()
-                .unwrap();
-
-        // Create a join
-        let join_plan = LogicalPlanBuilder::from(foo_scan)
-            .join(
-                bar_scan,
-                JoinType::Inner,
-                (
-                    vec![Column::from_qualified_name("foo.id")],
-                    vec![Column::from_qualified_name("bar.id")],
-                ),
-                None,
-            )
-            .unwrap()
-            .build()
-            .unwrap();
-
-        // Project foo.* (which includes foo._block_num)
-        let invalid_projection_plan = LogicalPlanBuilder::from(join_plan.clone())
-            .project(vec![
-                col("foo.id"),
-                col(format!("foo.{}", RESERVED_BLOCK_NUM_COLUMN_NAME)),
-                col("foo.foo_value"),
-            ])
-            .unwrap()
-            .build()
-            .unwrap();
-
-        // Error on incorrect selection of `_block_num`, even if qualified.
-        let err = propagate_block_num(invalid_projection_plan).unwrap_err();
-        assert!(err.to_string().contains("Invalid select of `_block_num`. To fix this error, alias the column or if using `*`, consider explicitly selecting the columns you need."));
-
-        // Project foo.* (now aliasing foo._block_num)
-        let projection_plan = LogicalPlanBuilder::from(join_plan)
-            .project(vec![
-                col("foo.id"),
-                col(format!("foo.{}", RESERVED_BLOCK_NUM_COLUMN_NAME)).alias("block_num"),
-                col("foo.foo_value"),
-            ])
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let transformed_plan = propagate_block_num(projection_plan).unwrap();
-
-        // Check that the plan was transformed (should be a Projection)
-        match &transformed_plan {
-            LogicalPlan::Projection(projection) => {
-                // The first expression should be the RESERVED_BLOCK_NUM_COLUMN_NAME
-                assert_eq!(projection.expr.len(), 4);
-
-                // Check if the qualified column was properly aliased
-                if let Expr::Alias(alias) = &projection.expr[2] {
-                    assert_eq!(alias.name, "block_num", "Should alias to block_num");
-                    if let Expr::Column(c) = alias.expr.as_ref() {
-                        assert_eq!(
-                            c.name, RESERVED_BLOCK_NUM_COLUMN_NAME,
-                            "Should reference RESERVED_BLOCK_NUM_COLUMN_NAME (_block_num) column"
-                        );
-                        assert_eq!(
-                            c.relation.as_ref().unwrap().table(),
-                            "foo",
-                            "Should retain the 'foo' qualifier"
-                        );
-                    }
-                } else {
-                    panic!("Expected an aliased expression for qualified _block_num column");
-                }
-            }
-            _ => panic!("Expected a Projection plan after propagate_block_num"),
-        }
-
-        // Check the schema to ensure RESERVED_BLOCK_NUM_COLUMN_NAME is present and correctly aliased
-        let schema = transformed_plan.schema();
-        assert!(
-            schema
-                .fields()
-                .iter()
-                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
-            "Schema should contain the RESERVED_BLOCK_NUM_COLUMN_NAME field"
-        );
-    }
-
-    #[test]
-    fn prepend_special_block_num_field_with_various_schemas_behaves_correctly() {
-        use datafusion::{
-            arrow::datatypes::{DataType, Field, Schema},
-            common::DFSchema,
-        };
-
-        // Test 1: Function adds _block_num field when schema doesn't have it
-        let schema = DFSchema::from_unqualified_fields(
-            vec![
-                Field::new("id", DataType::Int32, false),
-                Field::new("value", DataType::Utf8, false),
-            ]
-            .into(),
-            Default::default(),
-        )
-        .unwrap();
-
-        let result = prepend_special_block_num_field(&schema);
-
-        assert_eq!(result.fields().len(), 3, "Should add _block_num field");
-        assert_eq!(
-            result.fields()[0].name(),
-            RESERVED_BLOCK_NUM_COLUMN_NAME,
-            "First field should be _block_num"
-        );
-        assert_eq!(result.fields()[1].name(), "id");
-        assert_eq!(result.fields()[2].name(), "value");
-
-        // Test 2: Function is idempotent (calling twice returns same schema)
-        let result2 = prepend_special_block_num_field(&result);
-
-        assert_eq!(
-            result2.fields().len(),
-            3,
-            "Calling again should not add another field"
-        );
-        assert_eq!(
-            result2.fields()[0].name(),
-            RESERVED_BLOCK_NUM_COLUMN_NAME,
-            "First field should still be _block_num"
-        );
-
-        // Test 3: Function skips adding field when _block_num already exists in schema
-        let schema_with_block_num = DFSchema::from_unqualified_fields(
-            vec![
-                Field::new("id", DataType::Int32, false),
-                Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
-                Field::new("value", DataType::Utf8, false),
-            ]
-            .into(),
-            Default::default(),
-        )
-        .unwrap();
-
-        let result3 = prepend_special_block_num_field(&schema_with_block_num);
-
-        assert_eq!(
-            result3.fields().len(),
-            3,
-            "Should not add _block_num when it already exists"
-        );
-        assert!(
-            result3
-                .fields()
-                .iter()
-                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
-            "Should still contain _block_num field"
-        );
-
-        // Test 4: Function skips adding field when qualified _block_num exists (e.g., foo._block_num)
-        // This is the critical case mentioned in the comment: different qualifiers should be
-        // considered as the same field for the purposes of this function.
-        let arrow_schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
-            Field::new("value", DataType::Utf8, false),
-        ]));
-        let qualified_schema = DFSchema::try_from_qualified_schema("foo", &arrow_schema).unwrap();
-
-        let result4 = prepend_special_block_num_field(&qualified_schema);
-
-        assert_eq!(
-            result4.fields().len(),
-            3,
-            "Should not add _block_num when qualified version (foo._block_num) exists"
-        );
-        assert!(
-            result4
-                .fields()
-                .iter()
-                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
-            "Should still contain _block_num field"
-        );
-        // Verify the qualified field is preserved
-        let (qualifier, _field) = result4
-            .iter()
-            .find(|(_, f)| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME)
-            .unwrap();
-        assert_eq!(
-            qualifier.map(|q| q.to_string()),
-            Some("foo".to_string()),
-            "Qualified field should retain its qualifier"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_forbid_duplicate_field_names() {
-        // Create a logical plan with duplicate field names
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new("value", DataType::Utf8, false),
-        ]));
-        let partition = array::RecordBatch::new_empty(schema.clone());
-
-        let table = Arc::new(MemTable::try_new(schema.clone(), vec![vec![partition]]).unwrap());
-
-        let a_scan = LogicalPlanBuilder::scan("a", provider_as_source(table.clone()), None)
-            .unwrap()
-            .build()
-            .unwrap();
-        let b_scan = LogicalPlanBuilder::scan("b", provider_as_source(table), None)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let plan = LogicalPlanBuilder::from(a_scan)
-            .join(
-                b_scan,
-                JoinType::Inner,
-                (
-                    vec![Column::from_qualified_name("a.id")],
-                    vec![Column::from_qualified_name("b.id")],
-                ),
-                None,
-            )
-            .unwrap()
-            .project(vec![
-                col("a.id"),
-                col("a.value"),
-                col("b.value"), // This will create a duplicate "value" field
-            ])
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let ctx = datafusion::prelude::SessionContext::new();
-        let state = ctx.state();
-        let physical_plan = datafusion::physical_planner::DefaultPhysicalPlanner::default()
-            .create_physical_plan(&plan, &state)
-            .await
-            .unwrap();
-        let result = forbid_duplicate_field_names(&physical_plan, &plan);
-
-        assert!(
-            result.is_err(),
-            "forbid_duplicate_field_names should fail with duplicate field names"
-        );
-
-        let err_msg = result.err().unwrap().to_string();
-        assert!(
-            err_msg.contains("Duplicate field names detected in plan schema"),
-            "Error message should indicate duplicate field names"
-        );
-    }
-
-    #[test]
-    fn test_propagate_block_num_through_subquery_alias_in_join() {
-        // This test verifies that _block_num is properly propagated through SubqueryAlias nodes
-        // when used in JOINs. This simulates the CTE case where a user writes:
-        //   WITH test AS (SELECT block_num FROM transactions WHERE value > 0)
-        //   SELECT tx.tx_hash, t.block_num FROM test t, transactions tx
-        // Without explicit _block_num in the CTE.
-
-        // Create a table with _block_num
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new(RESERVED_BLOCK_NUM_COLUMN_NAME, DataType::UInt64, false),
-            Field::new("value", DataType::Utf8, false),
-        ]));
-        let batch = array::RecordBatch::new_empty(schema.clone());
-        let table = Arc::new(MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap());
-
-        // Create a scan and project WITHOUT _block_num (simulating a CTE that doesn't select it)
-        let scan = LogicalPlanBuilder::scan("txs", provider_as_source(table.clone()), None)
-            .unwrap()
-            .project(vec![col("id"), col("value")]) // Note: no _block_num!
-            .unwrap()
-            .build()
-            .unwrap();
-
-        // Wrap in SubqueryAlias to simulate a CTE
-        let cte_alias = SubqueryAliasStruct::try_new(Arc::new(scan), "cte").unwrap();
-        let cte_plan = LogicalPlan::SubqueryAlias(cte_alias);
-
-        // Create another scan for the right side of join
-        let right_scan = LogicalPlanBuilder::scan("txs2", provider_as_source(table), None)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        // Create a cross join between CTE and the table
-        let join_plan = LogicalPlanBuilder::from(cte_plan)
-            .join(
-                right_scan,
-                JoinType::Inner,
-                (
-                    vec![Column::from_qualified_name("cte.id")],
-                    vec![Column::from_qualified_name("txs2.id")],
-                ),
-                None,
-            )
-            .unwrap()
-            .project(vec![col("cte.value"), col("txs2.value")])
-            .unwrap()
-            .build()
-            .unwrap();
-
-        // This should succeed now that SubqueryAlias properly propagates _block_num
-        let result = propagate_block_num(join_plan);
-        assert!(
-            result.is_ok(),
-            "propagate_block_num should succeed for SubqueryAlias in JOIN: {:?}",
-            result.err()
-        );
-
-        // Verify that the resulting plan has _block_num in the schema
-        let plan = result.unwrap();
-        assert!(
-            plan.schema()
-                .fields()
-                .iter()
-                .any(|f| f.name() == RESERVED_BLOCK_NUM_COLUMN_NAME),
-            "Resulting plan should have _block_num in schema"
-        );
-    }
-}
+mod tests;

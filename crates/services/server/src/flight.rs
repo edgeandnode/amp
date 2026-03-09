@@ -44,6 +44,7 @@ use common::{
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
     ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::ExecEnv,
+    plan_visitors::plan_has_block_num_udf,
     sql::{ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_table_references},
     sql_str::SqlStr,
     streaming_query::{QueryMessage, StreamingQuery},
@@ -184,6 +185,15 @@ impl Service {
                 .map_err(Error::CreateExecContext)?;
             let plan = plan.attach_to(&ctx).map_err(Error::AttachPlan)?;
 
+            if plan_has_block_num_udf(&plan) {
+                return Err(Error::PlanSql(
+                    datafusion::error::DataFusionError::Plan(
+                        "block_num() is only supported in streaming queries".to_string(),
+                    )
+                    .context("amp::invalid_input"),
+                ));
+            }
+
             let block_ranges = ctx
                 .common_ranges(&plan)
                 .await
@@ -251,12 +261,12 @@ impl Service {
                 self.config.keep_alive_interval,
             )
             .await
-            .map_err(|err| Error::StreamingExecutionError(err.to_string()))?;
+            .map_err(|err| Error::StreamingExecutionError(Box::new(err)))?;
 
             let stream = QueryResultStream::Incremental {
                 stream: query
                     .into_stream()
-                    .map_err(|err| Error::StreamingExecutionError(err.to_string()))
+                    .map_err(Error::StreamingExecutionError)
                     .boxed(),
                 schema,
             };
@@ -562,7 +572,7 @@ impl QueryResultStream {
                 schema: _,
                 block_ranges: _,
             } => stream
-                .map_err(|err| Error::StreamingExecutionError(err.to_string()))
+                .map_err(|err| Error::StreamingExecutionError(Box::new(err)))
                 .boxed(),
             Self::Incremental { stream, schema: _ } => stream
                 .filter_map(async |result| match result {
@@ -791,7 +801,7 @@ fn flight_data_stream(query_result_stream: QueryResultStream) -> TonicStream<Fli
         while let Some(result) = incremental_stream.next().await {
             match result {
                 Err(err) => {
-                    yield Err(Error::StreamingExecutionError(err.to_string()).into());
+                    yield Err(Error::StreamingExecutionError(Box::new(err)).into());
                     break;
                 }
                 Ok(message) => match message {
@@ -1033,8 +1043,8 @@ pub enum Error {
     ///
     /// Wraps errors from the streaming query pipeline
     /// (microbatch iteration, reorg handling).
-    #[error("streaming query execution error: {0}")]
-    StreamingExecutionError(String),
+    #[error("streaming query execution error")]
+    StreamingExecutionError(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[error("failed to determine streaming start block")]
     StreamingEarliestBlock(#[source] EarliestBlockError),
