@@ -77,8 +77,8 @@ async fn resolve_schema_with_catalog_qualified_table_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "INVALID_PLAN",
-        "should return INVALID_PLAN for catalog-qualified table"
+        response.error_code, "TABLE_REFERENCE_RESOLUTION",
+        "should return TABLE_REFERENCE_RESOLUTION for catalog-qualified table"
     );
     assert!(
         response
@@ -652,8 +652,8 @@ async fn multiple_tables_catalog_qualified_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "INVALID_PLAN",
-        "should return INVALID_PLAN for catalog-qualified table"
+        response.error_code, "TABLE_REFERENCE_RESOLUTION",
+        "should return TABLE_REFERENCE_RESOLUTION for catalog-qualified table"
     );
 }
 
@@ -1726,6 +1726,37 @@ async fn non_incremental_query_with_limit_fails() {
     assert_eq!(
         response.error_code, "NON_INCREMENTAL_QUERY",
         "should return NON_INCREMENTAL_QUERY for LIMIT"
+    );
+}
+
+#[tokio::test]
+async fn resolve_schema_with_no_table_references_fails() {
+    //* Given
+    let ctx = TestCtx::setup("no_table_refs", [("eth_firehose", "_/eth_firehose@0.0.1")]).await;
+
+    //* When — table SQL references no source tables
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [("table_a", "SELECT 1 AS dummy")],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should reject tables with no table references"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    assert_eq!(
+        response.error_code, "NO_TABLE_REFERENCES",
+        "should return NO_TABLE_REFERENCES for table with no source references"
     );
 }
 
