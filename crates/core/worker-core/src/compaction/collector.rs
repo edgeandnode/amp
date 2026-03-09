@@ -11,10 +11,10 @@ use futures::{StreamExt as _, TryStreamExt as _, stream};
 use metadata_db::{MetadataDb, files::FileId, gc::GcManifestRow};
 use object_store::{Error as ObjectStoreError, path::Path};
 
+use super::config::ParquetConfig;
 use crate::{
     WriterProperties,
     compaction::error::{CollectionResult, CollectorError},
-    config::ParquetConfig,
     metrics::MetricsRegistry,
 };
 

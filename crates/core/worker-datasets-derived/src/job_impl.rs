@@ -102,25 +102,30 @@ use std::sync::Arc;
 
 use amp_data_store::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
-    Ctx, EndBlock, check::consistency_check, compaction::AmpCompactor, progress::ProgressReporter,
-    retryable::RetryableErrorExt, tasks::TryWaitAllError,
+    check::consistency_check, compaction::AmpCompactor, retryable::RetryableErrorExt,
+    tasks::TryWaitAllError,
 };
 use common::{physical_table::PhysicalTable, retryable::RetryableErrorExt as _};
 use datasets_common::hash_reference::HashReference;
 use tracing::Instrument;
 
 use self::table::{MaterializeTableError, materialize_table};
+use crate::{job_ctx::Context, job_descriptor::JobDescriptor};
 
 /// Executes materialization of a set of derived dataset tables.
 /// All tables must belong to the same dataset.
 pub async fn execute(
-    ctx: Ctx,
-    dataset_ref: &HashReference,
-    microbatch_max_interval: u64,
-    end: EndBlock,
+    ctx: Context,
+    desc: JobDescriptor,
     writer: impl Into<Option<metadata_db::jobs::JobId>>,
-    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
+    let dataset_ref = HashReference::new(
+        desc.dataset_namespace.clone(),
+        desc.dataset_name.clone(),
+        desc.manifest_hash.clone(),
+    );
+    let end = desc.end_block;
+
     let writer = writer.into();
 
     // Resolve manifest once using the provided hash reference
@@ -131,12 +136,12 @@ pub async fn execute(
         .map(Arc::new)
         .map_err(Error::GetDerivedManifest)?;
 
-    let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet.clone());
+    let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet_writer.clone());
 
     // Get dataset for table resolution
     let dataset = ctx
         .datasets_cache
-        .get_dataset(dataset_ref)
+        .get_dataset(&dataset_ref)
         .await
         .map_err(Error::GetDataset)?;
 
@@ -222,10 +227,8 @@ pub async fn execute(
         let table = Arc::clone(table);
         let compactor = Arc::clone(compactor);
         let opts = parquet_opts.clone();
-        let metrics = ctx.metrics.clone();
         let manifest = manifest.clone();
 
-        let progress_reporter = progress_reporter.clone();
         join_set.spawn(
             async move {
                 let table_name = table.table_name().to_string();
@@ -237,10 +240,7 @@ pub async fn execute(
                     table.clone(),
                     compactor,
                     opts.clone(),
-                    microbatch_max_interval,
                     end,
-                    metrics,
-                    progress_reporter,
                 )
                 .await?;
 

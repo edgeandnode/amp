@@ -1,11 +1,10 @@
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use amp_worker_core::{
-    Ctx, EndBlock, ResolvedEndBlock, WriterProperties,
+    EndBlock, ResolvedEndBlock, WriterProperties,
     block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
     compaction::AmpCompactor,
-    metrics,
-    progress::{ProgressReporter, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
+    progress::{SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
     retryable::RetryableErrorExt,
     tasks::{self, TryWaitAllError},
 };
@@ -31,21 +30,18 @@ use datasets_derived::{
 use tracing::Instrument as _;
 
 use super::query::{MaterializeSqlQueryError, materialize_sql_query};
+use crate::job_ctx::Context;
 
 /// Materializes a derived dataset table
 #[tracing::instrument(skip_all, fields(table = %table.table_name()), err)]
-#[expect(clippy::too_many_arguments)]
 pub async fn materialize_table(
-    ctx: Ctx,
+    ctx: Context,
     manifest: &DerivedManifest,
     env: ExecEnv,
     table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
     opts: Arc<WriterProperties>,
-    microbatch_max_interval: u64,
     end: EndBlock,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
-    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), MaterializeTableError> {
     let materialize_start_time = Instant::now();
 
@@ -53,7 +49,7 @@ pub async fn materialize_table(
 
     // Clone values needed for metrics after async block
     let table_name_for_metrics = table_name.clone();
-    let metrics_for_after = metrics.clone();
+    let metrics_for_after = ctx.metrics.clone();
 
     // Get the table definition from the manifest
     let table_def = manifest
@@ -182,7 +178,7 @@ pub async fn materialize_table(
             };
 
             // Emit sync.started event now that we have resolved start/end blocks
-            if let Some(ref reporter) = progress_reporter {
+            if let Some(ref reporter) = ctx.progress_reporter {
                 reporter.report_sync_started(SyncStartedInfo {
                     table_name: table.table_name().clone(),
                     start_block: Some(start),
@@ -211,16 +207,12 @@ pub async fn materialize_table(
                 table.clone(),
                 compactor,
                 &opts,
-                progress_reporter.clone(),
-                microbatch_max_interval,
-                &ctx.notification_multiplexer,
-                metrics.clone(),
             )
             .await;
 
             // Handle materialization result and emit appropriate lifecycle event
             if let Err(ref err) = materialize_result {
-                if let Some(ref reporter) = progress_reporter {
+                if let Some(ref reporter) = ctx.progress_reporter {
                     reporter.report_sync_failed(SyncFailedInfo {
                         table_name: table.table_name().clone(),
                         error_message: err.to_string(),
@@ -233,7 +225,7 @@ pub async fn materialize_table(
             // Emit sync.completed event for bounded jobs only
             // (continuous jobs never complete, they just keep syncing)
             if let Some(final_block) = end
-                && let Some(ref reporter) = progress_reporter
+                && let Some(ref reporter) = ctx.progress_reporter
             {
                 reporter.report_sync_completed(SyncCompletedInfo {
                     table_name: table.table_name().clone(),

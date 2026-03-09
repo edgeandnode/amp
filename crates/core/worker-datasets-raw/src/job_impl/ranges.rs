@@ -14,7 +14,7 @@ use std::{
 
 use amp_data_store::DataStore;
 use amp_worker_core::{
-    Ctx, WriterProperties,
+    WriterProperties,
     compaction::AmpCompactor,
     metrics,
     progress::{ProgressReporter, ProgressUpdate},
@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use tracing::Instrument as _;
 
 use super::writer::{RawDatasetWriter, RawDatasetWriterCloseError, RawDatasetWriterError};
+use crate::job_ctx::Context;
 
 /// Materializes block ranges by partitioning them across multiple parallel workers.
 #[tracing::instrument(skip_all, err)]
@@ -47,12 +48,11 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
     missing_dataset_ranges: Vec<RangeInclusive<BlockNum>>,
     max_writers: u16,
     client: &S,
-    ctx: &Ctx,
+    ctx: &Context,
     catalog: &Catalog,
     parquet_opts: Arc<WriterProperties>,
     missing_ranges_by_table: BTreeMap<TableName, Vec<RangeInclusive<BlockNum>>>,
     compactors_by_table: BTreeMap<TableName, Arc<AmpCompactor>>,
-    metrics: Option<&Arc<metrics::MetricsRegistry>>,
     tables: &[(Arc<PhysicalTable>, Arc<AmpCompactor>)],
     // The job's actual start block (from dataset definition), used for progress events
     job_start_block: BlockNum,
@@ -60,8 +60,6 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
     job_end_block: Option<BlockNum>,
     // Current chain head block, used for percentage calculation in continuous mode
     chain_head: BlockNum,
-    // Optional progress reporter for external event streaming
-    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), TryWaitAllError<RunRangeError>> {
     tracing::info!(
         "materializing ranges {}",
@@ -96,7 +94,7 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
         last_emitted_block: AtomicU64::new(0),
         has_emitted: AtomicBool::new(false),
         interval: ctx.config.progress_interval,
-        progress_reporter: progress_reporter.clone(),
+        progress_reporter: ctx.progress_reporter.clone(),
         table_names,
         job_start_block,
         job_end_block,
@@ -116,7 +114,7 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
             missing_ranges_by_table: missing_ranges_by_table.clone(),
             compactors_by_table: compactors_by_table.clone(),
             id: i as u32,
-            metrics: metrics.cloned(),
+            metrics: ctx.metrics.clone(),
             progress_tracker: progress_tracker.clone(),
         });
 
@@ -145,7 +143,7 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
         }
 
         // Record error metrics
-        if let Some(metrics) = metrics {
+        if let Some(ref metrics) = ctx.metrics {
             for (table, _) in tables {
                 let table_name = table.table_name().to_string();
                 metrics.record_dump_error(table_name);

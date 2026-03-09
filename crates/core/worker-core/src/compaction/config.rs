@@ -1,38 +1,8 @@
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use datafusion::parquet::basic::{Compression, ZstdLevel};
 
-use crate::compaction::Overflow;
-
-/// Configuration specific to dump operations
-///
-/// This configuration contains only the fields needed by the dump crate for executing
-/// dataset dump operations. It is created from a larger configuration by the worker service.
-#[derive(Debug, Clone)]
-pub struct Config {
-    /// Poll interval for raw datasets
-    pub poll_interval: Duration,
-
-    /// Keep-alive interval for streaming queries
-    pub keep_alive_interval: u64,
-
-    /// Maximum memory usage for DataFusion query environment (in MB)
-    pub max_mem_mb: usize,
-
-    /// Maximum memory per query for DataFusion (in MB)
-    pub query_max_mem_mb: usize,
-
-    /// Directory paths for DataFusion query spilling
-    pub spill_location: Vec<PathBuf>,
-
-    /// Parquet file configuration
-    pub parquet: ParquetConfig,
-
-    /// Progress event emission interval.
-    /// Progress events are emitted at most once per this interval when there is new progress.
-    /// Default: 10 seconds.
-    pub progress_interval: Duration,
-}
+use super::algorithm::Overflow;
 
 #[derive(Debug, Clone)]
 pub struct ParquetConfig {

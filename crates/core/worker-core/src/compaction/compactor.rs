@@ -18,13 +18,13 @@ use futures::{StreamExt, TryStreamExt, stream};
 use metadata_db::MetadataDb;
 use monitoring::logging;
 
+use super::config::ParquetConfig;
 use crate::{
     WriterProperties,
     compaction::{
         CompactionAlgorithm, CompactionResult, CompactorError,
         plan::{CompactionFile, CompactionPlan},
     },
-    config::ParquetConfig,
     metrics::MetricsRegistry,
 };
 

@@ -621,7 +621,7 @@ impl Worker {
         // the dump layer where table names are known, ensuring partition key consistency
         // with sync.progress events.
 
-        let job_fut = job_impl::new(self.job_ctx.clone(), job_id, job_desc);
+        let job_fut = job_impl::new(self.job_ctx.clone(), job_desc, job_id);
 
         self.job_set.spawn(job_id, job_fut);
 

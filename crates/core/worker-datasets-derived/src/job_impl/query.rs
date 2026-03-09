@@ -8,10 +8,9 @@ use amp_parquet::{
     writer::{ParquetFileWriter, ParquetFileWriterCloseError, ParquetFileWriterOutput},
 };
 use amp_worker_core::{
-    Ctx, WriterProperties,
+    WriterProperties,
     compaction::{AmpCompactor, AmpCompactorTaskError},
-    metrics,
-    progress::{ProgressReporter, ProgressUpdate},
+    progress::ProgressUpdate,
     retryable::RetryableErrorExt,
 };
 use common::{
@@ -29,13 +28,14 @@ use common::{
 };
 use datafusion::parquet::errors::ParquetError;
 use futures::StreamExt as _;
-use metadata_db::NotificationMultiplexerHandle;
 use tracing::instrument;
+
+use crate::job_ctx::Context;
 
 #[instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]
 pub async fn materialize_sql_query(
-    ctx: &Ctx,
+    ctx: &Context,
     env: &ExecEnv,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
@@ -45,10 +45,6 @@ pub async fn materialize_sql_query(
     physical_table: Arc<PhysicalTable>,
     compactor: Arc<AmpCompactor>,
     opts: &Arc<WriterProperties>,
-    progress_reporter: Option<Arc<dyn ProgressReporter>>,
-    microbatch_max_interval: u64,
-    notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), MaterializeSqlQueryError> {
     tracing::info!(
         "materializing {} [{}-{}]",
@@ -65,9 +61,9 @@ pub async fn materialize_sql_query(
             start,
             end,
             cursor,
-            notification_multiplexer,
+            &ctx.notification_multiplexer,
             Some(physical_table.clone()),
-            microbatch_max_interval,
+            ctx.config.microbatch_max_interval,
             keep_alive_interval,
         )
         .await
@@ -117,7 +113,7 @@ pub async fn materialize_sql_query(
                     .await
                     .map_err(MaterializeSqlQueryError::WriteBatch)?;
 
-                if let Some(ref metrics) = metrics {
+                if let Some(ref metrics) = ctx.metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
                     metrics.record_ingestion_rows(num_rows, table_name.to_string(), location_id);
@@ -163,7 +159,7 @@ pub async fn materialize_sql_query(
 
                 // Time-based progress event emission
                 // Emit when interval has elapsed AND we have new progress
-                if let Some(ref reporter) = progress_reporter {
+                if let Some(ref reporter) = ctx.progress_reporter {
                     let now = Instant::now();
                     let interval_elapsed =
                         now.duration_since(last_emission_time) >= ctx.config.progress_interval;
@@ -203,7 +199,7 @@ pub async fn materialize_sql_query(
                 )
                 .map_err(MaterializeSqlQueryError::CreateParquetFileWriter)?;
 
-                if let Some(ref metrics) = metrics {
+                if let Some(ref metrics) = ctx.metrics {
                     metrics.record_file_written(table_name.to_string(), location_id);
                     if let Some(ts) = block_timestamp {
                         metrics.record_table_freshness(table_name.to_string(), location_id, ts);

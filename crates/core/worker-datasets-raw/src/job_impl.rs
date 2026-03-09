@@ -83,11 +83,11 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use amp_data_store::retryable::RetryableErrorExt as _;
 use amp_providers_registry::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
-    Ctx, EndBlock, ResolvedEndBlock,
+    ResolvedEndBlock,
     block_ranges::resolve_end_block,
     check::consistency_check,
     compaction::AmpCompactor,
-    progress::{ProgressReporter, SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
+    progress::{SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
     retryable::RetryableErrorExt,
     tasks::TryWaitAllError,
 };
@@ -105,6 +105,8 @@ use datasets_raw::{
     dataset::Dataset as RawDataset,
 };
 
+use crate::{job_ctx::Context, job_descriptor::JobDescriptor};
+
 mod ranges;
 mod writer;
 
@@ -113,16 +115,22 @@ use self::ranges::{RunRangeError, materialize_ranges, spawn_freshness_tracker};
 /// Executes a raw dataset job. All tables must belong to the same dataset.
 #[tracing::instrument(skip_all, err)]
 pub async fn execute(
-    ctx: Ctx,
-    dataset_ref: &HashReference,
-    max_writers: u16,
-    end: EndBlock,
+    ctx: Context,
+    desc: JobDescriptor,
     writer: impl Into<Option<metadata_db::jobs::JobId>>,
-    progress_reporter: Option<Arc<dyn ProgressReporter>>,
 ) -> Result<(), Error> {
+    let dataset_ref = HashReference::new(
+        desc.dataset_namespace.clone(),
+        desc.dataset_name.clone(),
+        desc.manifest_hash.clone(),
+    );
+    let end = desc.end_block;
+    let max_writers = desc.max_writers;
+
+    let progress_reporter = ctx.progress_reporter.clone();
     let dataset = ctx
         .datasets_cache
-        .get_dataset(dataset_ref)
+        .get_dataset(&dataset_ref)
         .await
         .map_err(Error::GetDataset)?;
     let dataset = dataset
@@ -133,7 +141,7 @@ pub async fn execute(
     let dataset_reference = dataset.reference();
 
     let materialize_start_time = Instant::now();
-    let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet.clone());
+    let parquet_opts = amp_worker_core::parquet_opts(ctx.config.parquet_writer.clone());
 
     // Initialize physical tables and compactors
     let mut tables: Vec<(Arc<PhysicalTable>, Arc<AmpCompactor>)> = vec![];
@@ -349,12 +357,10 @@ pub async fn execute(
                 parquet_opts.clone(),
                 missing_ranges_by_table,
                 compactors_by_table,
-                metrics.as_ref(),
                 &tables,
                 start,
                 end,
                 latest_block,
-                progress_reporter.clone(),
             )
             .await
             .map_err(Error::PartitionTask)?;
