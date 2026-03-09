@@ -22,7 +22,9 @@ use datafusion::{
 use datasets_common::{block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, network_id::NetworkId};
 
 use crate::{
-    incrementalizer::{BlockNumForm, NonIncrementalQueryError, incremental_op_kind},
+    incrementalizer::{
+        BlockNumForm, IncrementalOpKind, NonIncrementalQueryError, incremental_op_kind,
+    },
     udfs::block_num::{BLOCK_NUM_UDF_SCHEMA_NAME, is_block_num_udf},
 };
 
@@ -489,6 +491,8 @@ pub enum NonIncrementalOp {
     Window,
     /// Recursive queries are inherently stateful
     RecursiveQuery,
+    /// Stacked (nested) inner joins are not yet supported for incremental processing
+    StackedJoins,
 }
 
 impl fmt::Display for NonIncrementalOp {
@@ -502,6 +506,7 @@ impl fmt::Display for NonIncrementalOp {
             Sort => write!(f, "Sort"),
             Window => write!(f, "Window"),
             RecursiveQuery => write!(f, "RecursiveQuery"),
+            StackedJoins => write!(f, "StackedJoins"),
         }
     }
 }
@@ -510,7 +515,7 @@ impl fmt::Display for NonIncrementalOp {
 pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError> {
     let mut err: Option<NonIncrementalQueryError> = None;
 
-    // TODO: Detect unsupported join stacking, possibly by doing a dry run of the incrementalizer.
+    // Check individual nodes for unsupported operations.
     plan.exists(|node| match incremental_op_kind(node, BlockNumForm::Udf) {
         Ok(_) => Ok(false),
         Err(e) => {
@@ -522,6 +527,41 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<(), NonIncrementalQueryError
 
     if let Some(err) = err {
         return Err(err);
+    }
+
+    // Detect stacked (nested) joins. The incrementalizer rewrites join children
+    // with History range, causing a nested join to fail at runtime. Detect this
+    // structurally: if any join node has a descendant that is also an incremental join,
+    // it's stacked. We check all descendants (not just direct children) because linear
+    // nodes like SubqueryAlias or Projection can sit between two joins without breaking
+    // the nesting relationship.
+    let has_stacked_joins = plan
+        .exists(|node| {
+            let LogicalPlan::Join(join) = node else {
+                return Ok(false);
+            };
+            if !matches!(
+                incremental_op_kind(node, BlockNumForm::Udf),
+                Ok(IncrementalOpKind::InnerJoin)
+            ) {
+                return Ok(false);
+            }
+            let child_has_join = |child: &LogicalPlan| {
+                child.exists(|desc| {
+                    Ok(matches!(
+                        incremental_op_kind(desc, BlockNumForm::Udf),
+                        Ok(IncrementalOpKind::InnerJoin)
+                    ))
+                })
+            };
+            Ok(child_has_join(&join.left)? || child_has_join(&join.right)?)
+        })
+        .map_err(|err| NonIncrementalQueryError::Invalid(err.to_string()))?;
+
+    if has_stacked_joins {
+        return Err(NonIncrementalQueryError::NonIncremental(
+            NonIncrementalOp::StackedJoins,
+        ));
     }
 
     Ok(())

@@ -140,6 +140,7 @@ Streaming queries require all operations to be incrementalizable. The following 
 - **ORDER BY** (global) - Requires seeing all data before sorting
 - **Window functions** - Often require state and sorting
 - **Recursive queries** - Inherently stateful
+- **Stacked (nested) joins** - Nested inner joins are not yet supported for incremental processing
 
 Non-incrementalizable queries will be rejected with a `NonIncrementalOp` error.
 
