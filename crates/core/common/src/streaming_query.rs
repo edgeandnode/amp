@@ -441,8 +441,11 @@ impl StreamingQuery {
             blocks_table,
         };
 
-        let join_handle =
-            AbortOnDropHandle::new(tokio::spawn(streaming_query.execute().in_current_span()));
+        let execute_span = tracing::info_span!("streaming_query_execute");
+        execute_span.follows_from(tracing::Span::current());
+        let join_handle = AbortOnDropHandle::new(tokio::spawn(
+            streaming_query.execute().instrument(execute_span),
+        ));
 
         Ok(StreamingQueryHandle { rx, join_handle })
     }
@@ -472,69 +475,78 @@ impl StreamingQuery {
                 continue;
             };
 
-            tracing::debug!("execute range [{}-{}]", range.start(), range.end());
-
-            let plan = {
-                // Incrementalize the plan
-                let plan = self
-                    .plan
-                    .clone()
-                    .attach_to(&ctx)
-                    .map_err(StreamingQueryExecutionError::AttachPlan)?;
-                let mut plan = incrementalize_plan(plan, range.start(), range.end())
-                    .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
-
-                // Enforce `order by _block_num`.
-                plan = order_by_block_num(plan);
-
-                // Remove `_block_num` if not needed in the output.
-                if !self.preserve_block_num {
-                    plan = unproject_special_block_num_column(plan)
-                        .map_err(StreamingQueryExecutionError::UnprojectSpecialBlockNumColumn)?
-                }
-                plan
-            };
-
-            let keep_alive_interval = self.keep_alive_interval.max(30);
-            let schema = Arc::new(plan.schema().as_arrow().clone());
-            let mut stream = keep_alive_stream(
-                ctx.execute_plan(plan, false)
-                    .await
-                    .map_err(StreamingQueryExecutionError::ExecutePlan)?,
-                schema,
-                keep_alive_interval,
-            );
-
-            // Send start message for this microbatch
-            let _ = self
-                .tx
-                .send(QueryMessage::MicrobatchStart {
-                    range: range.clone(),
-                    is_reorg: direction.is_reorg(),
-                })
-                .await;
-
-            // Drain the microbatch completely
-            while let Some(item) = stream.next().await {
-                let item = item.map_err(StreamingQueryExecutionError::StreamItem)?;
-
-                // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
-                // aborted, so we don't bother checking for errors when sending a message.
-                let _ = self.tx.send(QueryMessage::Data(item)).await;
-            }
-
-            // Send end message for this microbatch
-            let _ = self
-                .tx
-                .send(QueryMessage::MicrobatchEnd(range.clone()))
-                .await;
-
-            if Some(range.end()) == self.end_block {
-                // If we reached the end block, we are done
+            if self.execute_microbatch(&ctx, &range, &direction).await? {
                 return Ok(());
             }
             self.prev_cursor = Some((&range).into());
         }
+    }
+
+    /// Execute a single microbatch for the given range. Returns `true` if this was the final
+    /// batch (i.e. `range.end() == self.end_block`).
+    #[instrument(skip_all, err, fields(start_block = %range.start(), end_block = %range.end()))]
+    async fn execute_microbatch(
+        &mut self,
+        ctx: &ExecContext,
+        range: &BlockRange,
+        direction: &StreamDirection,
+    ) -> Result<bool, StreamingQueryExecutionError> {
+        let plan = {
+            // Incrementalize the plan
+            let plan = self
+                .plan
+                .clone()
+                .attach_to(ctx)
+                .map_err(StreamingQueryExecutionError::AttachPlan)?;
+            let mut plan = incrementalize_plan(plan, range.start(), range.end())
+                .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
+
+            // Enforce `order by _block_num`.
+            plan = order_by_block_num(plan);
+
+            // Remove `_block_num` if not needed in the output.
+            if !self.preserve_block_num {
+                plan = unproject_special_block_num_column(plan)
+                    .map_err(StreamingQueryExecutionError::UnprojectSpecialBlockNumColumn)?
+            }
+            plan
+        };
+
+        let keep_alive_interval = self.keep_alive_interval.max(30);
+        let schema = Arc::new(plan.schema().as_arrow().clone());
+        let mut stream = keep_alive_stream(
+            ctx.execute_plan(plan, false)
+                .await
+                .map_err(StreamingQueryExecutionError::ExecutePlan)?,
+            schema,
+            keep_alive_interval,
+        );
+
+        // Send start message for this microbatch
+        let _ = self
+            .tx
+            .send(QueryMessage::MicrobatchStart {
+                range: range.clone(),
+                is_reorg: direction.is_reorg(),
+            })
+            .await;
+
+        // Drain the microbatch completely
+        while let Some(item) = stream.next().await {
+            let item = item.map_err(StreamingQueryExecutionError::StreamItem)?;
+
+            // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
+            // aborted, so we don't bother checking for errors when sending a message.
+            let _ = self.tx.send(QueryMessage::Data(item)).await;
+        }
+
+        // Send end message for this microbatch
+        let _ = self
+            .tx
+            .send(QueryMessage::MicrobatchEnd(range.clone()))
+            .await;
+
+        Ok(Some(range.end()) == self.end_block)
     }
 
     #[instrument(skip_all, err)]

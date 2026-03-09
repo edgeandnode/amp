@@ -35,6 +35,7 @@ use futures::{Stream, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
 use tracing::field;
+use tracing_futures::Instrument as _;
 
 use crate::{
     BlockNum, BlockRange, arrow,
@@ -769,14 +770,21 @@ async fn execute_plan(
 
     forbid_duplicate_field_names(&physical_plan, &plan)
         .map_err(ExecuteError::DuplicateFieldNames)?;
-
     tracing::debug!(physical_plan = %print_physical_plan(&*physical_plan), "optimized plan");
 
     let task_ctx = state.task_ctx();
-    match is_explain {
-        false => execute_stream(physical_plan, task_ctx).map_err(ExecuteError::ExecuteStream),
-        true => execute_explain(physical_plan, task_ctx).await,
-    }
+    let stream = if is_explain {
+        execute_explain(physical_plan, task_ctx).await?
+    } else {
+        execute_stream(physical_plan, task_ctx).map_err(ExecuteError::ExecuteStream)?
+    };
+
+    let span = tracing::Span::current();
+    let schema = stream.schema();
+    Ok(Box::pin(RecordBatchStreamAdapter::new(
+        schema,
+        stream.instrument(span),
+    )))
 }
 
 // We do special handling for `Explain` plans to ensure that the output is sanitized from full paths.
