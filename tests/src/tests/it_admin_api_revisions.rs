@@ -1188,6 +1188,92 @@ async fn prune_revision_with_stopped_writer_succeeds() {
     );
 }
 
+#[tokio::test]
+async fn prune_revision_with_reorg_schedules_non_canonical_files() {
+    logging::init();
+
+    //* Given - Setup with IPC for reorg support
+    let test_ctx = TestCtxBuilder::new("prune_revision_with_reorg_schedules_non_canonical_files")
+        .with_anvil_ipc()
+        .with_dataset_manifest("anvil_rpc")
+        .build()
+        .await
+        .expect("failed to build test context");
+
+    let ampctl_client = test_ctx.new_ampctl();
+
+    // Mine 10 blocks
+    test_ctx
+        .anvil()
+        .mine(10)
+        .await
+        .expect("failed to mine blocks");
+
+    // Deploy dataset with end block 10 (creates segments for blocks 0-10)
+    let dataset_ref: Reference = "_/anvil_rpc@0.0.0".parse().expect("valid reference");
+    crate::testlib::helpers::deploy_and_wait(
+        &ampctl_client,
+        &dataset_ref,
+        Some(10),
+        std::time::Duration::from_secs(30),
+    )
+    .await
+    .expect("failed to deploy dataset");
+
+    // Get the revision for the blocks table
+    let revisions_after_first_deploy = ampctl_client
+        .revisions()
+        .list(None, None)
+        .await
+        .expect("failed to list revisions");
+    let blocks_revision = revisions_after_first_deploy
+        .iter()
+        .find(|r| r.metadata.table_name == "blocks")
+        .expect("blocks table should exist");
+    let location_id = blocks_revision.id;
+
+    // Trigger reorg of 3 blocks (blocks 8, 9, 10 become non-canonical)
+    test_ctx
+        .anvil()
+        .reorg(3)
+        .await
+        .expect("failed to trigger reorg");
+
+    // Mine 3 more blocks to reach block 13
+    test_ctx
+        .anvil()
+        .mine(3)
+        .await
+        .expect("failed to mine blocks");
+
+    // Deploy again with end block 13 (creates new segments for the canonical chain)
+    crate::testlib::helpers::deploy_and_wait(
+        &ampctl_client,
+        &dataset_ref,
+        Some(13),
+        std::time::Duration::from_secs(30),
+    )
+    .await
+    .expect("failed to deploy dataset after reorg");
+
+    //* When - Prune non-canonical segments
+    let resp = ampctl_client
+        .revisions()
+        .prune(location_id, None, 3600)
+        .await
+        .expect("failed to prune revision");
+
+    //* Then - Verify that non-canonical files were scheduled for GC
+    assert!(
+        resp.files_scheduled > 0,
+        "Expected non-canonical files to be scheduled for GC after reorg, but got 0"
+    );
+    assert_eq!(
+        resp.gc_delay_secs, 3600,
+        "GC delay should match requested value"
+    );
+}
+
 struct TestCtx {
     ctx: crate::testlib::ctx::TestCtx,
     ampctl_client: Ampctl,

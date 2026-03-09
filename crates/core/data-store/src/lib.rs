@@ -720,6 +720,27 @@ impl DataStore {
         Ok(file_count)
     }
 
+    /// Schedule files for garbage collection.
+    ///
+    /// Schedules files for deletion by upserting GC manifest entries with the specified
+    /// expiration duration. Files become eligible for deletion by the GC collector after
+    /// the duration elapses.
+    ///
+    /// If a file already exists in the GC manifest, its expiration time is updated.
+    ///
+    /// This is used by operations like table pruning that need deferred deletion with
+    /// a safety window, as opposed to immediate deletion used by truncate.
+    pub async fn schedule_files_for_gc(
+        &self,
+        location_id: LocationId,
+        file_ids: &[FileId],
+        delay: std::time::Duration,
+    ) -> Result<(), ScheduleFilesForGcError> {
+        metadata_db::gc::upsert(&self.metadata_db, location_id, file_ids, delay)
+            .await
+            .map_err(ScheduleFilesForGcError)
+    }
+
     /// Deletes multiple files from object storage.
     ///
     /// Validates that the number of successfully deleted files matches the expected count.
@@ -1587,3 +1608,19 @@ pub enum GetCachedMetadataError {
     #[error("cache layer error")]
     CacheError(#[source] foyer::Error),
 }
+
+/// Failed to schedule files for garbage collection
+///
+/// This error occurs when upserting GC manifest entries fails.
+/// The GC manifest tracks files scheduled for deferred deletion with
+/// expiration timestamps.
+///
+/// Common causes:
+/// - Database connection lost during insert/update
+/// - Database server unreachable
+/// - Network connectivity issues
+/// - Transaction conflicts or deadlocks
+/// - Database constraint violations
+#[derive(Debug, thiserror::Error)]
+#[error("failed to schedule files for garbage collection")]
+pub struct ScheduleFilesForGcError(#[source] pub metadata_db::Error);

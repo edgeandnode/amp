@@ -252,14 +252,10 @@ pub async fn handler(
     );
 
     // Schedule files for garbage collection
-    metadata_db::gc::upsert(
-        &ctx.metadata_db,
-        location_id,
-        &non_canonical_ids,
-        gc_duration,
-    )
-    .await
-    .map_err(Error::ScheduleGc)?;
+    ctx.data_store
+        .schedule_files_for_gc(location_id, &non_canonical_ids, gc_duration)
+        .await
+        .map_err(Error::ScheduleGc)?;
 
     tracing::info!(
         location_id = %location_id,
@@ -383,7 +379,7 @@ pub enum Error {
     /// - Upserting GC manifest entries fails
     /// - Database connection issues
     #[error("Failed to schedule files for garbage collection")]
-    ScheduleGc(#[source] metadata_db::Error),
+    ScheduleGc(#[source] amp_data_store::ScheduleFilesForGcError),
 }
 
 impl IntoErrorResponse for Error {
