@@ -34,7 +34,7 @@ use crate::{
 ///
 /// ## Query Parameters
 /// - `before_block` (optional): Only prune segments ending before this block number
-/// - `gc_delay_secs` (required): Seconds before files become eligible for GC deletion
+/// - `gc_delay_secs` (optional): Seconds before files become eligible for GC deletion (default: 3600)
 ///
 /// ## Response
 /// - **200 OK**: Non-canonical segments scheduled for GC successfully
@@ -77,7 +77,7 @@ use crate::{
         params(
             ("id" = i64, Path, description = "Revision ID"),
             ("before_block" = Option<u64>, Query, description = "Only prune segments ending before this block number"),
-            ("gc_delay_secs" = u64, Query, description = "Seconds before files become eligible for GC deletion")
+            ("gc_delay_secs" = Option<u64>, Query, description = "Seconds before files become eligible for GC deletion (default: 3600)")
         ),
         responses(
             (status = 200, description = "Non-canonical segments scheduled for GC successfully", body = PruneResponse),
@@ -168,10 +168,10 @@ pub async fn handler(
 
     // Convert files to Segment objects
     let all_segments: Vec<Segment> = files
-        .iter()
+        .into_iter()
         .map(|file_meta| {
             // Parse FileMetadata from PhyTableRevisionFileMetadata
-            let file: FileMetadata = file_meta.clone().try_into().map_err(Error::ParseMetadata)?;
+            let file: FileMetadata = file_meta.try_into().map_err(Error::ParseMetadata)?;
 
             // Extract components for Segment
             let FileMetadata {
@@ -281,8 +281,13 @@ pub async fn handler(
 pub struct QueryParams {
     /// Only prune segments ending before this block number
     pub before_block: Option<BlockNum>,
-    /// Seconds before files become eligible for GC deletion
+    /// Seconds before files become eligible for GC deletion (default: 3600)
+    #[serde(default = "default_gc_delay_secs")]
     pub gc_delay_secs: u64,
+}
+
+fn default_gc_delay_secs() -> u64 {
+    3600
 }
 
 /// Response for prune operation

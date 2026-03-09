@@ -1487,7 +1487,7 @@ pub enum PruneError {
 
     /// Invalid query parameters (400, INVALID_QUERY_PARAMETERS)
     ///
-    /// The query parameters (before_block, concurrency) are invalid.
+    /// The query parameters (before_block, gc_delay_secs) are invalid.
     #[error("invalid query parameters")]
     InvalidQueryParams(#[source] ApiError),
 
