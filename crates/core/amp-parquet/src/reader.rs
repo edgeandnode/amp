@@ -19,7 +19,7 @@ use datafusion::{
 use datafusion_datasource::PartitionedFile;
 use futures::future::BoxFuture;
 use metadata_db::{files::FileId, physical_table_revision::LocationId};
-use tracing::Instrument;
+use tracing::Instrument as _;
 
 /// Factory that creates [`AmpReader`] instances for DataFusion's Parquet scan execution.
 #[derive(Debug, Clone)]
@@ -106,7 +106,7 @@ impl AsyncFileReader for AmpReader {
         self.file_metrics.bytes_scanned.add(bytes_scanned as usize);
         let span = tracing::info_span!(
             "get_bytes",
-            file_id = %self.file_id,
+            %self.file_id,
             offset = range.start,
             len = bytes_scanned,
         );
@@ -122,7 +122,7 @@ impl AsyncFileReader for AmpReader {
         self.file_metrics.bytes_scanned.add(total_bytes as usize);
         let span = tracing::info_span!(
             "get_byte_ranges",
-            file_id = %self.file_id,
+            %self.file_id,
             num_ranges = ranges.len(),
             total_bytes = total_bytes,
         );
@@ -137,7 +137,7 @@ impl AsyncFileReader for AmpReader {
         let store = self.store.clone();
         let schema = self.schema.clone();
         let file_id = self.file_id;
-        let span = tracing::info_span!("get_metadata", file_id = %file_id);
+        let span = tracing::info_span!("get_metadata", %file_id);
 
         Box::pin(
             async move {

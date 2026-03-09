@@ -66,7 +66,7 @@ use serde_json::json;
 use thiserror::Error;
 use tonic::{Request, Response, Status, service::Routes};
 use tracing::instrument;
-use tracing_futures::Instrument;
+use tracing_futures::Instrument as _;
 
 use crate::{
     config::Config, metrics::MetricsRegistry,

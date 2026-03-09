@@ -35,7 +35,7 @@ use futures::{Stream, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use regex::Regex;
 use tracing::field;
-use tracing_futures::Instrument;
+use tracing_futures::Instrument as _;
 
 use crate::{
     BlockNum, BlockRange, arrow,
@@ -773,9 +773,10 @@ async fn execute_plan(
     tracing::debug!(physical_plan = %print_physical_plan(&*physical_plan), "optimized plan");
 
     let task_ctx = state.task_ctx();
-    let stream = match is_explain {
-        false => execute_stream(physical_plan, task_ctx).map_err(ExecuteError::ExecuteStream)?,
-        true => execute_explain(physical_plan, task_ctx).await?,
+    let stream = if is_explain {
+        execute_explain(physical_plan, task_ctx).await?
+    } else {
+        execute_stream(physical_plan, task_ctx).map_err(ExecuteError::ExecuteStream)?
     };
 
     let span = tracing::Span::current();
