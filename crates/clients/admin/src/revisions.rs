@@ -72,6 +72,17 @@ fn revision_truncate(id: i64, concurrency: Option<usize>) -> String {
     }
 }
 
+/// Build URL path for pruning non-canonical segments from a revision.
+///
+/// DELETE `/revisions/{id}/prune`
+fn revision_prune(id: i64, before_block: Option<u64>, gc_delay_secs: u64) -> String {
+    let mut params = vec![format!("gc_delay_secs={gc_delay_secs}")];
+    if let Some(block) = before_block {
+        params.push(format!("before_block={block}"));
+    }
+    format!("revisions/{id}/prune?{}", params.join("&"))
+}
+
 /// Build URL path for creating a table revision.
 ///
 /// POST `/revisions`
@@ -763,6 +774,130 @@ impl<'a> RevisionsClient<'a> {
         }
     }
 
+    /// Prune non-canonical segments from a table revision by location ID.
+    ///
+    /// Sends DELETE to `/revisions/{id}/prune` endpoint.
+    ///
+    /// Schedules non-canonical segments for garbage collection. Segments not part
+    /// of the canonical chain (due to reorgs, failed compaction, or other reasons)
+    /// are marked for deletion after a configurable delay. The revision record and
+    /// all canonical segments are preserved.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PruneError`] for network errors, API errors (400/404/409/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(location_id = %location_id, before_block = ?before_block, gc_delay_secs = %gc_delay_secs))]
+    pub async fn prune(
+        &self,
+        location_id: i64,
+        before_block: Option<u64>,
+        gc_delay_secs: u64,
+    ) -> Result<PruneResponse, PruneError> {
+        // SAFETY: `revision_prune()` returns a relative path that is always valid for URL joining.
+        // The base URL is validated during client construction, and the path components are
+        // properly formatted integers and query parameters.
+        let url = self
+            .client
+            .base_url()
+            .join(&revision_prune(location_id, before_block, gc_delay_secs))
+            .expect("valid URL");
+
+        tracing::debug!(url = %url, "DELETE request sent for revision prune");
+
+        let response = self
+            .client
+            .http()
+            .delete(url.as_str())
+            .send()
+            .await
+            .map_err(|err| PruneError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            200 => {
+                let prune_response =
+                    response
+                        .json()
+                        .await
+                        .map_err(|err| PruneError::UnexpectedResponse {
+                            status: 200,
+                            message: format!("Failed to parse response: {err}"),
+                        })?;
+                tracing::debug!(location_id = %location_id, "non-canonical segments pruned");
+                Ok(prune_response)
+            }
+            400 | 404 | 409 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {err}"),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_PATH_PARAMETERS" => {
+                        Err(PruneError::InvalidPath(error_response.into()))
+                    }
+                    "INVALID_QUERY_PARAMETERS" => {
+                        Err(PruneError::InvalidQueryParams(error_response.into()))
+                    }
+                    "REVISION_NOT_FOUND" => {
+                        Err(PruneError::RevisionNotFound(error_response.into()))
+                    }
+                    "WRITER_JOB_NOT_TERMINAL" => {
+                        Err(PruneError::WriterJobNotTerminal(error_response.into()))
+                    }
+                    "GET_REVISION_BY_LOCATION_ID_ERROR" => {
+                        Err(PruneError::GetRevision(error_response.into()))
+                    }
+                    "GET_WRITER_JOB_ERROR" => Err(PruneError::GetWriterJob(error_response.into())),
+                    "GET_FILES_ERROR" => Err(PruneError::Prune(error_response.into())),
+                    "PARSE_METADATA_ERROR" => Err(PruneError::Prune(error_response.into())),
+                    "PRUNE_ERROR" => Err(PruneError::Prune(error_response.into())),
+                    _ => Err(PruneError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Failed to read response body"));
+                Err(PruneError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
+
     /// Activate a table revision by location ID.
     ///
     /// POSTs to `/revisions/{id}/activate` endpoint.
@@ -1326,6 +1461,73 @@ pub enum TruncateError {
     /// Network or connection error
     #[error("network error connecting to {url}")]
     Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Response from a successful revision prune operation.
+#[derive(Debug, serde::Deserialize)]
+pub struct PruneResponse {
+    /// Number of non-canonical files scheduled for garbage collection.
+    pub files_scheduled: u64,
+    /// Seconds before files become eligible for GC deletion.
+    pub gc_delay_secs: u64,
+}
+
+/// Errors that can occur when pruning non-canonical segments from a revision.
+#[derive(Debug, thiserror::Error)]
+pub enum PruneError {
+    /// Invalid path parameters (400, INVALID_PATH_PARAMETERS)
+    ///
+    /// The location ID in the URL path is invalid.
+    #[error("invalid path parameters")]
+    InvalidPath(#[source] ApiError),
+
+    /// Invalid query parameters (400, INVALID_QUERY_PARAMETERS)
+    ///
+    /// The query parameters (before_block, gc_delay_secs) are invalid.
+    #[error("invalid query parameters")]
+    InvalidQueryParams(#[source] ApiError),
+
+    /// Revision not found (404, REVISION_NOT_FOUND)
+    ///
+    /// No revision exists with the specified location ID.
+    #[error("revision not found")]
+    RevisionNotFound(#[source] ApiError),
+
+    /// Writer job is not in a terminal state (409, WRITER_JOB_NOT_TERMINAL)
+    ///
+    /// The revision's writer job is still running and must reach a terminal state before pruning.
+    #[error("writer job is not in a terminal state")]
+    WriterJobNotTerminal(#[source] ApiError),
+
+    /// Failed to get revision (500, GET_REVISION_BY_LOCATION_ID_ERROR)
+    ///
+    /// The database query to get the revision failed.
+    #[error("failed to get revision")]
+    GetRevision(#[source] ApiError),
+
+    /// Failed to get writer job (500, GET_WRITER_JOB_ERROR)
+    ///
+    /// The database query to get the writer job failed.
+    #[error("failed to get writer job")]
+    GetWriterJob(#[source] ApiError),
+
+    /// Failed to prune non-canonical segments (500, PRUNE_ERROR)
+    ///
+    /// Segment identification, file deletion, or metadata cleanup failed.
+    #[error("failed to prune non-canonical segments")]
+    Prune(#[source] ApiError),
+
+    /// Network or connection error
+    #[error("network error connecting to {url}")]
+    Network {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
 
     /// Unexpected response from API
     #[error("unexpected response (status {status}): {message}")]

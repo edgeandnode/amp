@@ -2014,6 +2014,102 @@
         }
       }
     },
+    "/revisions/{id}/prune": {
+      "delete": {
+        "tags": [
+          "revisions"
+        ],
+        "summary": "Handler for the `DELETE /revisions/{id}/prune` endpoint",
+        "description": "Prunes non-canonical segments from a physical table revision by scheduling\nthem for garbage collection via the GC manifest.\n\n## Path Parameters\n- `id`: The unique identifier of the revision (must be a valid LocationId)\n\n## Query Parameters\n- `before_block` (optional): Only prune segments ending before this block number\n- `gc_delay_secs` (optional): Seconds before files become eligible for GC deletion (default: 3600)\n\n## Response\n- **200 OK**: Non-canonical segments scheduled for GC successfully\n- **400 Bad Request**: Invalid path or query parameters\n- **404 Not Found**: Revision not found\n- **409 Conflict**: Writer job is not terminal\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PATH_PARAMETERS`: Invalid path parameters\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters\n- `REVISION_NOT_FOUND`: No revision exists with the specified location ID\n- `WRITER_JOB_NOT_TERMINAL`: The revision's writer job is still running and must reach a terminal state before pruning\n- `GET_REVISION_BY_LOCATION_ID_ERROR`: Failed to retrieve revision from database\n- `GET_WRITER_JOB_ERROR`: Failed to retrieve writer job from database\n- `GET_FILES_ERROR`: Failed to retrieve file metadata\n- `PARSE_METADATA_ERROR`: Failed to parse parquet metadata\n- `CANONICAL_CHAIN_PANICKED`: Canonical chain computation task panicked or was aborted\n- `PRUNE_ERROR`: Failed to prune non-canonical segments\n\n## Behavior\nThis handler:\n- Validates and extracts the location ID from the URL path\n- Retrieves the revision to verify it exists\n- Checks that any writer job is in a terminal state (completed, stopped, or failed)\n- Retrieves all file metadata for the revision\n- Computes the canonical chain of segments\n- Identifies non-canonical segments (segments not in the canonical chain)\n- Optionally filters by block number (only segments ending before the specified block)\n- Schedules non-canonical files for garbage collection via the GC manifest\n- Preserves the revision record and all canonical segments",
+        "operationId": "prune_table_revision",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before_block",
+            "in": "query",
+            "description": "Only prune segments ending before this block number",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "gc_delay_secs",
+            "in": "query",
+            "description": "Seconds before files become eligible for GC deletion (default: 3600)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Non-canonical segments scheduled for GC successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PruneResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path or query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Revision not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Writer job is not terminal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/revisions/{id}/restore": {
       "post": {
         "tags": [
@@ -2830,14 +2926,22 @@
       },
       "PruneResponse": {
         "type": "object",
-        "description": "Response payload for manifest pruning operation\n\nContains the count of successfully deleted orphaned manifests.",
+        "description": "Response for prune operation",
         "required": [
-          "deleted_count"
+          "files_scheduled",
+          "gc_delay_secs"
         ],
         "properties": {
-          "deleted_count": {
+          "files_scheduled": {
             "type": "integer",
-            "description": "Number of orphaned manifests successfully deleted",
+            "format": "int64",
+            "description": "Number of non-canonical files scheduled for garbage collection",
+            "minimum": 0
+          },
+          "gc_delay_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds before files become eligible for GC deletion",
             "minimum": 0
           }
         }

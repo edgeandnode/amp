@@ -67,6 +67,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
             "/revisions/{id}/truncate",
             delete(revisions::truncate::handler),
         )
+        .route("/revisions/{id}/prune", delete(revisions::prune::handler))
         .route(
             "/revisions/{id}/activate",
             post(revisions::activate::handler),
@@ -167,6 +168,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::create::handler,
         handlers::revisions::delete::handler,
         handlers::revisions::truncate::handler,
+        handlers::revisions::prune::handler,
         // Worker endpoints
         handlers::workers::get_all::handler,
         handlers::workers::get_by_id::handler,
@@ -217,6 +219,7 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::revisions::create::CreatePayload,
         handlers::revisions::create::CreateRevisionResponse,
         handlers::revisions::truncate::TruncateResponse,
+        handlers::revisions::prune::PruneResponse,
         // Worker schemas
         handlers::workers::get_all::WorkerInfo,
         handlers::workers::get_all::WorkersResponse,
