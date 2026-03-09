@@ -73,7 +73,7 @@ pub(super) fn new(
     async move {
         match job_desc {
             JobDescriptor::MaterializeRaw(desc) => {
-                amp_worker_datasets_raw::dump(
+                amp_worker_datasets_raw::execute(
                     ctx,
                     &reference,
                     desc.max_writers,
