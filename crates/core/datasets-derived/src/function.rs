@@ -132,8 +132,24 @@ pub fn validate_js_udf_input_type(dt: &ArrowDataType) -> Result<(), JsUdfTypeErr
         | ArrowDataType::UInt16
         | ArrowDataType::UInt32
         | ArrowDataType::UInt64
+        | ArrowDataType::Float16
         | ArrowDataType::Float32
         | ArrowDataType::Float64 => Ok(()),
+
+        // Date types
+        ArrowDataType::Date32 | ArrowDataType::Date64 => Ok(()),
+
+        // Time types
+        ArrowDataType::Time32(_) | ArrowDataType::Time64(_) => Ok(()),
+
+        // Timestamp types (with optional timezone)
+        ArrowDataType::Timestamp(_, _) => Ok(()),
+
+        // Interval types
+        ArrowDataType::Interval(_) => Ok(()),
+
+        // Duration types
+        ArrowDataType::Duration(_) => Ok(()),
 
         // String types
         ArrowDataType::Utf8 | ArrowDataType::Utf8View | ArrowDataType::LargeUtf8 => Ok(()),
@@ -145,8 +161,14 @@ pub fn validate_js_udf_input_type(dt: &ArrowDataType) -> Result<(), JsUdfTypeErr
         | ArrowDataType::FixedSizeBinary(_) => Ok(()),
 
         // Decimal — only scale 0 (integer decimals that map to BigInt)
-        ArrowDataType::Decimal128(_, 0) | ArrowDataType::Decimal256(_, 0) => Ok(()),
-        ArrowDataType::Decimal128(_, scale) | ArrowDataType::Decimal256(_, scale) => {
+        ArrowDataType::Decimal32(_, 0)
+        | ArrowDataType::Decimal64(_, 0)
+        | ArrowDataType::Decimal128(_, 0)
+        | ArrowDataType::Decimal256(_, 0) => Ok(()),
+        ArrowDataType::Decimal32(_, scale)
+        | ArrowDataType::Decimal64(_, scale)
+        | ArrowDataType::Decimal128(_, scale)
+        | ArrowDataType::Decimal256(_, scale) => {
             Err(JsUdfTypeError::FractionalDecimal { scale: *scale })
         }
 
@@ -168,6 +190,40 @@ pub fn validate_js_udf_input_type(dt: &ArrowDataType) -> Result<(), JsUdfTypeErr
         | ArrowDataType::LargeList(field)
         | ArrowDataType::FixedSizeList(field, _) => validate_js_udf_input_type(field.data_type())
             .map_err(|e| JsUdfTypeError::UnsupportedListElement(Box::new(e))),
+
+        // Map — validate key and value types recursively (input-only)
+        ArrowDataType::Map(entries_field, _) => {
+            // Map's field is a struct with "key" and "value" fields
+            if let ArrowDataType::Struct(fields) = entries_field.data_type() {
+                for field in fields.iter() {
+                    validate_js_udf_input_type(field.data_type()).map_err(|source| {
+                        JsUdfTypeError::UnsupportedFieldType {
+                            name: field.name().clone(),
+                            source: Box::new(source),
+                        }
+                    })?;
+                }
+                Ok(())
+            } else {
+                Err(JsUdfTypeError::UnsupportedType(dt.clone()))
+            }
+        }
+
+        // Dictionary — validate the value type (input-only, ToV8 extracts inner value)
+        ArrowDataType::Dictionary(_, value_type) => validate_js_udf_input_type(value_type),
+
+        // Union — validate each variant type (input-only, ToV8 extracts inner value)
+        ArrowDataType::Union(union_fields, _) => {
+            for (_, field) in union_fields.iter() {
+                validate_js_udf_input_type(field.data_type()).map_err(|source| {
+                    JsUdfTypeError::UnsupportedFieldType {
+                        name: field.name().clone(),
+                        source: Box::new(source),
+                    }
+                })?;
+            }
+            Ok(())
+        }
 
         other => Err(JsUdfTypeError::UnsupportedType(other.clone())),
     }
@@ -195,6 +251,15 @@ pub fn validate_js_udf_output_type(dt: &ArrowDataType) -> Result<(), JsUdfTypeEr
             Err(JsUdfTypeError::UnsupportedOutputType(dt.clone()))
         }
 
+        // Map cannot be converted back from JS (FromV8 produces Struct, not Map)
+        ArrowDataType::Map(_, _) => Err(JsUdfTypeError::UnsupportedOutputType(dt.clone())),
+
+        // Dictionary cannot be converted back from JS (FromV8 doesn't produce Dictionary)
+        ArrowDataType::Dictionary(_, _) => Err(JsUdfTypeError::UnsupportedOutputType(dt.clone())),
+
+        // Union cannot be converted back from JS (FromV8 doesn't produce Union)
+        ArrowDataType::Union(_, _) => Err(JsUdfTypeError::UnsupportedOutputType(dt.clone())),
+
         // Struct — validate each field recursively with output rules
         ArrowDataType::Struct(fields) => {
             for field in fields.iter() {
@@ -217,7 +282,9 @@ pub fn validate_js_udf_output_type(dt: &ArrowDataType) -> Result<(), JsUdfTypeEr
 mod tests {
     use std::sync::Arc;
 
-    use datafusion::arrow::datatypes::{DataType, Field, Fields};
+    use datafusion::arrow::datatypes::{
+        DataType, Field, Fields, IntervalUnit, TimeUnit, UnionFields, UnionMode,
+    };
 
     use super::*;
 
@@ -271,6 +338,10 @@ mod tests {
 
         // Float types
         assert!(
+            validate_js_udf_input_type(&DataType::Float16).is_ok(),
+            "Float16 should be accepted"
+        );
+        assert!(
             validate_js_udf_input_type(&DataType::Float32).is_ok(),
             "Float32 should be accepted"
         );
@@ -313,12 +384,94 @@ mod tests {
 
         // Decimal types (scale 0 only)
         assert!(
+            validate_js_udf_input_type(&DataType::Decimal32(9, 0)).is_ok(),
+            "Decimal32 with scale 0 should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Decimal64(18, 0)).is_ok(),
+            "Decimal64 with scale 0 should be accepted"
+        );
+        assert!(
             validate_js_udf_input_type(&DataType::Decimal128(38, 0)).is_ok(),
             "Decimal128 with scale 0 should be accepted"
         );
         assert!(
             validate_js_udf_input_type(&DataType::Decimal256(76, 0)).is_ok(),
             "Decimal256 with scale 0 should be accepted"
+        );
+
+        // Date types
+        assert!(
+            validate_js_udf_input_type(&DataType::Date32).is_ok(),
+            "Date32 should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Date64).is_ok(),
+            "Date64 should be accepted"
+        );
+
+        // Time types
+        assert!(
+            validate_js_udf_input_type(&DataType::Time32(TimeUnit::Second)).is_ok(),
+            "Time32Second should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Time32(TimeUnit::Millisecond)).is_ok(),
+            "Time32Millisecond should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Time64(TimeUnit::Microsecond)).is_ok(),
+            "Time64Microsecond should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Time64(TimeUnit::Nanosecond)).is_ok(),
+            "Time64Nanosecond should be accepted"
+        );
+
+        // Timestamp types
+        assert!(
+            validate_js_udf_input_type(&DataType::Timestamp(TimeUnit::Second, None)).is_ok(),
+            "TimestampSecond should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Timestamp(
+                TimeUnit::Millisecond,
+                Some("UTC".into())
+            ))
+            .is_ok(),
+            "TimestampMillisecond with timezone should be accepted"
+        );
+
+        // Interval types
+        assert!(
+            validate_js_udf_input_type(&DataType::Interval(IntervalUnit::YearMonth)).is_ok(),
+            "IntervalYearMonth should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Interval(IntervalUnit::DayTime)).is_ok(),
+            "IntervalDayTime should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Interval(IntervalUnit::MonthDayNano)).is_ok(),
+            "IntervalMonthDayNano should be accepted"
+        );
+
+        // Duration types
+        assert!(
+            validate_js_udf_input_type(&DataType::Duration(TimeUnit::Second)).is_ok(),
+            "DurationSecond should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Duration(TimeUnit::Millisecond)).is_ok(),
+            "DurationMillisecond should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Duration(TimeUnit::Microsecond)).is_ok(),
+            "DurationMicrosecond should be accepted"
+        );
+        assert!(
+            validate_js_udf_input_type(&DataType::Duration(TimeUnit::Nanosecond)).is_ok(),
+            "DurationNanosecond should be accepted"
         );
     }
 
@@ -361,7 +514,10 @@ mod tests {
         //* Given
         let dt = DataType::Struct(Fields::from(vec![Field::new(
             "bad",
-            DataType::Date32,
+            DataType::RunEndEncoded(
+                Arc::new(Field::new("run_ends", DataType::Int32, false)),
+                Arc::new(Field::new("values", DataType::Utf8, true)),
+            ),
             false,
         )]));
 
@@ -369,7 +525,7 @@ mod tests {
         let result = validate_js_udf_input_type(&dt);
 
         //* Then
-        let err = result.expect_err("Struct with Date32 field should be rejected");
+        let err = result.expect_err("Struct with unsupported field should be rejected");
         assert!(
             matches!(err, JsUdfTypeError::UnsupportedFieldType { ref name, .. } if name == "bad"),
             "expected UnsupportedFieldType for 'bad', got {err:?}"
@@ -402,13 +558,20 @@ mod tests {
     #[test]
     fn validate_js_udf_input_type_with_unsupported_list_element_fails() {
         //* Given
-        let dt = DataType::List(Arc::new(Field::new("item", DataType::Date32, true)));
+        let dt = DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::RunEndEncoded(
+                Arc::new(Field::new("run_ends", DataType::Int32, false)),
+                Arc::new(Field::new("values", DataType::Utf8, true)),
+            ),
+            true,
+        )));
 
         //* When
         let result = validate_js_udf_input_type(&dt);
 
         //* Then
-        let err = result.expect_err("List with Date32 element should be rejected");
+        let err = result.expect_err("List with unsupported element should be rejected");
         assert!(
             matches!(err, JsUdfTypeError::UnsupportedListElement(_)),
             "expected UnsupportedListElement, got {err:?}"
@@ -416,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_js_udf_input_type_with_map_fails() {
+    fn validate_js_udf_input_type_with_map_succeeds() {
         //* Given
         let dt = DataType::Map(
             Arc::new(Field::new(
@@ -434,10 +597,47 @@ mod tests {
         let result = validate_js_udf_input_type(&dt);
 
         //* Then
-        let err = result.expect_err("Map should be rejected");
         assert!(
-            matches!(err, JsUdfTypeError::UnsupportedType(_)),
-            "expected UnsupportedType, got {err:?}"
+            result.is_ok(),
+            "Map with valid key/value types should be accepted as input"
+        );
+    }
+
+    #[test]
+    fn validate_js_udf_input_type_with_dictionary_succeeds() {
+        //* Given
+        let dt = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+
+        //* When
+        let result = validate_js_udf_input_type(&dt);
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "Dictionary with valid value type should be accepted as input"
+        );
+    }
+
+    #[test]
+    fn validate_js_udf_input_type_with_union_succeeds() {
+        //* Given
+        let fields = UnionFields::try_new(
+            vec![0, 1],
+            vec![
+                Field::new("i", DataType::Int32, false),
+                Field::new("s", DataType::Utf8, false),
+            ],
+        )
+        .expect("valid union fields");
+        let dt = DataType::Union(fields, UnionMode::Dense);
+
+        //* When
+        let result = validate_js_udf_input_type(&dt);
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "Union with valid field types should be accepted as input"
         );
     }
 
@@ -491,6 +691,10 @@ mod tests {
 
         // Float types
         assert!(
+            validate_js_udf_output_type(&DataType::Float16).is_ok(),
+            "Float16 should be accepted as output"
+        );
+        assert!(
             validate_js_udf_output_type(&DataType::Float32).is_ok(),
             "Float32 should be accepted"
         );
@@ -515,12 +719,38 @@ mod tests {
 
         // Decimal types (scale 0 only)
         assert!(
+            validate_js_udf_output_type(&DataType::Decimal32(9, 0)).is_ok(),
+            "Decimal32 with scale 0 should be accepted as output"
+        );
+        assert!(
+            validate_js_udf_output_type(&DataType::Decimal64(18, 0)).is_ok(),
+            "Decimal64 with scale 0 should be accepted as output"
+        );
+        assert!(
             validate_js_udf_output_type(&DataType::Decimal128(38, 0)).is_ok(),
             "Decimal128 with scale 0 should be accepted"
         );
         assert!(
             validate_js_udf_output_type(&DataType::Decimal256(76, 0)).is_ok(),
             "Decimal256 with scale 0 should be accepted"
+        );
+
+        // Temporal types as output
+        assert!(
+            validate_js_udf_output_type(&DataType::Date32).is_ok(),
+            "Date32 should be accepted as output"
+        );
+        assert!(
+            validate_js_udf_output_type(&DataType::Timestamp(TimeUnit::Second, None)).is_ok(),
+            "TimestampSecond should be accepted as output"
+        );
+        assert!(
+            validate_js_udf_output_type(&DataType::Duration(TimeUnit::Millisecond)).is_ok(),
+            "DurationMillisecond should be accepted as output"
+        );
+        assert!(
+            validate_js_udf_output_type(&DataType::Interval(IntervalUnit::YearMonth)).is_ok(),
+            "IntervalYearMonth should be accepted as output"
         );
     }
 
@@ -561,9 +791,10 @@ mod tests {
     #[test]
     fn validate_js_udf_output_type_with_invalid_struct_field_fails() {
         //* Given
+        // Binary is valid as input but not as output
         let dt = DataType::Struct(Fields::from(vec![Field::new(
             "bad",
-            DataType::Date32,
+            DataType::Binary,
             false,
         )]));
 
@@ -571,7 +802,7 @@ mod tests {
         let result = validate_js_udf_output_type(&dt);
 
         //* Then
-        let err = result.expect_err("Struct with Date32 field should be rejected as output");
+        let err = result.expect_err("Struct with Binary field should be rejected as output");
         assert!(
             matches!(err, JsUdfTypeError::UnsupportedFieldType { ref name, .. } if name == "bad"),
             "expected UnsupportedFieldType for 'bad', got {err:?}"
@@ -638,10 +869,50 @@ mod tests {
         let result = validate_js_udf_output_type(&dt);
 
         //* Then
-        let err = result.expect_err("Map should be rejected");
+        let err = result.expect_err("Map should be rejected as output");
         assert!(
-            matches!(err, JsUdfTypeError::UnsupportedType(_)),
-            "expected UnsupportedType, got {err:?}"
+            matches!(err, JsUdfTypeError::UnsupportedOutputType(_)),
+            "expected UnsupportedOutputType, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_js_udf_output_type_with_dictionary_fails() {
+        //* Given
+        let dt = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+
+        //* When
+        let result = validate_js_udf_output_type(&dt);
+
+        //* Then
+        let err = result.expect_err("Dictionary should be rejected as output");
+        assert!(
+            matches!(err, JsUdfTypeError::UnsupportedOutputType(_)),
+            "expected UnsupportedOutputType, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_js_udf_output_type_with_union_fails() {
+        //* Given
+        let fields = UnionFields::try_new(
+            vec![0, 1],
+            vec![
+                Field::new("i", DataType::Int32, false),
+                Field::new("s", DataType::Utf8, false),
+            ],
+        )
+        .expect("valid union fields");
+        let dt = DataType::Union(fields, UnionMode::Dense);
+
+        //* When
+        let result = validate_js_udf_output_type(&dt);
+
+        //* Then
+        let err = result.expect_err("Union should be rejected as output");
+        assert!(
+            matches!(err, JsUdfTypeError::UnsupportedOutputType(_)),
+            "expected UnsupportedOutputType, got {err:?}"
         );
     }
 
@@ -659,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_with_unsupported_input_type_fails() {
+    fn deserialize_with_date32_input_type_succeeds() {
         //* Given
         let json = make_json(&["Date32"], "Int32");
 
@@ -667,12 +938,7 @@ mod tests {
         let result = serde_json::from_str::<Function>(&json);
 
         //* Then
-        let err = result.expect_err("should reject unsupported input type");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("input parameter at index 0"),
-            "error should mention input index: {msg}"
-        );
+        assert!(result.is_ok(), "Date32 should be accepted as input type");
     }
 
     #[test]

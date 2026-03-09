@@ -1,6 +1,6 @@
 mod v8_value;
 
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use datafusion::{
     arrow::{
@@ -73,8 +73,8 @@ pub enum ToV8Error {
 
     /// The Arrow data type is not yet supported for conversion to a V8 value
     ///
-    /// This occurs when a `ScalarValue` variant (e.g. `Float16`, `Map`, timestamps,
-    /// intervals, durations, fractional decimals) has no V8 representation implemented yet.
+    /// This occurs when a `ScalarValue` variant (e.g. fractional decimals) has no
+    /// V8 representation implemented yet.
     #[error("{js_type} not yet supported in JS functions")]
     UnsupportedType { js_type: String },
 
@@ -309,6 +309,8 @@ impl ToV8 for ScalarValue {
             | ScalarValue::LargeBinary(b) => b.as_ref().map(|b| b.as_slice()).to_v8(scope),
             ScalarValue::Decimal128(i, _, 0) => i.to_v8(scope),
             ScalarValue::Decimal256(i, _, 0) => i.to_v8(scope),
+            ScalarValue::Decimal32(i, _, 0) => i.to_v8(scope),
+            ScalarValue::Decimal64(i, _, 0) => i.to_v8(scope),
             ScalarValue::Struct(struct_array) => {
                 // ScalarValue Struct should always have a single element
                 assert_eq!(struct_array.len(), 1);
@@ -355,31 +357,90 @@ impl ToV8 for ScalarValue {
                 js_type: "fractional Decimal256".to_string(),
             }),
 
-            // TODOs
-            ScalarValue::Float16(_)
-            | ScalarValue::Map(_)
-            | ScalarValue::Date32(_)
-            | ScalarValue::Date64(_)
-            | ScalarValue::Time32Second(_)
-            | ScalarValue::Time32Millisecond(_)
-            | ScalarValue::Time64Microsecond(_)
-            | ScalarValue::Time64Nanosecond(_)
-            | ScalarValue::TimestampSecond(_, _)
-            | ScalarValue::TimestampMillisecond(_, _)
-            | ScalarValue::TimestampMicrosecond(_, _)
-            | ScalarValue::TimestampNanosecond(_, _)
-            | ScalarValue::IntervalYearMonth(_)
-            | ScalarValue::IntervalDayTime(_)
-            | ScalarValue::IntervalMonthDayNano(_)
-            | ScalarValue::DurationSecond(_)
-            | ScalarValue::DurationMillisecond(_)
-            | ScalarValue::DurationMicrosecond(_)
-            | ScalarValue::DurationNanosecond(_)
-            | ScalarValue::Union(_, _, _)
-            | ScalarValue::Decimal32(_, _, _)
-            | ScalarValue::Decimal64(_, _, _)
-            | ScalarValue::Dictionary(_, _) => Err(ToV8Error::UnsupportedType {
-                js_type: self.data_type().to_string(),
+            ScalarValue::Float16(f) => f.map(|f| f.to_f64()).to_v8(scope),
+
+            ScalarValue::Date32(i) => i.to_v8(scope),
+            ScalarValue::Date64(i) => i.to_v8(scope),
+
+            ScalarValue::Time32Second(i) | ScalarValue::Time32Millisecond(i) => i.to_v8(scope),
+            ScalarValue::Time64Microsecond(i) | ScalarValue::Time64Nanosecond(i) => i.to_v8(scope),
+
+            ScalarValue::TimestampSecond(i, _)
+            | ScalarValue::TimestampMillisecond(i, _)
+            | ScalarValue::TimestampMicrosecond(i, _)
+            | ScalarValue::TimestampNanosecond(i, _) => i.to_v8(scope),
+
+            ScalarValue::IntervalYearMonth(i) => i.to_v8(scope),
+            ScalarValue::IntervalDayTime(interval) => match interval {
+                Some(iv) => {
+                    let obj = v8::Object::new(scope);
+                    let days_key = v8::String::new(scope, "days").unwrap();
+                    let ms_key = v8::String::new(scope, "milliseconds").unwrap();
+                    let days_val = iv.days.to_v8(scope)?;
+                    let ms_val = iv.milliseconds.to_v8(scope)?;
+                    obj.set(scope, days_key.into(), days_val);
+                    obj.set(scope, ms_key.into(), ms_val);
+                    Ok(obj.into())
+                }
+                None => Ok(v8::null(scope).into()),
+            },
+            ScalarValue::IntervalMonthDayNano(interval) => match interval {
+                Some(iv) => {
+                    let obj = v8::Object::new(scope);
+                    let months_key = v8::String::new(scope, "months").unwrap();
+                    let days_key = v8::String::new(scope, "days").unwrap();
+                    let ns_key = v8::String::new(scope, "nanoseconds").unwrap();
+                    let months_val = iv.months.to_v8(scope)?;
+                    let days_val = iv.days.to_v8(scope)?;
+                    let ns_val = iv.nanoseconds.to_v8(scope)?;
+                    obj.set(scope, months_key.into(), months_val);
+                    obj.set(scope, days_key.into(), days_val);
+                    obj.set(scope, ns_key.into(), ns_val);
+                    Ok(obj.into())
+                }
+                None => Ok(v8::null(scope).into()),
+            },
+
+            ScalarValue::DurationSecond(i)
+            | ScalarValue::DurationMillisecond(i)
+            | ScalarValue::DurationMicrosecond(i)
+            | ScalarValue::DurationNanosecond(i) => i.to_v8(scope),
+
+            ScalarValue::Dictionary(_, inner) => inner.to_v8(scope),
+
+            ScalarValue::Union(Some((_, inner)), _, _) => inner.to_v8(scope),
+            ScalarValue::Union(None, _, _) => Ok(v8::null(scope).into()),
+
+            ScalarValue::Map(map_array) => {
+                assert_eq!(map_array.len(), 1);
+                let obj = v8::Object::new(scope);
+                let keys = map_array.keys();
+                let values = map_array.values();
+                for i in 0..keys.len() {
+                    let key_sv =
+                        ScalarValue::try_from_array(keys, i).map_err(ToV8Error::ExtractScalar)?;
+                    let key_str: Cow<'_, str> = match &key_sv {
+                        ScalarValue::Utf8(Some(s))
+                        | ScalarValue::Utf8View(Some(s))
+                        | ScalarValue::LargeUtf8(Some(s)) => Cow::Borrowed(s.as_str()),
+                        other => Cow::Owned(other.to_string()),
+                    };
+                    let key = v8::String::new(scope, &key_str)
+                        .ok_or(ToV8Error::StringTooLong(key_str.len()))?;
+                    let val_sv =
+                        ScalarValue::try_from_array(values, i).map_err(ToV8Error::ExtractScalar)?;
+                    let value = val_sv.to_v8(scope)?;
+                    obj.set(scope, key.into(), value);
+                }
+                Ok(obj.into())
+            }
+
+            // Fractional decimals
+            ScalarValue::Decimal32(_, _, _) => Err(ToV8Error::UnsupportedType {
+                js_type: "fractional Decimal32".to_string(),
+            }),
+            ScalarValue::Decimal64(_, _, _) => Err(ToV8Error::UnsupportedType {
+                js_type: "fractional Decimal64".to_string(),
             }),
         }
     }
