@@ -59,7 +59,14 @@
         },
         "responses": {
           "201": {
-            "description": "Dataset successfully registered or updated"
+            "description": "Dataset successfully registered or updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request format or manifest",
@@ -2884,6 +2891,61 @@
           "version": {
             "type": "string",
             "description": "Optional version of the dataset to register using semantic versioning (e.g., \"1.0.0\").\n\nIf omitted, only the manifest linking and \"dev\" tag update are performed.\nIf provided, the manifest is also tagged with this semantic version, and \"latest\" tag is\nupdated if this version is higher than the current latest."
+          }
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "description": "Response payload for dataset registration",
+        "required": [
+          "namespace",
+          "name",
+          "manifest_hash",
+          "kind",
+          "start_block",
+          "finalized_blocks_only",
+          "tables"
+        ],
+        "properties": {
+          "finalized_blocks_only": {
+            "type": "boolean",
+            "description": "Finalized blocks only"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Dataset kind"
+          },
+          "manifest_hash": {
+            "type": "string",
+            "description": "Manifest hash"
+          },
+          "name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Dataset namespace"
+          },
+          "start_block": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Starting block",
+            "minimum": 0
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tables"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of the dataset, if provided during registration"
           }
         }
       },

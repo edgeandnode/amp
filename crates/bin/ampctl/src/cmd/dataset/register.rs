@@ -34,13 +34,16 @@
 //! - Admin URL: `--admin-url` flag or `AMP_ADMIN_URL` env var (default: `http://localhost:1610`)
 //! - Logging: `AMP_LOG` env var (`error`, `warn`, `info`, `debug`, `trace`)
 
-use amp_client_admin::datasets::HashOrManifestJson;
+use amp_client_admin::datasets::{HashOrManifestJson, RegisterResponse};
 use amp_object_store::{
     self as store, ObjectStoreCreationError,
     ext::{ObjectStoreExt as _, ObjectStoreExtError},
     url::{ObjectStoreUrl, ObjectStoreUrlError},
 };
-use datasets_common::{fqn::FullyQualifiedName, version::Version};
+use datasets_common::{
+    dataset_kind_str::DatasetKindStr, fqn::FullyQualifiedName, hash::Hash, name::Name,
+    namespace::Namespace, table_name::TableName, version::Version,
+};
 use monitoring::logging;
 use object_store::path::Path as ObjectStorePath;
 use serde_json::value::RawValue;
@@ -99,7 +102,19 @@ pub async fn run(
     let manifest: Box<RawValue> =
         serde_json::from_str(&manifest_str).map_err(Error::InvalidManifest)?;
 
-    register_manifest(&global, &fqn, tag.as_ref(), manifest).await?;
+    let response = register_manifest(&global, &fqn, tag.as_ref(), manifest).await?;
+
+    let result = RegisterResult {
+        namespace: response.namespace,
+        name: response.name,
+        version: response.version,
+        manifest_hash: response.manifest_hash,
+        kind: response.kind,
+        start_block: response.start_block,
+        finalized_blocks_only: response.finalized_blocks_only,
+        tables: response.tables,
+    };
+    global.print(&result).map_err(Error::JsonSerialization)?;
 
     Ok(())
 }
@@ -148,7 +163,7 @@ pub async fn register_manifest(
     fqn: &FullyQualifiedName,
     version: Option<&Version>,
     manifest: impl Into<HashOrManifestJson>,
-) -> Result<(), Error> {
+) -> Result<RegisterResponse, Error> {
     tracing::debug!("Creating admin API client");
 
     let client = global.build_client().map_err(Error::ClientBuildError)?;
@@ -160,6 +175,69 @@ pub async fn register_manifest(
         .register(fqn, version, manifest)
         .await
         .map_err(Error::ClientError)
+}
+
+/// Result of a dataset registration operation.
+#[derive(serde::Serialize)]
+struct RegisterResult {
+    namespace: Namespace,
+    name: Name,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<Version>,
+    manifest_hash: Hash,
+    kind: DatasetKindStr,
+    start_block: u64,
+    finalized_blocks_only: bool,
+    tables: Vec<TableName>,
+}
+
+impl std::fmt::Display for RegisterResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} Dataset registered successfully",
+            console::style("✓").green().bold()
+        )?;
+        writeln!(
+            f,
+            "{} Namespace: {}",
+            console::style("→").cyan(),
+            self.namespace
+        )?;
+        writeln!(f, "{} Name: {}", console::style("→").cyan(), self.name)?;
+        if let Some(version) = &self.version {
+            writeln!(f, "{} Version: {}", console::style("→").cyan(), version)?;
+        }
+        writeln!(
+            f,
+            "{} Hash: {}",
+            console::style("→").cyan(),
+            self.manifest_hash
+        )?;
+        writeln!(f, "{} Kind: {}", console::style("→").cyan(), self.kind)?;
+        writeln!(
+            f,
+            "{} Start block: {}",
+            console::style("→").cyan(),
+            self.start_block
+        )?;
+        writeln!(
+            f,
+            "{} Finalized only: {}",
+            console::style("→").cyan(),
+            self.finalized_blocks_only
+        )?;
+        writeln!(
+            f,
+            "{} Tables: {}",
+            console::style("→").cyan(),
+            self.tables
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
 }
 
 /// Errors for manifest registration operations.
@@ -196,6 +274,10 @@ pub enum Error {
     /// Client error during registration
     #[error("dataset registration failed")]
     ClientError(#[source] amp_client_admin::datasets::RegisterError),
+
+    /// Failed to serialize output to JSON
+    #[error("failed to serialize output to JSON")]
+    JsonSerialization(#[source] serde_json::Error),
 }
 
 /// Manifest file path supporting local and remote storage.
