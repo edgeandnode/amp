@@ -60,6 +60,7 @@ use datasets_common::reference::Reference;
 use datasets_derived::{Dataset as DerivedDataset, sorting::CyclicDepError};
 use fs_err as fs;
 use futures::{StreamExt as _, TryStreamExt as _};
+use js_runtime::isolate_pool::IsolatePool;
 use monitoring::logging;
 use tests::testlib::{
     build_info,
@@ -227,6 +228,7 @@ async fn main() {
                 data_store.clone(),
                 datasets_cache.clone(),
                 ethcall_udfs_cache,
+                IsolatePool::new(),
                 None,
                 "bless".parse().expect("valid worker node id"),
             )

@@ -5,6 +5,7 @@ use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use amp_worker_core::node_id::NodeId;
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use js_runtime::isolate_pool::IsolatePool;
 use monitoring::telemetry::metrics::Meter;
 
 use crate::build_info::BuildInfo;
@@ -58,6 +59,8 @@ pub async fn run(
         (datasets_registry, providers_registry)
     };
 
+    let isolate_pool = IsolatePool::new();
+
     let datasets_cache = DatasetsCache::new(datasets_registry.clone());
     let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
 
@@ -72,9 +75,10 @@ pub async fn run(
         data_store,
         datasets_cache,
         ethcall_udfs_cache,
+        isolate_pool,
         meter,
-        node_id,
         None, // Use config-based event emitter
+        node_id,
     )
     .await
     .map_err(Error::Init)?;

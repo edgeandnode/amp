@@ -6,6 +6,7 @@ use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use js_runtime::isolate_pool::IsolatePool;
 use monitoring::telemetry::metrics::Meter;
 use server::config::Config as ServerConfig;
 
@@ -57,6 +58,9 @@ pub async fn run(
         let datasets_registry = DatasetsRegistry::new(metadata_db.clone(), dataset_manifests_store);
         (datasets_registry, providers_registry)
     };
+
+    let isolate_pool = IsolatePool::new();
+
     let datasets_cache = DatasetsCache::new(datasets_registry);
     let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry);
 
@@ -90,6 +94,7 @@ pub async fn run(
         data_store,
         datasets_cache,
         ethcall_udfs_cache,
+        isolate_pool,
         meter,
         flight_at,
         jsonl_at,

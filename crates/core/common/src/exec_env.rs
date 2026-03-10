@@ -98,6 +98,7 @@ pub fn create(
     store: DataStore,
     datasets_cache: DatasetsCache,
     ethcall_udfs_cache: EthCallUdfsCache,
+    isolate_pool: IsolatePool,
 ) -> Result<ExecEnv, datafusion::error::DataFusionError> {
     let spill_allowed = !spill_location.is_empty();
     let disk_manager_mode = if spill_allowed {
@@ -120,7 +121,6 @@ pub fn create(
 
     // Build RuntimeEnv to extract components
     let runtime_env = runtime_config.build()?;
-    let isolate_pool = IsolatePool::new();
 
     let session_config = default_session_config()?;
 
