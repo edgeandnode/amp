@@ -1,7 +1,8 @@
 ---
-name: "provider-extractor-firehose"
+name: "provider-firehose"
 description: "StreamingFast Firehose provider for high-throughput blockchain streaming. Load when asking about Firehose, gRPC streaming, or StreamingFast"
 type: feature
+status: stable
 components: "crate:firehose"
 ---
 
@@ -9,7 +10,7 @@ components: "crate:firehose"
 
 ## Summary
 
-The Firehose provider enables high-throughput blockchain data extraction via StreamingFast's Firehose protocol. It uses gRPC streaming for efficient data transfer and supports optional bearer token authentication.
+The Firehose provider enables high-throughput blockchain data streaming via StreamingFast's Firehose protocol. It uses gRPC streaming for efficient data transfer and supports optional bearer token authentication.
 
 ## Table of Contents
 
@@ -28,7 +29,7 @@ The Firehose provider enables high-throughput blockchain data extraction via Str
 
 ## Architecture
 
-The Firehose provider integrates into Amp's extraction pipeline as a high-throughput data source for blockchain data:
+The Firehose provider integrates into Amp's data pipeline as a high-throughput data source for blockchain data:
 
 ```
 Dataset Job → Provider Resolution → Firehose Client → gRPC Stream → Firehose Endpoint
@@ -57,12 +58,7 @@ Dataset Job → Provider Resolution → Firehose Client → gRPC Stream → Fire
 
 ## Configuration
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `kind` | string | Yes | Must be `"firehose"` |
-| `network` | string | Yes | Network identifier (mainnet, base, etc.) |
-| `url` | string | Yes | Firehose gRPC endpoint URL |
-| `token` | string | No | Bearer token for authentication |
+For the complete field reference, see the [config schema](../providers/firehose.spec.json).
 
 ### Minimal Configuration
 

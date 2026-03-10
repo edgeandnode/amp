@@ -1,7 +1,8 @@
 ---
-name: "provider-extractor-solana"
+name: "provider-solana"
 description: "Solana blockchain provider with Old Faithful archive support. Load when asking about Solana providers, Old Faithful, or CAR files"
 type: feature
+status: experimental
 components: "crate:solana"
 ---
 
@@ -9,7 +10,7 @@ components: "crate:solana"
 
 ## Summary
 
-The Solana provider enables data extraction from the Solana blockchain using a two-stage approach: historical data from Old Faithful CAR archive files and real-time data from JSON-RPC endpoints. It handles Solana's slot-based architecture and supports configurable rate limiting.
+The Solana provider enables data access from the Solana blockchain using a two-stage approach: historical data from Old Faithful CAR archive files and real-time data from JSON-RPC endpoints. It handles Solana's slot-based architecture and supports configurable rate limiting.
 
 ## Table of Contents
 
@@ -30,15 +31,7 @@ The Solana provider enables data extraction from the Solana blockchain using a t
 
 ## Configuration
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `kind` | string | Yes | Must be `"solana"` |
-| `network` | string | Yes | Network identifier (mainnet, devnet) |
-| `rpc_provider_url` | string | Yes | Solana RPC HTTP endpoint |
-| `of1_car_directory` | string | Yes | Local directory for CAR file cache |
-| `use_archive` | string | No | Archive usage mode: `"auto"`, `"always"`, or `"never"` (default: `"always"`) |
-| `max_rpc_calls_per_second` | number | No | Rate limit for RPC calls |
-| `keep_of1_car_files` | boolean | No | Retain CAR files after processing (default: false) |
+For the complete field reference, see the [config schema](../providers/solana.spec.json).
 
 ### Example Configuration
 
@@ -62,11 +55,11 @@ keep_of1_car_files = false
 
 ### Two-Stage Data Extraction
 
-The extractor supports three archive modes controlled by the `use_archive` configuration:
+The provider supports three archive modes controlled by the `use_archive` configuration:
 
 - **`"always"`** (default): Always use archive mode, even for recent slots. Downloads epoch CAR files (~745GB each).
 - **`"auto"`**: Smart selection based on slot age. Uses RPC-only mode when `start_slot > current_slot - 10,000` (recent slots within ~83 minutes on mainnet), and archive mode for historical data.
-- **`"never"`**: Always use RPC-only mode. Best for demos and recent data extraction.
+- **`"never"`**: Always use RPC-only mode. Best for demos and recent data access.
 
 ```
 Historical Data                    Real-time Data

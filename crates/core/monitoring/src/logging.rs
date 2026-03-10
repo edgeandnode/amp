@@ -76,6 +76,7 @@ const AMP_CRATES: &[&str] = &[
     "amp_providers_firehose",
     "amp_providers_registry",
     "amp_providers_solana",
+    "amp_providers_static",
     "amp_worker_core",
     "amp_worker_datasets_derived",
     "amp_worker_datasets_raw",
