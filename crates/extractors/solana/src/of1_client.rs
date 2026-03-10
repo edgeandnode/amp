@@ -8,8 +8,6 @@ use yellowstone_faithful_car_parser as car_parser;
 
 use crate::{error::Of1StreamError, metrics, rpc_client};
 
-const BYTES_DOWNLOADED_METRICS_REPORT_THRESHOLD: u64 = 10 * 1024 * 1024; // 10 MiB
-
 pub type DecodedTransactionStatusMeta = DecodedField<
     solana_storage_proto::confirmed_block::TransactionStatusMeta,
     solana_storage_proto::StoredTransactionStatusMeta,
@@ -431,6 +429,56 @@ struct ByteStreamMonitor {
     registry: Arc<metrics::MetricsRegistry>,
 }
 
+impl ByteStreamMonitor {
+    const BYTES_READ_RECORD_THRESHOLD: u64 = 10 * 1024 * 1024; // 10 MiB
+
+    /// Record the number of bytes read and report to metrics if the reporting threshold is reached.
+    fn record_bytes_read(&mut self, n: u64) {
+        self.bytes_read_chunk += n;
+
+        if self.bytes_read_chunk >= Self::BYTES_READ_RECORD_THRESHOLD {
+            self.registry.record_of1_car_download_bytes(
+                self.bytes_read_chunk,
+                self.epoch,
+                &self.provider,
+                &self.network,
+            );
+            self.bytes_read_chunk = 0;
+        }
+    }
+
+    /// Record any remaining bytes read that didn't reach the reporting threshold.
+    fn flush_bytes_read(&mut self) {
+        if self.bytes_read_chunk > 0 {
+            self.registry.record_of1_car_download_bytes(
+                self.bytes_read_chunk,
+                self.epoch,
+                &self.provider,
+                &self.network,
+            );
+            self.bytes_read_chunk = 0;
+        }
+    }
+
+    fn record_car_download(&mut self) {
+        let elapsed = self.started_at.elapsed().as_secs_f64();
+        self.registry
+            .record_of1_car_download(elapsed, self.epoch, &self.provider, &self.network);
+        self.flush_bytes_read();
+    }
+
+    fn record_car_download_error(&mut self) {
+        self.registry
+            .record_of1_car_download_error(self.epoch, &self.provider, &self.network);
+    }
+}
+
+impl Drop for ByteStreamMonitor {
+    fn drop(&mut self) {
+        self.flush_bytes_read();
+    }
+}
+
 struct MonitoredByteStream {
     stream: ByteStream,
     monitor: Option<ByteStreamMonitor>,
@@ -468,35 +516,13 @@ impl Stream for MonitoredByteStream {
         if let Some(m) = this.monitor.as_mut() {
             match &poll {
                 std::task::Poll::Ready(Some(Ok(bytes))) => {
-                    m.bytes_read_chunk += bytes.len() as u64;
-
-                    if m.bytes_read_chunk >= BYTES_DOWNLOADED_METRICS_REPORT_THRESHOLD {
-                        m.registry.record_of1_car_download_bytes(
-                            m.bytes_read_chunk,
-                            m.epoch,
-                            &m.provider,
-                            &m.network,
-                        );
-                        m.bytes_read_chunk = 0;
-                    }
+                    m.record_bytes_read(bytes.len() as u64);
                 }
                 std::task::Poll::Ready(Some(Err(_))) => {
-                    m.registry
-                        .record_of1_car_download_error(m.epoch, &m.provider, &m.network);
+                    m.record_car_download_error();
                 }
                 std::task::Poll::Ready(None) => {
-                    // Record any remaining bytes read that didn't reach the reporting threshold.
-                    if m.bytes_read_chunk > 0 {
-                        m.registry.record_of1_car_download_bytes(
-                            m.bytes_read_chunk,
-                            m.epoch,
-                            &m.provider,
-                            &m.network,
-                        );
-                    }
-                    let elapsed = m.started_at.elapsed().as_secs_f64();
-                    m.registry
-                        .record_of1_car_download(elapsed, m.epoch, &m.provider, &m.network);
+                    m.record_car_download();
                 }
                 _ => {}
             }
