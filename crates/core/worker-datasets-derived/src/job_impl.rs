@@ -98,7 +98,7 @@
 pub mod query;
 pub mod table;
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use amp_data_store::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
@@ -106,7 +106,7 @@ use amp_worker_core::{
     retryable::RetryableErrorExt, tasks::TryWaitAllError,
 };
 use common::{physical_table::PhysicalTable, retryable::RetryableErrorExt as _};
-use datasets_common::hash_reference::HashReference;
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use tracing::Instrument;
 
 use self::table::{MaterializeTableError, materialize_table};
@@ -208,6 +208,14 @@ pub async fn execute(
             })?;
     }
 
+    // Collect all sibling tables for inter-table dependency resolution.
+    // Each materialize_table call receives this map so self-ref tables
+    // (e.g., `self.blocks_base`) can be resolved to sibling PhysicalTables.
+    let siblings: BTreeMap<TableName, Arc<PhysicalTable>> = tables
+        .iter()
+        .map(|(pt, _)| (pt.table_name().clone(), Arc::clone(pt)))
+        .collect();
+
     // Process all tables in parallel using FailFastJoinSet
     let mut join_set =
         amp_worker_core::tasks::FailFastJoinSet::<Result<(), MaterializeTableError>>::new();
@@ -227,8 +235,9 @@ pub async fn execute(
         let env = env.clone();
         let table = Arc::clone(table);
         let compactor = Arc::clone(compactor);
-        let opts = parquet_opts.clone();
         let manifest = manifest.clone();
+        let siblings = siblings.clone();
+        let opts = parquet_opts.clone();
 
         join_set.spawn(
             async move {
@@ -242,6 +251,7 @@ pub async fn execute(
                     compactor,
                     opts.clone(),
                     end,
+                    &siblings,
                 )
                 .await?;
 
@@ -476,6 +486,20 @@ mod tests {
 
             //* Then
             assert!(result, "DependencyNotFound should be fatal");
+        }
+
+        #[test]
+        fn is_fatal_self_ref_table_not_found_returns_true() {
+            //* Given
+            let err = MaterializeTableError::SelfRefTableNotFound(
+                "missing_table".parse().expect("should parse table name"),
+            );
+
+            //* When
+            let result = err.is_fatal();
+
+            //* Then
+            assert!(result, "SelfRefTableNotFound should be fatal");
         }
     }
 

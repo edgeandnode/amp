@@ -21,8 +21,9 @@ use datafusion::sql::parser::Statement;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     Manifest as DerivedDatasetManifest,
-    deps::{DepAlias, DepAliasError, DepAliasOrSelfRef, DepAliasOrSelfRefError},
+    deps::{DepAlias, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::{TableInput, View},
+    sorting::{self, CyclicDepError},
 };
 use futures::{StreamExt as _, stream};
 use js_runtime::isolate_pool::IsolatePool;
@@ -31,7 +32,7 @@ use js_runtime::isolate_pool::IsolatePool;
 type TableReferencesMap = BTreeMap<
     TableName,
     (
-        Vec<TableReference<DepAlias>>,
+        Vec<TableReference<DepAliasOrSelfRef>>,
         Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
@@ -232,6 +233,12 @@ pub enum ParseRawManifestError {
 /// - All tables used in SQL exist in their datasets
 /// - All functions used in SQL exist in their datasets
 /// - Table schemas are compatible with SQL queries
+///
+/// # Panics
+///
+/// Panics if `topological_sort` returns a table name that was not in the original
+/// statements or manifest tables maps. This is structurally impossible because the
+/// sort only returns keys from its input, which are derived from these maps.
 // TODO: This validation logic was moved here from datasets-derived as part of a refactoring
 //  to break the dependency between datasets-derived and common. This should eventually be
 //  moved to a more appropriate location.
@@ -281,22 +288,23 @@ pub async fn validate_derived_manifest(
                 source: err,
             })?;
 
-        // Extract table references
-        let table_refs = resolve_table_references::<DepAlias>(&stmt).map_err(|err| match &err {
-            ResolveTableReferencesError::InvalidTableName { .. } => {
-                ManifestValidationError::InvalidTableName(err)
-            }
-            ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
-                ManifestValidationError::CatalogQualifiedTableInSql {
+        // Extract table references (using DepAliasOrSelfRef to support `self.` inter-table refs)
+        let table_refs =
+            resolve_table_references::<DepAliasOrSelfRef>(&stmt).map_err(|err| match &err {
+                ResolveTableReferencesError::InvalidTableName { .. } => {
+                    ManifestValidationError::InvalidTableName(err)
+                }
+                ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                    ManifestValidationError::CatalogQualifiedTableInSql {
+                        table_name: table_name.clone(),
+                        source: err,
+                    }
+                }
+                _ => ManifestValidationError::TableReferenceResolution {
                     table_name: table_name.clone(),
                     source: err,
-                }
-            }
-            _ => ManifestValidationError::TableReferenceResolution {
-                table_name: table_name.clone(),
-                source: err,
-            },
-        })?;
+                },
+            })?;
 
         // Reject tables whose SQL references no source tables (e.g., `SELECT 1`).
         // Derived tables must reference at least one external dependency or sibling table.
@@ -306,14 +314,16 @@ pub async fn validate_derived_manifest(
             });
         }
 
-        // Validate dependency aliases in table references before catalog creation
+        // Validate dependency aliases in table references before catalog creation.
+        // Skip `self` schema refs — those are inter-table references, not external deps.
         for table_ref in &table_refs {
             if let TableReference::Partial { schema, .. } = table_ref
-                && !dependencies.contains_key(schema.as_ref())
+                && let DepAliasOrSelfRef::DepAlias(dep_alias) = schema.as_ref()
+                && !dependencies.contains_key(dep_alias)
             {
                 return Err(ManifestValidationError::DependencyAliasNotFound {
                     table_name: table_name.clone(),
-                    alias: schema.to_string(),
+                    alias: dep_alias.to_string(),
                 });
             }
         }
@@ -343,22 +353,49 @@ pub async fn validate_derived_manifest(
         statements.insert(table_name.clone(), stmt);
     }
 
-    // Step 3: Create planning context to validate all table and function references
-    // This validates:
-    // - All table references resolve to existing tables in dependencies
-    // - All function references resolve to existing functions in dependencies
-    // - Bare function references can be created as UDFs or are assumed to be built-ins
-    // - Table references use valid dataset aliases from dependencies
-    // - Schema compatibility across dependencies
+    // Step 2b: Extract inter-table dependencies and determine processing order.
+    // `self.`-qualified table references that match sibling table names are inter-table deps.
+    let table_order = {
+        let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
+        for (table_name, (table_refs, _func_refs)) in &references {
+            let mut table_deps = Vec::new();
+            for table_ref in table_refs {
+                if let TableReference::Partial { schema, table } = table_ref
+                    && schema.as_ref().is_self()
+                {
+                    if table.as_ref() == table_name {
+                        return Err(ManifestValidationError::SelfReferencingTable {
+                            table_name: table_name.clone(),
+                        });
+                    }
+                    if manifest.tables.contains_key(table.as_ref()) {
+                        table_deps.push(table.as_ref().clone());
+                    } else {
+                        return Err(ManifestValidationError::SelfRefTableNotFound {
+                            source_table: table_name.clone(),
+                            referenced_table: table.as_ref().clone(),
+                        });
+                    }
+                }
+            }
+            deps.insert(table_name.clone(), table_deps);
+        }
+        sorting::topological_sort(deps).map_err(ManifestValidationError::CyclicDependency)?
+    };
+
+    // Step 3: Create planning context to validate all table and function references.
+    // Inter-table references use `self.<table_name>` syntax, which resolves through the
+    // SelfSchemaProvider registered under the "self" schema in the AmpCatalogProvider.
     let session_config =
         default_session_config().map_err(ManifestValidationError::SessionConfig)?;
     let dep_aliases: BTreeMap<String, HashReference> = dependencies
         .iter()
         .map(|(alias, hash_ref)| (alias.to_string(), hash_ref.clone()))
         .collect();
-    let self_schema: Arc<dyn AsyncSchemaProvider> = Arc::new(
-        SelfSchemaProvider::from_manifest_udfs(IsolatePool::dummy(), &manifest.functions),
-    );
+    let self_schema_provider = Arc::new(SelfSchemaProvider::from_manifest_udfs(
+        IsolatePool::dummy(),
+        &manifest.functions,
+    ));
     let amp_catalog = Arc::new(
         AmpCatalogProvider::new(
             datasets_cache.clone(),
@@ -366,18 +403,22 @@ pub async fn validate_derived_manifest(
             IsolatePool::dummy(),
         )
         .with_dep_aliases(dep_aliases)
-        .with_self_schema(self_schema),
+        .with_self_schema(self_schema_provider.clone() as Arc<dyn AsyncSchemaProvider>),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
         .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
         .build();
 
-    // Step 4: Validate that all table SQL queries are incremental.
-    // Incremental processing is required for derived datasets to efficiently update
-    // as new blocks arrive. This check ensures no non-incremental operations are used.
-    // Use cached parsed statements from Step 2 to avoid re-parsing.
-    for (table_name, stmt) in statements {
+    // Step 4: Validate that all table SQL queries are incremental, in topological order.
+    // After validating each table, register its manifest schema so subsequent tables
+    // can reference it via `self.<table_name>`.
+    for table_name in table_order {
+        // topological_sort only returns keys from the input map
+        let stmt = statements
+            .remove(&table_name)
+            .expect("topological_sort returned unknown table");
+
         // Plan the SQL query to a logical plan
         let plan = planning_ctx.statement_to_plan(stmt).await.map_err(|err| {
             ManifestValidationError::SqlPlanningError {
@@ -387,12 +428,20 @@ pub async fn validate_derived_manifest(
         })?;
 
         // Validate that the plan can be processed incrementally
-        // This checks for non-incremental operations like aggregations, sorts, limits, outer joins, etc.
         plan.is_incremental()
             .map_err(|err| ManifestValidationError::NonIncrementalSql {
                 table_name: table_name.clone(),
                 source: err,
             })?;
+
+        // Register the table's manifest schema so subsequent tables can reference it.
+        // table_name comes from the manifest's own tables
+        let table = manifest
+            .tables
+            .get(&table_name)
+            .expect("manifest table missing after topological sort");
+        let schema = table.schema.arrow.clone().into_schema_ref();
+        self_schema_provider.add_table(table_name.as_str(), schema);
     }
 
     Ok(())
@@ -421,7 +470,7 @@ pub enum ManifestValidationError {
         /// The table whose SQL query contains unresolvable table references
         table_name: TableName,
         #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Failed to resolve function references from SQL query
@@ -493,15 +542,15 @@ pub enum ManifestValidationError {
         /// The table whose SQL query contains a catalog-qualified table reference
         table_name: TableName,
         #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Invalid table name
     ///
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error("Invalid table name in SQL query")]
-    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
+    #[error("Invalid table name in SQL query: {0}")]
+    InvalidTableName(#[source] ResolveTableReferencesError<DepAliasOrSelfRefError>),
 
     /// Dependency alias not found
     ///
@@ -515,6 +564,34 @@ pub enum ManifestValidationError {
         /// The dependency alias that was not found
         alias: String,
     },
+
+    /// A table references itself via `self.<table_name>`
+    ///
+    /// This occurs when a table's SQL query contains `self.<own_name>`, which would
+    /// create a trivial circular dependency. Tables cannot reference themselves.
+    #[error("Table '{table_name}' references itself via self.{table_name}")]
+    SelfReferencingTable {
+        /// The table that references itself
+        table_name: TableName,
+    },
+
+    /// A `self.`-qualified table reference targets a table that does not exist in the dataset.
+    #[error(
+        "Table '{source_table}' references non-existent sibling table 'self.{referenced_table}'"
+    )]
+    SelfRefTableNotFound {
+        /// The table whose SQL contains the invalid self-ref
+        source_table: TableName,
+        /// The referenced table name that does not exist
+        referenced_table: TableName,
+    },
+
+    /// Cyclic dependency detected among tables within the dataset
+    ///
+    /// This occurs when tables reference each other in a cycle (e.g., table_a references
+    /// table_b which references table_a). Inter-table dependencies must form a DAG.
+    #[error("Cyclic dependency detected among inter-table references: {0}")]
+    CyclicDependency(#[source] CyclicDepError<TableName>),
 
     /// Non-incremental SQL operation in table query
     ///

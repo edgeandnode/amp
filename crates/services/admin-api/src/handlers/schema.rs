@@ -12,18 +12,19 @@ use common::{
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
     self_schema_provider::SelfSchemaProvider,
-    sql::{ResolveTableReferencesError, resolve_table_references},
+    sql::{self, ResolveTableReferencesError, TableReference},
     sql_str::SqlStr,
 };
-use datafusion::sql::parser::Statement;
+use datafusion::{arrow, sql::parser::Statement};
 use datasets_common::{
     hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
 };
 use datasets_derived::{
-    deps::{DepAlias, DepAliasError, DepReference, HashOrVersion},
+    deps::{DepAlias, DepAliasOrSelfRef, DepAliasOrSelfRefError, DepReference, HashOrVersion},
     func_name::FuncName,
     function::Function,
     manifest::TableSchema,
+    sorting::{self, CyclicDepError},
 };
 use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
@@ -55,6 +56,8 @@ use crate::{
 /// - `EMPTY_TABLES_AND_FUNCTIONS`: No tables or functions provided (at least one is required)
 /// - `INVALID_TABLE_SQL`: SQL syntax error in table definition
 /// - `NON_INCREMENTAL_QUERY`: SQL query is non-incremental
+/// - `SELF_REFERENCING_TABLE`: A table references itself via `self.<own_name>`
+/// - `CYCLIC_DEPENDENCY`: Inter-table dependencies form a cycle
 /// - `TABLE_REFERENCE_RESOLUTION`: Failed to extract table references from SQL
 /// - `NO_TABLE_REFERENCES`: Table SQL does not reference any source tables
 /// - `FUNCTION_REFERENCE_RESOLUTION`: Failed to extract function references from SQL
@@ -84,6 +87,12 @@ use crate::{
 /// 4. **Infer Schema**: Uses DataFusion's query planner to determine output schema without executing the query
 /// 5. **Prepend Special Fields**: Adds `RESERVED_BLOCK_NUM_COLUMN_NAME` field to the output schema
 /// 6. **Extract Networks**: Identifies which blockchain networks are referenced by the query
+///
+/// # Panics
+///
+/// Panics if `topological_sort` returns a table name that was not in the original
+/// statements map. This is structurally impossible because the sort only returns
+/// keys from its input.
 #[instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -192,7 +201,7 @@ pub async fn handler(
     };
 
     // Parse all SQL queries from tables and extract table references and function names
-    let statements = {
+    let mut statements = {
         let mut statements: BTreeMap<TableName, Statement> = BTreeMap::new();
 
         for (table_name, sql_query) in tables {
@@ -207,17 +216,82 @@ pub async fn handler(
         statements
     };
 
+    // Extract inter-table dependencies and determine processing order.
+    // `self.`-qualified table references that match sibling table names are inter-table deps.
+    let table_order = {
+        let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
+        for (table_name, stmt) in &statements {
+            let table_refs = sql::resolve_table_references::<DepAliasOrSelfRef>(stmt).map_err(
+                |err| match &err {
+                    ResolveTableReferencesError::InvalidTableName { .. } => {
+                        Error::InvalidTableName {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                    }
+                    ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                        Error::CatalogQualifiedTableInSql {
+                            table_name: table_name.clone(),
+                            source: err,
+                        }
+                    }
+                    _ => Error::TableReferenceResolution {
+                        table_name: table_name.clone(),
+                        source: err,
+                    },
+                },
+            )?;
+
+            // Reject tables whose SQL references no source tables (e.g., `SELECT 1`).
+            // Derived tables must reference at least one external dependency or sibling table.
+            if table_refs.is_empty() {
+                return Err(Error::NoTableReferences {
+                    table_name: table_name.clone(),
+                }
+                .into());
+            }
+
+            let mut table_deps = Vec::new();
+            for table_ref in table_refs {
+                if let TableReference::Partial { schema, table } = &table_ref
+                    && schema.as_ref().is_self()
+                {
+                    if table.as_ref() == table_name {
+                        return Err(Error::SelfReferencingTable {
+                            table_name: table_name.clone(),
+                        }
+                        .into());
+                    }
+                    if statements.contains_key(table.as_ref()) {
+                        table_deps.push(table.as_ref().clone());
+                    } else {
+                        return Err(Error::SelfRefTableNotFound {
+                            source_table: table_name.clone(),
+                            referenced_table: table.as_ref().clone(),
+                        }
+                        .into());
+                    }
+                }
+            }
+            deps.insert(table_name.clone(), table_deps);
+        }
+        sorting::topological_sort(deps).map_err(Error::CyclicDependency)?
+    };
+
     // Build dep_aliases for AmpCatalogProvider before dependencies is consumed
     let dep_aliases: BTreeMap<String, HashReference> = dependencies
         .iter()
         .map(|(alias, hash_ref)| (alias.to_string(), hash_ref.clone()))
         .collect();
 
-    // Create planning context with self-schema provider
+    // Create planning context with self-schema provider.
+    // Inter-table references use `self.<table_name>` syntax, which resolves through the
+    // SelfSchemaProvider registered under the "self" schema in the AmpCatalogProvider.
     let session_config = default_session_config().map_err(Error::SessionConfig)?;
-    let self_schema: Arc<dyn AsyncSchemaProvider> = Arc::new(
-        SelfSchemaProvider::from_manifest_udfs(IsolatePool::dummy(), &functions),
-    );
+    let self_schema_provider = Arc::new(SelfSchemaProvider::from_manifest_udfs(
+        IsolatePool::dummy(),
+        &functions,
+    ));
     let amp_catalog = Arc::new(
         AmpCatalogProvider::new(
             ctx.datasets_cache.clone(),
@@ -225,30 +299,22 @@ pub async fn handler(
             IsolatePool::dummy(),
         )
         .with_dep_aliases(dep_aliases)
-        .with_self_schema(self_schema),
+        .with_self_schema(self_schema_provider.clone() as Arc<dyn AsyncSchemaProvider>),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
         .with_func_catalog(AMP_CATALOG_NAME, amp_catalog)
         .build();
 
-    // Infer schema for each table and extract networks
+    // Infer schema for each table in topological order.
+    // After inferring a table's schema, register it with the self-schema provider
+    // so that subsequent tables can reference it via `self.<table_name>`.
     let mut schemas = BTreeMap::new();
-    for (table_name, stmt) in statements {
-        // Extract table references and reject tables with no source tables
-        let table_refs = resolve_table_references::<DepAlias>(&stmt).map_err(|err| {
-            Error::TableReferenceResolution {
-                table_name: table_name.clone(),
-                source: err,
-            }
-        })?;
-        if table_refs.is_empty() {
-            return Err(Error::NoTableReferences {
-                table_name: table_name.clone(),
-            }
-            .into());
-        }
-
+    for table_name in table_order {
+        // topological_sort only returns keys from the input map
+        let stmt = statements
+            .remove(&table_name)
+            .expect("topological_sort returned unknown table");
         let plan = planning_ctx.statement_to_plan(stmt).await.map_err(|err| {
             Error::SchemaPlanInference {
                 table_name: table_name.clone(),
@@ -266,6 +332,10 @@ pub async fn handler(
 
         // Prepend the special block number field
         let schema = prepend_special_block_num_field(&schema);
+
+        // Register the inferred schema so subsequent tables can reference this table
+        let arrow_schema: Arc<arrow::datatypes::Schema> = Arc::new(schema.as_arrow().clone());
+        self_schema_provider.add_table(table_name.as_str(), arrow_schema);
 
         schemas.insert(
             table_name,
@@ -376,11 +446,79 @@ enum Error {
         source: common::sql::ParseSqlError,
     },
 
+    /// SQL query contains non-incremental operations
+    ///
+    /// This occurs when a table's SQL uses operations that cannot be processed incrementally
+    /// (e.g., aggregations, sorts, limits, outer joins, window functions, distinct).
     #[error("Table '{table_name}' contains non-incremental SQL: {source}")]
     NonIncrementalQuery {
+        /// The table whose SQL query contains non-incremental operations
         table_name: TableName,
         #[source]
         source: NonIncrementalQueryError,
+    },
+
+    /// A table references itself via `self.<table_name>`
+    ///
+    /// This occurs when a table's SQL query contains `self.<own_name>`, which would
+    /// create a trivial circular dependency. Tables cannot reference themselves.
+    #[error("Table '{table_name}' references itself via self.{table_name}")]
+    SelfReferencingTable {
+        /// The table that references itself
+        table_name: TableName,
+    },
+
+    /// A `self.`-qualified table reference targets a table that does not exist in the dataset.
+    #[error(
+        "Table '{source_table}' references non-existent sibling table 'self.{referenced_table}'"
+    )]
+    SelfRefTableNotFound {
+        /// The table whose SQL contains the invalid self-ref
+        source_table: TableName,
+        /// The referenced table name that does not exist
+        referenced_table: TableName,
+    },
+
+    /// Cyclic dependency detected among tables within the dataset
+    ///
+    /// This occurs when tables reference each other in a cycle (e.g., table_a references
+    /// table_b which references table_a). Inter-table dependencies must form a DAG.
+    #[error("Cyclic dependency detected among inter-table references: {0}")]
+    CyclicDependency(#[source] CyclicDepError<TableName>),
+
+    /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
+    ///
+    /// This occurs during SQL parsing when a 3-part table reference is detected.
+    #[error("Catalog-qualified table reference in table '{table_name}': {source}")]
+    CatalogQualifiedTableInSql {
+        /// The table whose SQL query contains a catalog-qualified table reference
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
+    },
+
+    /// Table name in SQL reference has invalid format.
+    ///
+    /// This occurs when a table name extracted from SQL does not conform to identifier rules.
+    #[error("Invalid table name in table '{table_name}': {source}")]
+    InvalidTableName {
+        /// The table whose SQL query contains an invalid table name
+        table_name: TableName,
+        #[source]
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
+    },
+
+    /// Failed to extract table references from SQL query
+    ///
+    /// This occurs when resolving table references from a parsed SQL statement fails
+    /// for reasons other than catalog qualification or invalid table names.
+    #[error("Failed to extract table references from table '{table_name}': {source}")]
+    TableReferenceResolution {
+        /// The table whose SQL query failed reference extraction
+        table_name: TableName,
+        /// The underlying error
+        #[source]
+        source: ResolveTableReferencesError<DepAliasOrSelfRefError>,
     },
 
     /// Dependency not found in dataset store
@@ -424,18 +562,6 @@ enum Error {
         /// The underlying database error
         #[source]
         source: amp_datasets_registry::error::ResolveRevisionError,
-    },
-
-    /// Failed to extract table references from SQL query
-    ///
-    /// This occurs when extracting table references from the parsed SQL fails,
-    /// typically due to unsupported table reference formats.
-    #[error("Failed to extract table references for table '{table_name}': {source}")]
-    TableReferenceResolution {
-        /// The table whose SQL query failed table reference extraction
-        table_name: TableName,
-        #[source]
-        source: ResolveTableReferencesError<DepAliasError>,
     },
 
     /// Table SQL does not reference any source tables
@@ -494,10 +620,15 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => "EMPTY_TABLES_AND_FUNCTIONS",
             Error::InvalidTableSql { .. } => "INVALID_TABLE_SQL",
             Error::NonIncrementalQuery { .. } => "NON_INCREMENTAL_QUERY",
+            Error::SelfReferencingTable { .. } => "SELF_REFERENCING_TABLE",
+            Error::SelfRefTableNotFound { .. } => "SELF_REF_TABLE_NOT_FOUND",
+            Error::CyclicDependency(_) => "CYCLIC_DEPENDENCY",
+            Error::CatalogQualifiedTableInSql { .. } => "CATALOG_QUALIFIED_TABLE",
+            Error::InvalidTableName { .. } => "INVALID_TABLE_NAME",
+            Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
             Error::DependencyNotFound { .. } => "DEPENDENCY_NOT_FOUND",
             Error::DependencyManifestLinkCheck { .. } => "DEPENDENCY_MANIFEST_LINK_CHECK",
             Error::DependencyVersionResolution { .. } => "DEPENDENCY_VERSION_RESOLUTION",
-            Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
             Error::NoTableReferences { .. } => "NO_TABLE_REFERENCES",
             Error::SessionConfig(_) => "SESSION_CONFIG_ERROR",
             Error::SchemaPlanInference { source, .. } if is_user_input_error(source) => {
@@ -513,10 +644,15 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => StatusCode::BAD_REQUEST,
             Error::InvalidTableSql { .. } => StatusCode::BAD_REQUEST,
             Error::NonIncrementalQuery { .. } => StatusCode::BAD_REQUEST,
+            Error::SelfReferencingTable { .. } => StatusCode::BAD_REQUEST,
+            Error::SelfRefTableNotFound { .. } => StatusCode::BAD_REQUEST,
+            Error::CyclicDependency(_) => StatusCode::BAD_REQUEST,
+            Error::CatalogQualifiedTableInSql { .. } => StatusCode::BAD_REQUEST,
+            Error::InvalidTableName { .. } => StatusCode::BAD_REQUEST,
+            Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::DependencyNotFound { .. } => StatusCode::NOT_FOUND,
             Error::DependencyManifestLinkCheck { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DependencyVersionResolution { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
             Error::NoTableReferences { .. } => StatusCode::BAD_REQUEST,
             Error::SessionConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::SchemaPlanInference { source, .. } if is_user_input_error(source) => {

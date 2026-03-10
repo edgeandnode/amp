@@ -2,7 +2,7 @@
 //!
 //! This module provides physical catalog creation for derived dataset execution.
 //! It resolves dependency tables from manifest deps and SQL table references,
-//! then adds physical parquet locations.
+//! then builds the catalog from resolved entries.
 
 use std::{
     collections::{BTreeMap, btree_map::Entry},
@@ -22,10 +22,18 @@ use crate::{
     sql::TableReference,
 };
 
-/// Creates a full catalog with physical data access for derived dataset dumps.
+/// A resolved table entry containing logical metadata, physical data access,
+/// and the SQL schema name used in queries.
+pub struct ResolvedTableEntry {
+    pub logical: LogicalTable,
+    pub physical: Arc<PhysicalTable>,
+    pub schema_name: Arc<str>,
+}
+
+/// Resolves external dependency table references into resolved table entries.
 ///
 /// This function resolves dependency tables from manifest deps and SQL table references,
-/// loads dataset metadata, builds physical table entries, and constructs the catalog.
+/// loads dataset metadata, and builds physical table entries.
 ///
 /// ## Parameters
 ///
@@ -33,14 +41,12 @@ use crate::{
 /// - `data_store`: Used to query metadata database for physical parquet locations
 /// - `manifest_deps`: Dependency alias → hash reference mappings from the manifest
 /// - `table_refs`: Parsed SQL table references with dep alias schemas
-/// - `udfs`: Pre-resolved self-ref UDFs (from logical catalog)
-pub async fn create(
+pub async fn resolve_external_deps(
     datasets_cache: &DatasetsCache,
     data_store: &DataStore,
     manifest_deps: &BTreeMap<DepAlias, HashReference>,
     table_refs: Vec<TableReference<DepAlias>>,
-    udfs: Vec<ScalarUDF>,
-) -> Result<Catalog, CreateCatalogError> {
+) -> Result<Vec<ResolvedTableEntry>, CreateCatalogError> {
     // Resolve table references to LogicalTable instances
     let mut tables_by_hash: BTreeMap<Hash, BTreeMap<TableReference<DepAlias>, LogicalTable>> =
         Default::default();
@@ -98,7 +104,7 @@ pub async fn create(
         .flat_map(|map| map.into_values())
         .collect();
 
-    // Build physical catalog entries from resolved logical tables
+    // Build resolved entries from logical tables
     let mut entries = Vec::new();
     for table in &logical_tables {
         let dataset_ref = table.dataset_reference();
@@ -136,24 +142,47 @@ pub async fn create(
             Arc::clone(table_def),
             revision,
         );
-        entries.push((
-            Arc::from(physical_table),
-            Arc::from(table.sql_schema_name()),
-        ));
+        entries.push(ResolvedTableEntry {
+            logical: table.clone(),
+            physical: Arc::from(physical_table),
+            schema_name: Arc::from(table.sql_schema_name()),
+        });
     }
 
-    // Build dep_aliases map
+    Ok(entries)
+}
+
+/// Builds a physical catalog from resolved table entries.
+///
+/// Takes already-resolved table entries (from both external deps and self-ref
+/// siblings) and constructs the final catalog.
+///
+/// ## Parameters
+///
+/// - `entries`: All resolved table entries (external deps + self-refs combined)
+/// - `udfs`: Pre-resolved UDFs (from logical catalog)
+/// - `manifest_deps`: Dependency alias → hash reference mappings from the manifest
+pub fn build_catalog(
+    entries: Vec<ResolvedTableEntry>,
+    udfs: Vec<ScalarUDF>,
+    manifest_deps: &BTreeMap<DepAlias, HashReference>,
+) -> Catalog {
+    let (logical_tables, physical_entries): (Vec<_>, Vec<_>) = entries
+        .into_iter()
+        .map(|e| (e.logical, (e.physical, e.schema_name)))
+        .unzip();
+
     let dep_aliases: BTreeMap<String, HashReference> = manifest_deps
         .iter()
         .map(|(alias, hash_ref)| (alias.to_string(), hash_ref.clone()))
         .collect();
 
-    Ok(Catalog::new(logical_tables, udfs, entries, dep_aliases))
+    Catalog::new(logical_tables, udfs, physical_entries, dep_aliases)
 }
 
-/// Errors that can occur when creating a physical catalog.
+/// Errors that can occur when resolving external dependency table references.
 ///
-/// Returned by [`create`] when catalog creation fails.
+/// Returned by [`resolve_external_deps`] when resolution fails.
 #[derive(Debug, thiserror::Error)]
 pub enum CreateCatalogError {
     /// Table is not qualified with a schema/dataset name.
