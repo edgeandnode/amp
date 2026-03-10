@@ -9,6 +9,7 @@ async-trait.workspace = true
 blake3.workspace = true
 datafusion.workspace = true
 deadpool = "0.12.2"
+half = "2.7.1"
 lru = "0.16.3"
 num-traits = "0.2.19"
 num_cpus = "1.16.0"

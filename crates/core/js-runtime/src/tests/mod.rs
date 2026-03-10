@@ -3,13 +3,17 @@ use std::{iter, sync::Arc};
 use datafusion::{
     arrow::{
         array::{
-            ArrayRef, BooleanArray, Int32Array, ListBuilder, StringArray, StringBuilder,
-            StructArray,
+            ArrayRef, BooleanArray, Int32Array, Int32Builder, ListBuilder, MapBuilder, StringArray,
+            StringBuilder, StructArray,
         },
-        datatypes::{DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, i256},
+        datatypes::{
+            DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, IntervalDayTime,
+            i256,
+        },
     },
     scalar::ScalarValue,
 };
+use half::f16;
 
 use crate::{convert::ToV8, isolate::Isolate};
 
@@ -50,10 +54,13 @@ fn param_types() {
         &ScalarValue::Decimal128(Some(i128::MAX), DECIMAL128_MAX_PRECISION, 0) as &dyn ToV8;
     let decimal256 =
         &ScalarValue::Decimal256(Some(i256::MAX), DECIMAL256_MAX_PRECISION, 0) as &dyn ToV8;
+    let f16_val = ScalarValue::Float16(Some(f16::from_f32(1.5)));
+    let interval_day_time_val = ScalarValue::IntervalDayTime(Some(IntervalDayTime::new(5, 3000)));
 
     let params = vec![
         &ScalarValue::Null as &dyn ToV8,
         &ScalarValue::Boolean(Some(true)) as &dyn ToV8,
+        &f16_val,
         &ScalarValue::Float32(Some(32.5)) as &dyn ToV8,
         &ScalarValue::Float64(Some(64.5)) as &dyn ToV8,
         &ScalarValue::Int8(Some(-128)) as &dyn ToV8,
@@ -68,6 +75,20 @@ fn param_types() {
         binary,
         decimal128,
         decimal256,
+        &ScalarValue::Date32(Some(19000)),
+        &ScalarValue::Date64(Some(1_700_000_000_000)),
+        &ScalarValue::Time32Second(Some(3661)),
+        &ScalarValue::Time32Millisecond(Some(3_661_500)),
+        &ScalarValue::Time64Microsecond(Some(3_661_500_000)),
+        &ScalarValue::Time64Nanosecond(Some(3_661_500_000_000)),
+        &ScalarValue::TimestampSecond(Some(1_700_000_000), None),
+        &ScalarValue::DurationMillisecond(Some(86_400_000)),
+        &ScalarValue::IntervalYearMonth(Some(14)),
+        &interval_day_time_val,
+        &ScalarValue::Float16(None),
+        &ScalarValue::Date32(None),
+        &ScalarValue::TimestampSecond(None, None),
+        &ScalarValue::IntervalDayTime(None),
     ];
 
     isolate
@@ -199,4 +220,34 @@ fn return_types() {
         ScalarValue::try_from_array(arrow_struct.column(14), 0).unwrap(),
         ScalarValue::Int32(Some(255))
     );
+}
+
+#[test]
+fn map_param() {
+    let mut isolate = Isolate::new();
+
+    let mut builder = MapBuilder::new(None, StringBuilder::new(), Int32Builder::new());
+    builder.keys().append_value("x");
+    builder.values().append_value(10);
+    builder.keys().append_value("y");
+    builder.values().append_value(20);
+    builder.append(true).unwrap();
+
+    let map = ScalarValue::Map(Arc::new(builder.finish()));
+    let params = iter::once(&map as &dyn ToV8);
+    isolate
+        .invoke::<()>("test.js", TEST_JS, "map_param", params)
+        .unwrap();
+}
+
+#[test]
+fn dictionary_param() {
+    let mut isolate = Isolate::new();
+
+    let inner = ScalarValue::Utf8(Some("hello".to_string()));
+    let dict = ScalarValue::Dictionary(Box::new(DataType::Int32), Box::new(inner));
+    let params = iter::once(&dict as &dyn ToV8);
+    isolate
+        .invoke::<()>("test.js", TEST_JS, "dictionary_param", params)
+        .unwrap();
 }

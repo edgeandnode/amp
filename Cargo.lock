@@ -6543,6 +6543,7 @@ dependencies = [
  "blake3",
  "datafusion",
  "deadpool",
+ "half 2.7.1",
  "hex",
  "indoc",
  "lru",

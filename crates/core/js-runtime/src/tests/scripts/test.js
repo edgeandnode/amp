@@ -9,6 +9,7 @@ function throws() {
 function param_types(
   nul,
   bool,
+  f16,
   f32,
   f64,
   i8,
@@ -23,9 +24,24 @@ function param_types(
   bytes,
   decimal128,
   decimal256,
+  date32,
+  date64,
+  time32s,
+  time32ms,
+  time64us,
+  time64ns,
+  timestamp,
+  duration,
+  interval_ym,
+  interval_dt,
+  null_f16,
+  null_date32,
+  null_timestamp,
+  null_interval_dt,
 ) {
   assert_eq(nul, null)
   assert_eq(bool, true)
+  assert_eq(f16, 1.5)
   assert_eq(f32, 32.5)
   assert_eq(f64, 64.5)
 
@@ -52,6 +68,29 @@ function param_types(
       "57896044618658097711785492504343953926634992332820282019728792003956564819967",
     ),
   )
+
+  assert_eq(date32, 19000)
+
+  assert_eq(date64, BigInt("1700000000000"))
+
+  assert_eq(time32s, 3661)
+  assert_eq(time32ms, 3661500)
+  assert_eq(time64us, BigInt("3661500000"))
+  assert_eq(time64ns, BigInt("3661500000000"))
+
+  assert_eq(timestamp, BigInt("1700000000"))
+
+  assert_eq(duration, BigInt("86400000"))
+
+  assert_eq(interval_ym, 14)
+
+  assert_eq(interval_dt.days, 5)
+  assert_eq(interval_dt.milliseconds, 3000)
+
+  assert_eq(null_f16, null)
+  assert_eq(null_date32, null)
+  assert_eq(null_timestamp, null)
+  assert_eq(null_interval_dt, null)
 }
 
 // Returns an object symmetric to the parameters to `param_types`, on field for each parameter, and
@@ -127,4 +166,13 @@ function list_param(list) {
   assert_eq(list[0], "1")
   assert_eq(list[1], "2")
   assert_eq(list[2], "3")
+}
+
+function map_param(map) {
+  assert_eq(map.x, 10)
+  assert_eq(map.y, 20)
+}
+
+function dictionary_param(dict) {
+  assert_eq(dict, "hello")
 }
