@@ -1,5 +1,7 @@
 //! Error handling types for HTTP handlers
 
+use std::error::Error as StdError;
+
 use axum::{Json, http::StatusCode};
 
 /// Standard error response returned by the API
@@ -47,7 +49,7 @@ pub struct ErrorResponse {
 ///
 /// This trait must be implemented by all handler-specific error enums to enable
 /// automatic conversion into `ErrorResponse`.
-pub trait IntoErrorResponse: std::fmt::Display + Send + Sync + 'static {
+pub trait IntoErrorResponse: StdError + Send + Sync + 'static {
     /// Returns a stable, machine-readable error code
     ///
     /// Error codes should use SCREAMING_SNAKE_CASE and remain stable across versions.
@@ -62,10 +64,20 @@ where
     E: IntoErrorResponse,
 {
     fn from(error: E) -> Self {
+        // Format error message with source chain
+        let mut message = error.to_string();
+        let mut current = error.source();
+
+        while let Some(source) = current {
+            message.push_str(": ");
+            message.push_str(&source.to_string());
+            current = source.source();
+        }
+
         ErrorResponse {
             status_code: error.status_code(),
             error_code: error.error_code().to_string(),
-            error_message: error.to_string(),
+            error_message: message,
         }
     }
 }
