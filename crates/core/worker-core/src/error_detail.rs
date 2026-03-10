@@ -1,4 +1,9 @@
 //! Structured error detail payload for job failures.
+//!
+//! Also defines [`ErrorDetailsProvider`], a trait for errors that contribute
+//! structured key-value details. Each error layer provides only its own context
+//! via [`ErrorDetailsProvider::error_details`], and
+//! [`collect_error_details`] walks the chain to merge them.
 
 /// Structured error detail persisted as JSONB on job failure.
 ///
@@ -39,4 +44,57 @@ pub struct ErrorContext<T: serde::Serialize + serde::de::DeserializeOwned = ()> 
     /// a concrete type with `#[serde(skip_serializing_if)]` on its fields.
     #[serde(flatten)]
     pub extra: T,
+}
+
+/// Trait for errors that contribute structured details to error payloads.
+///
+/// Each error layer contributes only its own context via [`error_details`](Self::error_details).
+/// The [`detail_source`](Self::detail_source) method chains to inner errors so a collector can
+/// walk the typed chain without downcasting.
+pub trait ErrorDetailsProvider {
+    /// Key-value pairs this error layer contributes.
+    ///
+    /// Only this layer's own context — never aggregate from inner errors.
+    fn error_details(&self) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+
+    /// Next error in the chain that also provides details.
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        None
+    }
+}
+
+/// Build a details map containing `block_range_start` and `block_range_end` entries
+/// for the given optional block numbers. Returns an empty map when both are `None`.
+pub fn block_range_details(
+    start: Option<u64>,
+    end: Option<u64>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    if let Some(start) = start {
+        map.insert("block_range_start".into(), serde_json::Value::from(start));
+    }
+    if let Some(end) = end {
+        map.insert("block_range_end".into(), serde_json::Value::from(end));
+    }
+    map
+}
+
+/// Walk the [`ErrorDetailsProvider`] chain and merge all detail maps.
+///
+/// First occurrence wins — the detail closest to the failure site takes priority
+/// when the same key appears at multiple levels.
+pub fn collect_error_details(
+    provider: &dyn ErrorDetailsProvider,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut details = serde_json::Map::new();
+    let mut current: Option<&dyn ErrorDetailsProvider> = Some(provider);
+    while let Some(p) = current {
+        for (k, v) in p.error_details() {
+            details.entry(k).or_insert(v);
+        }
+        current = p.detail_source();
+    }
+    details
 }

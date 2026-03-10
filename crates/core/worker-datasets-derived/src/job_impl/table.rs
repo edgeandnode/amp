@@ -4,6 +4,7 @@ use amp_worker_core::{
     EndBlock, ResolvedEndBlock, WriterProperties,
     block_ranges::{GetLatestBlockError, ResolutionError, resolve_end_block},
     compaction::AmpCompactor,
+    error_detail::ErrorDetailsProvider,
     progress::{SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
     retryable::RetryableErrorExt,
     tasks::{self, TryWaitAllError},
@@ -316,6 +317,15 @@ pub enum MaterializeTableError {
     ParallelTaskFailed(#[source] TryWaitAllError<MaterializeTableSpawnError>),
 }
 
+impl ErrorDetailsProvider for MaterializeTableError {
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        match self {
+            Self::ParallelTaskFailed(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 impl RetryableErrorExt for MaterializeTableError {
     fn is_retryable(&self) -> bool {
         match self {
@@ -384,6 +394,15 @@ pub enum MaterializeTableSpawnError {
     /// This occurs when the inner `materialize_sql_query` function fails.
     #[error("failed to materialize SQL query: {0}")]
     MaterializeSqlQuery(#[source] MaterializeSqlQueryError),
+}
+
+impl ErrorDetailsProvider for MaterializeTableSpawnError {
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        match self {
+            Self::MaterializeSqlQuery(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 impl RetryableErrorExt for MaterializeTableSpawnError {

@@ -102,8 +102,8 @@ use std::sync::Arc;
 
 use amp_data_store::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
-    check::consistency_check, compaction::AmpCompactor, retryable::RetryableErrorExt,
-    tasks::TryWaitAllError,
+    check::consistency_check, compaction::AmpCompactor, error_detail::ErrorDetailsProvider,
+    retryable::RetryableErrorExt, tasks::TryWaitAllError,
 };
 use common::{physical_table::PhysicalTable, retryable::RetryableErrorExt as _};
 use datasets_common::hash_reference::HashReference;
@@ -397,6 +397,16 @@ impl RetryableErrorExt for Error {
 
             // Parallel tasks — delegate to TryWaitAllError classification
             Self::ParallelTasksFailed(err) => err.is_retryable(),
+        }
+    }
+}
+
+impl ErrorDetailsProvider for Error {
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        match self {
+            Self::MaterializeTable { source, .. } => Some(source),
+            Self::ParallelTasksFailed(err) => Some(err),
+            _ => None,
         }
     }
 }

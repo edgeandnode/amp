@@ -4,6 +4,7 @@ use std::{future::Future, sync::Arc};
 
 use amp_worker_core::{
     ProgressReporter,
+    error_detail::ErrorDetailsProvider,
     jobs::job_id::JobId,
     metrics::MetricsRegistry,
     retryable::{JobErrorExt, RetryableErrorExt},
@@ -154,6 +155,15 @@ impl JobErrorExt for JobError {
         match self {
             Self::MaterializeRaw(err) => err.error_code(),
             Self::MaterializeDerived(err) => err.error_code(),
+        }
+    }
+}
+
+impl ErrorDetailsProvider for JobError {
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        match self {
+            Self::MaterializeRaw(err) => Some(err),
+            Self::MaterializeDerived(err) => Some(err),
         }
     }
 }

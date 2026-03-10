@@ -16,6 +16,7 @@ use amp_data_store::DataStore;
 use amp_worker_core::{
     WriterProperties,
     compaction::AmpCompactor,
+    error_detail::ErrorDetailsProvider,
     metrics,
     progress::{ProgressReporter, ProgressUpdate},
     retryable::RetryableErrorExt,
@@ -447,7 +448,9 @@ impl<S: BlockStreamer> MaterializePartition<S> {
             );
             let start_time = Instant::now();
 
-            self.run_range(range.clone()).await?;
+            self.run_range(range.clone())
+                .await
+                .map_err(|err| err.with_block_range(*range.start(), *range.end()))?;
 
             tracing::info!(
                 "finished scan for range [{}-{}] in {} minutes",
@@ -498,19 +501,20 @@ impl<S: BlockStreamer> MaterializePartition<S> {
             self.compactors_by_table.clone(),
             self.metrics.clone(),
         )
-        .map_err(RunRangeError::CreateWriter)?;
+        .map_err(RunRangeError::create_writer)?;
 
         let mut stream = std::pin::pin!(stream);
         let mut prev_block_num = None;
-        while let Some(dataset_rows) = stream.try_next().await.map_err(RunRangeError::ReadStream)? {
+        while let Some(dataset_rows) = stream
+            .try_next()
+            .await
+            .map_err(RunRangeError::read_stream)?
+        {
             let cur_block_num = dataset_rows.block_num();
             if let Some(prev) = prev_block_num
                 && cur_block_num <= prev
             {
-                return Err(RunRangeError::NonIncreasingBlockNum {
-                    previous: prev,
-                    current: cur_block_num,
-                });
+                return Err(RunRangeError::non_increasing_block_num(prev, cur_block_num));
             }
             prev_block_num = Some(cur_block_num);
 
@@ -519,7 +523,7 @@ impl<S: BlockStreamer> MaterializePartition<S> {
         }
 
         // Close the last part file for each table, checking for any errors.
-        writer.close().await.map_err(RunRangeError::Close)?;
+        writer.close().await.map_err(RunRangeError::close)?;
 
         Ok(())
     }
@@ -550,7 +554,7 @@ impl<S: BlockStreamer> MaterializePartition<S> {
             writer
                 .write(table_rows)
                 .await
-                .map_err(RunRangeError::Write)?;
+                .map_err(RunRangeError::write)?;
         }
 
         self.progress_tracker.block_covered(block_num);
@@ -558,11 +562,92 @@ impl<S: BlockStreamer> MaterializePartition<S> {
     }
 }
 
-/// Errors that occur when running a block range materialize operation
+/// Errors that occur when running a block range materialize operation.
 ///
-/// This error type is used by `MaterializePartition::run_range()`.
+/// This is a wrapper struct around [`RunRangeErrorKind`] that optionally carries
+/// the block range context of the failed segment. The block range is attached
+/// via [`with_block_range`](Self::with_block_range) and surfaces as structured
+/// JSON fields through [`ErrorDetailsProvider`].
+#[derive(Debug)]
+pub struct RunRangeError {
+    kind: RunRangeErrorKind,
+    block_range: Option<(BlockNum, BlockNum)>,
+}
+
+impl RunRangeError {
+    /// Attach block range context to this error.
+    fn with_block_range(mut self, start: BlockNum, end: BlockNum) -> Self {
+        self.block_range = Some((start, end));
+        self
+    }
+
+    pub(super) fn create_writer(err: ParquetError) -> Self {
+        Self {
+            kind: RunRangeErrorKind::CreateWriter(err),
+            block_range: None,
+        }
+    }
+
+    pub(super) fn read_stream(err: BlockStreamError) -> Self {
+        Self {
+            kind: RunRangeErrorKind::ReadStream(err),
+            block_range: None,
+        }
+    }
+
+    pub(super) fn non_increasing_block_num(previous: BlockNum, current: BlockNum) -> Self {
+        Self {
+            kind: RunRangeErrorKind::NonIncreasingBlockNum { previous, current },
+            block_range: None,
+        }
+    }
+
+    pub(super) fn write(err: RawDatasetWriterError) -> Self {
+        Self {
+            kind: RunRangeErrorKind::Write(err),
+            block_range: None,
+        }
+    }
+
+    pub(super) fn close(err: RawDatasetWriterCloseError) -> Self {
+        Self {
+            kind: RunRangeErrorKind::Close(err),
+            block_range: None,
+        }
+    }
+}
+
+impl std::fmt::Display for RunRangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
+impl std::error::Error for RunRangeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.kind.source()
+    }
+}
+
+impl RetryableErrorExt for RunRangeError {
+    fn is_retryable(&self) -> bool {
+        self.kind.is_retryable()
+    }
+}
+
+impl ErrorDetailsProvider for RunRangeError {
+    fn error_details(&self) -> serde_json::Map<String, serde_json::Value> {
+        let (start, end) = match self.block_range {
+            Some((s, e)) => (Some(s), Some(e)),
+            None => (None, None),
+        };
+        amp_worker_core::error_detail::block_range_details(start, end)
+    }
+}
+
+/// The specific error variants for [`RunRangeError`].
 #[derive(Debug, thiserror::Error)]
-pub enum RunRangeError {
+enum RunRangeErrorKind {
     /// Failed to create the raw dataset writer
     ///
     /// This occurs when initializing the parquet writer for one or more tables fails.
@@ -625,7 +710,7 @@ pub enum RunRangeError {
     Close(#[source] RawDatasetWriterCloseError),
 }
 
-impl RetryableErrorExt for RunRangeError {
+impl RetryableErrorExt for RunRangeErrorKind {
     fn is_retryable(&self) -> bool {
         match self {
             Self::CreateWriter(_) => true,
@@ -1178,5 +1263,131 @@ mod test {
             completed.is_ok(),
             "freshness tracker loop must exit when all subscriptions close"
         );
+    }
+
+    mod run_range_error {
+        use amp_worker_core::error_detail::ErrorDetailsProvider;
+        use common::parquet::errors::ParquetError;
+
+        use super::super::RunRangeError;
+
+        #[test]
+        fn error_details_with_block_range_returns_start_and_end() {
+            //* Given
+            let err = RunRangeError::create_writer(ParquetError::General("test".into()))
+                .with_block_range(100, 200);
+
+            //* When
+            let details = err.error_details();
+
+            //* Then
+            assert_eq!(details.len(), 2, "should contain exactly two entries");
+            assert_eq!(
+                details["block_range_start"],
+                serde_json::json!(100),
+                "block_range_start should match"
+            );
+            assert_eq!(
+                details["block_range_end"],
+                serde_json::json!(200),
+                "block_range_end should match"
+            );
+        }
+
+        #[test]
+        fn error_details_without_block_range_returns_empty() {
+            //* Given
+            let err = RunRangeError::create_writer(ParquetError::General("test".into()));
+
+            //* When
+            let details = err.error_details();
+
+            //* Then
+            assert!(
+                details.is_empty(),
+                "details should be empty without block range"
+            );
+        }
+
+        #[test]
+        fn display_without_block_range_delegates_to_kind() {
+            //* Given
+            let err = RunRangeError::create_writer(ParquetError::General("test".into()));
+
+            //* When
+            let msg = err.to_string();
+
+            //* Then
+            assert_eq!(
+                msg, "Failed to create raw dataset writer",
+                "should delegate to kind Display"
+            );
+        }
+
+        #[test]
+        fn display_with_block_range_delegates_to_kind() {
+            //* Given
+            let err = RunRangeError::create_writer(ParquetError::General("test".into()))
+                .with_block_range(100, 200);
+
+            //* When
+            let msg = err.to_string();
+
+            //* Then
+            assert_eq!(
+                msg, "Failed to create raw dataset writer",
+                "block range should not affect Display output"
+            );
+        }
+
+        #[test]
+        fn source_with_inner_error_returns_inner() {
+            use std::error::Error;
+
+            //* Given
+            let err = RunRangeError::create_writer(ParquetError::General("inner".into()));
+
+            //* When
+            let source = err.source();
+
+            //* Then
+            let source = source.expect("should have a source error");
+            assert_eq!(
+                source.to_string(),
+                "Parquet error: inner",
+                "source should be the inner error"
+            );
+        }
+
+        #[test]
+        fn is_retryable_with_retryable_kind_returns_true() {
+            use amp_worker_core::retryable::RetryableErrorExt;
+
+            //* Given
+            let err = RunRangeError::create_writer(ParquetError::General("test".into()));
+
+            //* When
+            let retryable = err.is_retryable();
+
+            //* Then
+            assert!(retryable, "CreateWriter errors should be retryable");
+        }
+
+        #[test]
+        fn is_retryable_with_fatal_kind_returns_false() {
+            use amp_worker_core::retryable::RetryableErrorExt;
+
+            //* Given
+            let err = RunRangeError::non_increasing_block_num(10, 5);
+
+            //* When
+            let retryable = err.is_retryable();
+
+            //* Then
+            assert!(
+                !retryable,
+                "NonIncreasingBlockNum errors should not be retryable"
+            );
+        }
     }
 }
