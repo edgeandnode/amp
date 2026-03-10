@@ -148,7 +148,7 @@ pub fn stream(
                                 CarReaderError::RangeRequestUnsupported
                             }
                             // No more CAR files available, end the stream.
-                            Some(CarReaderError::Http(404)) => {
+                            Some(CarReaderError::FileNotFound) => {
                                 return;
                             }
                             Some(e) => {
@@ -201,18 +201,18 @@ pub enum CarReaderError {
     /// accessing the CAR file.
     #[error("IO error: {0}")]
     Io(#[source] std::io::Error),
-    /// HTTP error when connecting to or reading from the CAR file.
-    ///
-    /// This can occur when the CAR file for a given epoch is not found (404) or if
-    /// there are other HTTP errors (e.g., 500) when trying to access the CAR file.
-    #[error("HTTP error with status code: {0}")]
-    Http(u16),
     /// Reqwest error when connecting to or reading from the CAR file.
     ///
     /// This can occur due to network issues, timeouts, or other problems when making
     /// HTTP requests to access the CAR file.
     #[error("Reqwest error: {0}")]
     Reqwest(#[source] reqwest::Error),
+    /// The CAR file for the requested epoch was not found (HTTP 404).
+    ///
+    /// This is a non-recoverable error because it indicates that the expected data
+    /// is not available and retrying will not resolve the issue.
+    #[error("CAR file not found (HTTP 404)")]
+    FileNotFound,
     /// The server does not support HTTP range requests.
     ///
     /// This is a non-recoverable error because the [`CarReader`] relies on range
@@ -603,11 +603,20 @@ impl tokio::io::AsyncRead for CarReader {
                 ReaderState::Connect(fut) => match fut.as_mut().poll(cx) {
                     std::task::Poll::Ready(Ok(resp)) => {
                         let status = resp.status();
-                        if !status.is_success() {
-                            this.schedule_backoff(format!("HTTP error: {status}"));
-                            continue;
+                        // Handle error codes.
+                        match status {
+                            reqwest::StatusCode::NOT_FOUND => {
+                                let e = std::io::Error::other(CarReaderError::FileNotFound);
+                                return std::task::Poll::Ready(Err(e));
+                            }
+                            status if !status.is_success() => {
+                                this.schedule_backoff(format!("HTTP error: {status}"));
+                                continue;
+                            }
+                            _ => {}
                         }
 
+                        // Handle partial content.
                         if this.bytes_read_total > 0
                             && status != reqwest::StatusCode::PARTIAL_CONTENT
                         {

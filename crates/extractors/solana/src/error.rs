@@ -148,13 +148,13 @@ impl From<Of1StreamError> for BlockStreamError {
     fn from(value: Of1StreamError) -> Self {
         match value {
             Of1StreamError::RpcClient(_)
-            | Of1StreamError::FileStream(of1_client::CarReaderError::Http(_))
             | Of1StreamError::FileStream(of1_client::CarReaderError::Reqwest(_)) => {
                 BlockStreamError::Recoverable(value.into())
             }
             // This is intentionally not a catch-all, to force consideration of
             // each error type when mapping to recoverable vs fatal.
             Of1StreamError::FileStream(of1_client::CarReaderError::Io(_))
+            | Of1StreamError::FileStream(of1_client::CarReaderError::FileNotFound)
             | Of1StreamError::FileStream(of1_client::CarReaderError::RangeRequestUnsupported)
             | Of1StreamError::UnexpectedNode { .. }
             | Of1StreamError::MissingNode { .. }
