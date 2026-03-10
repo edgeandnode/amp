@@ -87,6 +87,7 @@ use amp_worker_core::{
     block_ranges::resolve_end_block,
     check::consistency_check,
     compaction::AmpCompactor,
+    error_detail::ErrorDetailsProvider,
     progress::{SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo},
     retryable::RetryableErrorExt,
     tasks::TryWaitAllError,
@@ -567,6 +568,15 @@ impl RetryableErrorExt for Error {
 
             // Cleanup failures — recoverable
             Self::Cleanup(_) => true,
+        }
+    }
+}
+
+impl ErrorDetailsProvider for Error {
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        match self {
+            Self::PartitionTask(err) => Some(err),
+            _ => None,
         }
     }
 }

@@ -5,7 +5,7 @@ use std::future::Future;
 use monitoring::logging;
 use tokio::task::{JoinError, JoinSet};
 
-use crate::retryable::RetryableErrorExt;
+use crate::{error_detail::ErrorDetailsProvider, retryable::RetryableErrorExt};
 
 /// A wrapper around [`JoinSet`] that implements fail-fast semantics.
 ///
@@ -117,6 +117,15 @@ impl<E: RetryableErrorExt> RetryableErrorExt for TryWaitAllError<E> {
         match self {
             Self::Error(err) => err.is_retryable(),
             Self::Panic(_) => false,
+        }
+    }
+}
+
+impl<E: ErrorDetailsProvider> ErrorDetailsProvider for TryWaitAllError<E> {
+    fn detail_source(&self) -> Option<&dyn ErrorDetailsProvider> {
+        match self {
+            Self::Error(err) => Some(err),
+            Self::Panic(_) => None,
         }
     }
 }

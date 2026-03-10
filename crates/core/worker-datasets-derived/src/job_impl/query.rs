@@ -10,6 +10,7 @@ use amp_parquet::{
 use amp_worker_core::{
     WriterProperties,
     compaction::{AmpCompactor, AmpCompactorTaskError},
+    error_detail::ErrorDetailsProvider,
     progress::ProgressUpdate,
     retryable::RetryableErrorExt,
 };
@@ -67,11 +68,12 @@ pub async fn materialize_sql_query(
             keep_alive_interval,
         )
         .await
-        .map_err(MaterializeSqlQueryError::StreamingQuerySpawn)?
+        .map_err(MaterializeSqlQueryError::streaming_query_spawn)?
         .into_stream()
     };
 
     let mut microbatch_start = start;
+    let mut current_end = microbatch_start;
     let mut filename = FileName::new_with_random_suffix(microbatch_start);
     let mut buf_writer = ctx
         .data_store
@@ -86,7 +88,7 @@ pub async fn materialize_sql_query(
         opts.max_row_group_bytes,
         opts.parquet.clone(),
     )
-    .map_err(MaterializeSqlQueryError::CreateParquetFileWriter)?;
+    .map_err(MaterializeSqlQueryError::create_parquet_file_writer)?;
 
     let table_name = physical_table.table_name();
     let location_id = *physical_table.location_id();
@@ -101,17 +103,19 @@ pub async fn materialize_sql_query(
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
-        let message = message.map_err(MaterializeSqlQueryError::StreamingQuery)?;
+        let message = message
+            .map_err(MaterializeSqlQueryError::streaming_query)
+            .map_err(|err| err.with_block_range(microbatch_start, current_end))?;
         match message {
-            QueryMessage::MicrobatchStart {
-                range: _,
-                is_reorg: _,
-            } => (),
+            QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
+                current_end = range.end();
+            }
             QueryMessage::Data(batch) => {
                 writer
                     .write(&batch)
                     .await
-                    .map_err(MaterializeSqlQueryError::WriteBatch)?;
+                    .map_err(MaterializeSqlQueryError::write_batch)
+                    .map_err(|err| err.with_block_range(microbatch_start, current_end))?;
 
                 if let Some(ref metrics) = ctx.metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
@@ -136,7 +140,8 @@ pub async fn materialize_sql_query(
                 } = writer
                     .close(range, vec![], Generation::default())
                     .await
-                    .map_err(MaterializeSqlQueryError::CloseFile)?;
+                    .map_err(MaterializeSqlQueryError::close_file)
+                    .map_err(|err| err.with_block_range(microbatch_start, current_end))?;
 
                 // Track progress stats
                 files_count += 1;
@@ -151,11 +156,13 @@ pub async fn materialize_sql_query(
                     footer,
                 )
                 .await
-                .map_err(MaterializeSqlQueryError::CommitMetadata)?;
+                .map_err(MaterializeSqlQueryError::commit_metadata)
+                .map_err(|err| err.with_block_range(microbatch_start, current_end))?;
 
                 compactor
                     .try_run()
-                    .map_err(MaterializeSqlQueryError::Compactor)?;
+                    .map_err(MaterializeSqlQueryError::compactor)
+                    .map_err(|err| err.with_block_range(microbatch_start, current_end))?;
 
                 // Time-based progress event emission
                 // Emit when interval has elapsed AND we have new progress
@@ -183,6 +190,7 @@ pub async fn materialize_sql_query(
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;
+                current_end = microbatch_start;
                 filename = FileName::new_with_random_suffix(microbatch_start);
                 buf_writer = ctx
                     .data_store
@@ -197,7 +205,7 @@ pub async fn materialize_sql_query(
                     opts.max_row_group_bytes,
                     opts.parquet.clone(),
                 )
-                .map_err(MaterializeSqlQueryError::CreateParquetFileWriter)?;
+                .map_err(MaterializeSqlQueryError::create_parquet_file_writer)?;
 
                 if let Some(ref metrics) = ctx.metrics {
                     metrics.record_file_written(table_name.to_string(), location_id);
@@ -212,11 +220,106 @@ pub async fn materialize_sql_query(
     Ok(())
 }
 
-/// Errors that occur when executing a SQL query materialization operation
+/// Errors that occur when executing a SQL query materialization operation.
 ///
-/// This error type is used by `materialize_sql_query()`.
+/// This is a wrapper struct around [`MaterializeSqlQueryErrorKind`] that optionally
+/// carries the block range context of the failed microbatch. The block range is
+/// attached via [`with_block_range`](Self::with_block_range) and surfaces as
+/// structured JSON fields through [`ErrorDetailsProvider`].
+#[derive(Debug)]
+pub struct MaterializeSqlQueryError {
+    kind: MaterializeSqlQueryErrorKind,
+    block_range: Option<(BlockNum, BlockNum)>,
+}
+
+impl MaterializeSqlQueryError {
+    /// Attach block range context to this error.
+    fn with_block_range(mut self, start: BlockNum, end: BlockNum) -> Self {
+        self.block_range = Some((start, end));
+        self
+    }
+
+    fn streaming_query_spawn(err: common::streaming_query::SpawnError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::StreamingQuerySpawn(err),
+            block_range: None,
+        }
+    }
+
+    fn create_parquet_file_writer(err: ParquetError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::CreateParquetFileWriter(err),
+            block_range: None,
+        }
+    }
+
+    fn write_batch(err: ParquetError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::WriteBatch(err),
+            block_range: None,
+        }
+    }
+
+    fn close_file(err: ParquetFileWriterCloseError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::CloseFile(err),
+            block_range: None,
+        }
+    }
+
+    fn commit_metadata(err: CommitMetadataError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::CommitMetadata(err),
+            block_range: None,
+        }
+    }
+
+    fn compactor(err: AmpCompactorTaskError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::Compactor(err),
+            block_range: None,
+        }
+    }
+
+    fn streaming_query(err: MessageStreamError) -> Self {
+        Self {
+            kind: MaterializeSqlQueryErrorKind::StreamingQuery(err),
+            block_range: None,
+        }
+    }
+}
+
+impl std::fmt::Display for MaterializeSqlQueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
+impl std::error::Error for MaterializeSqlQueryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.kind.source()
+    }
+}
+
+impl RetryableErrorExt for MaterializeSqlQueryError {
+    fn is_retryable(&self) -> bool {
+        self.kind.is_retryable()
+    }
+}
+
+impl ErrorDetailsProvider for MaterializeSqlQueryError {
+    fn error_details(&self) -> serde_json::Map<String, serde_json::Value> {
+        let (start, end) = match self.block_range {
+            Some((s, e)) => (Some(s), Some(e)),
+            None => (None, None),
+        };
+        amp_worker_core::error_detail::block_range_details(start, end)
+    }
+}
+
+/// The specific error variants for [`MaterializeSqlQueryError`].
 #[derive(Debug, thiserror::Error)]
-pub enum MaterializeSqlQueryError {
+enum MaterializeSqlQueryErrorKind {
     /// Failed to spawn the streaming query execution
     ///
     /// This occurs when initializing the streaming query executor fails.
@@ -262,7 +365,7 @@ pub enum MaterializeSqlQueryError {
     StreamingQuery(#[source] MessageStreamError),
 }
 
-impl RetryableErrorExt for MaterializeSqlQueryError {
+impl RetryableErrorExt for MaterializeSqlQueryErrorKind {
     fn is_retryable(&self) -> bool {
         match self {
             // Query spawn failure — fatal (likely invalid SQL or schema mismatch)
@@ -284,5 +387,119 @@ impl RetryableErrorExt for MaterializeSqlQueryError {
                 None => true,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use amp_worker_core::error_detail::ErrorDetailsProvider;
+    use datafusion::parquet::errors::ParquetError;
+
+    use super::MaterializeSqlQueryError;
+
+    #[test]
+    fn error_details_with_block_range_returns_start_and_end() {
+        //* Given
+        let err = MaterializeSqlQueryError::write_batch(ParquetError::General("test".into()))
+            .with_block_range(50, 150);
+
+        //* When
+        let details = err.error_details();
+
+        //* Then
+        assert_eq!(details.len(), 2, "should contain exactly two entries");
+        assert_eq!(
+            details["block_range_start"],
+            serde_json::json!(50),
+            "block_range_start should match"
+        );
+        assert_eq!(
+            details["block_range_end"],
+            serde_json::json!(150),
+            "block_range_end should match"
+        );
+    }
+
+    #[test]
+    fn error_details_without_block_range_returns_empty() {
+        //* Given
+        let err = MaterializeSqlQueryError::write_batch(ParquetError::General("test".into()));
+
+        //* When
+        let details = err.error_details();
+
+        //* Then
+        assert!(
+            details.is_empty(),
+            "details should be empty without block range"
+        );
+    }
+
+    #[test]
+    fn display_without_block_range_delegates_to_kind() {
+        //* Given
+        let err = MaterializeSqlQueryError::create_parquet_file_writer(ParquetError::General(
+            "test".into(),
+        ));
+
+        //* When
+        let msg = err.to_string();
+
+        //* Then
+        assert_eq!(
+            msg, "failed to create parquet file writer: Parquet error: test",
+            "should delegate to kind Display"
+        );
+    }
+
+    #[test]
+    fn display_with_block_range_delegates_to_kind() {
+        //* Given
+        let err = MaterializeSqlQueryError::create_parquet_file_writer(ParquetError::General(
+            "test".into(),
+        ))
+        .with_block_range(10, 20);
+
+        //* When
+        let msg = err.to_string();
+
+        //* Then
+        assert_eq!(
+            msg, "failed to create parquet file writer: Parquet error: test",
+            "block range should not affect Display output"
+        );
+    }
+
+    #[test]
+    fn source_with_inner_error_returns_inner() {
+        use std::error::Error;
+
+        //* Given
+        let err = MaterializeSqlQueryError::write_batch(ParquetError::General("inner".into()));
+
+        //* When
+        let source = err.source();
+
+        //* Then
+        let source = source.expect("should have a source error");
+        assert_eq!(
+            source.to_string(),
+            "Parquet error: inner",
+            "source should be the inner error"
+        );
+    }
+
+    #[test]
+    fn is_retryable_with_retryable_kind_returns_true() {
+        use amp_worker_core::retryable::RetryableErrorExt;
+
+        //* Given
+        let err = MaterializeSqlQueryError::write_batch(ParquetError::General("test".into()));
+
+        //* When
+        let retryable = err.is_retryable();
+
+        //* Then
+        assert!(retryable, "WriteBatch errors should be retryable");
     }
 }

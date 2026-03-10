@@ -20,7 +20,7 @@ mod job_queue;
 mod job_set;
 
 use amp_worker_core::{
-    error_detail::{ErrorContext, ErrorDetailPayload},
+    error_detail::{ErrorContext, ErrorDetailPayload, collect_error_details},
     jobs::{job_id::JobId, status::JobStatus},
     node_id::NodeId,
     retryable::JobErrorExt as _,
@@ -351,10 +351,12 @@ impl Worker {
                 );
 
                 let (error_message, stack_trace) = extract_error_info(&*err);
+                let error_details = collect_error_details(&*err);
                 let detail = build_error_detail(
                     err.error_code(),
                     &error_message,
                     stack_trace,
+                    error_details,
                     &self.queue,
                     job_id,
                 )
@@ -378,10 +380,12 @@ impl Worker {
                 );
 
                 let (error_message, stack_trace) = extract_error_info(&*err);
+                let error_details = collect_error_details(&*err);
                 let detail = build_error_detail(
                     err.error_code(),
                     &error_message,
                     stack_trace,
+                    error_details,
                     &self.queue,
                     job_id,
                 )
@@ -418,9 +422,15 @@ impl Worker {
                 );
 
                 let (error_message, stack_trace) = extract_error_info(&err);
-                let detail =
-                    build_error_detail("PANIC", &error_message, stack_trace, &self.queue, job_id)
-                        .await;
+                let detail = build_error_detail(
+                    "PANIC",
+                    &error_message,
+                    stack_trace,
+                    serde_json::Map::new(),
+                    &self.queue,
+                    job_id,
+                )
+                .await;
 
                 // Mark the job as FATAL (retry on failure)
                 self.queue
@@ -454,6 +464,7 @@ async fn build_error_detail(
     error_code: &str,
     error_message: &str,
     stack_trace: Vec<String>,
+    error_details: serde_json::Map<String, serde_json::Value>,
     queue: &job_queue::JobQueue,
     job_id: amp_worker_core::jobs::job_id::JobId,
 ) -> metadata_db::job_events::EventDetail<'static> {
@@ -496,7 +507,8 @@ async fn build_error_detail(
     let has_context = !stack_trace.is_empty()
         || dataset.is_some()
         || manifest_hash.is_some()
-        || attempt_index.is_some();
+        || attempt_index.is_some()
+        || !error_details.is_empty();
 
     let payload = ErrorDetailPayload {
         error_code: error_code.to_owned(),
@@ -507,6 +519,7 @@ async fn build_error_detail(
             extra: JobErrorContext {
                 dataset,
                 manifest_hash,
+                details: error_details,
             },
         }),
     };
@@ -523,6 +536,10 @@ struct JobErrorContext {
     /// Manifest content hash of the dataset being processed.
     #[serde(skip_serializing_if = "Option::is_none")]
     manifest_hash: Option<String>,
+    /// Additional structured error details collected from the error chain.
+    #[serde(flatten)]
+    #[serde(skip_serializing_if = "serde_json::Map::is_empty")]
+    details: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Serialize an [`ErrorDetailPayload`] into an [`EventDetail`] for database storage.
@@ -827,6 +844,7 @@ mod tests {
                 extra: JobErrorContext {
                     dataset: Some("ns/dataset".into()),
                     manifest_hash: Some("Qm123".into()),
+                    details: serde_json::Map::new(),
                 },
             }),
         };
