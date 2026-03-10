@@ -48,11 +48,11 @@ type TableReferencesMap = BTreeMap<
 /// graph, and topologically sorts it.
 ///
 /// ## Parameters
-/// - `table_refs`: Iterator of `(table_name, table_references)` pairs
+/// - `table_refs`: Map of table names to their parsed SQL table references
 /// - `known_tables`: Set of all table names in the dataset (used to validate
 ///   that `self.` targets exist)
-pub fn resolve_inter_table_order<'a>(
-    table_refs: impl IntoIterator<Item = (&'a TableName, &'a [TableReference<DepAliasOrSelfRef>])>,
+pub fn resolve_inter_table_order(
+    table_refs: &BTreeMap<TableName, Vec<TableReference<DepAliasOrSelfRef>>>,
     known_tables: &BTreeSet<TableName>,
 ) -> Result<Vec<TableName>, InterTableDepError> {
     let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
@@ -444,13 +444,12 @@ pub async fn validate_derived_manifest(
     // Step 2b: Extract inter-table dependencies and determine processing order.
     // `self.`-qualified table references that match sibling table names are inter-table deps.
     let known_tables: BTreeSet<TableName> = manifest.tables.keys().cloned().collect();
-    let table_order = resolve_inter_table_order(
-        references
-            .iter()
-            .map(|(name, (refs, _))| (name, refs.as_slice())),
-        &known_tables,
-    )
-    .map_err(ManifestValidationError::InterTableDep)?;
+    let table_refs_only: BTreeMap<TableName, Vec<TableReference<DepAliasOrSelfRef>>> = references
+        .iter()
+        .map(|(name, (refs, _))| (name.clone(), refs.clone()))
+        .collect();
+    let table_order = resolve_inter_table_order(&table_refs_only, &known_tables)
+        .map_err(ManifestValidationError::InterTableDep)?;
 
     // Step 3: Create planning context to validate all table and function references.
     // Inter-table references use `self.<table_name>` syntax, which resolves through the

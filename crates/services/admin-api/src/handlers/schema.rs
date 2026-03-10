@@ -256,13 +256,8 @@ pub async fn handler(
     }
 
     let known_tables: BTreeSet<TableName> = statements.keys().cloned().collect();
-    let table_order = resolve_inter_table_order(
-        parsed_refs
-            .iter()
-            .map(|(name, refs)| (name, refs.as_slice())),
-        &known_tables,
-    )
-    .map_err(Error::InterTableDep)?;
+    let table_order =
+        resolve_inter_table_order(&parsed_refs, &known_tables).map_err(Error::InterTableDep)?;
 
     // Build dep_aliases for AmpCatalogProvider before dependencies is consumed
     let dep_aliases: BTreeMap<String, HashReference> = dependencies
