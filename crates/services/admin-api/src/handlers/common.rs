@@ -1,6 +1,9 @@
 //! Common utilities for HTTP handlers
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use amp_data_store::{DataStore, PhyTableRevision};
 use amp_datasets_registry::error::ResolveRevisionError;
@@ -36,6 +39,91 @@ type TableReferencesMap = BTreeMap<
         Vec<FunctionReference<DepAliasOrSelfRef>>,
     ),
 >;
+
+/// Extracts inter-table dependencies from parsed table references and returns
+/// a topologically sorted processing order.
+///
+/// For each table, inspects `self.`-qualified table references, validates that
+/// they don't self-reference or target nonexistent siblings, builds a dependency
+/// graph, and topologically sorts it.
+///
+/// ## Parameters
+/// - `table_refs`: Iterator of `(table_name, table_references)` pairs
+/// - `known_tables`: Set of all table names in the dataset (used to validate
+///   that `self.` targets exist)
+pub fn resolve_inter_table_order<'a>(
+    table_refs: impl IntoIterator<Item = (&'a TableName, &'a [TableReference<DepAliasOrSelfRef>])>,
+    known_tables: &BTreeSet<TableName>,
+) -> Result<Vec<TableName>, InterTableDepError> {
+    let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
+    for (table_name, refs) in table_refs {
+        let mut table_deps = Vec::new();
+        for table_ref in refs {
+            if let TableReference::Partial { schema, table } = table_ref
+                && schema.as_ref().is_self()
+            {
+                if table.as_ref() == table_name {
+                    return Err(InterTableDepError::SelfReferencingTable {
+                        table_name: table_name.clone(),
+                    });
+                }
+                if known_tables.contains(table.as_ref()) {
+                    table_deps.push(table.as_ref().clone());
+                } else {
+                    return Err(InterTableDepError::SelfRefTableNotFound {
+                        source_table: table_name.clone(),
+                        referenced_table: table.as_ref().clone(),
+                    });
+                }
+            }
+        }
+        deps.insert(table_name.clone(), table_deps);
+    }
+    sorting::topological_sort(deps).map_err(InterTableDepError::CyclicDependency)
+}
+
+/// Errors from extracting and validating inter-table dependencies.
+#[derive(Debug, thiserror::Error)]
+pub enum InterTableDepError {
+    /// A table references itself via `self.<table_name>`
+    ///
+    /// This occurs when a table's SQL query contains `self.<own_name>`, which would
+    /// create a trivial circular dependency. Tables cannot reference themselves.
+    #[error("Table '{table_name}' references itself via self.{table_name}")]
+    SelfReferencingTable {
+        /// The table that references itself
+        table_name: TableName,
+    },
+
+    /// A `self.`-qualified table reference targets a table that does not exist in the dataset.
+    #[error(
+        "Table '{source_table}' references non-existent sibling table 'self.{referenced_table}'"
+    )]
+    SelfRefTableNotFound {
+        /// The table whose SQL contains the invalid self-ref
+        source_table: TableName,
+        /// The referenced table name that does not exist
+        referenced_table: TableName,
+    },
+
+    /// Cyclic dependency detected among tables within the dataset
+    ///
+    /// This occurs when tables reference each other in a cycle (e.g., table_a references
+    /// table_b which references table_a). Inter-table dependencies must form a DAG.
+    #[error("Cyclic dependency detected among inter-table references: {0}")]
+    CyclicDependency(#[source] CyclicDepError<TableName>),
+}
+
+impl InterTableDepError {
+    /// Returns the machine-readable error code for this error.
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            Self::SelfReferencingTable { .. } => "SELF_REFERENCING_TABLE",
+            Self::SelfRefTableNotFound { .. } => "SELF_REF_TABLE_NOT_FOUND",
+            Self::CyclicDependency(_) => "CYCLIC_DEPENDENCY",
+        }
+    }
+}
 
 /// A string wrapper that ensures the value is not empty or whitespace-only
 ///
@@ -355,33 +443,14 @@ pub async fn validate_derived_manifest(
 
     // Step 2b: Extract inter-table dependencies and determine processing order.
     // `self.`-qualified table references that match sibling table names are inter-table deps.
-    let table_order = {
-        let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
-        for (table_name, (table_refs, _func_refs)) in &references {
-            let mut table_deps = Vec::new();
-            for table_ref in table_refs {
-                if let TableReference::Partial { schema, table } = table_ref
-                    && schema.as_ref().is_self()
-                {
-                    if table.as_ref() == table_name {
-                        return Err(ManifestValidationError::SelfReferencingTable {
-                            table_name: table_name.clone(),
-                        });
-                    }
-                    if manifest.tables.contains_key(table.as_ref()) {
-                        table_deps.push(table.as_ref().clone());
-                    } else {
-                        return Err(ManifestValidationError::SelfRefTableNotFound {
-                            source_table: table_name.clone(),
-                            referenced_table: table.as_ref().clone(),
-                        });
-                    }
-                }
-            }
-            deps.insert(table_name.clone(), table_deps);
-        }
-        sorting::topological_sort(deps).map_err(ManifestValidationError::CyclicDependency)?
-    };
+    let known_tables: BTreeSet<TableName> = manifest.tables.keys().cloned().collect();
+    let table_order = resolve_inter_table_order(
+        references
+            .iter()
+            .map(|(name, (refs, _))| (name, refs.as_slice())),
+        &known_tables,
+    )
+    .map_err(ManifestValidationError::InterTableDep)?;
 
     // Step 3: Create planning context to validate all table and function references.
     // Inter-table references use `self.<table_name>` syntax, which resolves through the
@@ -565,33 +634,12 @@ pub enum ManifestValidationError {
         alias: String,
     },
 
-    /// A table references itself via `self.<table_name>`
+    /// Inter-table dependency validation failed
     ///
-    /// This occurs when a table's SQL query contains `self.<own_name>`, which would
-    /// create a trivial circular dependency. Tables cannot reference themselves.
-    #[error("Table '{table_name}' references itself via self.{table_name}")]
-    SelfReferencingTable {
-        /// The table that references itself
-        table_name: TableName,
-    },
-
-    /// A `self.`-qualified table reference targets a table that does not exist in the dataset.
-    #[error(
-        "Table '{source_table}' references non-existent sibling table 'self.{referenced_table}'"
-    )]
-    SelfRefTableNotFound {
-        /// The table whose SQL contains the invalid self-ref
-        source_table: TableName,
-        /// The referenced table name that does not exist
-        referenced_table: TableName,
-    },
-
-    /// Cyclic dependency detected among tables within the dataset
-    ///
-    /// This occurs when tables reference each other in a cycle (e.g., table_a references
-    /// table_b which references table_a). Inter-table dependencies must form a DAG.
-    #[error("Cyclic dependency detected among inter-table references: {0}")]
-    CyclicDependency(#[source] CyclicDepError<TableName>),
+    /// This occurs when validating `self.`-qualified table references within the
+    /// dataset: self-referencing tables, nonexistent sibling targets, or cyclic deps.
+    #[error("Inter-table dependency error")]
+    InterTableDep(#[source] InterTableDepError),
 
     /// Non-incremental SQL operation in table query
     ///

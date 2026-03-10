@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use axum::{
     Json,
@@ -12,7 +15,7 @@ use common::{
     incrementalizer::NonIncrementalQueryError,
     plan_visitors::prepend_special_block_num_field,
     self_schema_provider::SelfSchemaProvider,
-    sql::{self, ResolveTableReferencesError, TableReference},
+    sql::{self, ResolveTableReferencesError},
     sql_str::SqlStr,
 };
 use datafusion::{arrow, sql::parser::Statement};
@@ -24,14 +27,16 @@ use datasets_derived::{
     func_name::FuncName,
     function::Function,
     manifest::TableSchema,
-    sorting::{self, CyclicDepError},
 };
 use js_runtime::isolate_pool::IsolatePool;
 use tracing::instrument;
 
 use crate::{
     ctx::Ctx,
-    handlers::error::{ErrorResponse, IntoErrorResponse},
+    handlers::{
+        common::{InterTableDepError, resolve_inter_table_order},
+        error::{ErrorResponse, IntoErrorResponse},
+    },
 };
 
 /// Handler for the `POST /schema` endpoint
@@ -90,9 +95,9 @@ use crate::{
 ///
 /// # Panics
 ///
-/// Panics if `topological_sort` returns a table name that was not in the original
-/// statements map. This is structurally impossible because the sort only returns
-/// keys from its input.
+/// Panics if `resolve_inter_table_order` returns a table name that was not in the
+/// original statements map. This is structurally impossible because the sort only
+/// returns keys from its input.
 #[instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
@@ -216,67 +221,48 @@ pub async fn handler(
         statements
     };
 
-    // Extract inter-table dependencies and determine processing order.
-    // `self.`-qualified table references that match sibling table names are inter-table deps.
-    let table_order = {
-        let mut deps: BTreeMap<TableName, Vec<TableName>> = BTreeMap::new();
-        for (table_name, stmt) in &statements {
-            let table_refs = sql::resolve_table_references::<DepAliasOrSelfRef>(stmt).map_err(
-                |err| match &err {
-                    ResolveTableReferencesError::InvalidTableName { .. } => {
-                        Error::InvalidTableName {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                    }
-                    ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
-                        Error::CatalogQualifiedTableInSql {
-                            table_name: table_name.clone(),
-                            source: err,
-                        }
-                    }
-                    _ => Error::TableReferenceResolution {
+    // Extract table references per table, validate non-empty, then determine
+    // inter-table processing order via the shared helper.
+    let mut parsed_refs: BTreeMap<TableName, Vec<common::sql::TableReference<DepAliasOrSelfRef>>> =
+        BTreeMap::new();
+    for (table_name, stmt) in &statements {
+        let table_refs =
+            sql::resolve_table_references::<DepAliasOrSelfRef>(stmt).map_err(|err| match &err {
+                ResolveTableReferencesError::InvalidTableName { .. } => Error::InvalidTableName {
+                    table_name: table_name.clone(),
+                    source: err,
+                },
+                ResolveTableReferencesError::CatalogQualifiedTable { .. } => {
+                    Error::CatalogQualifiedTableInSql {
                         table_name: table_name.clone(),
                         source: err,
-                    },
-                },
-            )?;
-
-            // Reject tables whose SQL references no source tables (e.g., `SELECT 1`).
-            // Derived tables must reference at least one external dependency or sibling table.
-            if table_refs.is_empty() {
-                return Err(Error::NoTableReferences {
+                    }
+                }
+                _ => Error::TableReferenceResolution {
                     table_name: table_name.clone(),
-                }
-                .into());
-            }
+                    source: err,
+                },
+            })?;
 
-            let mut table_deps = Vec::new();
-            for table_ref in table_refs {
-                if let TableReference::Partial { schema, table } = &table_ref
-                    && schema.as_ref().is_self()
-                {
-                    if table.as_ref() == table_name {
-                        return Err(Error::SelfReferencingTable {
-                            table_name: table_name.clone(),
-                        }
-                        .into());
-                    }
-                    if statements.contains_key(table.as_ref()) {
-                        table_deps.push(table.as_ref().clone());
-                    } else {
-                        return Err(Error::SelfRefTableNotFound {
-                            source_table: table_name.clone(),
-                            referenced_table: table.as_ref().clone(),
-                        }
-                        .into());
-                    }
-                }
+        // Reject tables whose SQL references no source tables (e.g., `SELECT 1`).
+        if table_refs.is_empty() {
+            return Err(Error::NoTableReferences {
+                table_name: table_name.clone(),
             }
-            deps.insert(table_name.clone(), table_deps);
+            .into());
         }
-        sorting::topological_sort(deps).map_err(Error::CyclicDependency)?
-    };
+
+        parsed_refs.insert(table_name.clone(), table_refs);
+    }
+
+    let known_tables: BTreeSet<TableName> = statements.keys().cloned().collect();
+    let table_order = resolve_inter_table_order(
+        parsed_refs
+            .iter()
+            .map(|(name, refs)| (name, refs.as_slice())),
+        &known_tables,
+    )
+    .map_err(Error::InterTableDep)?;
 
     // Build dep_aliases for AmpCatalogProvider before dependencies is consumed
     let dep_aliases: BTreeMap<String, HashReference> = dependencies
@@ -458,33 +444,12 @@ enum Error {
         source: NonIncrementalQueryError,
     },
 
-    /// A table references itself via `self.<table_name>`
+    /// Inter-table dependency validation failed
     ///
-    /// This occurs when a table's SQL query contains `self.<own_name>`, which would
-    /// create a trivial circular dependency. Tables cannot reference themselves.
-    #[error("Table '{table_name}' references itself via self.{table_name}")]
-    SelfReferencingTable {
-        /// The table that references itself
-        table_name: TableName,
-    },
-
-    /// A `self.`-qualified table reference targets a table that does not exist in the dataset.
-    #[error(
-        "Table '{source_table}' references non-existent sibling table 'self.{referenced_table}'"
-    )]
-    SelfRefTableNotFound {
-        /// The table whose SQL contains the invalid self-ref
-        source_table: TableName,
-        /// The referenced table name that does not exist
-        referenced_table: TableName,
-    },
-
-    /// Cyclic dependency detected among tables within the dataset
-    ///
-    /// This occurs when tables reference each other in a cycle (e.g., table_a references
-    /// table_b which references table_a). Inter-table dependencies must form a DAG.
-    #[error("Cyclic dependency detected among inter-table references: {0}")]
-    CyclicDependency(#[source] CyclicDepError<TableName>),
+    /// This occurs when validating `self.`-qualified table references within the
+    /// dataset: self-referencing tables, nonexistent sibling targets, or cyclic deps.
+    #[error("Inter-table dependency error")]
+    InterTableDep(#[source] InterTableDepError),
 
     /// Catalog-qualified tables (e.g., `catalog.schema.table`) are not supported.
     ///
@@ -620,9 +585,7 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => "EMPTY_TABLES_AND_FUNCTIONS",
             Error::InvalidTableSql { .. } => "INVALID_TABLE_SQL",
             Error::NonIncrementalQuery { .. } => "NON_INCREMENTAL_QUERY",
-            Error::SelfReferencingTable { .. } => "SELF_REFERENCING_TABLE",
-            Error::SelfRefTableNotFound { .. } => "SELF_REF_TABLE_NOT_FOUND",
-            Error::CyclicDependency(_) => "CYCLIC_DEPENDENCY",
+            Error::InterTableDep(inner) => inner.error_code(),
             Error::CatalogQualifiedTableInSql { .. } => "CATALOG_QUALIFIED_TABLE",
             Error::InvalidTableName { .. } => "INVALID_TABLE_NAME",
             Error::TableReferenceResolution { .. } => "TABLE_REFERENCE_RESOLUTION",
@@ -644,9 +607,7 @@ impl IntoErrorResponse for Error {
             Error::EmptyTablesAndFunctions => StatusCode::BAD_REQUEST,
             Error::InvalidTableSql { .. } => StatusCode::BAD_REQUEST,
             Error::NonIncrementalQuery { .. } => StatusCode::BAD_REQUEST,
-            Error::SelfReferencingTable { .. } => StatusCode::BAD_REQUEST,
-            Error::SelfRefTableNotFound { .. } => StatusCode::BAD_REQUEST,
-            Error::CyclicDependency(_) => StatusCode::BAD_REQUEST,
+            Error::InterTableDep(_) => StatusCode::BAD_REQUEST,
             Error::CatalogQualifiedTableInSql { .. } => StatusCode::BAD_REQUEST,
             Error::InvalidTableName { .. } => StatusCode::BAD_REQUEST,
             Error::TableReferenceResolution { .. } => StatusCode::BAD_REQUEST,
