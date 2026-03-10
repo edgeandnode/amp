@@ -5,6 +5,7 @@ use amp_data_store::DataStore;
 use backon::{ExponentialBuilder, Retryable};
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use futures::TryStreamExt as _;
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{
     Error as MetadataDbError, MetadataDb, NotificationMultiplexerHandle, notification_multiplexer,
     workers::WorkerNotifListener as NotifListener,
@@ -72,9 +73,10 @@ pub async fn new(
     data_store: DataStore,
     datasets_cache: DatasetsCache,
     ethcall_udfs_cache: EthCallUdfsCache,
+    isolate_pool: IsolatePool,
     meter: Option<Meter>,
-    node_id: NodeId,
     event_emitter: Option<Arc<dyn EventEmitter>>,
+    node_id: NodeId,
 ) -> Result<impl Future<Output = Result<(), RuntimeError>>, InitError> {
     let build_info = build_info.into();
 
@@ -134,6 +136,7 @@ pub async fn new(
             notification_multiplexer,
             meter,
             event_emitter,
+            isolate_pool,
         },
     );
 
@@ -246,9 +249,10 @@ pub async fn new(
 pub(crate) struct WorkerJobCtx {
     pub config: Config,
     pub metadata_db: MetadataDb,
+    pub data_store: DataStore,
     pub datasets_cache: DatasetsCache,
     pub ethcall_udfs_cache: EthCallUdfsCache,
-    pub data_store: DataStore,
+    pub isolate_pool: IsolatePool,
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     pub meter: Option<Meter>,
     pub event_emitter: Arc<dyn EventEmitter>,

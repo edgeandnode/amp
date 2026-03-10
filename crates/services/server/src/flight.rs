@@ -60,6 +60,7 @@ use futures::{
     Stream, StreamExt as _, TryStreamExt,
     stream::{self, BoxStream},
 };
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle, notification_multiplexer};
 use monitoring::telemetry::metrics::Meter;
 use prost::Message as _;
@@ -92,6 +93,7 @@ impl Service {
         datasets_cache: DatasetsCache,
         ethcall_udfs_cache: EthCallUdfsCache,
         meter: Option<Meter>,
+        isolate_pool: IsolatePool,
     ) -> Result<Self, InitError> {
         let env = common::exec_env::create(
             config.max_mem_mb,
@@ -100,6 +102,7 @@ impl Service {
             data_store,
             datasets_cache,
             ethcall_udfs_cache,
+            isolate_pool,
         )
         .map_err(InitError::ExecEnv)?;
         let notification_multiplexer =

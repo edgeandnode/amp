@@ -219,6 +219,7 @@ pub async fn execute(
         ctx.data_store.clone(),
         ctx.datasets_cache.clone(),
         ctx.ethcall_udfs_cache.clone(),
+        ctx.isolate_pool.clone(),
     )
     .map_err(Error::CreateQueryEnv)?;
     for (table, compactor) in &tables {

@@ -6,6 +6,7 @@ use amp_datasets_registry::{DatasetsRegistry, manifests::DatasetManifestsStore};
 use amp_object_store::ObjectStoreCreationError;
 use amp_providers_registry::{ProviderConfigsStore, ProvidersRegistry};
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{build_info, server_cmd, worker_cmd};
 
@@ -118,6 +119,8 @@ pub async fn run(
         (datasets_registry, providers_registry)
     };
 
+    let isolate_pool = IsolatePool::new();
+
     let datasets_cache = DatasetsCache::new(datasets_registry.clone());
     let ethcall_udfs_cache = EthCallUdfsCache::new(providers_registry.clone());
 
@@ -163,6 +166,7 @@ pub async fn run(
             data_store.clone(),
             datasets_cache.clone(),
             ethcall_udfs_cache.clone(),
+            isolate_pool.clone(),
             meter.clone(),
             flight_at,
             jsonl_at,
@@ -191,9 +195,10 @@ pub async fn run(
         data_store,
         datasets_cache,
         ethcall_udfs_cache,
+        isolate_pool,
         meter,
-        worker_id,
         None, // Use config-based event emitter
+        worker_id,
     )
     .await
     .map_err(Error::WorkerInit)?;

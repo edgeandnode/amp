@@ -9,6 +9,7 @@ use std::{net::SocketAddr, sync::Arc};
 use amp_data_store::DataStore;
 use anyhow::Result;
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use server::{
@@ -46,6 +47,7 @@ impl DaemonServer {
         data_store: DataStore,
         datasets_cache: DatasetsCache,
         ethcall_udfs_cache: EthCallUdfsCache,
+        isolate_pool: IsolatePool,
         meter: Option<Meter>,
         enable_flight: bool,
         enable_jsonl: bool,
@@ -68,6 +70,7 @@ impl DaemonServer {
             data_store.clone(),
             datasets_cache.clone(),
             ethcall_udfs_cache,
+            isolate_pool,
             meter,
             flight_at,
             jsonl_at,

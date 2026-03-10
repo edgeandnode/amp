@@ -10,6 +10,7 @@ use amp_data_store::DataStore;
 use amp_worker_core::node_id::NodeId;
 use anyhow::Result;
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -45,6 +46,7 @@ impl DaemonWorker {
         data_store: DataStore,
         datasets_cache: DatasetsCache,
         ethcall_udfs_cache: EthCallUdfsCache,
+        isolate_pool: IsolatePool,
         meter: Option<Meter>,
         node_id: NodeId,
     ) -> Result<Self> {
@@ -55,6 +57,7 @@ impl DaemonWorker {
             data_store,
             datasets_cache,
             ethcall_udfs_cache,
+            isolate_pool,
             meter,
             node_id,
             None,
@@ -79,6 +82,7 @@ impl DaemonWorker {
         data_store: DataStore,
         datasets_cache: DatasetsCache,
         ethcall_udfs_cache: EthCallUdfsCache,
+        isolate_pool: IsolatePool,
         meter: Option<Meter>,
         node_id: NodeId,
         event_emitter: Option<Arc<dyn EventEmitter>>,
@@ -91,9 +95,10 @@ impl DaemonWorker {
             data_store.clone(),
             datasets_cache.clone(),
             ethcall_udfs_cache,
+            isolate_pool,
             meter,
-            node_id.clone(),
             event_emitter,
+            node_id.clone(),
         )
         .await?;
         let worker_task = tokio::spawn(worker_fut);

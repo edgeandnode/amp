@@ -15,6 +15,7 @@ use axum::{
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry::metrics::Meter};
 use thiserror::Error;
@@ -34,6 +35,7 @@ pub async fn new(
     data_store: DataStore,
     datasets_cache: DatasetsCache,
     ethcall_udfs_cache: EthCallUdfsCache,
+    isolate_pool: IsolatePool,
     meter: Option<Meter>,
     flight_at: impl Into<Option<SocketAddr>>,
     jsonl_at: impl Into<Option<SocketAddr>>,
@@ -46,6 +48,7 @@ pub async fn new(
         datasets_cache,
         ethcall_udfs_cache,
         meter,
+        isolate_pool,
     )
     .await?;
 

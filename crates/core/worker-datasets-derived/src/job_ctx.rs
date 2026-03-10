@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use amp_data_store::DataStore;
 use amp_worker_core::{ParquetConfig, metrics::MetricsRegistry, progress::ProgressReporter};
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
 
 /// Job context for derived dataset materialization.
@@ -22,6 +23,8 @@ pub struct Context {
     pub ethcall_udfs_cache: EthCallUdfsCache,
     /// Object store abstraction for reading/writing Parquet files.
     pub data_store: DataStore,
+    /// Pool of reusable V8 isolates for JavaScript UDF execution.
+    pub isolate_pool: IsolatePool,
     /// Shared notification multiplexer for streaming queries.
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
     /// Optional job-specific metrics registry.

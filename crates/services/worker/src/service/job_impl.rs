@@ -110,6 +110,7 @@ pub(super) fn new(
                     datasets_cache: job_ctx.datasets_cache.clone(),
                     ethcall_udfs_cache: job_ctx.ethcall_udfs_cache.clone(),
                     data_store: job_ctx.data_store.clone(),
+                    isolate_pool: job_ctx.isolate_pool.clone(),
                     notification_multiplexer: job_ctx.notification_multiplexer.clone(),
                     metrics,
                     progress_reporter,

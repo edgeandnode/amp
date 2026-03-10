@@ -36,6 +36,7 @@ use amp_worker_core::node_id::NodeId;
 use anyhow::{Result, anyhow};
 use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
 use datasets_common::reference::Reference;
+use js_runtime::isolate_pool::IsolatePool;
 use worker::events::EventEmitter;
 
 use super::fixtures::{
@@ -455,6 +456,8 @@ impl TestCtxBuilder {
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
 
+        let isolate_pool = IsolatePool::new();
+
         // Start query server
         let server = DaemonServer::new(
             config.clone(),
@@ -462,6 +465,7 @@ impl TestCtxBuilder {
             data_store.clone(),
             datasets_cache.clone(),
             ethcall_udfs_cache.clone(),
+            isolate_pool.clone(),
             self.meter,
             true, // enable_flight
             true, // enable_jsonl
@@ -590,6 +594,7 @@ impl TestCtxBuilder {
             data_store,
             datasets_cache,
             ethcall_udfs_cache,
+            isolate_pool,
             worker_meter,
             node_id,
             self.event_emitter.clone(),

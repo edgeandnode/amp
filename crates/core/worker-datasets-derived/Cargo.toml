@@ -11,6 +11,7 @@ common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 datasets-derived = { path = "../datasets-derived" }
+js-runtime = { path = "../js-runtime" }
 amp-worker-core = { path = "../worker-core" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
