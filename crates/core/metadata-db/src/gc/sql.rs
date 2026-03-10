@@ -26,6 +26,13 @@ pub async fn upsert<'c, E>(
 where
     E: Executor<'c, Database = Postgres>,
 {
+    // Ensure duration is at least 1 second to satisfy the constraint: expiration > now()
+    let duration = if duration.is_zero() {
+        Duration::from_secs(1)
+    } else {
+        duration
+    };
+
     let interval = PgInterval {
         microseconds: (duration.as_micros() as u64) as i64,
         ..Default::default()
