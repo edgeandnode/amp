@@ -134,7 +134,7 @@ pub enum Error {
     /// This occurs when:
     /// - The namespace, name, or version in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Failed to resolve the "latest" revision
     ///
@@ -142,7 +142,7 @@ pub enum Error {
     /// - Failed to resolve which manifest the "latest" tag points to
     /// - Database connection issues
     /// - Internal database errors during resolution
-    #[error("Failed to resolve latest revision: {0}")]
+    #[error("Failed to resolve latest revision")]
     ResolveLatestRevision(#[source] ResolveRevisionError),
     /// Failed to resolve the version revision
     ///
@@ -150,7 +150,7 @@ pub enum Error {
     /// - Failed to resolve which manifest the requested version points to
     /// - Database connection issues
     /// - Internal database errors during resolution
-    #[error("Failed to resolve version revision: {0}")]
+    #[error("Failed to resolve version revision")]
     ResolveVersionRevision(#[source] ResolveRevisionError),
     /// Cannot delete the version currently tagged as "latest"
     ///
@@ -165,7 +165,7 @@ pub enum Error {
     /// - Failed to delete version tag from the dataset store
     /// - Database connection issues
     /// - Internal database errors during deletion
-    #[error("Failed to delete version tag: {0}")]
+    #[error("Failed to delete version tag")]
     DeleteVersionTag(#[source] DeleteVersionTagError),
 }
 

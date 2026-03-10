@@ -258,7 +258,7 @@ pub enum Error {
     /// - The ID cannot be parsed as a valid node identifier
     /// - The path parameter is missing or malformed
     /// - The ID format does not match the expected NodeId type
-    #[error("invalid worker node ID: {0}")]
+    #[error("invalid worker node ID")]
     InvalidId(#[source] PathRejection),
 
     /// The requested worker was not found
@@ -276,7 +276,7 @@ pub enum Error {
     /// - Database connection fails or is lost during the query
     /// - Query execution encounters an internal database error
     /// - Connection pool is exhausted or unavailable
-    #[error("failed to get worker by ID: {0}")]
+    #[error("failed to get worker by ID")]
     SchedulerGetWorker(#[source] crate::scheduler::GetWorkerError),
 }
 

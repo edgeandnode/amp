@@ -249,7 +249,7 @@ pub enum Error {
     /// This occurs when:
     /// - The namespace, name, or revision in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
 
     /// Dataset or revision not found
@@ -271,7 +271,7 @@ pub enum Error {
     /// - Failed to resolve revision to manifest hash
     /// - Database connection issues
     /// - Internal database errors
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
 
     /// Dataset store operation error when loading dataset
@@ -280,7 +280,7 @@ pub enum Error {
     /// - Failed to load dataset configuration from manifest
     /// - Manifest parsing errors
     /// - Invalid dataset structure
-    #[error("Failed to load dataset: {0}")]
+    #[error("Failed to load dataset")]
     GetDataset(#[source] common::datasets_cache::GetDatasetError),
 
     /// Failed to restore table revision from storage

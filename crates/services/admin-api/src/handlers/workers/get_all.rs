@@ -76,7 +76,7 @@ pub enum Error {
     /// - Database connection fails or is lost during the query
     /// - Query execution encounters an internal database error
     /// - Connection pool is exhausted or unavailable
-    #[error("failed to list workers: {0}")]
+    #[error("failed to list workers")]
     SchedulerListWorkers(#[source] crate::scheduler::ListWorkersError),
 }
 

@@ -136,7 +136,7 @@ pub enum Error {
     /// - Failed to query all datasets from the dataset store
     /// - Database connection issues
     /// - Internal database errors
-    #[error("Failed to list all datasets: {0}")]
+    #[error("Failed to list all datasets")]
     ListAllDatasets(#[source] ListAllDatasetsError),
 }
 

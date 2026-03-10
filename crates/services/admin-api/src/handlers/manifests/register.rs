@@ -191,11 +191,11 @@ pub enum Error {
     /// - Manifest structure doesn't match expected schema for the given kind
     /// - Required manifest fields (name, kind, version, etc.) are missing or invalid
     /// - JSON serialization/deserialization fails during canonicalization
-    #[error("invalid manifest: {0}")]
+    #[error("invalid manifest")]
     InvalidManifest(#[source] serde_json::Error),
 
     /// Manifest validation error for derived datasets
-    #[error("manifest validation error: {0}")]
+    #[error("manifest validation error")]
     ManifestValidationError(#[source] ManifestValidationError),
 
     /// Unsupported dataset kind
@@ -215,7 +215,7 @@ pub enum Error {
     /// - Write permissions are insufficient
     /// - Storage quota is exceeded
     /// - Network errors prevent writing to remote storage
-    #[error("failed to write manifest to object store: {0}")]
+    #[error("failed to write manifest to object store")]
     ObjectStoreWriteError(#[source] StoreError),
 
     /// Failed to register manifest in metadata database
@@ -225,7 +225,7 @@ pub enum Error {
     /// - SQL insertion or update query fails
     /// - Database constraints are violated
     /// - Schema inconsistencies prevent registration
-    #[error("failed to register manifest in metadata database: {0}")]
+    #[error("failed to register manifest in metadata database")]
     MetadataDbError(#[source] metadata_db::Error),
 }
 

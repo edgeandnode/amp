@@ -163,7 +163,7 @@ pub enum Error {
     /// - Database connection is lost
     /// - SQL query to resolve manifest hash to file path fails
     /// - Database schema inconsistencies prevent path lookup
-    #[error("failed to query manifest path from metadata database: {0}")]
+    #[error("failed to query manifest path from metadata database")]
     MetadataDbQueryError(#[source] metadata_db::Error),
 
     /// Failed to read manifest from object store
@@ -173,7 +173,7 @@ pub enum Error {
     /// - Read permissions are insufficient
     /// - Network errors prevent reading from remote storage
     /// - File corruption or invalid data in the object store
-    #[error("failed to read manifest from object store: {0}")]
+    #[error("failed to read manifest from object store")]
     ObjectStoreReadError(#[source] amp_datasets_registry::manifests::GetError),
 }
 

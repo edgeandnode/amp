@@ -86,7 +86,7 @@ pub enum Error {
     /// - Failed to query all manifests from the metadata database
     /// - Database connection issues
     /// - Internal database errors
-    #[error("Failed to list all manifests: {0}")]
+    #[error("Failed to list all manifests")]
     ListAllManifests(#[source] amp_datasets_registry::error::ListAllManifestsError),
 }
 

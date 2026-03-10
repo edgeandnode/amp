@@ -152,7 +152,7 @@ pub enum Error {
     /// - Database connection fails during revision resolution
     /// - Query execution encounters an internal database error
     /// - Metadata database query for revision fails
-    #[error("failed to resolve dataset revision: {0}")]
+    #[error("failed to resolve dataset revision")]
     ResolveRevision(#[source] ResolveRevisionError),
 
     /// Dataset revision does not exist

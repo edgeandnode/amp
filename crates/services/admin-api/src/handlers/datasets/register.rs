@@ -464,7 +464,7 @@ pub enum Error {
     /// - Request JSON is malformed or invalid
     /// - Required fields are missing or have wrong types
     /// - Dataset name or version format is invalid
-    #[error("invalid request body: {0}")]
+    #[error("invalid request body")]
     InvalidPayloadFormat(#[source] JsonRejection),
 
     /// Invalid derived dataset manifest content or structure
@@ -473,11 +473,11 @@ pub enum Error {
     /// - Manifest JSON is malformed or invalid
     /// - Manifest structure doesn't match expected schema
     /// - Required manifest fields are missing or invalid
-    #[error("invalid manifest: {0}")]
+    #[error("invalid manifest")]
     InvalidManifest(#[source] serde_json::Error),
 
     /// Manifest validation error
-    #[error("Manifest validation error: {0}")]
+    #[error("Manifest validation error")]
     ManifestValidationError(#[source] ManifestValidationError),
 
     /// Failed to register manifest in the system
@@ -486,7 +486,7 @@ pub enum Error {
     /// - Error during manifest processing or storage
     /// - Registry information extraction failed
     /// - System-level registration errors
-    #[error("Failed to register manifest: {0}")]
+    #[error("Failed to register manifest")]
     ManifestRegistrationError(#[source] RegisterManifestError),
 
     /// Failed to link manifest to dataset
@@ -494,7 +494,7 @@ pub enum Error {
     /// This occurs when:
     /// - Error during manifest linking in metadata database
     /// - Error updating dev tag
-    #[error("Failed to link manifest to dataset: {0}")]
+    #[error("Failed to link manifest to dataset")]
     ManifestLinkingError(#[source] LinkManifestError),
 
     /// Failed to tag version for the dataset
@@ -503,7 +503,7 @@ pub enum Error {
     /// - Error during version tagging in metadata database
     /// - Invalid semantic version format
     /// - Error updating latest tag
-    #[error("Failed to set version tag: {0}")]
+    #[error("Failed to set version tag")]
     VersionTaggingError(#[source] SetVersionTagError),
 
     /// Unsupported dataset kind
@@ -524,7 +524,7 @@ pub enum Error {
     ManifestNotFound(Hash),
 
     /// Failed to get dataset info after registration
-    #[error("Failed to get dataset info: {0}")]
+    #[error("Failed to get dataset info")]
     GetDataset(#[source] GetDatasetError),
 }
 

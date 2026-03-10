@@ -120,7 +120,7 @@ pub enum Error {
     /// This occurs when:
     /// - The location ID in the URL path is not a valid integer
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Revision not found
     ///

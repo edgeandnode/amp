@@ -105,7 +105,7 @@ pub enum Error {
     /// Invalid query parameters
     ///
     /// This occurs when the query string cannot be parsed.
-    #[error("Invalid query parameters: {0}")]
+    #[error("Invalid query parameters")]
     InvalidQueryParams(#[source] QueryRejection),
     /// Negative limit value
     ///
@@ -116,7 +116,7 @@ pub enum Error {
     ///
     /// This covers data store errors when retrieving revisions,
     /// including underlying database connection issues and query failures.
-    #[error("failed to list table revisions: {0}")]
+    #[error("failed to list table revisions")]
     ListAllTableRevisions(#[source] ListAllTableRevisionsError),
 }
 

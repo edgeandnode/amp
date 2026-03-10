@@ -128,7 +128,7 @@ pub enum Error {
     /// - **Mixed-type arrays**: TOML arrays must contain homogeneous types
     /// - **Complex nested structures**: Some deeply nested JSON structures may not map to TOML
     /// - **Invalid TOML table keys**: Keys that are not valid TOML identifiers
-    #[error("failed to convert JSON map to TOML table: {0}")]
+    #[error("failed to convert JSON map to TOML table")]
     ConversionError(serde_json::Error),
 
     /// Failed to store the provider configuration
@@ -136,7 +136,7 @@ pub enum Error {
     /// This occurs when the underlying storage operation fails,
     /// such as filesystem errors, serialization failures, or
     /// other store-level issues.
-    #[error("failed to store provider configuration: {0}")]
+    #[error("failed to store provider configuration")]
     StoreError(#[source] amp_providers_registry::RegisterError),
 }
 

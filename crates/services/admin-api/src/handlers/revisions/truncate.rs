@@ -245,14 +245,14 @@ pub enum Error {
     /// This occurs when:
     /// - The location ID in the URL path is not a valid integer
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
 
     /// Invalid query parameters
     ///
     /// This occurs when:
     /// - The query string cannot be parsed into the expected format
-    #[error("Invalid query parameters: {0}")]
+    #[error("Invalid query parameters")]
     InvalidQueryParams(#[source] QueryRejection),
 
     /// Revision not found

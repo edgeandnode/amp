@@ -174,14 +174,14 @@ pub enum Error {
     /// This occurs when:
     /// - The namespace or name in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Dataset store operation error when unlinking dataset manifests
     ///
     /// This occurs when:
     /// - Failed to delete dataset manifest links from database
     /// - Database connection or transaction issues
-    #[error("Failed to unlink dataset manifests: {0}")]
+    #[error("Failed to unlink dataset manifests")]
     UnlinkDatasetManifests(#[source] UnlinkDatasetManifestsError),
 }
 

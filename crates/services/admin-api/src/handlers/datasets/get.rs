@@ -156,7 +156,7 @@ pub enum Error {
     /// This occurs when:
     /// - The namespace, name, or revision in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Dataset or revision not found
     ///
@@ -176,7 +176,7 @@ pub enum Error {
     /// - Failed to query metadata database for revision information
     /// - Database connection issues
     /// - Internal database errors during revision resolution
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
     /// Failed to get dataset from dataset store
     ///
@@ -185,7 +185,7 @@ pub enum Error {
     /// - Dataset store connection issues
     /// - Permissions issues accessing dataset store
     /// - Network errors
-    #[error("Failed to get dataset from dataset store: {0}")]
+    #[error("Failed to get dataset from dataset store")]
     GetDataset(#[source] GetDatasetError),
 }
 

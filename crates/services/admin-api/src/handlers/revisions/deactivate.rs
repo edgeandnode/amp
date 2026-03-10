@@ -128,7 +128,7 @@ pub enum Error {
     /// This occurs when:
     /// - The database operation to mark revisions as inactive fails
     /// - Database connection issues during the update
-    #[error("Failed to deactivate table revision: {0}")]
+    #[error("Failed to deactivate table revision")]
     DeactivateTableRevision(#[source] DeactivateTableRevisionError),
     /// Failed to resolve revision to manifest hash
     ///
@@ -136,7 +136,7 @@ pub enum Error {
     /// - Failed to query metadata database for revision information
     /// - Database connection issues
     /// - Internal database errors during revision resolution
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
 }
 

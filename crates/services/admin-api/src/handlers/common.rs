@@ -161,15 +161,15 @@ pub async fn parse_and_canonicalize_derived_dataset_manifest(
 #[derive(Debug, thiserror::Error)]
 pub enum ParseDerivedManifestError {
     /// Failed to deserialize the JSON string into a `DerivedDatasetManifest` struct
-    #[error("failed to deserialize manifest: {0}")]
+    #[error("failed to deserialize manifest")]
     Deserialization(#[source] serde_json::Error),
 
     /// Failed manifest validation after successful deserialization
-    #[error("manifest validation failed: {0}")]
+    #[error("manifest validation failed")]
     ManifestValidation(#[source] Box<ManifestValidationError>),
 
     /// Failed to serialize the validated manifest back to canonical JSON
-    #[error("failed to serialize manifest: {0}")]
+    #[error("failed to serialize manifest")]
     Serialization(#[source] serde_json::Error),
 }
 
@@ -203,7 +203,7 @@ pub enum ParseRawManifestError {
     /// - JSON syntax is invalid
     /// - JSON structure doesn't match the manifest schema
     /// - Required fields are missing or have wrong types
-    #[error("failed to deserialize manifest: {0}")]
+    #[error("failed to deserialize manifest")]
     Deserialization(#[source] serde_json::Error),
 
     /// Failed to serialize the manifest back to canonical JSON
@@ -213,7 +213,7 @@ pub enum ParseRawManifestError {
     /// - Memory allocation fails during serialization
     ///
     /// Note: This should rarely happen since we already deserialized successfully
-    #[error("failed to serialize manifest: {0}")]
+    #[error("failed to serialize manifest")]
     Serialization(#[source] serde_json::Error),
 }
 
@@ -500,7 +500,7 @@ pub enum ManifestValidationError {
     ///
     /// Table name does not conform to SQL identifier rules (must start with letter/underscore,
     /// contain only alphanumeric/underscore/dollar, and be <= 63 bytes).
-    #[error("Invalid table name in SQL query: {0}")]
+    #[error("Invalid table name in SQL query")]
     InvalidTableName(#[source] ResolveTableReferencesError<DepAliasError>),
 
     /// Dependency alias not found

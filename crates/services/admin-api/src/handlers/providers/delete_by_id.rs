@@ -109,7 +109,7 @@ pub enum Error {
     /// This occurs when the underlying storage operation fails,
     /// such as filesystem errors, permission issues, or other
     /// store-level problems during deletion.
-    #[error("failed to delete provider configuration: {0}")]
+    #[error("failed to delete provider configuration")]
     StoreError(#[source] DeleteError),
 }
 

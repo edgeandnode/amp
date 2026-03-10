@@ -165,7 +165,7 @@ pub enum Error {
     /// This occurs when:
     /// - The location ID in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Dataset or revision not found
     ///
@@ -199,7 +199,7 @@ pub enum Error {
     /// - The manifest content could not be retrieved from object store
     /// - The manifest could not be parsed for the dataset kind
     /// - The dataset kind is unsupported
-    #[error("Failed to load dataset: {0}")]
+    #[error("Failed to load dataset")]
     GetDataset(#[source] GetDatasetError),
 
     /// Failed to activate table revision
@@ -216,7 +216,7 @@ pub enum Error {
     /// - Failed to query metadata database for revision information
     /// - Database connection issues
     /// - Internal database errors during revision resolution
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
 }
 
