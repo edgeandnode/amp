@@ -1,7 +1,8 @@
 ---
-name: "provider-extractor-evm-rpc"
+name: "provider-evm-rpc"
 description: "EVM JSON-RPC provider configuration for Ethereum and compatible chains. Load when asking about RPC providers, EVM endpoints, rate limiting, or batch requests"
 type: feature
+status: stable
 components: "crate:evm-rpc,crate:common"
 ---
 
@@ -9,7 +10,7 @@ components: "crate:evm-rpc,crate:common"
 
 ## Summary
 
-The JSON-RPC provider enables data extraction from EVM-compatible blockchains via standard JSON-RPC endpoints. It supports HTTP, WebSocket, and IPC connections with configurable rate limiting, request batching, and concurrent request management.
+The JSON-RPC provider enables data access from EVM-compatible blockchains via standard JSON-RPC endpoints. It supports HTTP, WebSocket, and IPC connections with configurable rate limiting, request batching, and concurrent request management.
 
 ## Table of Contents
 
@@ -31,7 +32,7 @@ The JSON-RPC provider enables data extraction from EVM-compatible blockchains vi
 
 ## Architecture
 
-The JSON-RPC provider integrates into Amp's extraction pipeline as a data source for EVM-compatible blockchains:
+The JSON-RPC provider integrates into Amp's data pipeline as a data source for EVM-compatible blockchains:
 
 ```
 Dataset Job → Provider Resolution → JSON-RPC Client → RPC Endpoint
@@ -59,15 +60,7 @@ Dataset Job → Provider Resolution → JSON-RPC Client → RPC Endpoint
 
 ## Configuration
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `kind` | string | - | Must be `"evm-rpc"` |
-| `network` | string | - | Network identifier (mainnet, base, polygon, etc.) |
-| `url` | string | - | RPC endpoint URL (http/https/ws/wss/ipc) |
-| `concurrent_request_limit` | number | 1024 | Max concurrent requests |
-| `rpc_batch_size` | number | 0 | Requests per batch (0 = disabled) |
-| `rate_limit_per_minute` | number | none | Rate limit in requests/minute |
-| `fetch_receipts_per_tx` | boolean | false | Use per-tx receipt fetching |
+For the complete field reference, see the [config schema](../providers/evm-rpc.spec.json).
 
 ### Minimal Configuration
 

@@ -221,6 +221,7 @@ gen:
     @cp -f $(ls -t target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-firehose-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-solana-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json
+    @cp -f $(ls -t target/debug/build/amp-providers-static-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/static.spec.json
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/evm-rpc.md
     @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/solana.md
     @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/tables.md | head -1) {{GEN_TABLE_SCHEMAS_OUTDIR}}/firehose-evm.md
@@ -234,6 +235,7 @@ gen:
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json"
+    @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/static.spec.json"
     @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/evm-rpc.md"
     @echo "  {{GEN_TABLE_SCHEMAS_OUTDIR}}/firehose-evm.md"
     @echo "  {{GEN_OPENAPI_SCHEMAS_OUTDIR}}/admin.spec.json"
@@ -297,6 +299,14 @@ gen-solana-provider-schema DEST_DIR=GEN_PROVIDER_SCHEMAS_OUTDIR:
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/amp-providers-solana-gen-*/out/schema.json | head -1) {{DEST_DIR}}/solana.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/solana.spec.json"
+
+# Generate static provider config JSON schema
+[group: 'codegen']
+gen-static-provider-schema DEST_DIR=GEN_PROVIDER_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-static-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/amp-providers-static-gen-*/out/schema.json | head -1) {{DEST_DIR}}/static.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/static.spec.json"
 
 ### Config Schema generation
 

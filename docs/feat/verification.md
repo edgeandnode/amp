@@ -168,5 +168,5 @@ Log + Transaction Data (from Amp)
 ## References
 
 - [data](data.md) - Dependency: Data lake architecture, segments, and revisions
-- [provider-extractor-evm-rpc](provider-extractor-evm-rpc.md) - Related: EVM RPC data extraction
+- [provider-evm-rpc](provider-evm-rpc.md) - Related: EVM RPC provider
 - [Blog: Amp Verifiable Extraction](../blog/verifiable-extraction.md) - Extended: Detailed explanation with verification examples

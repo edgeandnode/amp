@@ -1188,6 +1188,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-providers-static"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-common",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "amp-providers-static-gen"
+version = "0.1.0"
+dependencies = [
+ "amp-providers-static",
+ "schemars 1.2.1",
+ "serde_json",
+]
+
+[[package]]
 name = "amp-worker-core"
 version = "0.1.0"
 dependencies = [

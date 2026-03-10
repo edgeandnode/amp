@@ -30,6 +30,8 @@ members = [
     "crates/core/providers-firehose/gen",
     "crates/core/providers-solana",
     "crates/core/providers-solana/gen",
+    "crates/core/providers-static",
+    "crates/core/providers-static/gen",
     "crates/core/verification",
     "crates/core/worker-core",
     "crates/core/worker-datasets-derived",

@@ -2,6 +2,7 @@
 name: "provider-config"
 description: "Provider configuration format, TOML storage, and environment variable substitution. Load when asking about provider config files, secrets, or provider storage"
 type: feature
+status: stable
 components: "crate:dataset-store"
 ---
 
@@ -53,13 +54,7 @@ Dataset Resolution ← Environment Substitution ← Cache Lookup
 
 ## Configuration Format
 
-All providers share common fields with provider-specific extensions:
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `kind` | Yes | Provider type: `evm-rpc`, `firehose`, `solana` |
-| `network` | Yes | Blockchain network identifier |
-| Additional | Varies | Provider-specific fields (url, token, etc.) |
+The configuration format is provider-specific. Each provider feature doc documents its own fields and links to its config schema. All providers share a common `kind` field that identifies the provider type.
 
 ### Example Structure
 
