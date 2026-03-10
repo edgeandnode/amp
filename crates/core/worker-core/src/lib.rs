@@ -2,17 +2,11 @@
 
 use std::{sync::Arc, time::Duration};
 
-use amp_data_store::DataStore;
-use common::{
-    datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
-};
-use metadata_db::{MetadataDb, NotificationMultiplexerHandle};
+use datafusion::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
 pub mod block_ranges;
 pub mod check;
 pub mod compaction;
-pub mod config;
 pub mod error_detail;
 pub mod jobs;
 pub mod metrics;
@@ -24,7 +18,7 @@ pub mod tasks;
 pub use self::{
     block_ranges::{EndBlock, ResolvedEndBlock},
     check::consistency_check,
-    config::{
+    compaction::config::{
         CollectorConfig, CompactionAlgorithmConfig, CompactorConfig, ConfigDuration, ParquetConfig,
         SizeLimitConfig,
     },
@@ -34,30 +28,7 @@ pub use self::{
         SyncCompletedInfo, SyncFailedInfo, SyncStartedInfo,
     },
 };
-use crate::{
-    compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit},
-    config::Config,
-    metrics::MetricsRegistry,
-};
-
-/// Dataset dump context
-#[derive(Clone)]
-pub struct Ctx {
-    /// Worker configuration (intervals, timeouts, etc.).
-    pub config: Config,
-    /// Connection pool for the metadata database.
-    pub metadata_db: MetadataDb,
-    /// In-memory cache of resolved dataset definitions.
-    pub datasets_cache: DatasetsCache,
-    /// Cache of compiled ethcall UDF definitions.
-    pub ethcall_udfs_cache: EthCallUdfsCache,
-    /// Object store abstraction for reading/writing Parquet files.
-    pub data_store: DataStore,
-    /// Shared notification multiplexer for streaming queries
-    pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
-    /// Optional job-specific metrics registry
-    pub metrics: Option<Arc<MetricsRegistry>>,
-}
+use crate::compaction::{CollectorProperties, CompactorProperties, SegmentSizeLimit};
 
 #[derive(Debug, Clone)]
 /// Parquet writing and compaction configuration resolved from [`ParquetConfig`].

@@ -33,21 +33,3 @@ pub struct Config {
     /// Optional event streaming configuration
     pub events_config: WorkerEventsConfig,
 }
-
-impl Config {
-    /// Create an amp_worker_core::config::Config from this worker configuration
-    ///
-    /// This method extracts only the fields needed by the worker core crate for
-    /// executing dataset materialization operations.
-    pub fn dump_config(&self) -> amp_worker_core::config::Config {
-        amp_worker_core::config::Config {
-            poll_interval: self.poll_interval,
-            keep_alive_interval: self.keep_alive_interval,
-            max_mem_mb: self.max_mem_mb,
-            query_max_mem_mb: self.query_max_mem_mb,
-            spill_location: self.spill_location.clone(),
-            parquet: (&self.parquet).into(),
-            progress_interval: self.events_config.progress_interval.clone().into(),
-        }
-    }
-}

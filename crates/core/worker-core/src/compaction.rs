@@ -1,21 +1,8 @@
-mod algorithm;
-mod collector;
-mod compactor;
-mod error;
-mod plan;
+use std::sync::{Arc, atomic::Ordering::SeqCst};
 
-use std::{
-    error::Error,
-    fmt::{Display, Formatter, Result as FmtResult},
-    sync::{Arc, atomic::Ordering::SeqCst},
-};
-
-pub use algorithm::{CompactionAlgorithm, Overflow, SegmentSizeLimit};
 use amp_data_store::DataStore;
 use amp_parquet::timestamp::Timestamp;
-pub use collector::{Collector, CollectorProperties};
 use common::physical_table::PhysicalTable;
-pub use compactor::{Compactor, CompactorProperties};
 use error::{CollectionResult, CollectorError, CompactionResult, CompactorError};
 use futures::FutureExt;
 use metadata_db::MetadataDb;
@@ -24,33 +11,36 @@ use tokio::task::{JoinError, JoinHandle};
 
 use crate::{WriterProperties, metrics::MetricsRegistry, retryable::RetryableErrorExt};
 
+mod algorithm;
+mod collector;
+mod compactor;
+pub mod config;
+mod error;
+mod plan;
+
+pub use self::{
+    algorithm::{CompactionAlgorithm, Overflow, SegmentSizeLimit},
+    collector::{Collector, CollectorProperties},
+    compactor::{Compactor, CompactorProperties},
+};
+
 pub type TaskResult<T> = Result<T, AmpCompactorTaskError>;
 
-#[derive(Debug)]
+/// Errors that can occur during compaction or garbage-collection task execution.
+///
+/// The custom [`From`] impls flatten inner `Join` variants so that all
+/// task-cancellation / join failures surface uniformly as [`Self::Join`].
+#[derive(Debug, thiserror::Error)]
 pub enum AmpCompactorTaskError {
+    /// A compaction operation failed (e.g. I/O, metadata, or merge error).
+    #[error(transparent)]
     Compaction(CompactorError),
+    /// A garbage-collection (file deletion) operation failed.
+    #[error(transparent)]
     Collection(CollectorError),
+    /// The spawned Tokio task panicked or was cancelled.
+    #[error(transparent)]
     Join(JoinError),
-}
-
-impl Display for AmpCompactorTaskError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            AmpCompactorTaskError::Compaction(e) => e.fmt(f),
-            AmpCompactorTaskError::Collection(e) => e.fmt(f),
-            AmpCompactorTaskError::Join(e) => e.fmt(f),
-        }
-    }
-}
-
-impl Error for AmpCompactorTaskError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            AmpCompactorTaskError::Compaction(e) => e.source(),
-            AmpCompactorTaskError::Collection(e) => e.source(),
-            AmpCompactorTaskError::Join(e) => e.source(),
-        }
-    }
 }
 
 impl RetryableErrorExt for AmpCompactorTaskError {

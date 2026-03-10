@@ -145,10 +145,8 @@ impl From<u64> for Overflow {
     }
 }
 
-use crate::{
-    compaction::{compactor::CompactionGroup, plan::CompactionFile},
-    config::{ParquetConfig, SizeLimitConfig},
-};
+use super::config::{ParquetConfig, SizeLimitConfig};
+use crate::compaction::{compactor::CompactionGroup, plan::CompactionFile};
 
 /// Compaction algorithm parameters.
 /// Defines the criteria for grouping files for compaction
