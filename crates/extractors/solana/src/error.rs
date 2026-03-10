@@ -1,7 +1,8 @@
 use amp_providers_common::network_id::NetworkId;
 use datasets_raw::{client::BlockStreamError, rows::TableRowError};
-pub use yellowstone_faithful_car_parser as car_parser;
-use yellowstone_faithful_car_parser::node::{NodeError, ReassableError};
+use yellowstone_faithful_car_parser as car_parser;
+
+use crate::of1_client;
 
 /// Errors that occur when converting Solana block data to table rows.
 ///
@@ -57,29 +58,13 @@ pub enum Of1StreamError {
     #[error("RPC client error")]
     RpcClient(#[source] solana_client::client_error::ClientError),
 
-    /// The CAR manager communication channel was closed unexpectedly.
+    /// Failed to stream a CAR file through the OF1 client.
     ///
-    /// The CAR manager runs as a separate task handling file downloads. This error
-    /// occurs when the channel for communicating with the manager is closed before
-    /// a response is received, indicating the manager task has terminated.
-    #[error("CAR manager channel closed")]
-    ChannelClosed(#[source] tokio::sync::oneshot::error::RecvError),
-
-    /// Failed to open a CAR file from disk.
-    ///
-    /// This occurs when the downloaded CAR file cannot be opened for reading,
-    /// due to permission issues, file corruption, or the file being deleted
-    /// between download and read.
-    #[error("failed to open CAR file")]
-    FileOpen(#[source] std::io::Error),
-
-    /// Failed to memory-map a CAR file.
-    ///
-    /// CAR files are memory-mapped for efficient reading. This error occurs when
-    /// the memory-mapping operation fails, typically due to insufficient virtual
-    /// memory or file access issues.
-    #[error("failed to memory-map CAR file")]
-    Mmap(#[source] std::io::Error),
+    /// This occurs when the OF1 client encounters issues while reading or streaming
+    /// CAR files, which may include HTTP errors, unsupported range requests, or
+    /// other file access problems.
+    #[error("failed to stream CAR file")]
+    FileStream(#[source] of1_client::CarReaderError),
 
     /// Encountered an unexpected node type while reading a block from CAR.
     ///
@@ -148,7 +133,7 @@ pub enum Of1StreamError {
     /// This occurs during low-level parsing of CAR node structures, indicating
     /// malformed or corrupted node data that cannot be interpreted.
     #[error("CAR node parsing error")]
-    NodeParse(#[source] NodeError),
+    NodeParse(#[source] car_parser::node::NodeError),
 
     /// Failed to reassemble a dataframe from CAR nodes.
     ///
@@ -156,18 +141,21 @@ pub enum Of1StreamError {
     /// This error occurs when the reassembly of these fragmented structures fails,
     /// typically due to missing or corrupted fragment nodes.
     #[error("CAR dataframe reassembly error")]
-    DataframeReassembly(#[source] ReassableError),
+    DataframeReassembly(#[source] car_parser::node::ReassableError),
 }
 
 impl From<Of1StreamError> for BlockStreamError {
     fn from(value: Of1StreamError) -> Self {
         match value {
-            Of1StreamError::RpcClient(_) => BlockStreamError::Recoverable(value.into()),
+            Of1StreamError::RpcClient(_)
+            | Of1StreamError::FileStream(of1_client::CarReaderError::Http(_))
+            | Of1StreamError::FileStream(of1_client::CarReaderError::Reqwest(_)) => {
+                BlockStreamError::Recoverable(value.into())
+            }
             // This is intentionally not a catch-all, to force consideration of
             // each error type when mapping to recoverable vs fatal.
-            Of1StreamError::ChannelClosed(_)
-            | Of1StreamError::FileOpen(_)
-            | Of1StreamError::Mmap(_)
+            Of1StreamError::FileStream(of1_client::CarReaderError::Io(_))
+            | Of1StreamError::FileStream(of1_client::CarReaderError::RangeRequestUnsupported)
             | Of1StreamError::UnexpectedNode { .. }
             | Of1StreamError::MissingNode { .. }
             | Of1StreamError::RewardSlotMismatch { .. }

@@ -1,6 +1,8 @@
 //! The program streams blocks from OF1 for a given epoch, fetches the same blocks via JSON-RPC,
 //! and compares the results at the [solana_datasets::tables::NonEmptySlot] level.
 
+#[cfg(debug_assertions)]
+use std::{collections::HashSet, sync::Mutex};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
@@ -52,28 +54,19 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!( epoch = %cli.epoch, start_slot, end_slot, "running OF1 vs RPC comparison");
 
-    let (car_manager_tx, car_manager_rx) = tokio::sync::mpsc::channel(128);
-
-    let car_manager_jh = tokio::task::spawn(of1_client::car_file_manager(
-        car_manager_rx,
-        provider_cfg.of1_car_directory.clone(),
-        provider_cfg.keep_of1_car_files,
-        cli.provider_name.clone(),
-        provider_cfg.network.clone(),
-        None,
-    ));
-
-    let rpc_connection_info = rpc_client::RpcProviderConnectionInfo {
-        url: provider_cfg.rpc_provider_info.url,
-        auth: None,
+    let reqwest = Arc::new(reqwest::Client::new());
+    let rpc_client = {
+        let rpc_connection_info = rpc_client::RpcProviderConnectionInfo {
+            url: provider_cfg.rpc_provider_info.url,
+            auth: None,
+        };
+        Arc::new(rpc_client::SolanaRpcClient::new(
+            rpc_connection_info,
+            provider_cfg.max_rpc_calls_per_second,
+            cli.provider_name,
+            provider_cfg.network.clone(),
+        ))
     };
-
-    let rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
-        rpc_connection_info,
-        provider_cfg.max_rpc_calls_per_second,
-        cli.provider_name,
-        provider_cfg.network.clone(),
-    ));
 
     let get_block_config = rpc_client::rpc_config::RpcBlockConfig {
         encoding: Some(rpc_client::rpc_config::UiTransactionEncoding::Json),
@@ -86,11 +79,15 @@ async fn main() -> anyhow::Result<()> {
     let of1_stream = of1_client::stream(
         start_slot,
         end_slot,
-        provider_cfg.of1_car_directory,
-        car_manager_tx.clone(),
+        reqwest,
         rpc_client.clone(),
         get_block_config,
+        // Metrics, we don't need to record them.
         None,
+        // In-progress epochs, won't affect the example since it only matters
+        // when there are multiple concurrent epochs being processed.
+        #[cfg(debug_assertions)]
+        Arc::new(Mutex::new(HashSet::new())),
     );
 
     let mut expected_slot_num = start_slot;
@@ -189,11 +186,6 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!(slot = slot_num, "progress");
             }
         }
-    }
-
-    drop(car_manager_tx);
-    if let Err(e) = car_manager_jh.await {
-        tracing::error!(error = %e, "car file manager task failed");
     }
 
     tracing::info!("comparison complete");

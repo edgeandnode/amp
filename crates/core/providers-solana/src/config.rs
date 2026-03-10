@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, path::PathBuf};
+use std::num::NonZeroU32;
 
 use amp_providers_common::{network_id::NetworkId, redacted::Redacted};
 use headers::{HeaderName, HeaderValue};
@@ -39,13 +39,6 @@ pub struct SolanaProviderConfig {
 
     /// Optional rate limit for RPC calls per second.
     pub max_rpc_calls_per_second: Option<NonZeroU32>,
-
-    /// Directory for storing Old Faithful ONE CAR files.
-    pub of1_car_directory: PathBuf,
-
-    /// Whether to keep downloaded CAR files after processing.
-    #[serde(default)]
-    pub keep_of1_car_files: bool,
 
     /// Controls when to use the Solana archive for historical data.
     #[serde(default)]

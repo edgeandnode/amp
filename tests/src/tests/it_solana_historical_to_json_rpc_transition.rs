@@ -24,11 +24,9 @@ async fn historical_to_json_rpc_transition() {
         None, // Rate limit
         network,
         provider_name,
-        std::path::PathBuf::new(), // of1_car_directory
-        false,                     // keep_of1_car_files
         UseArchive::Auto,
-        None, // Metrics
         CommitmentConfig::finalized(),
+        None, // Metrics
     );
 
     let start = 0;

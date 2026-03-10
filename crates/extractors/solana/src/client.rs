@@ -6,11 +6,12 @@
 //!
 //! Learn more about the Old Faithful archive here: <https://docs.old-faithful.net/>.
 
+#[cfg(debug_assertions)]
+use std::{collections::HashSet, sync::Mutex};
 use std::{
     num::{NonZeroU32, NonZeroU64},
-    path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
@@ -18,9 +19,7 @@ use amp_providers_solana::config::UseArchive;
 use anyhow::Context;
 use datasets_common::block_num::BlockNum;
 use datasets_raw::{
-    client::{
-        BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
-    },
+    client::{BlockStreamError, BlockStreamResultExt, BlockStreamer, LatestBlockError},
     rows::Rows,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -33,23 +32,22 @@ use crate::{metrics, of1_client, rpc_client, tables};
 /// have been truncated.
 pub const TRUNCATED_LOG_MESSAGES_MARKER: &str = "Log truncated";
 
-/// Handles related to the OF1 CAR manager task, stored in the client for cleanup.
-struct Of1CarManagerHandles {
-    tx: tokio::sync::mpsc::Sender<of1_client::CarManagerMessage>,
-    jh: tokio::task::JoinHandle<()>,
-}
-
 /// A JSON-RPC based Solana client that implements the [`BlockStreamer`] trait.
+#[derive(Clone)]
 pub struct Client {
-    of1_car_manager_handles: Arc<Mutex<Option<Of1CarManagerHandles>>>,
+    reqwest: Arc<reqwest::Client>,
     main_rpc_client: Arc<rpc_client::SolanaRpcClient>,
     fallback_rpc_client: Option<Arc<rpc_client::SolanaRpcClient>>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     network: NetworkId,
     provider_name: ProviderName,
-    of1_car_directory: PathBuf,
     use_archive: UseArchive,
     commitment: CommitmentConfig,
+    /// Monitor which epochs are currently being streamed to prevent overlapping
+    /// streams. This is only used in debug builds as an additional safety check
+    /// with respect to the partitioning logic.
+    #[cfg(debug_assertions)]
+    epochs_in_progress: Arc<Mutex<HashSet<solana_clock::Epoch>>>,
 }
 
 impl Client {
@@ -60,16 +58,15 @@ impl Client {
         max_rpc_calls_per_second: Option<NonZeroU32>,
         network: NetworkId,
         provider_name: ProviderName,
-        of1_car_directory: PathBuf,
-        keep_of1_car_files: bool,
         use_archive: UseArchive,
-        meter: Option<&monitoring::telemetry::metrics::Meter>,
         commitment: CommitmentConfig,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         assert_eq!(network, "mainnet", "only mainnet is supported");
 
         let metrics = meter.map(metrics::MetricsRegistry::new).map(Arc::new);
 
+        let reqwest = reqwest::Client::new();
         let main_rpc_client = Arc::new(rpc_client::SolanaRpcClient::new(
             main_rpc_connection_info,
             max_rpc_calls_per_second,
@@ -87,30 +84,17 @@ impl Client {
             ))
         });
 
-        let (of1_car_manager_tx, of1_car_manager_rx) = tokio::sync::mpsc::channel(128);
-        let of1_car_manager_jh = tokio::task::spawn(of1_client::car_file_manager(
-            of1_car_manager_rx,
-            of1_car_directory.clone(),
-            keep_of1_car_files,
-            provider_name.to_string(),
-            network.clone(),
-            metrics.clone(),
-        ));
-        let handles = Of1CarManagerHandles {
-            tx: of1_car_manager_tx,
-            jh: of1_car_manager_jh,
-        };
-
         Self {
-            of1_car_manager_handles: Arc::new(Mutex::new(Some(handles))),
+            reqwest: Arc::new(reqwest),
             main_rpc_client,
             fallback_rpc_client,
             metrics,
             network,
             provider_name,
-            of1_car_directory,
             use_archive,
             commitment,
+            #[cfg(debug_assertions)]
+            epochs_in_progress: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -231,27 +215,6 @@ impl Client {
     }
 }
 
-impl Clone for Client {
-    fn clone(&self) -> Self {
-        assert!(
-            self.of1_car_manager_handles.lock().unwrap().is_some(),
-            "cannot clone Client after cleanup"
-        );
-
-        Self {
-            of1_car_manager_handles: self.of1_car_manager_handles.clone(),
-            main_rpc_client: self.main_rpc_client.clone(),
-            fallback_rpc_client: self.fallback_rpc_client.clone(),
-            metrics: self.metrics.clone(),
-            network: self.network.clone(),
-            provider_name: self.provider_name.clone(),
-            of1_car_directory: self.of1_car_directory.clone(),
-            use_archive: self.use_archive,
-            commitment: self.commitment,
-        }
-    }
-}
-
 impl BlockStreamer for Client {
     async fn block_stream(
         self,
@@ -316,27 +279,27 @@ impl BlockStreamer for Client {
             }
         };
 
-        let of1_car_manager_tx = {
-            let guard = self.of1_car_manager_handles.lock().unwrap();
-            guard
-                .as_ref()
-                .expect("new block streams should not start after cleanup")
-                .tx
-                .clone()
-        };
-
         let historical_block_stream = if use_rpc_only {
             // Return empty stream to skip Old Faithful entirely
             futures::stream::empty().boxed()
         } else {
+            let metrics = self
+                .metrics
+                .clone()
+                .map(|registry| of1_client::MetricsContext {
+                    registry,
+                    provider: self.provider_name.clone(),
+                    network: self.network.clone(),
+                });
             of1_client::stream(
                 start,
                 end,
-                self.of1_car_directory.clone(),
-                of1_car_manager_tx,
+                self.reqwest.clone(),
                 self.main_rpc_client.clone(),
                 get_block_config,
-                self.metrics.clone(),
+                metrics,
+                #[cfg(debug_assertions)]
+                self.epochs_in_progress.clone(),
             )
             .map_err(Into::into)
             .boxed()
@@ -367,30 +330,6 @@ impl BlockStreamer for Client {
     fn bucket_size(&self) -> Option<NonZeroU64> {
         const _: () = assert!(solana_clock::DEFAULT_SLOTS_PER_EPOCH > 0);
         NonZeroU64::new(solana_clock::DEFAULT_SLOTS_PER_EPOCH)
-    }
-
-    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
-        let Self {
-            of1_car_manager_handles,
-            ..
-        } = self;
-
-        let Of1CarManagerHandles { tx, jh } = {
-            let mut guard = of1_car_manager_handles.lock().unwrap();
-            if let Some(handles) = guard.take() {
-                handles
-            } else {
-                // Cleanup already done.
-                return Ok(());
-            }
-        };
-
-        // Drop the extra sender so that the CAR manager task can exit -- assuming all block
-        // streams, which hold clones of the sender, complete before cleanup.
-        drop(tx);
-        let _ = jh.await;
-
-        Ok(())
     }
 
     fn provider_name(&self) -> &str {
@@ -565,21 +504,24 @@ async fn fill_truncated_logs(
         .collect();
 
     for (tx_id, truncated_log) in truncated_logs {
-        let id = solana_transaction::Signature::from_str(tx_id)
-            .with_context(|| format!("parsing transaction signature {tx_id}"))?;
-        let fallback_log_messages = fallback_rpc_client
-            .get_transaction(id, get_transaction_config, metrics.clone())
-            .await
-            .with_context(|| {
-                format!(
-                    "fetching transaction details for tx {id} in slot {}",
-                    slot.slot
-                )
-            })?
-            .transaction
-            .meta
-            .and_then(|meta| -> Option<Vec<String>> { meta.log_messages.into() })
-            .unwrap_or_default();
+        let fallback_log_messages = {
+            let tx_id = solana_transaction::Signature::from_str(tx_id)
+                .with_context(|| format!("parsing transaction signature {tx_id}"))?;
+
+            fallback_rpc_client
+                .get_transaction(tx_id, get_transaction_config, metrics.clone())
+                .await
+                .with_context(|| {
+                    format!(
+                        "fetching transaction details for tx {tx_id} in slot {}",
+                        slot.slot
+                    )
+                })?
+                .transaction
+                .meta
+                .and_then(|meta| -> Option<Vec<String>> { meta.log_messages.into() })
+                .unwrap_or_default()
+        };
 
         if fallback_log_messages
             .iter()
@@ -628,8 +570,6 @@ fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use amp_providers_common::redacted::Redacted;
     use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
@@ -654,15 +594,13 @@ mod tests {
 
         let client = Client::new(
             rpc_connection_info,
-            None,
-            None,
+            None, // Fallback RPC
+            None, // RPC rate limit
             network,
             provider_name,
-            PathBuf::new(),
-            false,
             UseArchive::Auto,
-            None,
             CommitmentConfig::finalized(),
+            None, // Meter
         );
 
         let start = 0;

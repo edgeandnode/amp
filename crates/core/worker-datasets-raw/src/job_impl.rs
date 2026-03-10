@@ -102,7 +102,7 @@ use datasets_common::{
     table_name::TableName,
 };
 use datasets_raw::{
-    client::{BlockStreamer as _, BlockStreamerExt as _, CleanupError, LatestBlockError},
+    client::{BlockStreamer as _, BlockStreamerExt as _, LatestBlockError},
     dataset::Dataset as RawDataset,
 };
 
@@ -407,7 +407,6 @@ pub async fn execute(
         }
     }
 
-    client.wait_for_cleanup().await.map_err(Error::Cleanup)?;
     tracing::info!("materialize completed successfully");
 
     Ok(())
@@ -525,13 +524,6 @@ pub enum Error {
     /// - Partition task panics (assertion failures, unwrap on None/Err, stack overflow)
     #[error("Partition task failed")]
     PartitionTask(#[source] TryWaitAllError<RunRangeError>),
-
-    /// Failure during blockchain client cleanup
-    ///
-    /// At the end of the materialize process, the blockchain client may need to perform
-    /// cleanup operations, some of which could fail. This error indicates such a failure.
-    #[error("Failed to perform blockchain client cleanup: {0}")]
-    Cleanup(#[source] CleanupError),
 }
 
 impl RetryableErrorExt for Error {
@@ -565,9 +557,6 @@ impl RetryableErrorExt for Error {
 
             // Partition tasks — delegate to TryWaitAllError classification
             Self::PartitionTask(err) => err.is_retryable(),
-
-            // Cleanup failures — recoverable
-            Self::Cleanup(_) => true,
         }
     }
 }
@@ -595,7 +584,6 @@ impl amp_worker_core::retryable::JobErrorExt for Error {
             Self::LatestBlock(_) => "LATEST_BLOCK",
             Self::MissingRanges(_) => "MISSING_RANGES",
             Self::PartitionTask(_) => "PARTITION_TASK",
-            Self::Cleanup(_) => "CLEANUP",
         }
     }
 }
