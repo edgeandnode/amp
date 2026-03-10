@@ -136,30 +136,22 @@ pub fn stream(
                     // NOTE: There should be no retry logic here because the `CarReader` should
                     // handle all retry logic internally and only return an error when a non-recoverable
                     // error occurs.
-                    Err(Of1StreamError::NodeParse(car_parser::node::NodeError::Io(io_err)))
-                        if io_err.kind() == std::io::ErrorKind::Other =>
-                    {
-                        let downcast = io_err.get_ref().and_then(|e| e.downcast_ref::<CarReaderError>());
-                        let car_reader_err = match downcast {
-                            None => {
-                                CarReaderError::Io(io_err)
+                    Err(Of1StreamError::NodeParse(car_parser::node::NodeError::Io(io_err))) => {
+                        match io_err.downcast::<CarReaderError>() {
+                            // No more CAR files available, not an error.
+                            Ok(CarReaderError::FileNotFound) => {},
+                            // Non-recoverable error from the `CarReader`.
+                            Ok(car_err) => {
+                                yield Err(Of1StreamError::FileStream(car_err));
                             }
-                            Some(CarReaderError::RangeRequestUnsupported) => {
-                                CarReaderError::RangeRequestUnsupported
-                            }
-                            // No more CAR files available, end the stream.
-                            Some(CarReaderError::FileNotFound) => {
-                                return;
-                            }
-                            Some(e) => {
-                                let error = e.to_string();
-                                unreachable!(
-                                    "unexpected CAR reader error (should be retried indefinetly); {error}"
+                            // Non-recoverable IO error from the `NodeParser`.
+                            Err(io_err) => {
+                                let original_err = Of1StreamError::NodeParse(
+                                    car_parser::node::NodeError::Io(io_err)
                                 );
+                                yield Err(original_err);
                             }
                         };
-
-                        yield Err(Of1StreamError::FileStream(car_reader_err));
                         return;
                     }
                     Err(e) => {
