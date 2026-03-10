@@ -137,6 +137,7 @@ impl From<DFSchemaRef> for TableSchema {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ArrowSchema {
     /// Ordered list of fields in the schema
+    #[cfg_attr(feature = "schemars", schemars(length(min = 1)))]
     pub fields: Vec<Field>,
 }
 
