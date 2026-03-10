@@ -174,7 +174,7 @@ pub enum Error {
     /// - Database connection is not available or lost
     /// - Transaction isolation level cannot be established
     /// - Database resource limits prevent new transactions
-    #[error("failed to begin transaction: {0}")]
+    #[error("failed to begin transaction")]
     TransactionBeginError(#[source] metadata_db::Error),
 
     /// Failed to check if manifest is linked to datasets
@@ -183,7 +183,7 @@ pub enum Error {
     /// - Database query to check manifest references fails
     /// - SQL execution errors during link validation
     /// - Database connection is lost during the check
-    #[error("failed to check if manifest is linked to datasets: {0}")]
+    #[error("failed to check if manifest is linked to datasets")]
     CheckLinksError(#[source] metadata_db::Error),
 
     /// Failed to delete manifest from metadata database
@@ -192,7 +192,7 @@ pub enum Error {
     /// - Database delete operation fails
     /// - Database constraints prevent deletion
     /// - Connection is lost during the delete operation
-    #[error("failed to delete manifest from metadata database: {0}")]
+    #[error("failed to delete manifest from metadata database")]
     MetadataDbDeleteError(#[source] metadata_db::Error),
 
     /// Failed to delete manifest from object store
@@ -202,7 +202,7 @@ pub enum Error {
     /// - Delete permissions are insufficient
     /// - Network errors prevent deletion from remote storage
     /// - File does not exist in object store (non-critical if DB delete succeeded)
-    #[error("failed to delete manifest from object store: {0}")]
+    #[error("failed to delete manifest from object store")]
     ObjectStoreDeleteError(#[source] amp_datasets_registry::manifests::DeleteError),
 
     /// Failed to commit transaction
@@ -212,7 +212,7 @@ pub enum Error {
     /// - Connection is lost during commit
     /// - Database lock conflicts prevent commit
     /// - Transaction timeout occurs
-    #[error("failed to commit transaction: {0}")]
+    #[error("failed to commit transaction")]
     TransactionCommitError(#[source] metadata_db::Error),
 }
 

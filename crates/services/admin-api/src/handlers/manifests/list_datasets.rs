@@ -151,7 +151,7 @@ pub enum Error {
     /// - Database connection is lost
     /// - SQL query to retrieve dataset tags fails
     /// - Database schema inconsistencies prevent tag retrieval
-    #[error("failed to list dataset tags: {0}")]
+    #[error("failed to list dataset tags")]
     ListDatasetTags(#[source] ListDatasetsUsingManifestError),
 }
 

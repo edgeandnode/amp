@@ -168,7 +168,7 @@ pub enum Error {
     ///
     /// This covers database connection issues, query failures,
     /// and other internal database errors.
-    #[error("metadata db error: {0}")]
+    #[error("metadata db error")]
     MetadataDbError(#[source] metadata_db::Error),
 }
 

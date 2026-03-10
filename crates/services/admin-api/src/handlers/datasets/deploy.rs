@@ -275,7 +275,7 @@ pub enum Error {
     /// This occurs when:
     /// - The namespace, name, or revision in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Invalid request body
     ///
@@ -283,7 +283,7 @@ pub enum Error {
     /// - The request body is not valid JSON
     /// - The JSON structure doesn't match the expected schema
     /// - Required fields are missing or have invalid types
-    #[error("Invalid request body: {0}")]
+    #[error("Invalid request body")]
     InvalidBody(#[source] JsonRejection),
     /// Dataset or revision not found
     ///
@@ -303,7 +303,7 @@ pub enum Error {
     /// - Failed to query version tags from the dataset store
     /// - Database connection issues
     /// - Internal database errors
-    #[error("Failed to list version tags: {0}")]
+    #[error("Failed to list version tags")]
     ListVersionTags(#[source] ListVersionTagsError),
     /// Dataset store operation error when resolving revision
     ///
@@ -311,7 +311,7 @@ pub enum Error {
     /// - Failed to resolve revision to manifest hash
     /// - Database connection issues
     /// - Internal database errors
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
     /// Dataset store operation error when loading dataset
     ///
@@ -319,7 +319,7 @@ pub enum Error {
     /// - Failed to load dataset configuration from manifest
     /// - Manifest parsing errors
     /// - Invalid dataset structure
-    #[error("Failed to load dataset: {0}")]
+    #[error("Failed to load dataset")]
     GetDataset(#[source] GetDatasetError),
     /// Scheduler error
     ///
@@ -327,7 +327,7 @@ pub enum Error {
     /// - Failed to create or schedule extraction job
     /// - Scheduler is unavailable or overloaded
     /// - Invalid job configuration
-    #[error("Failed to schedule job: {0}")]
+    #[error("Failed to schedule job")]
     Scheduler(#[source] ScheduleJobError),
 }
 

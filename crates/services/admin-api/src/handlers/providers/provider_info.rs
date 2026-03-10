@@ -58,10 +58,10 @@ impl TryFrom<(ProviderName, ProviderConfigRaw)> for ProviderInfo {
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderInfoConversionError {
     /// Failed to parse the header fields (kind) from the config
-    #[error("failed to parse provider config header: {0}")]
+    #[error("failed to parse provider config header")]
     HeaderParse(#[source] amp_providers_common::config::InvalidConfigError),
 
     /// Failed to convert TOML table to JSON map
-    #[error("failed to convert TOML table to JSON map: {0}")]
+    #[error("failed to convert TOML table to JSON map")]
     JsonConversion(#[source] serde_json::Error),
 }

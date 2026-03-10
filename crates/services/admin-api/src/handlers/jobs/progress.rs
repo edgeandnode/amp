@@ -328,7 +328,7 @@ pub enum Error {
     ///
     /// This indicates a catalog inconsistency and is distinguishable from the
     /// "no data synced yet" case, which returns HTTP 200 with null block fields.
-    #[error("table has multi-network segments: {0}")]
+    #[error("table has multi-network segments")]
     MultiNetworkSegments(#[source] common::physical_table::MultiNetworkSegmentsError),
 
     /// A block number from the synced range cannot be represented as i64.

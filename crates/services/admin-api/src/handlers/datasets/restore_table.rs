@@ -254,7 +254,7 @@ pub enum Error {
     ///
     /// One or more path segments (namespace, name, revision, or table_name)
     /// could not be parsed into their expected types.
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
 
     /// Invalid request body
@@ -263,7 +263,7 @@ pub enum Error {
     /// - The request body is not valid JSON
     /// - The JSON structure doesn't match the expected schema
     /// - Required fields are missing or have invalid types
-    #[error("Invalid request body: {0}")]
+    #[error("Invalid request body")]
     InvalidBody(#[source] serde_json::Error),
 
     /// Dataset or revision not found
@@ -281,14 +281,14 @@ pub enum Error {
     ///
     /// The datasets registry could not resolve the given revision reference
     /// (version string, hash, "latest", or "dev") to a concrete manifest hash.
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
 
     /// Failed to load dataset from the dataset store
     ///
     /// The resolved hash reference exists but the dataset object could not
     /// be loaded from the backing store.
-    #[error("Failed to load dataset: {0}")]
+    #[error("Failed to load dataset")]
     GetDataset(#[source] common::datasets_cache::GetDatasetError),
 
     /// Table not found in the dataset manifest
@@ -320,7 +320,7 @@ pub enum Error {
     /// The transactional upsert-and-activate operation failed. This covers
     /// registering the physical table row, deactivating existing revisions,
     /// and activating the specified `location_id`.
-    #[error("Failed to register and activate physical table: {0}")]
+    #[error("Failed to register and activate physical table")]
     RegisterAndActivatePhysicalTable(
         #[source] amp_data_store::RegisterAndActivatePhysicalTableError,
     ),

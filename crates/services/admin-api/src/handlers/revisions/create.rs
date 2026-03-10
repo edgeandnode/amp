@@ -151,7 +151,7 @@ pub enum Error {
     /// - Failed to query metadata database for revision information
     /// - Database connection issues
     /// - Internal database errors during revision resolution
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
 
     /// Failed to register table revision
@@ -160,7 +160,7 @@ pub enum Error {
     /// - Failed to register table revision in metadata database
     /// - Database connection issues
     /// - Internal database errors during table revision registration
-    #[error("Failed to register table revision: {0}")]
+    #[error("Failed to register table revision")]
     RegisterTableRevision(#[source] RegisterTableRevisionError),
 }
 

@@ -129,7 +129,7 @@ pub enum Error {
     /// This occurs when:
     /// - The namespace, name, or revision in the URL path is invalid
     /// - Path parameter parsing fails
-    #[error("Invalid path parameters: {0}")]
+    #[error("Invalid path parameters")]
     InvalidPath(#[source] PathRejection),
     /// Dataset or revision not found
     ///
@@ -157,7 +157,7 @@ pub enum Error {
     /// - Failed to query metadata database for revision information
     /// - Database connection issues
     /// - Internal database errors during revision resolution
-    #[error("Failed to resolve revision: {0}")]
+    #[error("Failed to resolve revision")]
     ResolveRevision(#[source] ResolveRevisionError),
     /// Failed to query manifest path from metadata database
     ///
@@ -165,7 +165,7 @@ pub enum Error {
     /// - Failed to query manifest file path from metadata database
     /// - Database connection issues
     /// - Internal database errors
-    #[error("Failed to query manifest path: {0}")]
+    #[error("Failed to query manifest path")]
     GetManifestPath(#[source] GetManifestError),
     /// Failed to read manifest from object store
     ///
@@ -174,7 +174,7 @@ pub enum Error {
     /// - Object store connection issues
     /// - Permissions issues accessing object store
     /// - Network errors
-    #[error("Failed to read manifest from object store: {0}")]
+    #[error("Failed to read manifest from object store")]
     ReadManifest(#[source] GetManifestError),
     /// Failed to parse manifest JSON
     ///
@@ -182,7 +182,7 @@ pub enum Error {
     /// - Manifest file contains invalid JSON
     /// - Manifest structure doesn't match expected schema
     /// - Required fields are missing
-    #[error("Failed to parse manifest: {0}")]
+    #[error("Failed to parse manifest")]
     ParseManifest(#[source] ManifestParseError),
 }
 
