@@ -137,7 +137,7 @@ pub fn stream(
                     Err(Of1StreamError::NodeParse(car_parser::node::NodeError::Io(io_err))) => {
                         match io_err.downcast::<CarReaderError>() {
                             // No more CAR files available, not an error.
-                            Ok(CarReaderError::FileNotFound) => {},
+                            Ok(CarReaderError::Http(reqwest::StatusCode::NOT_FOUND)) => {},
                             // Non-recoverable error from the `CarReader`.
                             Ok(car_err) => {
                                 yield Err(Of1StreamError::FileStream(car_err));
@@ -197,12 +197,11 @@ pub enum CarReaderError {
     /// HTTP requests to access the CAR file.
     #[error("Reqwest error: {0}")]
     Reqwest(#[source] reqwest::Error),
-    /// The CAR file for the requested epoch was not found (HTTP 404).
+    /// The server responded with an HTTP error status code when trying to access the CAR file.
     ///
-    /// This is a non-recoverable error because it indicates that the expected data
-    /// is not available and retrying will not resolve the issue.
-    #[error("CAR file not found (HTTP 404)")]
-    FileNotFound,
+    /// This can occur due to network issues, server problems, or if the CAR file is not available.
+    #[error("HTTP error: {0}")]
+    Http(reqwest::StatusCode),
     /// The server does not support HTTP range requests.
     ///
     /// This is a non-recoverable error because the [`CarReader`] relies on range
@@ -580,7 +579,7 @@ impl CarReader {
         }
     }
 
-    fn schedule_backoff(&mut self, reason: impl std::fmt::Display) {
+    fn schedule_backoff(&mut self, err: CarReaderError) {
         self.reconnect_attempt = self.reconnect_attempt.saturating_add(1);
         let backoff = compute_backoff(self.base_backoff, self.max_backoff, self.reconnect_attempt);
 
@@ -589,7 +588,8 @@ impl CarReader {
             epoch = self.epoch,
             bytes_read = self.bytes_read_total,
             attempt = self.reconnect_attempt,
-            reason = %reason,
+            error = ?err,
+            error_source = monitoring::logging::error_source(&err),
             backoff = %backoff_str,
             "CAR reader failed; scheduled retry"
         );
@@ -624,11 +624,11 @@ impl tokio::io::AsyncRead for CarReader {
                         // Handle error codes.
                         match status {
                             reqwest::StatusCode::NOT_FOUND => {
-                                let e = std::io::Error::other(CarReaderError::FileNotFound);
-                                return std::task::Poll::Ready(Err(e));
+                                let err = std::io::Error::other(CarReaderError::Http(status));
+                                return std::task::Poll::Ready(Err(err));
                             }
                             status if !status.is_success() => {
-                                this.schedule_backoff(format!("HTTP error: {status}"));
+                                this.schedule_backoff(CarReaderError::Http(status));
                                 continue;
                             }
                             _ => {}
@@ -652,7 +652,7 @@ impl tokio::io::AsyncRead for CarReader {
                         this.state = ReaderState::Stream(stream);
                     }
                     std::task::Poll::Ready(Err(e)) => {
-                        this.schedule_backoff(format!("request error: {e}"));
+                        this.schedule_backoff(CarReaderError::Reqwest(e));
                     }
                     std::task::Poll::Pending => return std::task::Poll::Pending,
                 },
@@ -673,7 +673,7 @@ impl tokio::io::AsyncRead for CarReader {
                         return std::task::Poll::Ready(Ok(()));
                     }
                     std::task::Poll::Ready(Some(Err(e))) => {
-                        this.schedule_backoff(format!("stream error: {e}"));
+                        this.schedule_backoff(CarReaderError::Reqwest(e));
                     }
                     std::task::Poll::Pending => return std::task::Poll::Pending,
                 },
