@@ -8,6 +8,7 @@ license-file.workspace = true
 alloy.workspace = true
 amp-client = { path = "../../clients/flight" }
 anyhow.workspace = true
+arrow.workspace = true
 arrow-flight.workspace = true
 clap.workspace = true
 futures.workspace = true
@@ -15,6 +16,7 @@ indicatif.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 typed-arrow.workspace = true

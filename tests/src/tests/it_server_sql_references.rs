@@ -311,9 +311,15 @@ impl TestCtx {
             .parse()
             .expect("should parse multi_version reference");
         let ampctl = self.ctx.new_ampctl();
-        test_helpers::deploy_and_wait(&ampctl, &dump_ref, Some(15000000), Duration::from_secs(60))
-            .await
-            .expect("failed to dump multi_version dataset");
+        test_helpers::deploy_and_wait(
+            &ampctl,
+            &dump_ref,
+            Some(15000000),
+            Duration::from_secs(60),
+            false,
+        )
+        .await
+        .expect("failed to dump multi_version dataset");
     }
 
     /// Register the `basic_function` package with a semver tag.

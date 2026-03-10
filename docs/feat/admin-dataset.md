@@ -69,6 +69,9 @@ ampctl dataset deploy my_namespace/my_dataset@1.0.0 --parallelism 4
 
 # Assign to a specific worker
 ampctl dataset deploy my_namespace/my_dataset@1.0.0 --worker-id my-worker
+
+# Enable cryptographic verification for EVM datasets
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --verify
 ```
 
 **List registered datasets:**

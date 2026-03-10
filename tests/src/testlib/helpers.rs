@@ -127,6 +127,7 @@ pub async fn deploy_and_wait(
     dataset_ref: &Reference,
     end_block: Option<u64>,
     timeout: Duration,
+    verify: bool,
 ) -> Result<amp_client_admin::jobs::JobInfo> {
     let is_continuous = end_block.is_none();
     let job_id = ampctl
@@ -135,6 +136,7 @@ pub async fn deploy_and_wait(
             end_block,
             Some(1), // parallelism
             None,    // worker_id (auto-select)
+            verify,
         )
         .await?;
 

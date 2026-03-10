@@ -35,6 +35,15 @@ impl IntoIterator for Rows {
     }
 }
 
+impl<'a> IntoIterator for &'a Rows {
+    type Item = &'a TableRows;
+    type IntoIter = std::slice::Iter<'a, TableRows>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
 /// A record batch associated with a single block of chain data, for populating raw datasets.
 pub struct TableRows {
     pub table: Table,

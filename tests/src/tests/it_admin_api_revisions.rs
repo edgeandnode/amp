@@ -656,7 +656,7 @@ async fn delete_revision_with_active_writer_returns_409() {
 
     // Deploy dataset — schedules a job, worker creates revisions and assigns writer
     ctx.ampctl_client
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None, false)
         .await
         .expect("failed to deploy dataset");
 
@@ -710,7 +710,7 @@ async fn delete_revision_with_stopped_writer_succeeds() {
     // Deploy dataset — schedules a job, worker creates revisions and assigns writer
     let job_id = ctx
         .ampctl_client
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None, false)
         .await
         .expect("failed to deploy dataset");
 
@@ -892,7 +892,7 @@ async fn truncate_revision_with_active_writer_returns_409() {
 
     // Deploy dataset — schedules a job, worker creates revisions and assigns writer
     ctx.ampctl_client
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None, false)
         .await
         .expect("failed to deploy dataset");
 
@@ -946,7 +946,7 @@ async fn truncate_revision_with_stopped_writer_succeeds() {
     // Deploy dataset — schedules a job, worker creates revisions and assigns writer
     let job_id = ctx
         .ampctl_client
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None, false)
         .await
         .expect("failed to deploy dataset");
 
@@ -1110,7 +1110,7 @@ async fn prune_revision_with_active_writer_returns_409() {
 
     // Deploy dataset - schedules a job, worker creates revisions and assigns writer
     ctx.ampctl_client
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None, false)
         .await
         .expect("failed to deploy dataset");
 
@@ -1151,7 +1151,7 @@ async fn prune_revision_with_stopped_writer_succeeds() {
     // Deploy dataset - schedules a job, worker creates revisions and assigns writer
     let job_id = ctx
         .ampctl_client
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, None, None, false)
         .await
         .expect("failed to deploy dataset");
 
@@ -1216,6 +1216,7 @@ async fn prune_revision_with_reorg_schedules_non_canonical_files() {
         &dataset_ref,
         Some(10),
         std::time::Duration::from_secs(30),
+        false,
     )
     .await
     .expect("failed to deploy dataset");
@@ -1252,6 +1253,7 @@ async fn prune_revision_with_reorg_schedules_non_canonical_files() {
         &dataset_ref,
         Some(13),
         std::time::Duration::from_secs(30),
+        false,
     )
     .await
     .expect("failed to deploy dataset after reorg");

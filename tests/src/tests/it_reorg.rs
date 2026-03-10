@@ -437,7 +437,7 @@ impl ReorgTestCtx {
     async fn dump(&self, dataset: &str, end: Option<BlockNum>) {
         let ampctl = self.ctx.new_ampctl();
         let dataset_ref: Reference = format!("_/{}@0.0.0", dataset).parse().unwrap();
-        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, end, Duration::from_secs(30))
+        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, end, Duration::from_secs(30), false)
             .await
             .expect("Failed to dump dataset");
     }

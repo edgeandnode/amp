@@ -1271,6 +1271,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "verification",
 ]
 
 [[package]]
@@ -13818,6 +13819,7 @@ dependencies = [
  "alloy",
  "amp-client",
  "anyhow",
+ "arrow",
  "arrow-flight",
  "clap",
  "futures",
@@ -13825,6 +13827,7 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tonic",
  "typed-arrow",

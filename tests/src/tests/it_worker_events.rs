@@ -404,7 +404,7 @@ async fn e2e_anvil_sync_captures_lifecycle_events() {
     //* When: Deploy the dataset with an end block so the job completes
     let ampctl = ctx.new_ampctl();
     let job_id = ampctl
-        .dataset_deploy("_/anvil_rpc@0.0.0", Some(2000), None, None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", Some(2000), None, None, false)
         .await
         .expect("failed to deploy dataset");
 

@@ -18,7 +18,7 @@ async fn evm_rpc_single_dump() {
     test.deactivate_all_revisions(&tables).await;
 
     //* When
-    test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block, false).await;
 
     //* Then
     // Validate table consistency
@@ -55,7 +55,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     test.deactivate_all_revisions(&tables).await;
 
     //* When
-    test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block, false).await;
 
     //* Then
     // Validate table consistency
@@ -92,7 +92,7 @@ async fn evm_rpc_base_single_dump() {
     test.deactivate_all_revisions(&tables).await;
 
     //* When
-    test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block, false).await;
 
     //* Then
     // Validate table consistency
@@ -129,7 +129,7 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     test.deactivate_all_revisions(&tables).await;
 
     //* When
-    test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block, false).await;
 
     //* Then
     // Validate table consistency
@@ -166,7 +166,7 @@ async fn eth_firehose_single_dump() {
     test.deactivate_all_revisions(&tables).await;
 
     //* When
-    test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block, false).await;
 
     //* Then
     // Validate table consistency
@@ -203,7 +203,7 @@ async fn base_firehose_single_dump() {
     test.deactivate_all_revisions(&tables).await;
 
     //* When
-    test.dump_and_create_snapshot(block).await;
+    test.dump_and_create_snapshot(block, false).await;
 
     //* Then
     // Validate table consistency
@@ -293,7 +293,7 @@ impl TestCtx {
     ///
     /// This method exercises the full production code path by scheduling a job
     /// via the Admin API and waiting for the worker to complete it.
-    async fn dump_and_create_snapshot(&self, block: u64) -> Vec<Arc<PhysicalTable>> {
+    async fn dump_and_create_snapshot(&self, block: u64, verify: bool) -> Vec<Arc<PhysicalTable>> {
         let ampctl = self.ctx.new_ampctl();
 
         // Deploy via scheduler/worker
@@ -302,6 +302,7 @@ impl TestCtx {
             &self.dataset_ref,
             Some(block),
             Duration::from_secs(60),
+            verify,
         )
         .await
         .expect("Failed to dump dataset via worker");
@@ -392,4 +393,31 @@ fn assert_json_eq_ignoring_nulls(reference: &Value, dumped: &Value) {
             assert_eq!(ref_val, dump_val, "mismatch at row {i}, field \"{key}\"");
         }
     }
+}
+
+#[tokio::test]
+async fn evm_rpc_single_dump_with_verify() {
+    //* Given
+    let test = TestCtx::setup(
+        "evm_rpc_single_dump_with_verify",
+        "_/eth_rpc@0.0.0",
+        "rpc_eth_mainnet",
+    )
+    .await;
+
+    let block = test.get_dataset_start_block().await;
+    let tables = test.restore_reference_snapshot().await;
+    test.deactivate_all_revisions(&tables).await;
+
+    //* When - Extract with verification enabled
+    test.dump_and_create_snapshot(block, true).await;
+
+    //* Then - If we get here, verification passed during extraction
+    // Validate table consistency
+    for table in &tables {
+        test_helpers::check_table_consistency(table, test.ctx.daemon_server().data_store())
+            .await
+            .expect("Table consistency check failed");
+    }
+    // Test succeeds if the job completes without verification errors
 }

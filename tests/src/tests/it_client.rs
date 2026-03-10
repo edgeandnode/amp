@@ -157,9 +157,15 @@ impl TestCtx {
     async fn dump(&self, dataset: &str, end: BlockNum) {
         let ampctl = self.ctx.new_ampctl();
         let dataset_ref: Reference = dataset.parse().expect("failed to parse dataset reference");
-        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, Some(end), Duration::from_secs(30))
-            .await
-            .expect("Failed to dump dataset via worker");
+        test_helpers::deploy_and_wait(
+            &ampctl,
+            &dataset_ref,
+            Some(end),
+            Duration::from_secs(30),
+            false,
+        )
+        .await
+        .expect("Failed to dump dataset via worker");
     }
 
     /// Query blocks from the specified dataset.
