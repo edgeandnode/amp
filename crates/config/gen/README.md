@@ -18,7 +18,7 @@ Or using the full `cargo` command:
 RUSTFLAGS="--cfg gen_schema_config" cargo check -p amp-config-gen
 
 mkdir -p docs/config
-cp target/debug/build/amp-config-gen-*/out/schema.json docs/config/ampd.spec.json
+cp target/debug/build/amp-config-gen-*/out/schema.json docs/schemas/config/ampd.spec.json
 ```
 
-This will generate a JSON schema from the ampd configuration types and copy it to `docs/config/ampd.spec.json`.
+This will generate a JSON schema from the ampd configuration types and copy it to `docs/schemas/config/ampd.spec.json`.

@@ -55,8 +55,8 @@ Most `gen-*` commands accept an optional `DEST_DIR` parameter to override the ou
 - Before committing changes to manifest-related code
 
 ### Output Locations
-- **Manifest Schemas**: `docs/manifest-schemas/` (default)
-- **OpenAPI Specs**: `docs/openapi-specs/` (default)
+- **Manifest Schemas**: `docs/schemas/manifest/` (default)
+- **OpenAPI Specs**: `docs/schemas/openapi/` (default)
 
 ## Concrete Examples
 
@@ -66,7 +66,7 @@ Most `gen-*` commands accept an optional `DEST_DIR` parameter to override the ou
 ```bash
 just gen-raw-dataset-manifest-schema
 ```
-**Result**: Updated `docs/manifest-schemas/raw.spec.json` with new field
+**Result**: Updated `docs/schemas/manifest/raw.spec.json` with new field
 
 ### Example 2: After Modifying Admin API Endpoint
 **Situation**: Added new `/workers` endpoint to admin API
@@ -74,7 +74,7 @@ just gen-raw-dataset-manifest-schema
 ```bash
 just gen-admin-api-openapi-spec
 ```
-**Result**: Updated `docs/openapi-specs/admin.spec.json` with new endpoint
+**Result**: Updated `docs/schemas/openapi/admin.spec.json` with new endpoint
 
 ### Example 3: Multiple Changes Across Datasets
 **Situation**: Refactored field types across multiple dataset types

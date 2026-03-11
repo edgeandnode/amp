@@ -467,10 +467,10 @@ Omit this section for simple features where usage is self-explanatory.}}
 |----------|--------|-------------|
 | `/path` | POST | What this endpoint does |
 
-For request/response schemas, see [OpenAPI spec](../openapi-specs/spec.json):
+For request/response schemas, see [OpenAPI spec](../schemas/openapi/spec.json):
 
 ```bash
-jq '.paths["/path"]' docs/openapi-specs/spec.json
+jq '.paths["/path"]' docs/schemas/openapi/spec.json
 ```
 
 ## Implementation {{OPTIONAL}}
