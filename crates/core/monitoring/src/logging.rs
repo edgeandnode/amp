@@ -69,6 +69,7 @@ const AMP_CRATES: &[&str] = &[
     "amp_config",
     "amp_data_store",
     "amp_datasets_registry",
+    "amp_datasets_static",
     "amp_object_store",
     "amp_parquet",
     "amp_providers_common",

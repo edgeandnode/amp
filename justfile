@@ -216,6 +216,7 @@ gen:
     @cp -f $(ls -t target/debug/build/amp-config-gen-*/out/schema.json | head -1) {{GEN_CONFIG_SCHEMAS_OUTDIR}}/ampd.spec.json
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
     @cp -f $(ls -t target/debug/build/amp-datasets-raw-gen-*/out/raw.schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/raw.spec.json
+    @cp -f $(ls -t target/debug/build/amp-datasets-static-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/static.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-firehose-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-solana-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json
@@ -228,6 +229,7 @@ gen:
     @echo "  {{GEN_CONFIG_SCHEMAS_OUTDIR}}/ampd.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/raw.spec.json"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/static.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json"
@@ -253,6 +255,14 @@ gen-raw-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/amp-datasets-raw-gen-*/out/raw.schema.json | head -1) {{DEST_DIR}}/raw.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/raw.spec.json"
+
+# Generate the static dataset manifest JSON schema
+[group: 'codegen']
+gen-static-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema_manifest" cargo check -p amp-datasets-static-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/amp-datasets-static-gen-*/out/schema.json | head -1) {{DEST_DIR}}/static.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/static.spec.json"
 
 ### Provider Config Schema generation
 

@@ -1022,6 +1022,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "amp-datasets-static"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "datasets-common",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "amp-datasets-static-gen"
+version = "0.1.0"
+dependencies = [
+ "amp-datasets-static",
+ "schemars 1.2.1",
+ "serde_json",
+]
+
+[[package]]
 name = "amp-object-store"
 version = "0.1.0"
 dependencies = [

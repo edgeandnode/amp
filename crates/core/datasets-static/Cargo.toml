@@ -1,0 +1,19 @@
+[package]
+name = "amp-datasets-static"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
+
+[dependencies]
+datafusion.workspace = true
+datasets-common = { path = "../datasets-common" }
+schemars = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json.workspace = true
