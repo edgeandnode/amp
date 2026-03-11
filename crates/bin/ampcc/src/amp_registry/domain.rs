@@ -180,9 +180,9 @@ pub enum DerivedManifest {
     /// The Dataset is a derived Dataset kind
     Manifest(amp_datasets_derived::Manifest),
     /// The Dataset is an evm-rpc Dataset kind
-    EvmRpc(amp_datasets_evmrpc::Manifest),
+    EvmRpc(amp_datasets_raw::manifest::EvmRpcManifest),
     /// The Dataset is a firehose Dataset kind
-    Firehose(amp_datasets_firehose::Manifest),
+    Firehose(amp_datasets_raw::manifest::FirehoseManifest),
 }
 
 /// Status of the DatasetVersion

@@ -215,9 +215,7 @@ gen:
     @mkdir -p {{GEN_CONFIG_SCHEMAS_OUTDIR}} {{GEN_MANIFEST_SCHEMAS_OUTDIR}} {{GEN_OPENAPI_SCHEMAS_OUTDIR}} {{GEN_TABLE_SCHEMAS_OUTDIR}} {{GEN_PROVIDER_SCHEMAS_OUTDIR}}
     @cp -f $(ls -t target/debug/build/amp-config-gen-*/out/schema.json | head -1) {{GEN_CONFIG_SCHEMAS_OUTDIR}}/ampd.spec.json
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json
-    @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
-    @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/solana.spec.json
-    @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json
+    @cp -f $(ls -t target/debug/build/amp-datasets-raw-gen-*/out/raw.schema.json | head -1) {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/raw.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-firehose-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json
     @cp -f $(ls -t target/debug/build/amp-providers-solana-gen-*/out/schema.json | head -1) {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json
@@ -229,9 +227,7 @@ gen:
     @echo "Schemas generated and copied:"
     @echo "  {{GEN_CONFIG_SCHEMAS_OUTDIR}}/ampd.spec.json"
     @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/derived.spec.json"
-    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
-    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/solana.spec.json"
-    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/firehose.spec.json"
+    @echo "  {{GEN_MANIFEST_SCHEMAS_OUTDIR}}/raw.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/evm-rpc.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/firehose.spec.json"
     @echo "  {{GEN_PROVIDER_SCHEMAS_OUTDIR}}/solana.spec.json"
@@ -250,29 +246,13 @@ gen-derived-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
     @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
 
-# Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema_manifest" cargo build)
+# Generate the unified raw dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema_manifest" cargo build)
 [group: 'codegen']
-gen-evm-rpc-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
-    RUSTFLAGS="--cfg gen_schema_manifest" cargo check -p datasets-evm-rpc-gen
+gen-raw-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
+    RUSTFLAGS="--cfg gen_schema_manifest" cargo check -p amp-datasets-raw-gen
     @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{DEST_DIR}}/evm-rpc.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/evm-rpc.spec.json"
-
-# Generate the Solana dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema_manifest" cargo build)
-[group: 'codegen']
-gen-solana-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
-    RUSTFLAGS="--cfg gen_schema_manifest" cargo check -p datasets-solana-gen
-    @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/schema.json | head -1) {{DEST_DIR}}/solana.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/solana.spec.json"
-
-# Generate the Firehose dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
-[group: 'codegen']
-gen-firehose-dataset-manifest-schema DEST_DIR=GEN_MANIFEST_SCHEMAS_OUTDIR:
-    RUSTFLAGS="--cfg gen_schema_manifest" cargo check -p datasets-firehose-gen
-    @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{DEST_DIR}}/firehose.spec.json
-    @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
+    @cp -f $(ls -t target/debug/build/amp-datasets-raw-gen-*/out/raw.schema.json | head -1) {{DEST_DIR}}/raw.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/raw.spec.json"
 
 ### Provider Config Schema generation
 
@@ -320,7 +300,7 @@ gen-config-schema DEST_DIR=GEN_CONFIG_SCHEMAS_OUTDIR:
 
 ### Table Schema markdown generation
 
-# Generate the EVM RPC table schema markdown (RUSTFLAGS="--cfg gen_schema_tables" cargo build)
+# Generate EVM RPC table schema markdown
 [group: 'codegen']
 gen-evm-rpc-tables-schema DEST_DIR=GEN_TABLE_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema_tables" cargo check -p datasets-evm-rpc-gen
@@ -328,7 +308,7 @@ gen-evm-rpc-tables-schema DEST_DIR=GEN_TABLE_SCHEMAS_OUTDIR:
     @cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/tables.md | head -1) {{DEST_DIR}}/evm-rpc.md
     @echo "Table schema markdown generated and copied to {{DEST_DIR}}/evm-rpc.md"
 
-# Generate the Solana table schema markdown (RUSTFLAGS="--cfg gen_schema_tables" cargo build)
+# Generate Solana table schema markdown
 [group: 'codegen']
 gen-solana-tables-schema DEST_DIR=GEN_TABLE_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema_tables" cargo check -p datasets-solana-gen
@@ -336,7 +316,7 @@ gen-solana-tables-schema DEST_DIR=GEN_TABLE_SCHEMAS_OUTDIR:
     @cp -f $(ls -t target/debug/build/datasets-solana-gen-*/out/tables.md | head -1) {{DEST_DIR}}/solana.md
     @echo "Table schema markdown generated and copied to {{DEST_DIR}}/solana.md"
 
-# Generate the Firehose table schema markdown (RUSTFLAGS="--cfg gen_schema_tables" cargo build)
+# Generate Firehose table schema markdown
 [group: 'codegen']
 gen-firehose-tables-schema DEST_DIR=GEN_TABLE_SCHEMAS_OUTDIR:
     RUSTFLAGS="--cfg gen_schema_tables" cargo check -p datasets-firehose-gen

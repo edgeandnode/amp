@@ -5,12 +5,8 @@ files automatically in your editor.
 
 The `kind` field determines what dataset type schemas are supported:
 
-- for `evm-rpc` kind datasets, see [evm-rpc.spec.json](./evm-rpc.spec.json)
-- for `solana` datasets, see [solana.spec.json](./solana.spec.json)
-- for `firehose` kind datasets, see [firehose.spec.json](./firehose.spec.json)
-- for `manifest` kind datasets, see [derived.spec.json](./derived.spec.json)
+- for raw datasets (`evm-rpc`, `firehose`, `solana`), see [raw.spec.json](./raw.spec.json)
+- for derived (`manifest` kind) datasets, see [derived.spec.json](./derived.spec.json)
 
-The `manifest` datasets are also referred to as "derived datasets", whereas the other
-types are also referred to as "raw datasets". Unlike raw datasets, which extract
-blockchain data directly, derived datasets execute user-defined SQL queries against
-existing datasets' tables.
+Raw datasets extract blockchain data directly, while derived datasets execute
+user-defined SQL queries against existing datasets' tables.

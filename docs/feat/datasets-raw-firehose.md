@@ -15,8 +15,8 @@ The Firehose dataset defines table schemas for EVM-compatible blockchain data as
 ## Table of Contents
 
 1. [Key Concepts](#key-concepts)
-2. [Configuration](#configuration)
-3. [Usage](#usage)
+2. [Manifest](#manifest)
+3. [Schema](#schema)
 4. [Implementation](#implementation)
 5. [References](#references)
 
@@ -26,42 +26,15 @@ The Firehose dataset defines table schemas for EVM-compatible blockchain data as
 - **Call Traces**: The `calls` table schema describes internal contract-to-contract calls within a transaction, including input/output data, gas usage, and call type (call, delegatecall, staticcall, create)
 - **Shared EVM Schemas**: The `blocks` and `logs` tables use the same shared schemas as the EVM RPC dataset, ensuring consistent column definitions across EVM-compatible dataset kinds
 
-## Configuration
+## Manifest
 
-For the complete field reference, see the [manifest schema](../manifest-schemas/firehose.spec.json).
+See the [raw dataset manifest schema](../manifest-schemas/raw.spec.json) for the complete field reference, types, defaults, and examples.
 
-### Example Manifest
+## Schema
 
-```json
-{
-  "kind": "firehose",
-  "network": "mainnet",
-  "start_block": 0,
-  "finalized_blocks_only": false,
-  "tables": {
-    "blocks": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" },
-    "transactions": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" },
-    "calls": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" },
-    "logs": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" }
-  }
-}
-```
+This dataset declares four tables: `blocks`, `transactions`, `calls`, and `logs`.
 
-### Manifest Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `kind` | `"firehose"` | Dataset kind identifier |
-| `network` | string | Target EVM network (e.g., `mainnet`, `base`) |
-| `start_block` | u64 | First block number for data |
-| `finalized_blocks_only` | bool | Restrict to finalized blocks |
-| `tables` | object | Table definitions with schemas |
-
-## Usage
-
-This dataset declares four tables: `blocks`, `transactions`, `calls`, and `logs`. For detailed column definitions, see the [table schema](../schemas/firehose-evm.md).
-
-The `blocks` and `logs` tables share schemas with the EVM RPC dataset. The `calls` and `transactions` tables are unique to Firehose, with `calls` being the key differentiator — it describes internal contract interactions not available via JSON-RPC.
+For detailed column definitions, see the [table schema](../schemas/firehose-evm.md).
 
 ## Implementation
 

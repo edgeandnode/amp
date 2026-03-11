@@ -16,7 +16,7 @@ Raw datasets describe blockchain data through block-indexed table schemas. Each 
 
 1. [Key Concepts](#key-concepts)
 2. [Architecture](#architecture)
-3. [Usage](#usage)
+3. [Manifest](#manifest)
 4. [Implementation](#implementation)
 5. [References](#references)
 
@@ -57,34 +57,15 @@ Every `TableRows` value is validated against these invariants:
 - The record batch schema matches the table's declared Arrow schema
 - Block ranges are consistent across all tables in a single `Rows`
 
-## Usage
+## Manifest
 
-### Raw Dataset Manifest Fields
-
-Raw dataset manifests extend the common manifest with:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `kind` | string | Raw kind identifier (`evm-rpc`, `firehose`, `solana`) |
-| `network` | string | Target blockchain network (e.g., `mainnet`, `base`) |
-| `start_block` | u64 | First block number to extract |
-| `finalized_blocks_only` | bool | Whether to restrict to finalized blocks |
-| `tables` | object | Map of table name to table schema |
+For the complete field reference, types, defaults, and examples, see the [raw dataset manifest schema](../manifest-schemas/raw.spec.json).
 
 ### Network Identifier
 
 Every raw dataset table includes a `network` field identifying the blockchain network. The `NetworkId` type enforces that identifiers are non-empty strings. Values should follow [The Graph's networks registry](https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md) (e.g., `mainnet`, `base`, `arbitrum-one`, `solana-mainnet`).
 
 The network identifier appears both at the manifest level and on each individual table definition.
-
-### Shared EVM Types
-
-The `datasets-raw` crate provides shared EVM table definitions used by both the EVM RPC and Firehose extractors:
-
-- **blocks** — Block headers (number, hash, timestamp, gas, etc.)
-- **logs** — Event logs (address, topics, data, log index)
-
-These shared definitions ensure schema consistency across EVM-compatible extractors.
 
 ## Implementation
 
