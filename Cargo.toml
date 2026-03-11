@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/arrow-to-postgres",
-    "crates/auth/http",
     "crates/clients/admin",
     "crates/bin/ampctl",
     "crates/bin/ampcc",
