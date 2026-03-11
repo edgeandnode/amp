@@ -64,6 +64,16 @@ pub struct Args {
     /// The worker must be active (has sent heartbeats recently) for the deployment to succeed.
     #[arg(long, value_parser = clap::value_parser!(NodeSelector))]
     pub worker_id: Option<NodeSelector>,
+
+    /// Enable cryptographic verification of EVM block data during extraction
+    ///
+    /// When enabled, verifies block hashes, transaction roots, and receipt roots
+    /// before writing data to storage. Only applicable to EVM raw datasets.
+    /// Verification failures are retryable errors.
+    ///
+    /// Defaults to false if not specified.
+    #[arg(long)]
+    pub verify: bool,
 }
 
 /// Deploy a dataset to start syncing blockchain data.
@@ -81,6 +91,7 @@ pub async fn run(
         end_block,
         parallelism,
         worker_id,
+        verify,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!(
@@ -88,10 +99,19 @@ pub async fn run(
         ?end_block,
         %parallelism,
         ?worker_id,
+        %verify,
         "Deploying dataset"
     );
 
-    let job_id = deploy_dataset(&global, &dataset_ref, end_block, parallelism, worker_id).await?;
+    let job_id = deploy_dataset(
+        &global,
+        &dataset_ref,
+        end_block,
+        parallelism,
+        worker_id,
+        verify,
+    )
+    .await?;
     let result = DeployResult { job_id };
     global.print(&result).map_err(Error::JsonSerialization)?;
 
@@ -102,18 +122,19 @@ pub async fn run(
 ///
 /// POSTs to the versioned `/datasets/{namespace}/{name}/versions/{version}/deploy` endpoint
 /// and returns the job ID.
-#[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism, ?worker_id))]
+#[tracing::instrument(skip_all, fields(%dataset_ref, ?end_block, %parallelism, ?worker_id, %verify))]
 async fn deploy_dataset(
     global: &GlobalArgs,
     dataset_ref: &Reference,
     end_block: Option<EndBlock>,
     parallelism: u16,
     worker_id: Option<NodeSelector>,
+    verify: bool,
 ) -> Result<JobId, Error> {
     let client = global.build_client().map_err(Error::ClientBuild)?;
     let job_id = client
         .datasets()
-        .deploy(dataset_ref, end_block, parallelism, worker_id)
+        .deploy(dataset_ref, end_block, parallelism, worker_id, verify)
         .await
         .map_err(Error::Deploy)?;
 

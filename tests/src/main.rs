@@ -385,7 +385,7 @@ async fn bless(
 
     // Dump the dataset
     tracing::debug!(%dataset, end_block=end, "Dumping dataset");
-    test_helpers::deploy_and_wait(ampctl, &dataset, Some(end), Duration::from_secs(30))
+    test_helpers::deploy_and_wait(ampctl, &dataset, Some(end), Duration::from_secs(30), false)
         .await
         .map_err(|err| {
             anyhow!(

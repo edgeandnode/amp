@@ -268,6 +268,7 @@ impl<'a> DatasetsClient<'a> {
         end_block: Option<EndBlock>,
         parallelism: u16,
         worker_id: Option<NodeSelector>,
+        verify: bool,
     ) -> Result<JobId, DeployError> {
         let namespace = dataset_ref.namespace();
         let name = dataset_ref.name();
@@ -285,6 +286,7 @@ impl<'a> DatasetsClient<'a> {
             end_block,
             parallelism,
             worker_id,
+            verify,
         };
 
         let response = self
@@ -1283,6 +1285,8 @@ struct DeployRequest {
     parallelism: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     worker_id: Option<NodeSelector>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    verify: bool,
 }
 
 /// Input type for dataset registration manifest parameter.

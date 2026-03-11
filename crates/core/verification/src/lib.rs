@@ -1,4 +1,4 @@
-mod client;
+pub mod client;
 mod diff;
 mod rpc;
 
@@ -21,7 +21,49 @@ use reqwest::Url;
 use tokio::sync::Mutex;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
-use crate::client::{Block, Log, fetch_blocks};
+use crate::client::fetch_blocks;
+pub use crate::client::{Block, ConversionError, Log, Transaction};
+
+/// Error from cryptographic verification of block data.
+#[derive(Debug, thiserror::Error)]
+pub enum VerificationError {
+    /// Block hash computed from header fields doesn't match stored hash
+    #[error("block hash mismatch: computed {computed}, expected {expected}")]
+    BlockHashMismatch {
+        computed: alloy::primitives::B256,
+        expected: alloy::primitives::B256,
+    },
+
+    /// Transactions root computed from transactions doesn't match header
+    #[error("transactions root mismatch: computed {computed}, expected {expected}")]
+    TransactionsRootMismatch {
+        computed: alloy::primitives::B256,
+        expected: alloy::primitives::B256,
+    },
+
+    /// Receipts root computed from receipts doesn't match header
+    #[error("receipts root mismatch: computed {computed}, expected {expected}")]
+    ReceiptsRootMismatch {
+        computed: alloy::primitives::B256,
+        expected: alloy::primitives::B256,
+    },
+
+    /// Failed to build transaction envelope for root computation
+    #[error("failed to build transaction envelope")]
+    TxEnvelope(#[source] anyhow::Error),
+
+    /// Failed to convert record batches to verification types
+    #[error("failed to convert record batches")]
+    Conversion(#[from] ConversionError),
+
+    /// Missing required table for verification
+    #[error("verification enabled but '{0}' table not found in dataset")]
+    MissingTable(&'static str),
+
+    /// Unsupported transaction type
+    #[error("unsupported transaction type: {0}")]
+    UnsupportedTxType(i32),
+}
 
 #[derive(clap::Parser, Debug)]
 #[command(name = "verify", long_about = None)]
@@ -199,7 +241,7 @@ async fn fetch_and_verify_batch(
         match verification_result {
             (Ok(_), _) => {}
             (Err(err), _) if rpc_url.is_none() => {
-                return Err(err).context(anyhow!("verify block {}", block_number));
+                return Err(anyhow!(err).context(anyhow!("verify block {}", block_number)));
             }
             (Err(err), amp_block) => {
                 let Some(rpc_url) = rpc_url else {
@@ -210,7 +252,7 @@ async fn fetch_and_verify_batch(
                         Ok(rpc_block) => diff::create_block_diff(&amp_block, &rpc_block),
                         Err(err) => format!("RPC verification also failed: {err:#}"),
                     };
-                return Err(err
+                return Err(anyhow!(err)
                     .context(rpc_verification_message)
                     .context(anyhow!("verify block {}", block_number)));
             }
@@ -222,32 +264,39 @@ async fn fetch_and_verify_batch(
     Ok(())
 }
 
-fn verify_block(block: &Block) -> anyhow::Result<()> {
+pub fn verify_block(block: &Block) -> Result<(), VerificationError> {
     let computed_block_hash = alloy::consensus::Header::from(block).hash_slow();
-    anyhow::ensure!(computed_block_hash == block.hash);
-
-    verify_transactions_root(block).context("transactions root")?;
-    verify_receipts_root(block).context("receipts root (logs)")?;
-
-    Ok(())
-}
-
-fn verify_transactions_root(block: &Block) -> anyhow::Result<()> {
-    let mut tx_envelopes = Vec::with_capacity(block.transactions.len());
-    for tx in &block.transactions {
-        tx_envelopes.push(tx.to_tx_envelope()?);
+    if computed_block_hash != block.hash {
+        return Err(VerificationError::BlockHashMismatch {
+            computed: computed_block_hash,
+            expected: block.hash,
+        });
     }
 
-    let transactions_root = alloy::consensus::proofs::calculate_transaction_root(&tx_envelopes);
-    anyhow::ensure!(
-        transactions_root == block.transactions_root,
-        "computed transactions root does not match transactions_root from block header",
-    );
+    verify_transactions_root(block)?;
+    verify_receipts_root(block)?;
 
     Ok(())
 }
 
-fn verify_receipts_root(block: &Block) -> anyhow::Result<()> {
+pub fn verify_transactions_root(block: &Block) -> Result<(), VerificationError> {
+    let mut tx_envelopes = Vec::with_capacity(block.transactions.len());
+    for tx in &block.transactions {
+        tx_envelopes.push(tx.to_tx_envelope().map_err(VerificationError::TxEnvelope)?);
+    }
+
+    let computed_root = alloy::consensus::proofs::calculate_transaction_root(&tx_envelopes);
+    if computed_root != block.transactions_root {
+        return Err(VerificationError::TransactionsRootMismatch {
+            computed: computed_root,
+            expected: block.transactions_root,
+        });
+    }
+
+    Ok(())
+}
+
+pub fn verify_receipts_root(block: &Block) -> Result<(), VerificationError> {
     let mut logs_by_tx: BTreeMap<u32, Vec<&Log>> = BTreeMap::new();
     for log in &block.logs {
         logs_by_tx.entry(log.tx_index).or_default().push(log);
@@ -293,16 +342,18 @@ fn verify_receipts_root(block: &Block) -> anyhow::Result<()> {
             2 => alloy::consensus::ReceiptEnvelope::Eip1559(receipt.with_bloom()),
             3 => alloy::consensus::ReceiptEnvelope::Eip4844(receipt.with_bloom()),
             4 => alloy::consensus::ReceiptEnvelope::Eip7702(receipt.with_bloom()),
-            _ => anyhow::bail!("unsupported transaction type: {}", tx.tx_type),
+            _ => return Err(VerificationError::UnsupportedTxType(tx.tx_type)),
         };
         receipts.push(receipt_envelope);
     }
 
-    let receipts_root = alloy::consensus::proofs::calculate_receipt_root(&receipts);
-    anyhow::ensure!(
-        receipts_root == block.receipts_root,
-        "computed receipts root does not match receipts_root from block header",
-    );
+    let computed_root = alloy::consensus::proofs::calculate_receipt_root(&receipts);
+    if computed_root != block.receipts_root {
+        return Err(VerificationError::ReceiptsRootMismatch {
+            computed: computed_root,
+            expected: block.receipts_root,
+        });
+    }
 
     Ok(())
 }
@@ -314,7 +365,7 @@ async fn fetch_and_verify_rpc_block(
     let block = rpc::fetch_rpc_block(rpc_url, block_number)
         .await
         .context("fetch block from RPC")?;
-    verify_block(&block).context("verify block from RPC")?;
+    verify_block(&block).map_err(|e| anyhow!(e).context("verify block from RPC"))?;
     Ok(block)
 }
 

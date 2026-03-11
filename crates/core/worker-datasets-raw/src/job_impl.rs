@@ -362,6 +362,7 @@ pub async fn execute(
                 start,
                 end,
                 latest_block,
+                desc.verify,
             )
             .await
             .map_err(Error::PartitionTask)?;

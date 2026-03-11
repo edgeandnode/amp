@@ -301,7 +301,7 @@ impl TestCtx {
     ) -> Result<JobId, client::datasets::DeployError> {
         self.ampctl_client
             .datasets()
-            .deploy(&self.dataset_ref, end_block, 1, None)
+            .deploy(&self.dataset_ref, end_block, 1, None, false)
             .await
     }
 
@@ -330,7 +330,7 @@ impl TestCtx {
         );
         self.ampctl_client
             .datasets()
-            .deploy(&reference, None, 1, None)
+            .deploy(&reference, None, 1, None, false)
             .await
     }
 

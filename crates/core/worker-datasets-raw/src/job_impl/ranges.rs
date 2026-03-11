@@ -61,6 +61,8 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
     job_end_block: Option<BlockNum>,
     // Current chain head block, used for percentage calculation in continuous mode
     chain_head: BlockNum,
+    // Enable cryptographic verification of EVM block data
+    verify: bool,
 ) -> Result<(), TryWaitAllError<RunRangeError>> {
     tracing::info!(
         "materializing ranges {}",
@@ -117,6 +119,7 @@ pub(super) async fn materialize_ranges<S: BlockStreamer + Send + Sync>(
             id: i as u32,
             metrics: ctx.metrics.clone(),
             progress_tracker: progress_tracker.clone(),
+            verify,
         });
 
     // Spawn the writers, starting them with a 1-second delay between each.
@@ -426,6 +429,8 @@ struct MaterializePartition<S: BlockStreamer> {
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     /// A progress tracker which logs the overall progress of all partitions.
     progress_tracker: Arc<ProgressTracker>,
+    /// Enable cryptographic verification of EVM block data
+    verify: bool,
 }
 impl<S: BlockStreamer> MaterializePartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -535,6 +540,11 @@ impl<S: BlockStreamer> MaterializePartition<S> {
         dataset_rows: Rows,
         writer: &mut RawDatasetWriter,
     ) -> Result<(), RunRangeError> {
+        // Verify block data if verification is enabled
+        if self.verify {
+            self.verify_block_data(&dataset_rows)?;
+        }
+
         for table_rows in dataset_rows {
             if let Some(ref metrics) = self.metrics {
                 let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
@@ -558,6 +568,61 @@ impl<S: BlockStreamer> MaterializePartition<S> {
         }
 
         self.progress_tracker.block_covered(block_num);
+        Ok(())
+    }
+
+    /// Verify block data using cryptographic verification.
+    ///
+    /// Expects the dataset to contain blocks, transactions, and logs tables.
+    /// Converts the Arrow RecordBatches to verification types and performs:
+    /// - Block hash verification
+    /// - Transaction root verification
+    /// - Receipt root verification
+    #[expect(clippy::result_large_err)]
+    fn verify_block_data(&self, dataset_rows: &Rows) -> Result<(), RunRangeError> {
+        // Collect the RecordBatches for blocks, transactions, and logs
+        let mut block_batch = None;
+        let mut transactions_batch = None;
+        let mut logs_batch = None;
+
+        for table_rows in dataset_rows {
+            let table_name = table_rows.table.name().to_string();
+            match table_name.as_str() {
+                "blocks" => block_batch = Some(&table_rows.rows),
+                "transactions" => transactions_batch = Some(&table_rows.rows),
+                "logs" => logs_batch = Some(&table_rows.rows),
+                _ => {} // Ignore other tables
+            }
+        }
+
+        // Ensure all required tables are present
+        let block_batch = block_batch.ok_or_else(|| {
+            RunRangeError::verification_failed(verification::VerificationError::MissingTable(
+                "blocks",
+            ))
+        })?;
+        let transactions_batch = transactions_batch.ok_or_else(|| {
+            RunRangeError::verification_failed(verification::VerificationError::MissingTable(
+                "transactions",
+            ))
+        })?;
+        let logs_batch = logs_batch.ok_or_else(|| {
+            RunRangeError::verification_failed(verification::VerificationError::MissingTable(
+                "logs",
+            ))
+        })?;
+
+        // Convert RecordBatches to verification Block
+        let block = verification::client::block_from_record_batches(
+            block_batch,
+            transactions_batch,
+            logs_batch,
+        )
+        .map_err(|err| RunRangeError::verification_failed(err.into()))?;
+
+        // Run verification
+        verification::verify_block(&block).map_err(RunRangeError::verification_failed)?;
+
         Ok(())
     }
 }
@@ -612,6 +677,13 @@ impl RunRangeError {
     pub(super) fn close(err: RawDatasetWriterCloseError) -> Self {
         Self {
             kind: RunRangeErrorKind::Close(err),
+            block_range: None,
+        }
+    }
+
+    pub(super) fn verification_failed(err: verification::VerificationError) -> Self {
+        Self {
+            kind: RunRangeErrorKind::VerificationFailed(err),
             block_range: None,
         }
     }
@@ -708,6 +780,22 @@ enum RunRangeErrorKind {
     /// - Compaction task failure
     #[error("Failed to close")]
     Close(#[source] RawDatasetWriterCloseError),
+
+    /// Block verification failed
+    ///
+    /// This occurs when cryptographic verification of block data fails during extraction.
+    /// The block hash, transaction root, or receipt root does not match the computed value
+    /// from the extracted data.
+    ///
+    /// Possible causes:
+    /// - Data corruption during extraction
+    /// - Provider returned invalid data
+    /// - Missing required tables (blocks, transactions, logs)
+    /// - Schema mismatch between extraction and verification expectations
+    ///
+    /// This error is retryable as the issue may be transient.
+    #[error("Verification failed")]
+    VerificationFailed(#[source] verification::VerificationError),
 }
 
 impl RetryableErrorExt for RunRangeErrorKind {
@@ -719,6 +807,7 @@ impl RetryableErrorExt for RunRangeErrorKind {
             Self::NonIncreasingBlockNum { .. } => false,
             Self::Write(err) => err.is_retryable(),
             Self::Close(err) => err.is_retryable(),
+            Self::VerificationFailed(_) => true,
         }
     }
 }

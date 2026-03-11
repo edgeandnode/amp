@@ -132,9 +132,15 @@ impl TestCtx {
     async fn dump_dataset(&self, dataset: &str, end: u64) {
         let ampctl = self.ctx.new_ampctl();
         let dataset_ref: Reference = dataset.parse().expect("failed to parse dataset reference");
-        test_helpers::deploy_and_wait(&ampctl, &dataset_ref, Some(end), Duration::from_secs(30))
-            .await
-            .expect("Failed to dump dataset");
+        test_helpers::deploy_and_wait(
+            &ampctl,
+            &dataset_ref,
+            Some(end),
+            Duration::from_secs(30),
+            false,
+        )
+        .await
+        .expect("Failed to dump dataset");
     }
 
     /// Create a catalog for the specified dataset.

@@ -36,6 +36,7 @@ use crate::{
 /// - `end_block`: End block configuration (null for continuous, "latest", number, or negative offset)
 /// - `parallelism`: Number of parallel workers (default: 1, only for raw datasets)
 /// - `worker_id`: Optional worker selector (exact ID or glob pattern)
+/// - `verify`: Enable cryptographic verification of EVM block data (default: false)
 ///
 /// ## Response
 /// - **202 Accepted**: Job successfully scheduled
@@ -107,6 +108,7 @@ pub async fn handler(
         end_block,
         parallelism,
         worker_id,
+        verify,
     } = match json {
         Ok(Json(request)) => request,
         Err(err) => {
@@ -162,6 +164,7 @@ pub async fn handler(
             dataset_namespace: reference.namespace().clone(),
             dataset_name: reference.name().clone(),
             manifest_hash: reference.hash().clone(),
+            verify,
         }
         .into()
     };
@@ -252,6 +255,16 @@ pub struct DeployRequest {
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub worker_id: Option<NodeSelector>,
+
+    /// Enable cryptographic verification of EVM block data during extraction.
+    ///
+    /// When enabled, verifies block hashes, transaction roots, and receipt roots
+    /// before writing data to storage. Only applicable to EVM raw datasets.
+    /// Verification failures are retryable errors.
+    ///
+    /// Defaults to false if not specified.
+    #[serde(default)]
+    pub verify: bool,
 }
 
 fn default_parallelism() -> u16 {

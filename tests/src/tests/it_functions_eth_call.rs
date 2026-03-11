@@ -24,7 +24,7 @@ async fn eth_call_reads_counter_value_after_increments() {
 
     // Deploy anvil_rpc dataset (dependency for amp_demo) using ampctl
     ampctl
-        .dataset_deploy("_/anvil_rpc@0.0.0", None, Some(1), None)
+        .dataset_deploy("_/anvil_rpc@0.0.0", None, Some(1), None, false)
         .await
         .expect("Failed to deploy anvil_rpc dataset");
 
