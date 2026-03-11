@@ -224,7 +224,7 @@ WHERE result.message IS NOT NULL
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/eth_call.rs` - Core UDF implementation with async JSON-RPC calls and retry logic
+- `crates/core/common/src/udfs/eth_call/udf.rs` - Core UDF implementation with async JSON-RPC calls and retry logic
 
 ## Limitations
 

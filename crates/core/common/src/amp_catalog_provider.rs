@@ -22,7 +22,6 @@ use datasets_derived::deps::SELF_REF_KEYWORD;
 use crate::{
     dataset_schema_provider::DatasetSchemaProvider,
     datasets_cache::DatasetsCache,
-    ethcall_udfs_cache::EthCallUdfsCache,
     func_catalog::{
         catalog_provider::{
             AsyncCatalogProvider as FuncAsyncCatalogProvider,
@@ -32,6 +31,7 @@ use crate::{
             AsyncSchemaProvider as FuncAsyncSchemaProvider, SchemaProvider as FuncSchemaProvider,
         },
     },
+    udfs::eth_call::EthCallUdfsCache,
 };
 
 /// Combined async schema provider for both tables and functions.

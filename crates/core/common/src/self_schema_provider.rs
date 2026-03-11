@@ -27,7 +27,7 @@ use crate::{
         },
     },
     plan_table::PlanTable,
-    udfs::PlanJsUdf,
+    udfs::plan::PlanJsUdf,
 };
 
 /// Schema provider for virtual schemas (e.g., `"self"`) that resolve tables

@@ -12,7 +12,7 @@ use axum::{
     routing::get,
     serve::{Listener as _, ListenerExt as _},
 };
-use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use common::{datasets_cache::DatasetsCache, udfs::eth_call::EthCallUdfsCache};
 use datafusion::error::DataFusionError;
 use futures::FutureExt;
 use js_runtime::isolate_pool::IsolatePool;

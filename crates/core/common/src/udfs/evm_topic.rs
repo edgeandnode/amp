@@ -6,7 +6,8 @@ use datafusion::{
     scalar::ScalarValue,
 };
 
-use crate::{arrow::datatypes::DataType, evm::udfs::Event};
+pub use super::evm_common::Event;
+use crate::arrow::datatypes::DataType;
 
 /// DataFusion UDF that computes the topic0 (event selector) for a Solidity event signature.
 ///

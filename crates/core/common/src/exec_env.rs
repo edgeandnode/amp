@@ -16,8 +16,8 @@ use datafusion::{
 use crate::{
     amp_catalog_provider::AMP_CATALOG_NAME,
     datasets_cache::DatasetsCache,
-    ethcall_udfs_cache::EthCallUdfsCache,
     memory_pool::{MemoryPoolKind, make_memory_pool},
+    udfs::eth_call::EthCallUdfsCache,
 };
 
 /// Returns the default DataFusion catalog name used across all session contexts.

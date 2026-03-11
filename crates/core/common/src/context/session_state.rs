@@ -30,19 +30,14 @@ use futures::future;
 
 use crate::{
     context::common::INVALID_INPUT_CONTEXT,
-    evm::udfs::{
-        EvmDecodeHex, EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeHex, EvmEncodeParams,
-        EvmEncodeType, EvmTopic, ShiftUnits,
-    },
     func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
     sql::{FunctionReference, resolve_function_references, resolve_table_references},
-    udfs::block_num::BlockNumUdf,
 };
 
 /// Session state for planning and executing SQL queries.
 ///
 /// Stores a base `SessionState` built once at construction (with config,
-/// runtime environment, builtin UDFs, and physical optimizer rules) and
+/// runtime environment, scalar UDFs, and physical optimizer rules) and
 /// clones it for each planning/execution operation. SQL planning entry
 /// points (`statement_to_plan`) perform async catalog
 /// pre-resolution on top of the cloned base state.
@@ -50,7 +45,7 @@ use crate::{
 pub struct SessionState {
     /// Base DataFusion session state built once at construction.
     ///
-    /// Contains the session config, runtime environment, builtin UDFs, and
+    /// Contains the session config, runtime environment, scalar UDFs, and
     /// physical optimizer rules. Cloned for each planning/execution operation;
     /// callers register additional catalogs or tables on the clone before use.
     state: DfSessionState,
@@ -381,23 +376,6 @@ impl Default for SessionState {
     }
 }
 
-/// Returns the built-in scalar UDFs registered in every session state.
-fn builtin_udfs() -> Vec<ScalarUDF> {
-    vec![
-        BlockNumUdf::new().into(),
-        EvmDecodeLog::new().into(),
-        EvmDecodeLog::new().with_deprecated_name().into(),
-        EvmTopic::new().into(),
-        EvmEncodeParams::new().into(),
-        EvmDecodeParams::new().into(),
-        EvmEncodeType::new().into(),
-        EvmDecodeType::new().into(),
-        EvmEncodeHex::new().into(),
-        EvmDecodeHex::new().into(),
-        ShiftUnits::new().into(),
-    ]
-}
-
 /// Builder for [`SessionState`].
 ///
 /// Requires a [`SessionConfig`] as the mandatory constructor input.
@@ -441,6 +419,8 @@ pub struct SessionStateBuilder {
     object_store_registry: Option<Arc<dyn ObjectStoreRegistry>>,
     /// Physical optimizer rules folded into [`SessionState::base_state`] at build time.
     physical_optimizer_rules: Vec<Arc<dyn PhysicalOptimizerRule + Send + Sync>>,
+    /// Scalar UDFs to register in the base `DfSessionState` at build time.
+    scalar_udfs: Vec<Arc<ScalarUDF>>,
     /// See [`SessionState::table_catalogs`].
     table_catalogs: BTreeMap<String, Arc<dyn TableAsyncCatalogProvider>>,
     /// See [`SessionState::func_catalogs`].
@@ -457,6 +437,7 @@ impl SessionStateBuilder {
             cache_manager: None,
             object_store_registry: None,
             physical_optimizer_rules: Vec::new(),
+            scalar_udfs: Vec::new(),
             table_catalogs: Default::default(),
             func_catalogs: Default::default(),
         }
@@ -483,6 +464,16 @@ impl SessionStateBuilder {
     /// Sets the object store registry for the runtime environment in [`SessionState::base_state`].
     pub fn with_object_store_registry(mut self, registry: Arc<dyn ObjectStoreRegistry>) -> Self {
         self.object_store_registry = Some(registry);
+        self
+    }
+
+    /// Sets the scalar UDFs to register in the base `DfSessionState`.
+    ///
+    /// UDFs are seeded via [`DfSessionStateBuilder::with_scalar_functions`]
+    /// before `with_default_features`, so DF defaults (abs, concat, etc.)
+    /// are appended on top and both sets receive `with_updated_config`.
+    pub fn with_scalar_udfs(mut self, udfs: Vec<Arc<ScalarUDF>>) -> Self {
+        self.scalar_udfs = udfs;
         self
     }
 
@@ -539,25 +530,25 @@ impl SessionStateBuilder {
             self.object_store_registry,
         );
 
-        // Build the base SessionState once: config + runtime + optimizer rules + builtin UDFs.
+        // Build the base SessionState once: config + runtime + optimizer rules + scalar UDFs.
+        //
+        // Field order matters: `with_default_features` must come after
+        // `with_scalar_functions` because it *extends* each list
+        // (`get_or_insert_with(Vec::new).extend(defaults)`). Placing our
+        // UDFs first seeds the list; DF defaults are appended on top.
+        // Both sets then receive the `with_updated_config` treatment
+        // during `build()`.
         let mut builder = DfSessionStateBuilder::new()
             .with_config(self.session_config)
             .with_runtime_env(runtime_env)
+            .with_scalar_functions(self.scalar_udfs)
             .with_default_features();
 
         for rule in &self.physical_optimizer_rules {
             builder = builder.with_physical_optimizer_rule(rule.clone());
         }
 
-        let mut base_state = builder.build();
-
-        // Register builtin UDFs after build to preserve DataFusion's default
-        // scalar functions (abs, concat, etc.).
-        for udf in builtin_udfs() {
-            base_state
-                .register_udf(Arc::new(udf))
-                .expect("builtin UDF registration should never fail");
-        }
+        let base_state = builder.build();
 
         SessionState {
             state: base_state,

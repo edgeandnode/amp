@@ -9,13 +9,13 @@ use common::{
     amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider, AsyncSchemaProvider},
     context::plan::PlanContextBuilder,
     datasets_cache::{DatasetsCache, GetDatasetError},
-    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::default_session_config,
     self_schema_provider::SelfSchemaProvider,
     sql::{
         FunctionReference, ResolveFunctionReferencesError, ResolveTableReferencesError,
         TableReference, resolve_function_references, resolve_table_references,
     },
+    udfs::eth_call::EthCallUdfsCache,
 };
 use datafusion::sql::parser::Statement;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};

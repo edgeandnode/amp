@@ -105,8 +105,8 @@ FROM (
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/evm_topic.rs` - Computes topic0 hash from event signature
-- `crates/core/common/src/evm/udfs/evm_decode_log.rs` - Decodes event log data using signature
+- `crates/core/common/src/udfs/evm/topic.rs` - Computes topic0 hash from event signature
+- `crates/core/common/src/udfs/evm/decode_log.rs` - Decodes event log data using signature
 
 ## Limitations
 

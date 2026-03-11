@@ -86,4 +86,5 @@ FROM (
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/` - Core UDF infrastructure
+- `crates/core/common/src/udfs/evm/` - EVM UDF implementations
+- `crates/core/common/src/evm/udfs/` - EVM RPC-specific UDFs (eth_call)

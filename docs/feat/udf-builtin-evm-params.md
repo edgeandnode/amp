@@ -97,7 +97,7 @@ FROM (
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/evm_function_params.rs` - Function params encode/decode implementation
+- `crates/core/common/src/udfs/evm/function_params.rs` - Function params encode/decode implementation
 
 ## References
 

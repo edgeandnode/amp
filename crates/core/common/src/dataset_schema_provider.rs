@@ -20,7 +20,6 @@ use datasets_derived::{dataset::Dataset as DerivedDataset, func_name::ETH_CALL_F
 use parking_lot::RwLock;
 
 use crate::{
-    ethcall_udfs_cache::EthCallUdfsCache,
     func_catalog::{
         function_provider::{FunctionProvider, ScalarFunctionProvider},
         schema_provider::{
@@ -28,7 +27,7 @@ use crate::{
         },
     },
     plan_table::PlanTable,
-    udfs::PlanJsUdf,
+    udfs::{eth_call::EthCallUdfsCache, plan::PlanJsUdf},
 };
 
 /// Schema provider for a dataset.

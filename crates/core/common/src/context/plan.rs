@@ -14,6 +14,7 @@ use crate::{
     detached_logical_plan::DetachedLogicalPlan,
     func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
     plan_visitors::forbid_underscore_prefixed_aliases,
+    udfs::builtin_udfs,
 };
 
 /// A context for planning SQL queries.
@@ -117,9 +118,9 @@ impl PlanContextBuilder {
 
     /// Builds the [`PlanContext`].
     pub fn build(self) -> PlanContext {
-        PlanContext {
-            session_ctx: SessionContext::new_with_state(self.state_builder.build()),
-        }
+        let state = self.state_builder.with_scalar_udfs(builtin_udfs()).build();
+        let session_ctx = SessionContext::new_with_state(state);
+        PlanContext { session_ctx }
     }
 }
 
