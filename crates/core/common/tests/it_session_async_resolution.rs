@@ -405,7 +405,6 @@ async fn exec_statement_to_plan_with_qualified_function_uses_async_pre_resolutio
         disk_manager: runtime_env.disk_manager.clone(),
         cache_manager: runtime_env.cache_manager.clone(),
         object_store_registry: runtime_env.object_store_registry.clone(),
-        isolate_pool: IsolatePool::new(),
         query_max_mem_mb: 64,
         store: data_store,
         datasets_cache,
@@ -420,6 +419,7 @@ async fn exec_statement_to_plan_with_qualified_function_uses_async_pre_resolutio
     let catalog = Catalog::default();
 
     let query_ctx = ExecContextBuilder::new(exec_env)
+        .with_isolate_pool(IsolatePool::new())
         .with_table_catalog(
             "amp",
             amp_table_catalog as Arc<dyn TableAsyncCatalogProvider>,
@@ -506,7 +506,6 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
         disk_manager: runtime_env.disk_manager.clone(),
         cache_manager: runtime_env.cache_manager.clone(),
         object_store_registry: runtime_env.object_store_registry.clone(),
-        isolate_pool: IsolatePool::new(),
         query_max_mem_mb: 64,
         store: data_store.clone(),
         datasets_cache,
@@ -562,6 +561,7 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
     // Use ignore_canonical_segments=true so that the empty revision
     // produces an empty (but valid) TableSnapshot.
     let query_ctx = ExecContextBuilder::new(exec_env)
+        .with_isolate_pool(IsolatePool::new())
         .with_table_catalog(
             "amp",
             amp_table_catalog as Arc<dyn TableAsyncCatalogProvider>,

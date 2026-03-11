@@ -456,6 +456,7 @@ impl TestCtxBuilder {
         let worker_meter = self.meter.clone();
         let controller_meter = self.meter.clone();
 
+        // Create isolate pool shared by server and worker fixtures
         let isolate_pool = IsolatePool::new();
 
         // Start query server

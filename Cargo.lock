@@ -45,7 +45,6 @@ dependencies = [
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
- "js-runtime",
  "metadata-db",
  "monitoring",
  "serde",

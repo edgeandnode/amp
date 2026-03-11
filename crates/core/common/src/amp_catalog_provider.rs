@@ -18,7 +18,6 @@ use datasets_common::{
     hash_reference::HashReference, partial_reference::PartialReference, reference::Reference,
 };
 use datasets_derived::deps::SELF_REF_KEYWORD;
-use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{
     dataset_schema_provider::DatasetSchemaProvider,
@@ -53,7 +52,6 @@ pub const AMP_CATALOG_NAME: &str = "amp";
 pub struct AmpCatalogProvider {
     datasets_cache: DatasetsCache,
     ethcall_udfs_cache: EthCallUdfsCache,
-    isolate_pool: IsolatePool,
     /// Optional dependency alias overrides. When set, bare names matching
     /// a key are resolved directly to the corresponding [`HashReference`]
     /// instead of going through `PartialReference` → `Reference` → `resolve_revision`.
@@ -65,15 +63,10 @@ pub struct AmpCatalogProvider {
 
 impl AmpCatalogProvider {
     /// Creates a new catalog provider.
-    pub fn new(
-        datasets_cache: DatasetsCache,
-        ethcall_udfs_cache: EthCallUdfsCache,
-        isolate_pool: IsolatePool,
-    ) -> Self {
+    pub fn new(datasets_cache: DatasetsCache, ethcall_udfs_cache: EthCallUdfsCache) -> Self {
         Self {
             datasets_cache,
             ethcall_udfs_cache,
-            isolate_pool,
             dep_aliases: Default::default(),
             self_schema: None,
         }
@@ -127,7 +120,6 @@ impl AmpCatalogProvider {
                 name.to_string(),
                 dataset,
                 self.ethcall_udfs_cache.clone(),
-                self.isolate_pool.clone(),
             ));
             return Ok(Some(provider));
         }
@@ -158,7 +150,6 @@ impl AmpCatalogProvider {
             name.to_string(),
             dataset,
             self.ethcall_udfs_cache.clone(),
-            self.isolate_pool.clone(),
         ));
         Ok(Some(provider))
     }
