@@ -19,11 +19,6 @@
         }
       ]
     },
-    "keep_of1_car_files": {
-      "description": "Whether to keep downloaded CAR files after processing.",
-      "type": "boolean",
-      "default": false
-    },
     "kind": {
       "description": "The provider kind, must be `\"solana\"`.",
       "const": "solana"
@@ -41,10 +36,6 @@
       "description": "The network this provider serves.",
       "$ref": "#/$defs/NetworkId"
     },
-    "of1_car_directory": {
-      "description": "Directory for storing Old Faithful ONE CAR files.",
-      "type": "string"
-    },
     "rpc_provider_info": {
       "description": "Connection information for the primary Solana RPC endpoint.\n\nUsed for fetching recent blocks and all non-historical data.",
       "$ref": "#/$defs/RpcProviderConnectionConfig"
@@ -57,8 +48,7 @@
   "required": [
     "kind",
     "network",
-    "rpc_provider_info",
-    "of1_car_directory"
+    "rpc_provider_info"
   ],
   "$defs": {
     "CommitmentLevel": {

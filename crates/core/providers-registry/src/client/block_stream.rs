@@ -10,7 +10,7 @@ use amp_providers_solana::kind::SolanaProviderKind;
 use async_stream::stream;
 use datasets_common::{block_num::BlockNum, network_id::NetworkId};
 use datasets_raw::{
-    client::{BlockStreamError, BlockStreamer, CleanupError, LatestBlockError},
+    client::{BlockStreamError, BlockStreamer, LatestBlockError},
     rows::Rows,
 };
 use futures::Stream;
@@ -138,14 +138,6 @@ impl BlockStreamer for BlockStreamClient {
             Self::EvmRpc(client) => client.bucket_size(),
             Self::Solana(client) => client.bucket_size(),
             Self::Firehose(client) => client.bucket_size(),
-        }
-    }
-
-    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
-        match self {
-            Self::EvmRpc(client) => client.wait_for_cleanup().await,
-            Self::Solana(client) => client.wait_for_cleanup().await,
-            Self::Firehose(client) => client.wait_for_cleanup().await,
         }
     }
 

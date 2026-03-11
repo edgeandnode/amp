@@ -76,9 +76,6 @@ impl std::convert::AsRef<dyn std::error::Error + 'static> for BlockStreamError {
 /// Error type for [`BlockStreamer::latest_block`].
 pub type LatestBlockError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
-/// Error type for [`BlockStreamer::wait_for_cleanup`].
-pub type CleanupError = Box<dyn std::error::Error + Sync + Send + 'static>;
-
 /// Trait for extracting raw blockchain data as a stream of rows.
 ///
 /// Implementations fetch blocks from a data source (RPC, archive, etc.) and convert them
@@ -105,18 +102,6 @@ pub trait BlockStreamer: Clone + 'static {
     /// blocks are produced individually. This matters for determining how to split block ranges
     /// for parallel streaming.
     fn bucket_size(&self) -> Option<NonZeroU64>;
-
-    /// Waits for any background work and resources associated with this [`BlockStreamer`]
-    /// to be cleaned up.
-    ///
-    /// This should be called once the user no longer needs to create new block streams
-    /// to allow implementations to terminate internal tasks, flush or release network
-    /// connections, and free any other resources.
-    ///
-    /// After requesting cleanup, callers should not call [BlockStreamer::block_stream]
-    /// again on the same instance. Behavior when creating new streams after cleanup is
-    /// implementation-defined and must not be relied on.
-    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), CleanupError>> + Send;
 
     fn provider_name(&self) -> &str;
 }
@@ -259,10 +244,6 @@ where
 
     fn bucket_size(&self) -> Option<NonZeroU64> {
         self.0.bucket_size()
-    }
-
-    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), CleanupError>> + Send {
-        self.0.wait_for_cleanup()
     }
 
     fn provider_name(&self) -> &str {

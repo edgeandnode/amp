@@ -120,11 +120,9 @@ pub fn client(
         config.max_rpc_calls_per_second,
         config.network,
         name,
-        config.of1_car_directory,
-        config.keep_of1_car_files,
         config.use_archive,
-        meter,
         commitment,
+        meter,
     );
 
     Ok(client)
