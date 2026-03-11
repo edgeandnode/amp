@@ -191,4 +191,4 @@ jq '.paths | to_entries[] | select(.key | startswith("/datasets"))' docs/openapi
 
 - [app-ampctl](app-ampctl.md) - Base: ampctl overview
 - [admin](admin.md) - Related: Administration overview
-- [dataset-registry](dataset-registry.md) - Related: Dataset registry component
+- [datasets-registry](../../crates/core/datasets-registry/README.md) - Related: Dataset registry component

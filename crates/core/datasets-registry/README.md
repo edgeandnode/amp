@@ -1,10 +1,3 @@
----
-name: "dataset-registry"
-description: "DatasetsRegistry for manifest storage, version tags (latest/dev/semantic), revision resolution. Load when working with dataset versioning or manifest management"
-type: component
-components: "crate:amp-datasets-registry,crate:metadata-db,crate:amp-object-store"
----
-
 # Dataset Registry
 
 ## Summary
@@ -61,9 +54,3 @@ The registry uses these tables in the metadata database:
 | `manifests` | Stores manifest hash and object store path |
 | `dataset_manifests` | Links datasets (namespace/name) to manifest hashes |
 | `dataset_tags` | Stores version tags pointing to manifest hashes |
-
-### Source Files
-
-- `crates/core/datasets-registry/src/lib.rs` - Main `DatasetsRegistry` struct and methods
-- `crates/core/datasets-registry/src/error.rs` - Error types for registry operations
-- `crates/core/datasets-registry/src/manifests.rs` - Object store operations for manifest files
