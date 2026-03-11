@@ -128,8 +128,7 @@ pub async fn materialize_table(
 
     let mut join_set = tasks::FailFastJoinSet::<Result<(), MaterializeTableSpawnError>>::new();
 
-    let self_schema_provider =
-        SelfSchemaProvider::from_manifest_udfs(env.isolate_pool.clone(), &manifest.functions);
+    let self_schema_provider = SelfSchemaProvider::from_manifest_udfs(&manifest.functions);
 
     // Resolve and partition table references into external deps and self-refs.
     let all_table_refs = resolve_table_references::<DepAliasOrSelfRef>(&query)
@@ -183,13 +182,9 @@ pub async fn materialize_table(
     let self_schema: Arc<dyn common::amp_catalog_provider::AsyncSchemaProvider> =
         Arc::new(self_schema_provider);
     let amp_catalog = Arc::new(
-        AmpCatalogProvider::new(
-            ctx.datasets_cache.clone(),
-            ctx.ethcall_udfs_cache.clone(),
-            env.isolate_pool.clone(),
-        )
-        .with_dep_aliases(dep_alias_map)
-        .with_self_schema(self_schema),
+        AmpCatalogProvider::new(ctx.datasets_cache.clone(), ctx.ethcall_udfs_cache.clone())
+            .with_dep_aliases(dep_alias_map)
+            .with_self_schema(self_schema),
     );
     let planning_ctx = PlanContextBuilder::new(env.session_config.clone())
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())
@@ -246,6 +241,7 @@ pub async fn materialize_table(
 
             let resolved = resolve_end_block(&end, start, async {
                 let query_ctx = ExecContextBuilder::new(env.clone())
+                    .with_isolate_pool(ctx.isolate_pool.clone())
                     .for_catalog(catalog.clone(), false)
                     .await?;
                 let max_end_blocks = query_ctx
@@ -291,6 +287,7 @@ pub async fn materialize_table(
             let materialize_result = materialize_sql_query(
                 &ctx,
                 &env,
+                &ctx.isolate_pool,
                 &catalog,
                 plan.clone(),
                 start,

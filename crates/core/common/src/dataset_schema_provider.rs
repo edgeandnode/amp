@@ -13,11 +13,10 @@ use datafusion::{
         TableProvider,
     },
     error::DataFusionError,
-    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
+    logical_expr::ScalarUDF,
 };
 use datasets_common::{dataset::Dataset, table_name::TableName};
 use datasets_derived::{dataset::Dataset as DerivedDataset, func_name::ETH_CALL_FUNCTION_NAME};
-use js_runtime::{isolate_pool::IsolatePool, js_udf::JsUdf};
 use parking_lot::RwLock;
 
 use crate::{
@@ -29,34 +28,33 @@ use crate::{
         },
     },
     plan_table::PlanTable,
+    udfs::PlanJsUdf,
 };
 
 /// Schema provider for a dataset.
 ///
 /// Resolves tables as [`PlanTable`] instances (schema-only, no data access)
-/// and functions using the provided isolate pool.
+/// and functions as planning-phase [`PlanJsUdf`] representations that carry
+/// no runtime resources.
 pub struct DatasetSchemaProvider {
     schema_name: String,
     dataset: Arc<dyn Dataset>,
     ethcall_udfs_cache: EthCallUdfsCache,
-    isolate_pool: IsolatePool,
     tables: RwLock<BTreeMap<String, Arc<dyn TableProvider>>>,
     functions: RwLock<BTreeMap<String, Arc<ScalarUDF>>>,
 }
 
 impl DatasetSchemaProvider {
-    /// Creates a new provider for the given dataset, schema name, and isolate pool.
+    /// Creates a new provider for the given dataset and schema name.
     pub(crate) fn new(
         schema_name: String,
         dataset: Arc<dyn Dataset>,
         ethcall_udfs_cache: EthCallUdfsCache,
-        isolate_pool: IsolatePool,
     ) -> Self {
         Self {
             schema_name,
             dataset,
             ethcall_udfs_cache,
-            isolate_pool,
             tables: RwLock::new(Default::default()),
             functions: RwLock::new(Default::default()),
         }
@@ -165,25 +163,18 @@ impl FuncSchemaProvider for DatasetSchemaProvider {
             }
         }
 
-        // Try to get UDF from derived dataset
-        let udf = self.dataset.downcast_ref::<DerivedDataset>().and_then(|d| {
-            d.function_by_name(name).map(|function| {
-                AsyncScalarUDF::new(Arc::new(JsUdf::new(
-                    self.isolate_pool.clone(),
-                    self.schema_name.clone(),
-                    function.source.source.clone(),
-                    function.source.filename.clone(),
-                    Arc::from(name),
-                    function
-                        .input_types
-                        .iter()
-                        .map(|dt| dt.clone().into_arrow())
-                        .collect(),
-                    function.output_type.clone().into_arrow(),
-                )))
-                .into_scalar_udf()
-            })
-        });
+        // Try to get UDF from derived dataset and build a planning-only UDF.
+        let udf: Option<ScalarUDF> = self
+            .dataset
+            .downcast_ref::<DerivedDataset>()
+            .and_then(|d| d.function_by_name(name))
+            .map(|function| {
+                ScalarUDF::new_from_impl(PlanJsUdf::from_function(
+                    name,
+                    function,
+                    Some(&self.schema_name),
+                ))
+            });
 
         if let Some(udf) = udf {
             let udf = Arc::new(udf);

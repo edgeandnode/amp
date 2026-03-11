@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     pin::Pin,
     sync::{Arc, LazyLock},
     task::{Context, Poll},
@@ -11,7 +11,7 @@ use datafusion::{
     self,
     arrow::array::RecordBatch,
     catalog::{AsyncCatalogProvider as TableAsyncCatalogProvider, MemorySchemaProvider},
-    common::tree_node::Transformed,
+    common::tree_node::{Transformed, TreeNode},
     datasource::{DefaultTableSource, TableType},
     error::DataFusionError,
     execution::{
@@ -22,9 +22,10 @@ use datafusion::{
         memory_pool::{MemoryPool, human_readable_size},
         object_store::ObjectStoreRegistry,
     },
-    logical_expr::{LogicalPlan, TableScan},
+    logical_expr::{LogicalPlan, ScalarUDF, TableScan, expr::ScalarFunction},
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, execute_stream, stream::RecordBatchStreamAdapter},
+    prelude::Expr,
     sql::parser,
 };
 use datafusion_tracing::{
@@ -58,15 +59,25 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
     sql::{TableReference, TableReferenceConversionError},
+    udfs::plan::PlanJsUdf,
 };
 
 /// A context for executing queries against a catalog.
+///
+/// Holds everything needed to plan and execute a single query: the catalog
+/// snapshot, JavaScript UDF runtime, memory budget, and the DataFusion session
+/// that ties them together.
 #[derive(Clone)]
 pub struct ExecContext {
+    /// Shared execution environment (network, block range, data store, etc.).
     pub env: ExecEnv,
+    /// Pool of V8 isolates used to run JavaScript UDFs during execution.
+    isolate_pool: IsolatePool,
+    /// Point-in-time snapshot of the physical catalog (segments and tables).
     physical_table: CatalogSnapshot,
+    /// Queryable views derived from `physical_table`, one per registered table.
     query_snapshots: Vec<Arc<QueryableSnapshot>>,
-    /// Per-query memory pool (if per-query limits are enabled)
+    /// Per-query memory pool (if per-query limits are enabled).
     tiered_memory_pool: Arc<TieredMemoryPool>,
     /// Custom session context that owns the runtime environment and optimizer
     /// rules. All session creation goes through `session_ctx.state()`
@@ -75,13 +86,29 @@ pub struct ExecContext {
 }
 
 impl ExecContext {
-    /// Attaches a detached logical plan to this query context by replacing
-    /// `PlanTable` table sources in `TableScan` nodes with actual
-    /// `QueryableSnapshot` providers from the catalog.
+    /// Returns the isolate pool for JavaScript UDF execution.
+    pub fn isolate_pool(&self) -> &IsolatePool {
+        &self.isolate_pool
+    }
+
+    /// Attaches a detached logical plan to this query context in a single
+    /// traversal that, for each plan node:
+    ///
+    /// 1. Replaces `PlanTable` table sources in `TableScan` nodes with actual
+    ///    `QueryableSnapshot` providers from the catalog.
+    /// 2. Rewrites `PlanJsUdf`-backed scalar functions inside the node's
+    ///    expression tree into execution-ready UDFs by attaching the
+    ///    `IsolatePool`.
     #[tracing::instrument(skip_all, err)]
     pub(crate) fn attach(&self, plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
-        plan.transform_with_subqueries(|node| attach_table_node(node, self))
-            .map(|t| t.data)
+        let mut cache: HashMap<String, Arc<ScalarUDF>> = HashMap::new();
+        let pool = self.isolate_pool.clone();
+
+        plan.transform_with_subqueries(|node| {
+            let node = attach_table_node(node, self)?;
+            node.transform_data(|n| attach_js_udf_exprs(n, &pool, &mut cache))
+        })
+        .map(|t| t.data)
     }
 
     /// Returns the physical catalog snapshot backing this query context.
@@ -306,7 +333,7 @@ pub struct ExecContextBuilder {
     store: DataStore,
     datasets_cache: DatasetsCache,
     ethcall_udfs_cache: EthCallUdfsCache,
-    isolate_pool: IsolatePool,
+    isolate_pool: Option<IsolatePool>,
     global_memory_pool: Arc<dyn MemoryPool>,
     query_max_mem_mb: usize,
     disk_manager: Arc<DiskManager>,
@@ -329,7 +356,7 @@ impl ExecContextBuilder {
             store: env.store,
             datasets_cache: env.datasets_cache,
             ethcall_udfs_cache: env.ethcall_udfs_cache,
-            isolate_pool: env.isolate_pool,
+            isolate_pool: None,
             global_memory_pool: env.global_memory_pool,
             query_max_mem_mb: env.query_max_mem_mb,
             disk_manager: env.disk_manager,
@@ -370,6 +397,15 @@ impl ExecContextBuilder {
         provider: Arc<dyn FuncAsyncCatalogProvider>,
     ) -> Self {
         self.func_catalogs.insert(name.into(), provider);
+        self
+    }
+
+    /// Sets the isolate pool for JavaScript UDF execution.
+    ///
+    /// Required before calling [`for_catalog`](Self::for_catalog). Panics at
+    /// context construction time if not set.
+    pub fn with_isolate_pool(mut self, pool: IsolatePool) -> Self {
+        self.isolate_pool = Some(pool);
         self
     }
 
@@ -414,13 +450,16 @@ impl ExecContextBuilder {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let isolate_pool = self
+            .isolate_pool
+            .expect("IsolatePool is required — call .with_isolate_pool() before .for_catalog()");
+
         let env = ExecEnv {
             session_config: self.session_config.clone(),
             global_memory_pool: self.global_memory_pool.clone(),
             disk_manager: self.disk_manager.clone(),
             cache_manager: self.cache_manager.clone(),
             object_store_registry: self.object_store_registry.clone(),
-            isolate_pool: self.isolate_pool,
             query_max_mem_mb: self.query_max_mem_mb,
             store: self.store,
             datasets_cache: self.datasets_cache,
@@ -448,6 +487,7 @@ impl ExecContextBuilder {
 
         Ok(ExecContext {
             env,
+            isolate_pool,
             physical_table,
             query_snapshots,
             tiered_memory_pool,
@@ -687,8 +727,19 @@ fn register_catalog(
             .map_err(RegisterTableError::RegisterTable)?;
     }
 
-    // Register catalog UDFs
+    // Register catalog UDFs, skipping planning-only JS UDFs.
+    //
+    // Catalog UDFs may include `PlanJsUdf`-backed entries that are
+    // non-executable (they panic on invoke). The execution-boundary JS UDF
+    // attach (`ExecContext::attach`) rewrites inline plan references to
+    // `ExecJsUdf`, so session-level registration of planning JS UDFs is
+    // unnecessary and would re-introduce panic-guarded objects into the
+    // execution session.
     for udf in catalog.udfs() {
+        let is_plan_js_udf = udf.inner().as_any().downcast_ref::<PlanJsUdf>().is_some();
+        if is_plan_js_udf {
+            continue;
+        }
         state
             .register_udf(Arc::new(udf.clone()))
             .map_err(RegisterTableError::RegisterUdf)?;
@@ -744,6 +795,50 @@ fn attach_table_node(
         }
         _ => Ok(Transformed::no(node)),
     }
+}
+
+/// Rewrites all [`PlanJsUdf`]-backed UDF references in a single plan node's
+/// expressions to execution-ready UDF references.
+///
+/// Each unique `PlanJsUdf` (keyed by `name()`) is attached exactly once;
+/// subsequent occurrences reuse the same `Arc<ScalarUDF>`.
+fn attach_js_udf_exprs(
+    node: LogicalPlan,
+    pool: &IsolatePool,
+    cache: &mut HashMap<String, Arc<ScalarUDF>>,
+) -> Result<Transformed<LogicalPlan>, DataFusionError> {
+    node.map_expressions(|expr| expr.transform(|e| rewrite_single_expr(e, pool, cache)))
+}
+
+/// Rewrites a single `Expr` node if it is a `PlanJsUdf`-backed scalar function.
+fn rewrite_single_expr(
+    expr: Expr,
+    pool: &IsolatePool,
+    cache: &mut HashMap<String, Arc<ScalarUDF>>,
+) -> Result<Transformed<Expr>, DataFusionError> {
+    let Expr::ScalarFunction(ref sf) = expr else {
+        return Ok(Transformed::no(expr));
+    };
+
+    let Some(plan_udf) = sf.func.inner().as_any().downcast_ref::<PlanJsUdf>() else {
+        return Ok(Transformed::no(expr));
+    };
+
+    let name = sf.func.name().to_string();
+
+    let exec_udf = if let Some(cached) = cache.get(&name) {
+        cached.clone()
+    } else {
+        let exec = plan_udf.attach(pool.clone());
+        let udf = Arc::new(exec.into_scalar_udf());
+        cache.insert(name, udf.clone());
+        udf
+    };
+
+    Ok(Transformed::yes(Expr::ScalarFunction(ScalarFunction {
+        func: exec_udf,
+        args: sf.args.clone(),
+    })))
 }
 
 /// `logical_optimize` controls whether logical optimizations should be applied to `plan`.
@@ -921,6 +1016,13 @@ mod tests {
         array::{Array, Int64Array, StringArray},
         datatypes::{DataType, Field, Schema},
     };
+    use datafusion::{
+        common::tree_node::{TreeNode, TreeNodeRecursion},
+        logical_expr::{LogicalPlanBuilder, ScalarUDF, ScalarUDFImpl, expr::ScalarFunction},
+        prelude::Expr,
+    };
+    use datasets_derived::function::Function;
+    use js_runtime::isolate_pool::IsolatePool;
 
     use super::*;
 
@@ -1177,5 +1279,250 @@ mod tests {
             //* Then
             assert_eq!(result, "", "empty string should remain empty");
         }
+    }
+
+    #[test]
+    fn attach_js_udfs_single_plan_udf_rewrites_to_exec() {
+        //* Given
+        let (_, expr) = plan_udf_expr("my_func");
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![expr])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new()).expect("attach should succeed");
+
+        //* Then
+        assert_no_plan_js_udfs(&result);
+    }
+
+    #[test]
+    fn attach_js_udfs_duplicate_udf_refs_deduplicates() {
+        //* Given
+        let (udf, _) = plan_udf_expr("my_func");
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![
+                Expr::ScalarFunction(ScalarFunction::new_udf(
+                    udf.clone(),
+                    vec![datafusion::prelude::lit("a")],
+                )),
+                Expr::ScalarFunction(ScalarFunction::new_udf(
+                    udf,
+                    vec![datafusion::prelude::lit("b")],
+                )),
+            ])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new()).expect("attach should succeed");
+
+        //* Then
+        assert_no_plan_js_udfs(&result);
+    }
+
+    #[test]
+    fn attach_js_udfs_no_js_udfs_passes_through() {
+        //* Given
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![datafusion::prelude::lit(1)])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new());
+
+        //* Then
+        assert!(
+            result.is_ok(),
+            "attach should succeed for plan without JS UDFs"
+        );
+    }
+
+    #[test]
+    fn attach_js_udfs_schema_qualified_udf_preserves_name() {
+        //* Given
+        let function = sample_function();
+        let plan_udf = PlanJsUdf::from_function("my_func", &function, Some("ns/dataset@1.0"));
+        let expected_name = plan_udf.name().to_string();
+        let udf = Arc::new(ScalarUDF::new_from_impl(plan_udf));
+        let expr = Expr::ScalarFunction(ScalarFunction::new_udf(
+            udf,
+            vec![datafusion::prelude::lit("test")],
+        ));
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![expr])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new()).expect("attach should succeed");
+
+        //* Then
+        assert_no_plan_js_udfs(&result);
+        // Verify the rewritten UDF preserves the schema-qualified name.
+        result
+            .apply(|node| {
+                for expr in node.expressions() {
+                    expr.apply(|e| {
+                        if let Expr::ScalarFunction(sf) = e {
+                            assert_eq!(
+                                sf.func.name(),
+                                expected_name,
+                                "attached UDF should preserve schema-qualified name"
+                            );
+                        }
+                        Ok(TreeNodeRecursion::Continue)
+                    })
+                    .expect("expression traversal should succeed");
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })
+            .expect("plan traversal should succeed");
+    }
+
+    #[test]
+    fn attach_js_udfs_multiple_distinct_udfs_rewrites_all() {
+        //* Given
+        let (_, expr_a) = plan_udf_expr("func_a");
+        let (_, expr_b) = plan_udf_expr("func_b");
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![expr_a, expr_b])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new()).expect("attach should succeed");
+
+        //* Then
+        assert_no_plan_js_udfs(&result);
+    }
+
+    #[test]
+    fn attach_js_udfs_nested_case_expression_rewrites_inner_udf() {
+        //* Given
+        let (_, udf_expr) = plan_udf_expr("my_func");
+        // Wrap the JS UDF call inside a CASE expression.
+        let nested = Expr::Case(datafusion::logical_expr::expr::Case {
+            expr: None,
+            when_then_expr: vec![(Box::new(udf_expr), Box::new(datafusion::prelude::lit(1)))],
+            else_expr: Some(Box::new(datafusion::prelude::lit(0))),
+        });
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![nested])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new()).expect("attach should succeed");
+
+        //* Then
+        assert_no_plan_js_udfs(&result);
+    }
+
+    #[test]
+    fn attach_js_udfs_mixed_js_and_non_js_udfs_rewrites_only_js() {
+        //* Given
+        let (_, js_expr) = plan_udf_expr("js_func");
+        // A non-JS built-in UDF expression (abs).
+        let non_js_expr = datafusion::prelude::abs(datafusion::prelude::lit(42));
+        let plan = LogicalPlanBuilder::empty(false)
+            .project(vec![js_expr, non_js_expr])
+            .expect("project should succeed")
+            .build()
+            .expect("build should succeed");
+
+        //* When
+        let result = attach_js_udfs(plan, IsolatePool::new()).expect("attach should succeed");
+
+        //* Then
+        assert_no_plan_js_udfs(&result);
+        // Verify the non-JS UDF (abs) is still present and unchanged.
+        let mut found_abs = false;
+        result
+            .apply(|node| {
+                for expr in node.expressions() {
+                    expr.apply(|e| {
+                        if let Expr::ScalarFunction(sf) = e
+                            && sf.func.name() == "abs"
+                        {
+                            found_abs = true;
+                        }
+                        Ok(TreeNodeRecursion::Continue)
+                    })
+                    .expect("expression traversal should succeed");
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })
+            .expect("plan traversal should succeed");
+        assert!(found_abs, "non-JS UDF (abs) should be preserved in plan");
+    }
+
+    /// Test helper: wraps the node-level `attach_js_udf_exprs` in a full plan
+    /// traversal, mirroring the plan-level attach in `ExecContext::attach`.
+    fn attach_js_udfs(
+        plan: LogicalPlan,
+        pool: IsolatePool,
+    ) -> Result<LogicalPlan, DataFusionError> {
+        let mut cache: HashMap<String, Arc<ScalarUDF>> = HashMap::new();
+        plan.transform_with_subqueries(|node| attach_js_udf_exprs(node, &pool, &mut cache))
+            .map(|t| t.data)
+    }
+
+    /// Builds a minimal [`Function`] with a single `Utf8 -> Boolean` signature.
+    fn sample_function() -> Function {
+        serde_json::from_value(serde_json::json!({
+            "inputTypes": ["Utf8"],
+            "outputType": "Boolean",
+            "source": {
+                "source": "function f(a) { return true; }",
+                "filename": "test.js"
+            }
+        }))
+        .expect("test function should deserialize")
+    }
+
+    /// Creates a [`PlanJsUdf`]-backed `ScalarUDF` and a matching `Expr` for
+    /// use in test plans.
+    fn plan_udf_expr(name: &str) -> (Arc<ScalarUDF>, Expr) {
+        let function = sample_function();
+        let plan_udf = PlanJsUdf::from_function(name, &function, None);
+        let udf = Arc::new(ScalarUDF::new_from_impl(plan_udf));
+        let expr = Expr::ScalarFunction(ScalarFunction::new_udf(
+            udf.clone(),
+            vec![datafusion::prelude::lit("test")],
+        ));
+        (udf, expr)
+    }
+
+    /// Asserts no `PlanJsUdf` references remain anywhere in the plan.
+    fn assert_no_plan_js_udfs(plan: &LogicalPlan) {
+        plan.apply(|node| {
+            node.expressions().iter().for_each(|expr| {
+                expr.apply(|e| {
+                    if let Expr::ScalarFunction(sf) = e {
+                        assert!(
+                            sf.func
+                                .inner()
+                                .as_any()
+                                .downcast_ref::<PlanJsUdf>()
+                                .is_none(),
+                            "found PlanJsUdf in rewritten plan"
+                        );
+                    }
+                    Ok(TreeNodeRecursion::Continue)
+                })
+                .expect("expression traversal should succeed");
+            });
+            Ok(TreeNodeRecursion::Continue)
+        })
+        .expect("plan traversal should succeed");
     }
 }

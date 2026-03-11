@@ -29,15 +29,16 @@ use common::{
 };
 use datafusion::parquet::errors::ParquetError;
 use futures::StreamExt as _;
-use tracing::instrument;
+use js_runtime::isolate_pool::IsolatePool;
 
 use crate::job_ctx::Context;
 
-#[instrument(skip_all, err)]
+#[tracing::instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]
 pub async fn materialize_sql_query(
     ctx: &Context,
     env: &ExecEnv,
+    isolate_pool: &IsolatePool,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
     start: BlockNum,
@@ -57,6 +58,7 @@ pub async fn materialize_sql_query(
     let mut stream = {
         StreamingQuery::spawn(
             env.clone(),
+            isolate_pool.clone(),
             catalog.clone(),
             query,
             start,

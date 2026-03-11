@@ -28,8 +28,6 @@ use datasets_derived::{
     function::Function,
     manifest::TableSchema,
 };
-use js_runtime::isolate_pool::IsolatePool;
-use tracing::instrument;
 
 use crate::{
     ctx::Ctx,
@@ -98,7 +96,7 @@ use crate::{
 /// Panics if `resolve_inter_table_order` returns a table name that was not in the
 /// original statements map. This is structurally impossible because the sort only
 /// returns keys from its input.
-#[instrument(skip_all, err)]
+#[tracing::instrument(skip_all, err)]
 #[cfg_attr(
     feature = "utoipa",
     utoipa::path(
@@ -269,18 +267,11 @@ pub async fn handler(
     // Inter-table references use `self.<table_name>` syntax, which resolves through the
     // SelfSchemaProvider registered under the "self" schema in the AmpCatalogProvider.
     let session_config = default_session_config().map_err(Error::SessionConfig)?;
-    let self_schema_provider = Arc::new(SelfSchemaProvider::from_manifest_udfs(
-        IsolatePool::dummy(),
-        &functions,
-    ));
+    let self_schema_provider = Arc::new(SelfSchemaProvider::from_manifest_udfs(&functions));
     let amp_catalog = Arc::new(
-        AmpCatalogProvider::new(
-            ctx.datasets_cache.clone(),
-            ctx.ethcall_udfs_cache.clone(),
-            IsolatePool::dummy(),
-        )
-        .with_dep_aliases(dep_aliases)
-        .with_self_schema(self_schema_provider.clone() as Arc<dyn AsyncSchemaProvider>),
+        AmpCatalogProvider::new(ctx.datasets_cache.clone(), ctx.ethcall_udfs_cache.clone())
+            .with_dep_aliases(dep_aliases)
+            .with_self_schema(self_schema_provider.clone() as Arc<dyn AsyncSchemaProvider>),
     );
     let planning_ctx = PlanContextBuilder::new(session_config)
         .with_table_catalog(AMP_CATALOG_NAME, amp_catalog.clone())

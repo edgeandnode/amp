@@ -221,6 +221,7 @@ async fn main() {
             .expect("Failed to start controller for dependency restoration");
 
             // Start a worker to handle dump jobs
+            let isolate_pool = IsolatePool::new();
             let _worker = DaemonWorker::new(
                 build_info,
                 config.clone(),
@@ -228,7 +229,7 @@ async fn main() {
                 data_store.clone(),
                 datasets_cache.clone(),
                 ethcall_udfs_cache,
-                IsolatePool::new(),
+                isolate_pool,
                 None,
                 "bless".parse().expect("valid worker node id"),
             )

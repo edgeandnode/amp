@@ -19,6 +19,7 @@ use datasets_common::{
 use datasets_derived::{dataset::Dataset as DerivedDataset, deps::SELF_REF_KEYWORD};
 use datasets_raw::dataset::Dataset as RawDataset;
 use futures::stream::{self, BoxStream, StreamExt};
+use js_runtime::isolate_pool::IsolatePool;
 use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::{NotificationMultiplexerHandle, physical_table_revision::LocationId};
 use tokio::{
@@ -311,6 +312,7 @@ impl StreamingQueryHandle {
 /// stream.
 pub struct StreamingQuery {
     exec_env: ExecEnv,
+    isolate_pool: IsolatePool,
     catalog: Catalog,
     plan: DetachedLogicalPlan,
     start_block: BlockNum,
@@ -338,6 +340,7 @@ impl StreamingQuery {
     #[expect(clippy::too_many_arguments)]
     pub async fn spawn(
         exec_env: ExecEnv,
+        isolate_pool: IsolatePool,
         catalog: Catalog,
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
@@ -386,7 +389,6 @@ impl StreamingQuery {
                 AmpCatalogProvider::new(
                     exec_env.datasets_cache.clone(),
                     exec_env.ethcall_udfs_cache.clone(),
-                    exec_env.isolate_pool.clone(),
                 )
                 .with_dep_aliases(dep_alias_map)
                 .with_self_schema(self_schema),
@@ -426,6 +428,7 @@ impl StreamingQuery {
             .map_err(SpawnError::ConvertCursor)?;
         let streaming_query = Self {
             exec_env,
+            isolate_pool,
             catalog,
             plan,
             tx,
@@ -462,6 +465,7 @@ impl StreamingQuery {
 
             // The table snapshots to execute the microbatch against.
             let ctx = ExecContextBuilder::new(self.exec_env.clone())
+                .with_isolate_pool(self.isolate_pool.clone())
                 .for_catalog(self.catalog.clone(), false)
                 .await
                 .map_err(StreamingQueryExecutionError::CreateExecContext)?;
@@ -579,6 +583,7 @@ impl StreamingQuery {
                 )
             };
             ExecContextBuilder::new(self.exec_env.clone())
+                .with_isolate_pool(self.isolate_pool.clone())
                 .for_catalog(catalog, false)
                 .await
                 .map_err(NextMicrobatchRangeError::CreateExecContext)?
@@ -750,6 +755,7 @@ impl StreamingQuery {
                 Default::default(),
             );
             ExecContextBuilder::new(ctx.env.clone())
+                .with_isolate_pool(ctx.isolate_pool().clone())
                 .for_catalog(catalog, true)
                 .await
                 .map_err(ReorgBaseError::CreateExecContext)?
