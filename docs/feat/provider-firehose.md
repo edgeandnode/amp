@@ -129,7 +129,7 @@ authorization: bearer <token>
 
 ### Sample Configuration File
 
-`docs/providers/firehose.sample.toml`
+`docs/schemas/providers/firehose.sample.toml`
 
 ## References
 

@@ -13,7 +13,7 @@ The API serves as the primary administrative interface for monitoring and contro
 
 ## API Documentation
 
-Complete API documentation is available in the generated OpenAPI specification at [`docs/openapi-specs/admin.spec.json`](../../docs/openapi-specs/admin.spec.json).
+Complete API documentation is available in the generated OpenAPI specification at [`docs/schemas/openapi/admin.spec.json`](../../docs/schemas/openapi/admin.spec.json).
 
 The OpenAPI spec provides comprehensive documentation for all endpoints, including:
 - Request/response schemas
@@ -56,4 +56,4 @@ To generate the OpenAPI specification, run:
 just gen-admin-api-openapi-spec
 ```
 
-This will generate the OpenAPI spec from the handler utoipa annotations and copy it to `docs/openapi-specs/admin.spec.json`.
+This will generate the OpenAPI spec from the handler utoipa annotations and copy it to `docs/schemas/openapi/admin.spec.json`.

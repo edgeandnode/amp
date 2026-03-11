@@ -346,6 +346,4 @@ For more detailed information about the project:
 
 - **Architecture overview**: See [docs/architecture.md](docs/architecture.md)
 - **Technical documentation**: See `docs/` directory
-- **OpenAPI specifications**: Review `docs/openapi-specs/`
-- **OpenCLI specifications**: Review `docs/opencli-specs/`
-- **Schema definitions**: Browse `docs/manifest-schemas/`
+- **Schemas**: Browse `docs/schemas/` (tables, openapi, manifest, providers)

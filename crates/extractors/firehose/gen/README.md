@@ -18,4 +18,4 @@ Or using the full `cargo build` command:
 RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-firehose-gen
 ```
 
-This will generate JSON schemas from the Firehose dataset definitions. The unified raw manifest schema is output to `docs/manifest-schemas/raw.spec.json` via `just gen-raw-dataset-manifest-schema`.
+This will generate JSON schemas from the Firehose dataset definitions. The unified raw manifest schema is output to `docs/schemas/manifest/raw.spec.json` via `just gen-raw-dataset-manifest-schema`.

@@ -18,7 +18,7 @@ Or using the full `cargo` command:
 RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-solana-gen
 
 mkdir -p docs/providers
-cp target/debug/build/amp-providers-solana-gen-*/out/schema.json docs/providers/solana.spec.json
+cp target/debug/build/amp-providers-solana-gen-*/out/schema.json docs/schemas/providers/solana.spec.json
 ```
 
-This will generate JSON schemas from the Solana provider configurations and copy them to `docs/providers/solana.spec.json`.
+This will generate JSON schemas from the Solana provider configurations and copy them to `docs/schemas/providers/solana.spec.json`.

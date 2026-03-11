@@ -18,7 +18,7 @@ Or using the full `cargo` command:
 RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-evm-rpc-gen
 
 mkdir -p docs/providers
-cp target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json docs/providers/evm-rpc.spec.json
+cp target/debug/build/amp-providers-evm-rpc-gen-*/out/schema.json docs/schemas/providers/evm-rpc.spec.json
 ```
 
-This will generate JSON schemas from the EVM RPC provider configurations and copy them to `docs/providers/evm-rpc.spec.json`.
+This will generate JSON schemas from the EVM RPC provider configurations and copy them to `docs/schemas/providers/evm-rpc.spec.json`.

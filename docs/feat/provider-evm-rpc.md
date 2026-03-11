@@ -153,7 +153,7 @@ rpc_batch_size = 100
 
 ### Sample Configuration File
 
-`docs/providers/evm-rpc.sample.toml`
+`docs/schemas/providers/evm-rpc.sample.toml`
 
 ## Limitations
 

@@ -18,7 +18,7 @@ Or using the full `cargo` command:
 RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-static-gen
 
 mkdir -p docs/providers
-cp target/debug/build/amp-providers-static-gen-*/out/schema.json docs/providers/static.spec.json
+cp target/debug/build/amp-providers-static-gen-*/out/schema.json docs/schemas/providers/static.spec.json
 ```
 
-This will generate JSON schemas from the static provider configurations and copy them to `docs/providers/static.spec.json`.
+This will generate JSON schemas from the static provider configurations and copy them to `docs/schemas/providers/static.spec.json`.

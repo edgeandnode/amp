@@ -115,10 +115,10 @@ For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admi
 
 ```bash
 # List workers endpoint
-jq '.paths["/workers"]' docs/openapi-specs/admin.spec.json
+jq '.paths["/workers"]' docs/schemas/openapi/admin.spec.json
 
 # Get worker endpoint
-jq '.paths["/workers/{id}"]' docs/openapi-specs/admin.spec.json
+jq '.paths["/workers/{id}"]' docs/schemas/openapi/admin.spec.json
 ```
 
 ## Implementation

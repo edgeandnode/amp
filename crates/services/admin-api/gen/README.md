@@ -18,7 +18,7 @@ Or using the full `cargo build` command:
 RUSTFLAGS="--cfg gen_openapi_spec" cargo build -p admin-api-gen
 
 mkdir -p docs/openapi-specs
-cp target/debug/build/admin-api-gen-*/out/openapi.spec.json docs/openapi-specs/admin.spec.json
+cp target/debug/build/admin-api-gen-*/out/openapi.spec.json docs/schemas/openapi/admin.spec.json
 ```
 
-This will generate OpenAPI schemas from the admin API endpoint definitions and copy them to `docs/openapi-specs/admin.spec.json`.
+This will generate OpenAPI schemas from the admin API endpoint definitions and copy them to `docs/schemas/openapi/admin.spec.json`.

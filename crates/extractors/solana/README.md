@@ -117,7 +117,7 @@ JSON schemas for Solana dataset manifests can be generated using the companion `
 just gen-solana-dataset-manifest-schema
 ```
 
-This generates a JSON schema from the `Manifest` struct. The unified raw manifest schema is output to `docs/manifest-schemas/raw.spec.json` via `just gen-raw-dataset-manifest-schema`.
+This generates a JSON schema from the `Manifest` struct. The unified raw manifest schema is output to `docs/schemas/manifest/raw.spec.json` via `just gen-raw-dataset-manifest-schema`.
 
 ## Related Resources
 

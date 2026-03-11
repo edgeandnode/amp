@@ -18,7 +18,7 @@ Or using the full `cargo` command:
 RUSTFLAGS="--cfg gen_schema_provider" cargo check -p amp-providers-firehose-gen
 
 mkdir -p docs/providers
-cp target/debug/build/amp-providers-firehose-gen-*/out/schema.json docs/providers/firehose.spec.json
+cp target/debug/build/amp-providers-firehose-gen-*/out/schema.json docs/schemas/providers/firehose.spec.json
 ```
 
-This will generate JSON schemas from the Firehose provider configurations and copy them to `docs/providers/firehose.spec.json`.
+This will generate JSON schemas from the Firehose provider configurations and copy them to `docs/schemas/providers/firehose.spec.json`.
