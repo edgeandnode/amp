@@ -68,6 +68,7 @@ pub async fn materialize_sql_query(
             Some(physical_table.clone()),
             ctx.config.microbatch_max_interval,
             keep_alive_interval,
+            None,
         )
         .await
         .map_err(MaterializeSqlQueryError::streaming_query_spawn)?

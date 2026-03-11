@@ -48,10 +48,11 @@ use crate::{
     datasets_cache::{DatasetsCache, ResolveRevisionError},
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
-    incrementalizer::incrementalize_plan,
+    incrementalizer::{IncrementalContext, incrementalize_plan, validate_table_providers},
     physical_table::{CanonicalChainError, PhysicalTable, segments::Segment},
     plan_visitors::{
-        find_cross_network_join, order_by_block_num, unproject_special_block_num_column,
+        build_table_network_map, find_cross_network_join, order_by_block_num,
+        unproject_special_block_num_column,
     },
     retryable::RetryableErrorExt,
     self_schema_provider::SelfSchemaProvider,
@@ -326,9 +327,16 @@ pub struct StreamingQuery {
     network: NetworkId,
     /// `blocks` table for the network associated with the catalog.
     blocks_table: (Arc<PhysicalTable>, Arc<str>),
+    /// Mapping from table references to their network, used by the incrementalizer.
+    table_networks: BTreeMap<datafusion::sql::TableReference, NetworkId>,
     /// The single-network cursor for the previously processed range. This may be provided by the
     /// consumer (as a multi-network cursor) and converted to this single-network cursor.
     prev_cursor: Option<NetworkCursor>,
+    /// User-specified lead network override from `SETTINGS lead_network = '...'`.
+    /// When `None`, the lead network is chosen alphabetically from the query's table networks.
+    /// Used when constructing [`IncrementalContext`] for multi-network microbatches.
+    #[expect(dead_code)]
+    lead_network_override: Option<NetworkId>,
 }
 
 impl StreamingQuery {
@@ -350,6 +358,7 @@ impl StreamingQuery {
         destination: Option<Arc<PhysicalTable>>,
         microbatch_max_interval: u64,
         keep_alive_interval: u64,
+        lead_network_override: Option<NetworkId>,
     ) -> Result<StreamingQueryHandle, SpawnError> {
         let (tx, rx) = mpsc::channel(10);
 
@@ -422,6 +431,23 @@ impl StreamingQuery {
         };
 
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
+        let mut table_networks = build_table_network_map(&catalog);
+
+        // Derived tables don't carry a network (Table::network() returns None),
+        // so build_table_network_map skips them. Fill in missing entries using the
+        // resolved network so the incrementalizer can look up every table in the plan.
+        for (physical_table, sql_schema_name) in catalog.entries() {
+            if physical_table.network().is_none() {
+                let table_ref = datafusion::sql::TableReference::Partial {
+                    schema: Arc::from(&**sql_schema_name),
+                    table: Arc::from(physical_table.table_name().as_str()),
+                };
+                table_networks
+                    .entry(table_ref)
+                    .or_insert_with(|| network.clone());
+            }
+        }
+
         let prev_cursor = cursor
             .map(|c| c.to_single_network(&network))
             .transpose()
@@ -442,6 +468,8 @@ impl StreamingQuery {
             preserve_block_num,
             network,
             blocks_table,
+            table_networks,
+            lead_network_override,
         };
 
         let execute_span = tracing::info_span!("streaming_query_execute");
@@ -502,7 +530,14 @@ impl StreamingQuery {
                 .clone()
                 .attach_to(ctx)
                 .map_err(StreamingQueryExecutionError::AttachPlan)?;
-            let mut plan = incrementalize_plan(plan, range.start(), range.end())
+            validate_table_providers(&plan)
+                .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
+            let incremental_ctx = IncrementalContext::single_network(
+                self.network.clone(),
+                range.start(),
+                range.end(),
+            );
+            let mut plan = incrementalize_plan(plan, &incremental_ctx, &self.table_networks)
                 .map_err(StreamingQueryExecutionError::IncrementalizePlan)?;
 
             // Enforce `order by _block_num`.

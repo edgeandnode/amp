@@ -149,7 +149,10 @@ impl Service {
             .map_err(Error::PlanSql)?;
 
         let is_streaming = is_streaming.unwrap_or_else(|| crate::helpers::is_streaming(&query));
-        let result = self.execute_plan(catalog, plan, is_streaming, cursor).await;
+        let lead_network_override = crate::helpers::lead_network_setting(&query);
+        let result = self
+            .execute_plan(catalog, plan, is_streaming, cursor, lead_network_override)
+            .await;
 
         // Record execution error
         if result.is_err()
@@ -173,6 +176,7 @@ impl Service {
         plan: DetachedLogicalPlan,
         is_streaming: bool,
         cursor: Option<Cursor>,
+        lead_network_override: Option<NetworkId>,
     ) -> Result<QueryResultStream, Error> {
         let query_start_time = std::time::Instant::now();
         let schema = {
@@ -268,6 +272,7 @@ impl Service {
                 None,
                 self.config.server_microbatch_max_interval,
                 self.config.keep_alive_interval,
+                lead_network_override,
             )
             .await
             .map_err(|err| Error::StreamingExecutionError(Box::new(err)))?;
