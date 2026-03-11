@@ -132,4 +132,4 @@ jq '.paths | to_entries[] | select(.key | startswith("/manifests"))' docs/openap
 ## References
 
 - [app-ampctl](app-ampctl.md) - Base: ampctl overview
-- [dataset-registry](dataset-registry.md) - Related: Dataset registry and manifest storage
+- [datasets-registry](../../crates/core/datasets-registry/README.md) - Related: Dataset registry and manifest storage
