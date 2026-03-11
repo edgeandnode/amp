@@ -19,6 +19,7 @@ members = [
     "crates/core/datasets-derived",
     "crates/core/datasets-derived/gen",
     "crates/core/datasets-raw",
+    "crates/core/datasets-raw/gen",
     "crates/core/js-runtime",
     "crates/core/metadata-db",
     "crates/core/monitoring",

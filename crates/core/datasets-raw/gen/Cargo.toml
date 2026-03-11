@@ -1,0 +1,17 @@
+[package]
+name = "amp-datasets-raw-gen"
+edition.workspace = true
+version.workspace = true
+license-file.workspace = true
+publish = false
+
+# Manifest schema generation dependencies (schemars feature and related)
+# These dependencies are only included when the gen_schema_manifest cfg flag is enabled
+[target.'cfg(gen_schema_manifest)'.build-dependencies]
+datasets-raw = { path = "..", features = ["schemars"] }
+schemars = { workspace = true }
+serde_json = { workspace = true }
+
+[lints.rust]
+# Allow the gen_schema_manifest cfg flag used for conditional schema generation
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gen_schema_manifest)'] }

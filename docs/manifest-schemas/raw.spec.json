@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Manifest",
-  "description": "Firehose dataset manifest.",
+  "description": "Generic raw dataset manifest, parameterized by dataset kind `K`.\n\nAll raw datasets share the same structure: a typed kind, network identifier,\noptional start block, finalization preference, and table definitions.",
   "type": "object",
   "properties": {
     "finalized_blocks_only": {
@@ -10,12 +10,17 @@
       "default": false
     },
     "kind": {
-      "description": "Dataset kind, must be `firehose`.",
-      "const": "firehose"
+      "description": "Dataset kind identifier.",
+      "$ref": "#/$defs/RawDatasetKind"
     },
     "network": {
-      "description": "Network name, e.g., `mainnet`.",
-      "$ref": "#/$defs/NetworkId"
+      "description": "Network name.",
+      "$ref": "#/$defs/NetworkId",
+      "examples": [
+        "mainnet",
+        "base",
+        "solana-mainnet"
+      ]
     },
     "start_block": {
       "description": "Dataset start block.",
@@ -85,6 +90,15 @@
       "description": "A validated network identifier that enforces basic constraints.\n\nNetwork identifiers are used to distinguish between different blockchain networks\n(e.g., \"mainnet\", \"base\", \"arbitrum-one\"). This type provides compile-time guarantees\nthat all instances contain valid network identifiers.\n\nNetwork IDs should follow the values defined in The Graph's networks registry:\n<https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md>\n\n## Format Requirements\n\nA valid network identifier must:\n- **Not be empty** (minimum length of 1 character)",
       "type": "string",
       "minLength": 1
+    },
+    "RawDatasetKind": {
+      "description": "Unified enum of all raw dataset kinds, used for JSON schema generation.\n\nThis enum produces `{\"enum\": [\"evm-rpc\", \"firehose\", \"solana\"]}` in the JSON schema,\nallowing a single schema file to cover all raw dataset kinds.",
+      "type": "string",
+      "enum": [
+        "evm-rpc",
+        "firehose",
+        "solana"
+      ]
     },
     "Table": {
       "description": "Table definition for raw dataset manifests.",

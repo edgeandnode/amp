@@ -15,8 +15,8 @@ The Solana dataset defines table schemas for Solana blockchain data. It declares
 ## Table of Contents
 
 1. [Key Concepts](#key-concepts)
-2. [Configuration](#configuration)
-3. [Usage](#usage)
+2. [Manifest](#manifest)
+3. [Schema](#schema)
 4. [Implementation](#implementation)
 5. [Limitations](#limitations)
 6. [References](#references)
@@ -28,41 +28,15 @@ The Solana dataset defines table schemas for Solana blockchain data. It declares
 - **Commitment Level**: Solana's finality model (`processed`, `confirmed`, `finalized`). The `finalized_blocks_only` flag maps to the `finalized` commitment level
 - **Non-Empty Slot**: A confirmed slot containing block data, transactions, and rewards. Represented by the `NonEmptySlot` type in the extractor
 
-## Configuration
+## Manifest
 
-For the complete field reference, see the [manifest schema](../manifest-schemas/solana.spec.json).
+See the [raw dataset manifest schema](../manifest-schemas/raw.spec.json) for the complete field reference, types, defaults, and examples.
 
-### Example Manifest
+## Schema
 
-```json
-{
-  "kind": "solana",
-  "network": "solana-mainnet",
-  "start_block": 0,
-  "finalized_blocks_only": true,
-  "tables": {
-    "block_headers": { "schema": { "arrow": { "fields": [] } }, "network": "solana-mainnet" },
-    "transactions": { "schema": { "arrow": { "fields": [] } }, "network": "solana-mainnet" },
-    "messages": { "schema": { "arrow": { "fields": [] } }, "network": "solana-mainnet" },
-    "instructions": { "schema": { "arrow": { "fields": [] } }, "network": "solana-mainnet" },
-    "block_rewards": { "schema": { "arrow": { "fields": [] } }, "network": "solana-mainnet" }
-  }
-}
-```
+This dataset declares five tables: `block_headers`, `transactions`, `messages`, `instructions`, and `block_rewards`. 
 
-### Manifest Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `kind` | `"solana"` | Dataset kind identifier |
-| `network` | string | Target Solana network (e.g., `solana-mainnet`) |
-| `start_block` | u64 | First slot to extract |
-| `finalized_blocks_only` | bool | Restrict to finalized commitment level |
-| `tables` | object | Table definitions with schemas |
-
-## Usage
-
-This dataset declares five tables: `block_headers`, `transactions`, `messages`, `instructions`, and `block_rewards`. For detailed column definitions, see the [table schema](../schemas/solana.md).
+For detailed column definitions, see the [table schema](../schemas/solana.md).
 
 ### Slot-to-Block Mapping
 
