@@ -36,38 +36,6 @@ use tracing::Instrument as _;
 use super::query::{MaterializeSqlQueryError, materialize_sql_query};
 use crate::job_ctx::Context;
 
-/// Partitions table references into external dependency refs and self-ref table names.
-///
-/// References with `self.` schema are collected as self-ref table names.
-/// All other qualified references are converted to external `DepAlias` refs.
-fn partition_table_refs(
-    refs: Vec<TableReference<DepAliasOrSelfRef>>,
-) -> (Vec<TableReference<DepAlias>>, Vec<TableName>) {
-    let mut ext_refs: Vec<TableReference<DepAlias>> = Vec::new();
-    let mut self_ref_tables: Vec<TableName> = Vec::new();
-
-    for table_ref in refs {
-        match table_ref {
-            TableReference::Bare { table } => {
-                ext_refs.push(TableReference::Bare { table });
-            }
-            TableReference::Partial { schema, table } => match schema.as_ref() {
-                DepAliasOrSelfRef::SelfRef => {
-                    self_ref_tables.push(table.as_ref().clone());
-                }
-                DepAliasOrSelfRef::DepAlias(alias) => {
-                    ext_refs.push(TableReference::Partial {
-                        schema: Arc::new(alias.clone()),
-                        table,
-                    });
-                }
-            },
-        }
-    }
-
-    (ext_refs, self_ref_tables)
-}
-
 /// Materializes a derived dataset table
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, fields(table = %table.table_name()), err)]
@@ -521,20 +489,44 @@ impl RetryableErrorExt for MaterializeTableSpawnError {
     }
 }
 
+/// Partitions table references into external dependency refs and self-ref table names.
+///
+/// References with `self.` schema are collected as self-ref table names.
+/// All other qualified references are converted to external `DepAlias` refs.
+fn partition_table_refs(
+    refs: Vec<TableReference<DepAliasOrSelfRef>>,
+) -> (Vec<TableReference<DepAlias>>, Vec<TableName>) {
+    let mut ext_refs: Vec<TableReference<DepAlias>> = Vec::new();
+    let mut self_ref_tables: Vec<TableName> = Vec::new();
+
+    for table_ref in refs {
+        match table_ref {
+            TableReference::Bare { table } => {
+                ext_refs.push(TableReference::Bare { table });
+            }
+            TableReference::Partial { schema, table } => match schema.as_ref() {
+                DepAliasOrSelfRef::SelfRef => {
+                    self_ref_tables.push(table.as_ref().clone());
+                }
+                DepAliasOrSelfRef::DepAlias(alias) => {
+                    ext_refs.push(TableReference::Partial {
+                        schema: Arc::new(alias.clone()),
+                        table,
+                    });
+                }
+            },
+        }
+    }
+
+    (ext_refs, self_ref_tables)
+}
+
 #[cfg(test)]
 mod tests {
     use common::sql::resolve_table_references;
     use datasets_derived::{deps::DepAliasOrSelfRef, sql_str::SqlStr};
 
     use super::*;
-
-    fn parse_and_partition(sql: &str) -> (Vec<TableReference<DepAlias>>, Vec<TableName>) {
-        let sql_str: SqlStr = sql.parse().expect("sql should parse to SqlStr");
-        let stmt = common::sql::parse(&sql_str).expect("sql should parse to statement");
-        let refs = resolve_table_references::<DepAliasOrSelfRef>(&stmt)
-            .expect("table references should resolve");
-        partition_table_refs(refs)
-    }
 
     #[test]
     fn partition_table_refs_with_only_external_deps_returns_ext_refs_only() {
@@ -604,5 +596,13 @@ mod tests {
 
         //* Then
         assert!(!result, "SelfRefTableNotFound should not be retryable");
+    }
+
+    fn parse_and_partition(sql: &str) -> (Vec<TableReference<DepAlias>>, Vec<TableName>) {
+        let sql_str: SqlStr = sql.parse().expect("sql should parse to SqlStr");
+        let stmt = common::sql::parse(&sql_str).expect("sql should parse to statement");
+        let refs = resolve_table_references::<DepAliasOrSelfRef>(&stmt)
+            .expect("table references should resolve");
+        partition_table_refs(refs)
     }
 }

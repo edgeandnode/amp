@@ -486,20 +486,6 @@ mod tests {
             //* Then
             assert!(result, "DependencyNotFound should be fatal");
         }
-
-        #[test]
-        fn is_fatal_self_ref_table_not_found_returns_true() {
-            //* Given
-            let err = MaterializeTableError::SelfRefTableNotFound(
-                "missing_table".parse().expect("should parse table name"),
-            );
-
-            //* When
-            let result = err.is_fatal();
-
-            //* Then
-            assert!(result, "SelfRefTableNotFound should be fatal");
-        }
     }
 
     mod materialize_table_spawn_error_is_fatal {
