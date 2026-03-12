@@ -289,6 +289,7 @@ pub async fn execute(
     //
     // We wrap the loop in a block to handle errors and emit failure events.
     let materialize_result: Result<(), Error> = async {
+        let mut prev_latest_block: Option<BlockNum> = None;
         loop {
             let Some(latest_block) = client
                 .latest_block(finalized_blocks_only)
@@ -299,6 +300,13 @@ pub async fn execute(
                 timer.tick().await;
                 continue;
             };
+
+            // Skip recomputing missing ranges if latest_block hasn't changed.
+            if Some(latest_block) == prev_latest_block {
+                timer.tick().await;
+                continue;
+            }
+
             if latest_block < start {
                 // Start not yet reached, wait for more data
                 timer.tick().await;
@@ -337,6 +345,9 @@ pub async fn execute(
 
             // If there are no ranges then there is no more work to do, check materialize end condition.
             if missing_dataset_ranges.is_empty() {
+                // Work for this block is complete
+                prev_latest_block = Some(latest_block);
+
                 // If we've reached the configured end block, stop completely and return.
                 if let Some(end) = end
                     && end <= latest_block
