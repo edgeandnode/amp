@@ -348,7 +348,7 @@ describe("AmpRegistryService", () => {
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
         const result = yield* service.getOwnedDataset(
-          mockAuthStorage,
+          mockAuthStorage.accessToken,
           Model.DatasetNamespace.make("edgeandnode"),
           Model.DatasetName.make("mainnet"),
         )
@@ -378,7 +378,7 @@ describe("AmpRegistryService", () => {
 
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
         const result = yield* service.getOwnedDataset(
-          mockAuthStorage,
+          mockAuthStorage.accessToken,
           Model.DatasetNamespace.make("edgeandnode"),
           Model.DatasetName.make("nonexistent"),
         )
@@ -415,7 +415,7 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
         const result = yield* Effect.exit(
           service.getOwnedDataset(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
           ),
@@ -448,7 +448,7 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
         const result = yield* Effect.exit(
           service.getOwnedDataset(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
           ),
@@ -489,7 +489,7 @@ describe("AmpRegistryService", () => {
         const service = yield* Effect.provide(AmpRegistry.AmpRegistryService, TestLayer)
         const result = yield* Effect.exit(
           service.getOwnedDataset(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
           ),
@@ -550,7 +550,7 @@ describe("AmpRegistryService", () => {
           }),
         })
 
-        const result = yield* service.publishDataset(mockAuthStorage, insertDto)
+        const result = yield* service.publishDataset(mockAuthStorage.accessToken, insertDto)
 
         expect(result.namespace).toBe(Model.DatasetNamespace.make("edgeandnode"))
         expect(result.name).toBe(Model.DatasetName.make("mainnet"))
@@ -602,7 +602,7 @@ describe("AmpRegistryService", () => {
           }),
         })
 
-        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage, insertDto))
+        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage.accessToken, insertDto))
 
         expect(result._tag).toBe("Failure")
       }))
@@ -641,7 +641,7 @@ describe("AmpRegistryService", () => {
           }),
         })
 
-        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage, insertDto))
+        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage.accessToken, insertDto))
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -695,7 +695,7 @@ describe("AmpRegistryService", () => {
           }),
         })
 
-        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage, insertDto))
+        const result = yield* Effect.exit(service.publishDataset(mockAuthStorage.accessToken, insertDto))
 
         expect(result._tag).toBe("Failure")
         if (result._tag === "Failure" && result.cause._tag === "Fail") {
@@ -741,7 +741,7 @@ describe("AmpRegistryService", () => {
         })
 
         const result = yield* service.publishVersion(
-          mockAuthStorage,
+          mockAuthStorage.accessToken,
           Model.DatasetNamespace.make("edgeandnode"),
           Model.DatasetName.make("mainnet"),
           versionDto,
@@ -790,7 +790,7 @@ describe("AmpRegistryService", () => {
 
         const result = yield* Effect.exit(
           service.publishVersion(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
             versionDto,
@@ -839,7 +839,7 @@ describe("AmpRegistryService", () => {
 
         const result = yield* Effect.exit(
           service.publishVersion(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
             versionDto,
@@ -894,7 +894,7 @@ describe("AmpRegistryService", () => {
         })
 
         const result = yield* service.updateDatasetMetadata(
-          mockAuthStorage,
+          mockAuthStorage.accessToken,
           Model.DatasetNamespace.make("edgeandnode"),
           Model.DatasetName.make("mainnet"),
           updateDto,
@@ -941,7 +941,7 @@ describe("AmpRegistryService", () => {
 
         const result = yield* Effect.exit(
           service.updateDatasetMetadata(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
             updateDto,
@@ -991,7 +991,7 @@ describe("AmpRegistryService", () => {
 
         const result = yield* Effect.exit(
           service.updateDatasetMetadata(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("nonexistent"),
             updateDto,
@@ -1030,7 +1030,7 @@ describe("AmpRegistryService", () => {
 
         const result = yield* Effect.exit(
           service.updateDatasetMetadata(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
             updateDto,
@@ -1078,7 +1078,7 @@ describe("AmpRegistryService", () => {
 
         const result = yield* Effect.exit(
           service.updateDatasetMetadata(
-            mockAuthStorage,
+            mockAuthStorage.accessToken,
             Model.DatasetNamespace.make("edgeandnode"),
             Model.DatasetName.make("mainnet"),
             updateDto,

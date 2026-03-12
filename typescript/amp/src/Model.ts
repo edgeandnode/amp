@@ -8,6 +8,7 @@ export const Address = Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => 
 export const AccessToken = Schema.NonEmptyTrimmedString.pipe(
   Schema.brand("AccessToken"),
 )
+export type AccessToken = typeof AccessToken.Type
 
 export const RefreshToken = Schema.NonEmptyTrimmedString.pipe(
   Schema.brand("RefreshToken"),

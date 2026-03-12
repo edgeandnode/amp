@@ -11,7 +11,7 @@ import * as Admin from "../../api/Admin.ts"
 import * as Auth from "../../Auth.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile } from "../common.ts"
+import { adminUrl, bearerToken, configFile } from "../common.ts"
 
 export const build = Command.make("build", {
   args: {
@@ -22,6 +22,7 @@ export const build = Command.make("build", {
       Options.optional,
     ),
     adminUrl,
+    bearerToken,
   },
 }).pipe(
   Command.withDescription("Build a manifest from a dataset definition"),
@@ -46,8 +47,17 @@ export const build = Command.make("build", {
   Command.provide(({ args }) =>
     ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(
       Layer.unwrapEffect(Effect.gen(function*() {
-        const token = yield* Auth.AuthService.pipe(Effect.flatMap((auth) => auth.getCache()))
-        return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token)?.accessToken)
+        const token = yield* args.bearerToken.pipe(
+          Option.match({
+            onSome: (passed) => Effect.succeed(Option.some(Model.AccessToken.make(passed))),
+            onNone: () =>
+              Auth.AuthService.pipe(
+                Effect.flatMap((auth) => auth.getCache()),
+                Effect.map(Option.map((auth) => auth.accessToken)),
+              ),
+          }),
+        )
+        return Admin.layer(`${args.adminUrl}`, Option.getOrUndefined(token))
       })).pipe(Layer.provide(Auth.layer)),
     ))
   ),
