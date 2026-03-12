@@ -9,7 +9,7 @@ members = [
     "crates/clients/flight",
     "crates/config",
     "crates/config/gen",
-    "crates/core/amp-parquet",
+    "crates/core/parquet",
     "crates/core/common",
     "crates/core/data-store",
     "crates/core/datasets-registry",
