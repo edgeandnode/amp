@@ -51,7 +51,6 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.InvalidPayloadFormat)
   .addError(Error.InvalidManifest)
   .addError(Error.ManifestValidationError)
-  .addError(Error.UnsupportedDatasetKind)
   .addError(Error.ManifestRegistrationError)
   .addError(Error.ManifestLinkingError)
   .addError(Error.VersionTaggingError)
@@ -66,7 +65,6 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
  * - InvalidPayloadFormat: Request JSON is malformed or invalid.
  * - InvalidManifest: Manifest JSON is malformed or structurally invalid.
  * - ManifestValidationError: Manifest validation error (e.g., non-incremental operations).
- * - UnsupportedDatasetKind: Dataset kind is not supported.
  * - ManifestRegistrationError: Failed to register manifest in system.
  * - ManifestLinkingError: Failed to link manifest to dataset.
  * - VersionTaggingError: Failed to tag version for the dataset.
@@ -77,7 +75,6 @@ export type RegisterDatasetError =
   | Error.InvalidPayloadFormat
   | Error.InvalidManifest
   | Error.ManifestValidationError
-  | Error.UnsupportedDatasetKind
   | Error.ManifestRegistrationError
   | Error.ManifestLinkingError
   | Error.VersionTaggingError

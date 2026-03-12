@@ -24,7 +24,7 @@ pub mod sql_str;
 
 pub use self::{
     dataset::Dataset,
-    dataset_kind::{DerivedDatasetKind, DerivedDatasetKindError},
+    dataset_kind::DerivedDatasetKind,
     func_name::FuncName,
     function::{Function, FunctionSource},
     manifest::Manifest,

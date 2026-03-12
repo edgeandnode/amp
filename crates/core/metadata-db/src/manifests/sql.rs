@@ -4,24 +4,31 @@ use sqlx::{Executor, Postgres};
 
 use super::{
     hash::{Hash, HashOwned},
+    kind::{Kind, KindOwned},
     path::{Path, PathOwned},
 };
 
 /// Insert a new manifest record
 ///
 /// Idempotent (`ON CONFLICT DO NOTHING`).
-pub(crate) async fn insert<'c, E>(exe: E, hash: Hash<'_>, path: Path<'_>) -> Result<(), sqlx::Error>
+pub(crate) async fn insert<'c, E>(
+    exe: E,
+    hash: Hash<'_>,
+    kind: Kind<'_>,
+    path: Path<'_>,
+) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO manifest_files (hash, path)
-        VALUES ($1, $2)
+        INSERT INTO manifest_files (hash, kind, path)
+        VALUES ($1, $2, $3)
         ON CONFLICT (hash) DO NOTHING
     "#};
 
     sqlx::query(query)
         .bind(hash)
+        .bind(kind)
         .bind(path)
         .execute(exe)
         .await?;
@@ -103,6 +110,7 @@ where
 #[derive(Debug, Clone)]
 pub struct ManifestSummary {
     pub hash: HashOwned,
+    pub kind: KindOwned,
     pub dataset_count: i64,
 }
 
@@ -111,6 +119,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for ManifestSummary {
         use sqlx::Row;
         Ok(Self {
             hash: row.try_get("hash")?,
+            kind: row.try_get("kind")?,
             dataset_count: row.try_get("dataset_count")?,
         })
     }
@@ -118,7 +127,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for ManifestSummary {
 
 /// List all manifests with metadata
 ///
-/// Returns a vector of manifest summaries including hash and dataset link count,
+/// Returns a vector of manifest summaries including hash, kind, and dataset link count,
 /// ordered by hash.
 pub(crate) async fn list_all<'c, E>(exe: E) -> Result<Vec<ManifestSummary>, sqlx::Error>
 where
@@ -127,10 +136,11 @@ where
     let query = indoc::indoc! {r#"
         SELECT
             mf.hash,
+            mf.kind,
             COALESCE(COUNT(dm.hash), 0) AS dataset_count
         FROM manifest_files mf
         LEFT JOIN dataset_manifests dm ON mf.hash = dm.hash
-        GROUP BY mf.hash
+        GROUP BY mf.hash, mf.kind
         ORDER BY mf.hash
     "#};
 
