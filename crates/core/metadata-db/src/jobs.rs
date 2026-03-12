@@ -39,12 +39,11 @@ use crate::{
 pub async fn register<'c, E>(
     exe: E,
     idempotency_key: impl Into<IdempotencyKey<'_>> + std::fmt::Debug,
-    node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
 ) -> Result<JobId, Error>
 where
     E: Executor<'c>,
 {
-    sql::insert(exe, &idempotency_key.into(), &node_id.into())
+    sql::insert(exe, &idempotency_key.into())
         .await
         .map_err(Error::Database)
 }
