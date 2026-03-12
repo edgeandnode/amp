@@ -2,9 +2,13 @@ use datafusion::{
     logical_expr::sqlparser::{ast, ast::Expr},
     sql,
 };
+use datasets_common::network_id::NetworkId;
 
 /// `SETTINGS` key that enables streaming mode.
 const STREAM_SETTING: &str = "stream";
+
+/// `SETTINGS` key that specifies the lead network for multi-network streaming queries.
+const LEAD_NETWORK_SETTING: &str = "lead_network";
 
 /// Check whether a parsed statement contains `SETTINGS stream = true`.
 ///
@@ -35,6 +39,34 @@ pub fn is_streaming(stmt: &sql::parser::Statement) -> bool {
     };
 
     is_streaming
+}
+
+/// Extract the `lead_network` setting from a parsed statement, if present.
+///
+/// Returns `None` if the setting is absent, not a string, or not a valid network identifier.
+///
+/// ```sql
+/// SELECT * FROM eth UNION ALL SELECT * FROM base
+/// SETTINGS stream = true, lead_network = 'mainnet'
+/// ```
+pub fn lead_network_setting(stmt: &sql::parser::Statement) -> Option<NetworkId> {
+    let sql::parser::Statement::Statement(box_stmt) = stmt else {
+        return None;
+    };
+    let ast::Statement::Query(query) = box_stmt.as_ref() else {
+        return None;
+    };
+    let settings = query.settings.as_ref()?;
+    let setting = settings
+        .iter()
+        .find(|s| s.key.value.eq_ignore_ascii_case(LEAD_NETWORK_SETTING))?;
+    let Expr::Value(v) = &setting.value else {
+        return None;
+    };
+    match &v.value {
+        ast::Value::SingleQuotedString(s) => s.parse().ok(),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -110,6 +142,49 @@ mod tests {
 
         //* Then
         assert!(!result, "query without SETTINGS should not be streaming");
+    }
+
+    #[test]
+    fn lead_network_with_valid_string_returns_some() {
+        //* Given
+        let stmt =
+            parse_stmt("SELECT * FROM test SETTINGS stream = true, lead_network = 'mainnet'");
+
+        //* When
+        let result = lead_network_setting(&stmt);
+
+        //* Then
+        let expected: NetworkId = "mainnet"
+            .parse()
+            .expect("mainnet should be a valid NetworkId");
+        assert_eq!(result, Some(expected));
+    }
+
+    #[test]
+    fn lead_network_without_setting_returns_none() {
+        //* Given
+        let stmt = parse_stmt("SELECT * FROM test SETTINGS stream = true");
+
+        //* When
+        let result = lead_network_setting(&stmt);
+
+        //* Then
+        assert!(result.is_none(), "missing lead_network should return None");
+    }
+
+    #[test]
+    fn lead_network_with_non_string_value_returns_none() {
+        //* Given
+        let stmt = parse_stmt("SELECT * FROM test SETTINGS lead_network = 42");
+
+        //* When
+        let result = lead_network_setting(&stmt);
+
+        //* Then
+        assert!(
+            result.is_none(),
+            "numeric lead_network value should return None"
+        );
     }
 
     fn parse_stmt(sql: &str) -> sql::parser::Statement {

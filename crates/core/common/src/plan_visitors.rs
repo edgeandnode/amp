@@ -600,16 +600,12 @@ impl fmt::Display for CrossNetworkJoinInfo {
     }
 }
 
-/// Checks if any join in the logical plan crosses multiple networks.
-///
-/// Streaming queries cannot join tables from different networks because blocks
-/// from different chains cannot be synchronized. Returns the first cross-network
-/// join found, or `None` if all joins operate within a single network.
-pub fn find_cross_network_join(
-    plan: &LogicalPlan,
+/// Builds a mapping from DataFusion [`TableReference`] to [`NetworkId`] for all tables in the
+/// catalog that have a network.
+pub fn build_table_network_map(
     catalog: &crate::catalog::physical::Catalog,
-) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
-    let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
+) -> BTreeMap<TableReference, NetworkId> {
+    catalog
         .entries()
         .iter()
         .filter_map(|(physical_table, sql_schema_name)| {
@@ -620,7 +616,19 @@ pub fn find_cross_network_join(
             };
             Some((table_ref, network))
         })
-        .collect();
+        .collect()
+}
+
+/// Checks if any join in the logical plan crosses multiple networks.
+///
+/// Streaming queries cannot join tables from different networks because blocks
+/// from different chains cannot be synchronized. Returns the first cross-network
+/// join found, or `None` if all joins operate within a single network.
+pub fn find_cross_network_join(
+    plan: &LogicalPlan,
+    catalog: &crate::catalog::physical::Catalog,
+) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
+    let table_to_network = build_table_network_map(catalog);
 
     let reference_networks =
         |subtree: &LogicalPlan| -> Result<BTreeSet<NetworkId>, DataFusionError> {
