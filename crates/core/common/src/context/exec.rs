@@ -13,11 +13,8 @@ use datafusion::{
     datasource::{DefaultTableSource, TableType},
     error::DataFusionError,
     execution::{
-        SendableRecordBatchStream, TaskContext,
-        cache::cache_manager::CacheManager,
-        config::SessionConfig,
-        disk_manager::DiskManager,
-        memory_pool::MemoryPool,
+        SendableRecordBatchStream, TaskContext, cache::cache_manager::CacheManager,
+        config::SessionConfig, disk_manager::DiskManager, memory_pool::MemoryPool,
         object_store::ObjectStoreRegistry,
     },
     logical_expr::{LogicalPlan, ScalarUDF, TableScan, expr::ScalarFunction},
