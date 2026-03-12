@@ -47,6 +47,7 @@ use common::{
     datasets_cache::{DatasetsCache, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
     exec_env::ExecEnv,
+    memory_pool::TieredMemoryPool,
     plan_visitors::plan_has_block_num_udf,
     sql::{ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_table_references},
     sql_str::SqlStr,
@@ -223,6 +224,7 @@ impl Service {
                 );
             }
 
+            let memory_pool = ctx.memory_pool().clone();
             let record_batches = ctx
                 .execute_plan(plan, true)
                 .await
@@ -241,6 +243,7 @@ impl Service {
                     metrics,
                     query_start_time,
                     dataset_labels,
+                    Some(memory_pool),
                 ))
             } else {
                 Ok(stream)
@@ -302,6 +305,7 @@ impl Service {
                     metrics,
                     query_start_time,
                     dataset_labels,
+                    None,
                 ))
             } else {
                 Ok(stream)
@@ -678,6 +682,7 @@ fn track_query_metrics(
     metrics: &Arc<MetricsRegistry>,
     start_time: std::time::Instant,
     dataset_labels: Vec<HashReference>,
+    memory_pool: Option<Arc<TieredMemoryPool>>,
 ) -> QueryResultStream {
     let metrics = metrics.clone();
 
@@ -709,7 +714,7 @@ fn track_query_metrics(
                             let err_msg = e.to_string();
                             for dataset in &dataset_labels {
                                 metrics.record_query_error(&err_msg, dataset);
-                                metrics.record_query_execution(duration, total_rows, total_bytes, dataset);
+                                metrics.record_query_execution(duration, total_rows, total_bytes, dataset, memory_pool.as_ref());
                             }
 
                             yield Err(e);
@@ -721,7 +726,7 @@ fn track_query_metrics(
                 // Stream completed successfully, record metrics once per dataset
                 let duration = start_time.elapsed().as_millis() as f64;
                 for dataset in &dataset_labels {
-                    metrics.record_query_execution(duration, total_rows, total_bytes, dataset);
+                    metrics.record_query_execution(duration, total_rows, total_bytes, dataset, memory_pool.as_ref());
                 }
             };
 
