@@ -1,5 +1,5 @@
 ---
-name: "data-inter-table-dependencies"
+name: "datasets-derived-inter-table-dependencies"
 description: "Inter-table dependencies within derived datasets: self-qualified table references, topological ordering, cycle detection. Load when asking about tables referencing other tables in the same dataset"
 type: feature
 status: unstable
