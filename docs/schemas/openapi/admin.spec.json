@@ -2785,6 +2785,9 @@
           "tables"
         ],
         "properties": {
+          "detail": {
+            "description": "Structured error detail (present when job is in error/fatal state)"
+          },
           "job_id": {
             "type": "integer",
             "format": "int64",

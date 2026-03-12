@@ -4,6 +4,7 @@ use sqlx::{Executor, Postgres};
 
 use super::{EventDetail, JobEvent};
 use crate::{
+    job_events::EventDetailOwned,
     jobs::{JobDescriptorRawOwned, JobId, JobStatus},
     workers::WorkerNodeId,
 };
@@ -121,5 +122,31 @@ where
         .bind(job_ids)
         .bind(JobStatus::Scheduled)
         .fetch_all(exe)
+        .await
+}
+
+/// Get job detail for a job
+///
+/// Returns one `(job_id, detail)` pair per job, using the most recent
+/// SCHEDULED event in `job_events`.
+pub async fn get_job_detail<'c, E>(
+    exe: E,
+    job_id: JobId,
+    status: JobStatus,
+) -> Result<Option<EventDetailOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT detail
+        FROM job_events
+        WHERE job_id = $1 AND event_type = $2
+        ORDER BY id DESC
+        LIMIT 1
+    "#};
+    sqlx::query_scalar(query)
+        .bind(job_id)
+        .bind(status)
+        .fetch_optional(exe)
         .await
 }

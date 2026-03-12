@@ -113,6 +113,24 @@ where
         .map_err(Error::Database)
 }
 
+/// Get latest job descriptor for each of the given jobs
+///
+/// Returns one `(job_id, detail)` pair per job, using the most recent
+/// SCHEDULED event in `job_events`.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_job_detail<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+    status: impl Into<JobStatus> + std::fmt::Debug,
+) -> Result<Option<EventDetailOwned>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_job_detail(exe, job_id.into(), status.into())
+        .await
+        .map_err(Error::Database)
+}
+
 #[cfg(test)]
 mod tests {
     mod it_job_errors;
