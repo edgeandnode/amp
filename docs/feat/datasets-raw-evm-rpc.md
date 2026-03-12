@@ -28,13 +28,13 @@ The EVM RPC dataset defines the table schemas for block, transaction, and event 
 
 ## Manifest
 
-See the [raw dataset manifest schema](../manifest-schemas/raw.spec.json) for the complete field reference, types, defaults, and examples.
+See the [raw dataset manifest schema](../schemas/manifest/raw.spec.json) for the complete field reference, types, defaults, and examples.
 
 ## Schema
 
 This dataset declares three tables: `blocks`, `transactions`, and `logs`. 
 
-For detailed column definitions, see the [table schema](../schemas/evm-rpc.md).
+For detailed column definitions, see the [table schema](../schemas/tables/evm-rpc.md).
 
 ## Implementation
 

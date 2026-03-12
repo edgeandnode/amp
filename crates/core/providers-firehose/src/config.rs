@@ -27,5 +27,7 @@ pub struct FirehoseProviderConfig {
     pub url: Redacted<Url>,
 
     /// Optional authentication token for the Firehose endpoint.
+    ///
+    /// Sent as an `Authorization: bearer <token>` header.
     pub token: Option<Redacted<String>>,
 }

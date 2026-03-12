@@ -111,7 +111,7 @@ curl http://localhost:1610/workers/worker-01
 | `/workers` | GET | List all workers |
 | `/workers/{id}` | GET | Get worker details by node ID |
 
-For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
+For request/response schemas, see [Admin API OpenAPI spec](../schemas/openapi/admin.spec.json):
 
 ```bash
 # List workers endpoint

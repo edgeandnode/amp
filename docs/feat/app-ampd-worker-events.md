@@ -10,7 +10,7 @@ components: "service:worker"
 
 ## Summary
 
-Worker Event Streaming enables a **Push Model** where workers emit events to Kafka when significant state changes occur. This complements the pull-based [Job Progress API](admin-jobs-progress.md) by enabling real-time dashboards, event-driven Platform backend updates, alerting on sync failures, and audit logging of sync activity.
+Worker Event Streaming enables a **Push Model** where workers emit events to Kafka when significant state changes occur. This complements the pull-based [Job Progress API](admin-job-progress.md) by enabling real-time dashboards, event-driven Platform backend updates, alerting on sync failures, and audit logging of sync activity.
 
 ## Table of Contents
 
@@ -82,11 +82,11 @@ Event emission is a by-product of sync jobs - Kafka unavailability must not fail
 
 - **Retry with fixed delays**: 3 attempts with delays of 1s, 5s, 60s
 - **Log errors**: Record failures for debugging without blocking sync
-- **Fallback**: The [Job Progress API](admin-jobs-progress.md) remains available when events are disabled or Kafka is unavailable
+- **Fallback**: The [Job Progress API](admin-job-progress.md) remains available when events are disabled or Kafka is unavailable
 
 ## Configuration
 
-Event streaming is **opt-in** (disabled by default). When disabled, the [Job Progress API](admin-jobs-progress.md) remains available for polling sync status.
+Event streaming is **opt-in** (disabled by default). When disabled, the [Job Progress API](admin-job-progress.md) remains available for polling sync status.
 
 ```toml
 [worker_events]
@@ -209,10 +209,10 @@ The `dataset` + `table_name` fields form the **partition key** and discriminator
 
 ### `sync.started` / `sync.completed` / `sync.failed`
 
-All event payloads include the same `dataset` and `table_name` discriminator. Payloads align with the [Job Progress API](admin-jobs-progress.md) response format.
+All event payloads include the same `dataset` and `table_name` discriminator. Payloads align with the [Job Progress API](admin-job-progress.md) response format.
 
 ## References
 
-- [admin-jobs-progress](admin-jobs-progress.md) - Related: Pull Model (REST API) for sync progress
+- [admin-jobs-progress](admin-job-progress.md) - Related: Pull Model (REST API) for sync progress
 - [app-ampd](app-ampd.md) - Base: ampd application overview
 - [app-ampd-worker](app-ampd-worker.md) - Base: Worker architecture

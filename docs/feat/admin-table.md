@@ -78,11 +78,11 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 
 ### Request & Response Schemas
 
-See the [Admin API OpenAPI spec](../openapi-specs/admin.spec.json) for complete request/response body schemas for all revision endpoints.
+See the [Admin API OpenAPI spec](../schemas/openapi/admin.spec.json) for complete request/response body schemas for all revision endpoints.
 
 ### Error Codes
 
-See the [Admin API OpenAPI spec](../openapi-specs/admin.spec.json) for error codes and HTTP status mappings.
+See the [Admin API OpenAPI spec](../schemas/openapi/admin.spec.json) for error codes and HTTP status mappings.
 
 ## Usage
 
@@ -239,4 +239,4 @@ curl -X POST http://localhost:1610/revisions/42/restore
 - [app-ampctl](app-ampctl.md) - Base: ampctl overview
 - [admin](admin.md) - Related: Administration overview
 - [data-store](data-store.md) - Related: Storage abstraction and revision lifecycle
-- [admin-jobs-progress](admin-jobs-progress.md) - Related: Job progress uses table revision data
+- [admin-job-progress](admin-job-progress.md) - Related: Job progress uses table revision data

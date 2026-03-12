@@ -58,7 +58,7 @@ Dataset Job → Provider Resolution → Firehose Client → gRPC Stream → Fire
 
 ## Configuration
 
-For the complete field reference, see the [config schema](../providers/firehose.spec.json).
+For the complete field reference, see the [config schema](../schemas/providers/firehose.spec.json).
 
 ### Minimal Configuration
 
@@ -126,10 +126,6 @@ authorization: bearer <token>
 
 - `crates/extractors/firehose/src/client.rs` - Firehose gRPC client
 - `crates/extractors/firehose/src/dataset.rs` - ProviderConfig struct
-
-### Sample Configuration File
-
-`docs/schemas/providers/firehose.sample.toml`
 
 ## References
 

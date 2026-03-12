@@ -31,7 +31,7 @@ The Solana provider enables data access from the Solana blockchain using a two-s
 
 ## Configuration
 
-For the complete field reference, see the [config schema](../providers/solana.spec.json).
+For the complete field reference, see the [config schema](../schemas/providers/solana.spec.json).
 
 ### Example Configuration
 
