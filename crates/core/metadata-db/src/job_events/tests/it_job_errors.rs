@@ -14,7 +14,7 @@ async fn register_event_with_detail_persists_jsonb_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "detail_persist"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     let detail_value = serde_json::json!({
         "error_code": "MATERIALIZE_RAW_FAILED",
@@ -63,7 +63,7 @@ async fn register_event_without_detail_stores_null_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "detail_null"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     job_events::register(&conn, job_id, &worker_id, JobStatus::Running, None)
@@ -88,7 +88,7 @@ async fn mark_error_persists_detail_to_jobs_status_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "status_detail"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     let detail_value = serde_json::json!({
         "error_code": "MATERIALIZE_DERIVED_FAILED",
@@ -125,7 +125,7 @@ async fn mark_fatal_persists_detail_to_jobs_status_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "fatal_detail"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");

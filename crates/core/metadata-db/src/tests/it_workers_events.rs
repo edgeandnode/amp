@@ -3,6 +3,7 @@
 use futures::StreamExt;
 
 use crate::{
+    job_events,
     jobs::{JobId, JobStatus},
     tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db},
     workers::{self, WorkerNodeId},
@@ -38,7 +39,7 @@ async fn schedule_job_and_receive_notification() {
 
     //* When
     // Register the job
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     // Send notification to the worker
     workers::send_job_notif(
@@ -76,7 +77,11 @@ async fn schedule_job_and_receive_notification() {
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
+    let desc = job_events::get_latest_descriptor(&conn, job_id)
+        .await
+        .expect("Failed to get job descriptor")
+        .expect("Job descriptor not found");
     let roundtripped: serde_json::Value =
-        serde_json::from_str(job.desc.as_str()).expect("Failed to parse descriptor");
+        serde_json::from_str(desc.as_str()).expect("Failed to parse descriptor");
     assert_eq!(roundtripped, job_desc_json);
 }

@@ -199,7 +199,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 409 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -207,7 +212,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     RegisterError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -319,7 +329,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 404 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     DeployError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -327,7 +342,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     DeployError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -348,6 +368,46 @@ impl<'a> DatasetsClient<'a> {
                     "SCHEDULER_ERROR" => Err(DeployError::SchedulerError(error_response.into())),
                     "WORKER_NOT_AVAILABLE" => {
                         Err(DeployError::WorkerNotAvailable(error_response.into()))
+                    }
+                    "ACTIVE_JOB_CONFLICT" => {
+                        Err(DeployError::ActiveJobConflict(error_response.into()))
+                    }
+                    _ => Err(DeployError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            409 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    DeployError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("Failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    DeployError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "ACTIVE_JOB_CONFLICT" => {
+                        Err(DeployError::ActiveJobConflict(error_response.into()))
                     }
                     _ => Err(DeployError::UnexpectedResponse {
                         status: status.as_u16(),
@@ -422,7 +482,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 404 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     RestoreError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -430,7 +495,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     RestoreError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -642,7 +712,12 @@ impl<'a> DatasetsClient<'a> {
             }
             500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     ListAllError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -650,7 +725,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     ListAllError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -731,7 +811,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -739,7 +824,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     GetError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -821,7 +911,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -829,7 +924,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     DeleteError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -909,7 +1009,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     ListVersionsError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -917,7 +1022,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     ListVersionsError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -996,7 +1106,12 @@ impl<'a> DatasetsClient<'a> {
             }
             400 | 500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     DeleteVersionError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -1004,7 +1119,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     DeleteVersionError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -1098,7 +1218,12 @@ impl<'a> DatasetsClient<'a> {
             }
             500 => {
                 let text = response.text().await.map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to read error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
                     GetManifestError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: format!("Failed to read error response: {}", err),
@@ -1106,7 +1231,12 @@ impl<'a> DatasetsClient<'a> {
                 })?;
 
                 let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
-                    tracing::error!(status = %status, error = %err, error_source = logging::error_source(&err), "Failed to parse error response");
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
                     GetManifestError::UnexpectedResponse {
                         status: status.as_u16(),
                         message: text.clone(),
@@ -1519,6 +1649,14 @@ pub enum DeployError {
     /// - The specified worker hasn't sent heartbeats recently (inactive)
     #[error("worker not available")]
     WorkerNotAvailable(#[source] ApiError),
+
+    /// Active job conflict (409, ACTIVE_JOB_CONFLICT)
+    ///
+    /// This occurs when:
+    /// - An active job already exists for this dataset with different options
+    /// - The caller must stop the existing job before deploying with new options
+    #[error("active job conflict")]
+    ActiveJobConflict(#[source] ApiError),
 
     /// Network or connection error
     #[error("network error connecting to {url}")]

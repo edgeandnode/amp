@@ -472,11 +472,27 @@ async fn build_error_detail(
     queue: &job_queue::JobQueue,
     job_id: amp_worker_core::jobs::job_id::JobId,
 ) -> metadata_db::job_events::EventDetail<'static> {
-    let (job_result, attempt_result) =
-        tokio::join!(queue.get_job(job_id), queue.get_attempt_count(job_id));
+    let (attempt_result, job_desc_result) = tokio::join!(
+        queue.get_attempt_count(job_id),
+        queue.get_latest_job_descriptor(job_id)
+    );
 
-    let (dataset, manifest_hash) = match job_result {
-        Ok(Some(job)) => match serde_json::from_str::<serde_json::Value>(job.desc.as_str()) {
+    let job_desc = match job_desc_result {
+        Ok(Some(desc)) => Some(desc),
+        Ok(None) => None,
+        Err(err) => {
+            tracing::warn!(
+                job_id = %job_id,
+                error = %err,
+                error_source = logging::error_source(&err),
+                "failed to fetch job descriptor for error detail"
+            );
+            None
+        }
+    };
+
+    let (dataset, manifest_hash) = match &job_desc {
+        Some(desc) => match serde_json::from_str::<serde_json::Value>(desc.as_str()) {
             Ok(parsed) => {
                 let dataset = match (
                     parsed["dataset_namespace"].as_str(),
@@ -493,11 +509,7 @@ async fn build_error_detail(
                 (None, None)
             }
         },
-        Ok(None) => (None, None),
-        Err(err) => {
-            tracing::warn!(%job_id, error = %err, error_source = logging::error_source(&err), "failed to fetch job for error detail");
-            (None, None)
-        }
+        None => (None, None),
     };
 
     let attempt_index = match attempt_result {
@@ -630,7 +642,19 @@ impl Worker {
 
         // Construct the job instance and spawn it in the job set
         let job_id = job.id;
-        let job_desc = match serde_json::from_str(job.desc.as_str()) {
+        let job_desc = self
+            .queue
+            .get_latest_job_descriptor(job_id)
+            .await
+            .map_err(SpawnJobError::GetLatestJobDescriptorFailed)?;
+        let job_desc = match job_desc {
+            Some(desc) => desc,
+            None => {
+                tracing::warn!(job_id = %job_id, "no job descriptor found, skipping job");
+                return Ok(());
+            }
+        };
+        let job_desc = match serde_json::from_str(job_desc.as_str()) {
             Ok(desc) => desc,
             Err(err) => {
                 tracing::warn!(%job_id, %err, "unknown job descriptor, skipping job");

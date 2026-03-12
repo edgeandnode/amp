@@ -1,6 +1,5 @@
 use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use chrono::{DateTime, Utc};
-use metadata_db::jobs::JobDescriptorRawOwned;
 
 mod notif;
 
@@ -20,8 +19,6 @@ pub struct Job {
     pub node_id: NodeId,
     /// Current status of the job
     pub status: JobStatus,
-    /// Job descriptor (contains dataset name and other metadata)
-    pub desc: JobDescriptorRawOwned,
     /// Job creation timestamp
     pub created_at: DateTime<Utc>,
     /// Job last update timestamp
@@ -34,7 +31,6 @@ impl From<metadata_db::jobs::Job> for Job {
             id: job_meta.id.into(),
             node_id: job_meta.node_id.into(),
             status: job_meta.status.into(),
-            desc: job_meta.desc,
             created_at: job_meta.created_at,
             updated_at: job_meta.updated_at,
         }
@@ -47,7 +43,6 @@ impl From<Job> for metadata_db::jobs::Job {
             id: job.id.into(),
             node_id: job.node_id.into(),
             status: job.status.into(),
-            desc: job.desc,
             created_at: job.created_at,
             updated_at: job.updated_at,
         }

@@ -7,7 +7,9 @@
 use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use backon::{ExponentialBuilder, Retryable};
 use metadata_db::{
-    Error as MetadataDbError, MetadataDb, job_events::EventDetail, jobs::JobStatus,
+    Error as MetadataDbError, MetadataDb,
+    job_events::EventDetail,
+    jobs::{JobDescriptorRawOwned, JobStatus},
     workers::WorkerNodeId,
 };
 use monitoring::logging;
@@ -84,6 +86,34 @@ impl JobQueue {
             .map(Into::into)
             .collect();
         Ok(jobs)
+    }
+
+    /// Fetches the most recent descriptor from a job's SCHEDULED events.
+    ///
+    /// Returns `None` if no SCHEDULED event with a detail exists. Includes
+    /// automatic retry logic on connection errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails after retries.
+    pub async fn get_latest_job_descriptor(
+        &self,
+        job_id: JobId,
+    ) -> Result<Option<JobDescriptorRawOwned>, MetadataDbError> {
+        let job_descriptor =
+            (|| metadata_db::job_events::get_latest_descriptor(&self.metadata_db, job_id))
+                .retry(with_policy())
+                .when(MetadataDbError::is_connection_error)
+                .notify(|err, dur| {
+                    tracing::warn!(
+                        job_id = %job_id,
+                        error = %err, error_source = logging::error_source(&err),
+                        "Connection error while getting latest job descriptor. Retrying in {:.1}s",
+                        dur.as_secs_f32()
+                    );
+                })
+                .await?;
+        Ok(job_descriptor)
     }
 
     /// Fetches a job by its ID.

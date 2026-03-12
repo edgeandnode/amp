@@ -20,7 +20,7 @@ use monitoring::logging;
 use crate::{
     ctx::Ctx,
     handlers::error::{ErrorResponse, IntoErrorResponse},
-    scheduler::{NodeSelector, ScheduleJobError},
+    scheduler::{JobDescriptor, NodeSelector, ScheduleJobError},
 };
 
 /// Handler for the `POST /datasets/{namespace}/{name}/versions/{revision}/deploy` endpoint
@@ -148,31 +148,36 @@ pub async fn handler(
         .await
         .map_err(Error::GetDataset)?;
 
-    // Build the job descriptor based on dataset kind
-    let job_descriptor = if dataset.kind() == DerivedDatasetKind {
-        MaterializeDerivedDatasetJobDescriptor {
-            end_block: end_block.into(),
-            dataset_namespace: reference.namespace().clone(),
-            dataset_name: reference.name().clone(),
-            manifest_hash: reference.hash().clone(),
-        }
-        .into()
+    // Build the job descriptor and compute idempotency key based on dataset kind
+    let (job_descriptor, idempotency_key) = if dataset.kind() == DerivedDatasetKind {
+        (
+            JobDescriptor::from(MaterializeDerivedDatasetJobDescriptor {
+                end_block: end_block.into(),
+                dataset_namespace: reference.namespace().clone(),
+                dataset_name: reference.name().clone(),
+                manifest_hash: reference.hash().clone(),
+            }),
+            amp_worker_datasets_derived::job_key::idempotency_key(&reference),
+        )
     } else {
-        MaterializeRawDatasetJobDescriptor {
-            end_block: end_block.into(),
-            max_writers: parallelism,
-            dataset_namespace: reference.namespace().clone(),
-            dataset_name: reference.name().clone(),
-            manifest_hash: reference.hash().clone(),
-            verify,
-        }
-        .into()
+        (
+            MaterializeRawDatasetJobDescriptor {
+                end_block: end_block.into(),
+                max_writers: parallelism,
+                dataset_namespace: reference.namespace().clone(),
+                dataset_name: reference.name().clone(),
+                manifest_hash: reference.hash().clone(),
+                verify,
+            }
+            .into(),
+            amp_worker_datasets_raw::job_key::idempotency_key(&reference),
+        )
     };
 
     // Schedule the extraction job using the scheduler
     let job_id = ctx
         .scheduler
-        .schedule_job(reference.clone(), job_descriptor, worker_id)
+        .schedule_job(idempotency_key, job_descriptor, worker_id)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -355,6 +360,7 @@ impl IntoErrorResponse for Error {
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::Scheduler(err) => match err {
                 ScheduleJobError::WorkerNotAvailable(_) => "WORKER_NOT_AVAILABLE",
+                ScheduleJobError::ActiveJobConflict { .. } => "ACTIVE_JOB_CONFLICT",
                 _ => "SCHEDULER_ERROR",
             },
         }
@@ -370,6 +376,7 @@ impl IntoErrorResponse for Error {
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Scheduler(err) => match err {
                 ScheduleJobError::WorkerNotAvailable(_) => StatusCode::BAD_REQUEST,
+                ScheduleJobError::ActiveJobConflict { .. } => StatusCode::CONFLICT,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
         }

@@ -4,7 +4,7 @@ use sqlx::{Executor, Postgres};
 
 use super::{EventDetail, JobEvent};
 use crate::{
-    jobs::{JobId, JobStatus},
+    jobs::{JobDescriptorRawOwned, JobId, JobStatus},
     workers::WorkerNodeId,
 };
 
@@ -73,6 +73,52 @@ where
 
     sqlx::query_as(query)
         .bind(job_id)
+        .bind(JobStatus::Scheduled)
+        .fetch_all(exe)
+        .await
+}
+
+/// Get latest job descriptor for a job
+pub async fn get_latest_descriptor<'c, E>(
+    exe: E,
+    job_id: JobId,
+) -> Result<Option<JobDescriptorRawOwned>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT detail
+        FROM job_events
+        WHERE job_id = $1 AND event_type = $2
+        ORDER BY id DESC
+        LIMIT 1
+    "#};
+    sqlx::query_scalar(query)
+        .bind(job_id)
+        .bind(JobStatus::Scheduled)
+        .fetch_optional(exe)
+        .await
+}
+
+/// Get latest job descriptor for each of the given jobs
+///
+/// Returns one `(job_id, detail)` pair per job, using the most recent
+/// SCHEDULED event in `job_events`.
+pub async fn list_latest_descriptors<'c, E>(
+    exe: E,
+    job_ids: &[JobId],
+) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT DISTINCT ON (job_id) job_id, detail
+        FROM job_events
+        WHERE job_id = ANY($1) AND event_type = $2 AND detail IS NOT NULL
+        ORDER BY job_id, id DESC
+    "#};
+    sqlx::query_as(query)
+        .bind(job_ids)
         .bind(JobStatus::Scheduled)
         .fetch_all(exe)
         .await

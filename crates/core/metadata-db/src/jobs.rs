@@ -5,11 +5,13 @@
 
 use sqlx::types::chrono::{DateTime, Utc};
 
+mod idempotency_key;
 mod job_descriptor;
 mod job_id;
 pub(crate) mod sql;
 
 pub use self::{
+    idempotency_key::{IdempotencyKey, IdempotencyKeyOwned},
     job_descriptor::{JobDescriptorRaw, JobDescriptorRawOwned},
     job_id::JobId,
     sql::JobWithRetryInfo,
@@ -18,16 +20,19 @@ pub use crate::job_status::JobStatus;
 use crate::{
     db::Executor,
     error::Error,
-    job_events, job_status,
-    manifests::ManifestHash,
+    job_events::{self, EventDetail},
+    job_status,
     workers::{WorkerNodeId, WorkerNodeIdOwned},
 };
 
 /// Register a job in the queue
 ///
-/// Creates the job record with its descriptor. The caller is responsible for
-/// separately registering the status via [`job_status::register`] and the event
-/// via [`job_events::register`].
+/// Creates the job record with its descriptor, using the idempotency key for
+/// deduplication. If a job with the same idempotency key already exists, the
+/// descriptor is updated and the existing job ID is returned.
+///
+/// The caller is responsible for separately registering the status via
+/// [`job_status::register`] and the event via [`job_events::register`].
 ///
 /// **Note:** This function does not send notifications. The caller is responsible for
 /// calling `send_job_notification` after successful job registration if worker notification
@@ -35,14 +40,13 @@ use crate::{
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
+    idempotency_key: impl Into<IdempotencyKey<'_>> + std::fmt::Debug,
     node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
-    job_desc: impl Into<JobDescriptorRaw<'_>> + std::fmt::Debug,
 ) -> Result<JobId, Error>
 where
     E: Executor<'c>,
 {
-    let job_desc = job_desc.into();
-    sql::insert(exe, &node_id.into(), &job_desc)
+    sql::insert(exe, &idempotency_key.into(), &node_id.into())
         .await
         .map_err(Error::Database)
 }
@@ -66,29 +70,6 @@ where
         None => sql::list_first_page(exe, limit, statuses).await,
         Some(id) => sql::list_next_page(exe, limit, id.into(), statuses).await,
     }
-    .map_err(Error::Database)
-}
-
-/// List jobs by dataset reference (namespace, name, and manifest hash)
-///
-/// Queries the job descriptor JSONB field for matching jobs, avoiding joins to physical_tables.
-#[tracing::instrument(skip(exe), err)]
-pub async fn list_by_dataset_reference<'c, E>(
-    exe: E,
-    dataset_namespace: impl Into<crate::datasets::DatasetNamespace<'_>> + std::fmt::Debug,
-    dataset_name: impl Into<crate::datasets::DatasetName<'_>> + std::fmt::Debug,
-    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
-) -> Result<Vec<Job>, Error>
-where
-    E: Executor<'c>,
-{
-    sql::list_by_dataset_reference(
-        exe,
-        dataset_namespace.into(),
-        dataset_name.into(),
-        manifest_hash.into(),
-    )
-    .await
     .map_err(Error::Database)
 }
 
@@ -161,20 +142,21 @@ where
         .map_err(Error::Database)
 }
 
-/// Get jobs for a given dataset
+/// Get a job by its idempotency key
 ///
-/// Returns all jobs that write to locations belonging to the specified dataset.
-/// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
-/// If `version` is `None`, all versions of the dataset are included.
+/// Returns the job matching the given idempotency key, if any. The result
+/// includes the job's current status from the `jobs_status` projection table.
+///
+/// Returns `None` if no job with the given idempotency key exists.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_by_dataset<'c, E>(
+pub async fn get_by_idempotency_key<'c, E>(
     exe: E,
-    manifest_hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
-) -> Result<Vec<Job>, Error>
+    idempotency_key: impl Into<IdempotencyKey<'_>> + std::fmt::Debug,
+) -> Result<Option<Job>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_jobs_by_dataset(exe, manifest_hash.into())
+    sql::get_by_idempotency_key(exe, &idempotency_key.into())
         .await
         .map_err(Error::Database)
 }
@@ -250,16 +232,25 @@ pub async fn reschedule(
     tx: &mut crate::Transaction<'_>,
     job_id: impl Into<JobId> + std::fmt::Debug,
     new_node_id: impl Into<WorkerNodeId<'_>> + std::fmt::Debug,
+    detail: impl Into<EventDetail<'_>> + std::fmt::Debug,
     retry_index: i32,
 ) -> Result<(), Error> {
     let job_id = job_id.into();
     let new_node_id = new_node_id.into();
+    let detail = detail.into();
 
     // Update job status to SCHEDULED in jobs_status and assign to worker
-    job_status::reschedule(&mut *tx, job_id, &new_node_id).await?;
+    job_status::reschedule(&mut *tx, job_id, &new_node_id, &detail).await?;
 
     // Insert job event record
-    job_events::register(&mut *tx, job_id, &new_node_id, JobStatus::Scheduled, None).await?;
+    job_events::register(
+        &mut *tx,
+        job_id,
+        &new_node_id,
+        JobStatus::Scheduled,
+        Some(detail),
+    )
+    .await?;
 
     Ok(())
 }
@@ -276,10 +267,6 @@ pub struct Job {
     /// Current status of the job
     pub status: JobStatus,
 
-    /// Job descriptor
-    #[sqlx(rename = "descriptor")]
-    pub desc: JobDescriptorRawOwned,
-
     /// Job creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -290,5 +277,6 @@ pub struct Job {
 /// In-tree integration tests
 #[cfg(test)]
 mod tests {
+    mod it_idempotency;
     mod it_jobs;
 }

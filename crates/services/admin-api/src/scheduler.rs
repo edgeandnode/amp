@@ -28,10 +28,11 @@ use amp_worker_core::{
     node_id::{InvalidIdError, NodeId, validate_node_id},
 };
 use async_trait::async_trait;
-use datasets_common::{
-    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
+use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
+use metadata_db::{
+    jobs::{IdempotencyKey, JobDescriptorRawOwned},
+    workers::Worker,
 };
-use metadata_db::workers::Worker;
 use serde_json::value::RawValue;
 use worker::job::Job;
 
@@ -51,10 +52,14 @@ impl<T> Scheduler for T where T: SchedulerJobs + SchedulerWorkers {}
 // because const generics make the trait not dyn-compatible.
 #[async_trait]
 pub trait SchedulerJobs: Send + Sync {
-    /// Schedule a job with a pre-built descriptor
+    /// Schedule a job with a pre-built descriptor and idempotency key
+    ///
+    /// If an active job with the same idempotency key already exists and its descriptor
+    /// matches, the existing job ID is returned. If the descriptor differs,
+    /// a conflict error is returned
     async fn schedule_job(
         &self,
-        dataset_reference: HashReference,
+        idempotency_key: IdempotencyKey<'static>,
         job_descriptor: JobDescriptor,
         worker_id: Option<NodeSelector>,
     ) -> Result<JobId, ScheduleJobError>;
@@ -99,6 +104,23 @@ pub trait SchedulerJobs: Send + Sync {
         name: &Name,
         hash: &Hash,
     ) -> Result<Vec<Job>, ListJobsByDatasetError>;
+
+    /// Get the most recent descriptor from a job's SCHEDULED events.
+    ///
+    /// Returns `None` if no SCHEDULED event with a detail exists for the job.
+    async fn get_job_descriptor(
+        &self,
+        job_id: JobId,
+    ) -> Result<Option<JobDescriptorRawOwned>, GetJobDescriptorError>;
+
+    /// Get the most recent descriptors for a batch of jobs.
+    ///
+    /// Returns one `(job_id, descriptor)` pair per job that has a SCHEDULED
+    /// event with a non-null detail. Jobs without descriptors are omitted.
+    async fn list_job_descriptors(
+        &self,
+        job_ids: Vec<JobId>,
+    ) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, ListJobDescriptorsError>;
 }
 
 /// Invariant-preserving bridge between typed worker job descriptors and the scheduler.
@@ -112,6 +134,20 @@ pub trait SchedulerJobs: Send + Sync {
 /// `JobDescriptorRawOwned` or `JobDescriptorRaw` are infallible.
 #[derive(Clone, Debug)]
 pub struct JobDescriptor(Box<RawValue>);
+
+impl PartialEq for JobDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
+impl Eq for JobDescriptor {}
+
+impl PartialEq<metadata_db::jobs::JobDescriptorRaw<'_>> for JobDescriptor {
+    fn eq(&self, other: &metadata_db::jobs::JobDescriptorRaw<'_>) -> bool {
+        self.0.get() == other.as_raw().get()
+    }
+}
 
 impl From<JobDescriptor> for metadata_db::jobs::JobDescriptorRawOwned {
     fn from(value: JobDescriptor) -> Self {
@@ -218,6 +254,14 @@ pub enum ScheduleJobError {
     #[error("failed to register job status: {0}")]
     RegisterJobStatus(#[source] metadata_db::Error),
 
+    /// Failed to reschedule job status in the metadata database
+    ///
+    /// This occurs when:
+    /// - Updating existing job status to SCHEDULED fails
+    /// - Connection is lost during job status reschedule
+    #[error("failed to reschedule job status: {0}")]
+    RescheduleJobStatus(#[source] metadata_db::Error),
+
     /// Failed to register job event in the metadata database
     ///
     /// This occurs when:
@@ -252,6 +296,38 @@ pub enum ScheduleJobError {
     /// - No workers match the glob pattern
     #[error("no active workers match pattern '{0}'")]
     NoMatchingWorkers(NodeIdGlob),
+
+    /// An active job with the same idempotency key exists but has a different descriptor
+    ///
+    /// This occurs when:
+    /// - A job for the same dataset version is already running
+    /// - The new request specifies different options (e.g., end_block, parallelism)
+    /// - The caller must stop the existing job before redeploying with different options
+    #[error(
+        "an active job (id={job_id}) already exists for this dataset with different options; stop it first"
+    )]
+    ActiveJobConflict {
+        /// The ID of the existing active job
+        job_id: JobId,
+    },
+
+    /// Failed to get latest descriptor for existing job
+    ///
+    /// This occurs when:
+    /// - Database query fails during descriptor lookup
+    /// - Connection is lost during the transaction
+    /// - Query execution encounters an error
+    #[error("failed to get latest descriptor")]
+    GetLatestDescriptor(#[source] metadata_db::Error),
+
+    /// Descriptor not found for existing job
+    ///
+    /// This occurs when:
+    /// - Database query fails during descriptor lookup
+    /// - Connection is lost during the transaction
+    /// - Query execution encounters an error
+    #[error("descriptor not found for existing job: {0}")]
+    DescriptorNotFound(JobId),
 }
 
 /// Errors that can occur when stopping a job
@@ -385,6 +461,26 @@ pub struct DeleteJobsByStatusError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct ListJobsByDatasetError(#[source] pub metadata_db::Error);
+
+/// Error when getting a job descriptor from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct GetJobDescriptorError(#[source] pub metadata_db::Error);
+
+/// Error when listing job descriptors from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct ListJobDescriptorsError(#[source] pub metadata_db::Error);
 
 /// Trait for querying worker information
 ///

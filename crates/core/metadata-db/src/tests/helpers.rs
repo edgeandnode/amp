@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use pgtemp::PgTempDB;
 
 use crate::{
@@ -7,7 +9,7 @@ use crate::{
     job_events,
     job_events::EventDetail,
     job_status,
-    jobs::{self, JobDescriptorRaw, JobStatus},
+    jobs::{self, IdempotencyKey, JobDescriptorRaw, JobStatus},
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},
@@ -52,21 +54,39 @@ pub async fn setup_test_db() -> (PgTempDB, crate::MetadataDb) {
 /// Performs the 3-step atomic registration: insert job → register event → register status.
 pub async fn register_job(
     conn: &crate::MetadataDb,
-    job_desc: &JobDescriptorRaw<'_>,
+    job_desc: &JobDescriptorRaw<'static>,
     worker_id: &WorkerNodeId<'_>,
+    idempotency_key: Option<IdempotencyKey<'_>>,
     status: Option<JobStatus>,
 ) -> jobs::JobId {
     let status = status.unwrap_or(JobStatus::Scheduled);
     let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
-    let job_id = jobs::register(&mut tx, worker_id, job_desc)
+    let idempotency_key = idempotency_key.unwrap_or_else(|| {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let key_str = format!("test:{}", COUNTER.fetch_add(1, Ordering::Relaxed));
+        IdempotencyKey::from_owned_unchecked(key_str)
+    });
+    let job_id = jobs::register(&mut tx, idempotency_key, worker_id)
         .await
         .expect("Failed to register job");
-    job_events::register(&mut tx, job_id, worker_id, status, None)
-        .await
-        .expect("Failed to register job event");
-    job_status::register(&mut tx, job_id, worker_id, status)
-        .await
-        .expect("Failed to register job status");
+    job_events::register(
+        &mut tx,
+        job_id,
+        worker_id,
+        status,
+        Some(job_desc.clone().into()),
+    )
+    .await
+    .expect("Failed to register job event");
+    job_status::register(
+        &mut tx,
+        job_id,
+        worker_id,
+        status,
+        Some(job_desc.clone().into()),
+    )
+    .await
+    .expect("Failed to register job status");
     tx.commit().await.expect("Failed to commit transaction");
     job_id
 }

@@ -66,6 +66,14 @@ impl JobDescriptorRaw<'static> {
     }
 }
 
+impl<'a> PartialEq for JobDescriptorRaw<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
+impl<'a> Eq for JobDescriptorRaw<'a> {}
+
 impl<'a> AsRef<RawValue> for JobDescriptorRaw<'a> {
     fn as_ref(&self) -> &RawValue {
         &self.0

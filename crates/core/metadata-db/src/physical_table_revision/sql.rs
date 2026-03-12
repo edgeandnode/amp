@@ -11,7 +11,7 @@ use super::{
     path::{Path, PathOwned},
 };
 use crate::{
-    jobs::{Job, JobDescriptorRawOwned, JobId, JobStatus},
+    jobs::{Job, JobId, JobStatus},
     manifests::ManifestHash,
     physical_table::name::Name,
     workers::WorkerNodeIdOwned,
@@ -140,7 +140,6 @@ where
             j.id          AS writer_job_id,
             js.node_id     AS writer_job_node_id,
             js.status     AS writer_job_status,
-            j.descriptor  AS writer_job_descriptor,
             j.created_at  AS writer_job_created_at,
             js.updated_at AS writer_job_updated_at
         FROM physical_table_revisions ptr
@@ -159,7 +158,6 @@ where
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeIdOwned>,
         writer_job_status: Option<JobStatus>,
-        writer_job_descriptor: Option<JobDescriptorRawOwned>,
         writer_job_created_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
         writer_job_updated_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
     }
@@ -177,20 +175,16 @@ where
         row.writer_job_id,
         row.writer_job_node_id,
         row.writer_job_status,
-        row.writer_job_descriptor,
         row.writer_job_created_at,
         row.writer_job_updated_at,
     ) {
-        (Some(id), Some(node_id), Some(status), Some(desc), Some(created_at), Some(updated_at)) => {
-            Some(Job {
-                id,
-                node_id,
-                status,
-                desc,
-                created_at,
-                updated_at,
-            })
-        }
+        (Some(id), Some(node_id), Some(status), Some(created_at), Some(updated_at)) => Some(Job {
+            id,
+            node_id,
+            status,
+            created_at,
+            updated_at,
+        }),
         _ => None,
     };
 

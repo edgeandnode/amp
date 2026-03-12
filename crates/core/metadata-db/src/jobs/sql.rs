@@ -2,13 +2,8 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::{Job, job_descriptor::JobDescriptorRaw, job_id::JobId};
-use crate::{
-    datasets::{DatasetName, DatasetNamespace},
-    job_status::JobStatus,
-    manifests::ManifestHash,
-    workers::WorkerNodeId,
-};
+use super::{Job, idempotency_key::IdempotencyKey, job_id::JobId};
+use crate::{job_status::JobStatus, workers::WorkerNodeId};
 
 /// Job with calculated retry information
 ///
@@ -27,27 +22,29 @@ pub struct JobWithRetryInfo {
     pub next_retry_index: i32,
 }
 
-/// Insert a new job into the queue
+/// Insert a new job into the queue, or update the descriptor if the idempotency key already exists
 ///
-/// Creates the job record with its descriptor and timestamp. The job's status
-/// and worker assignment are stored in the `jobs_status` projection table via
-/// a separate insert.
+/// Uses `ON CONFLICT` on the idempotency key unique constraint for upsert semantics.
+/// The job's status and worker assignment are stored in the `jobs_status` projection
+/// table via a separate insert.
 pub async fn insert<'c, E>(
     exe: E,
+    idempotency_key: &IdempotencyKey<'_>,
     node_id: &WorkerNodeId<'_>,
-    descriptor: &JobDescriptorRaw<'_>,
 ) -> Result<JobId, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO jobs (node_id, descriptor, created_at)
-        VALUES ($1, $2, (timezone('UTC', now())))
+        INSERT INTO jobs (idempotency_key, node_id, created_at)
+        VALUES ($1, $2, timezone('UTC', now()))
+        ON CONFLICT ON CONSTRAINT jobs_idempotency_key_unique
+        DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
         RETURNING id
     "#};
     let res = sqlx::query_scalar(query)
+        .bind(idempotency_key)
         .bind(node_id)
-        .bind(descriptor)
         .fetch_one(exe)
         .await?;
     Ok(res)
@@ -59,10 +56,16 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT j.id, js.node_id, js.status, j.descriptor, j.created_at, js.updated_at
+        SELECT
+            j.id,
+            js.node_id,
+            js.status,
+            j.created_at,
+            js.updated_at
         FROM jobs j
-        INNER JOIN jobs_status js ON j.id = js.job_id
-        WHERE j.id = $1
+        INNER JOIN jobs_status js
+            ON j.id = js.job_id
+        WHERE j.id = $1;
     "#};
     let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
     Ok(res)
@@ -82,7 +85,6 @@ where
             j.id,
             js.node_id,
             js.status,
-            j.descriptor,
             j.created_at,
             js.updated_at
         FROM jobs j
@@ -98,49 +100,13 @@ where
     Ok(res)
 }
 
-/// Get jobs for a given dataset
+/// Get a job by its idempotency key
 ///
-/// Returns all jobs that write to locations belonging to the specified dataset.
-/// Jobs are deduplicated as a single job may write to multiple tables within the same dataset.
-/// If `version` is `None`, all versions of the dataset are included.
-pub async fn get_jobs_by_dataset<'c, E>(
+/// Returns the job matching the given idempotency key, if any.
+pub async fn get_by_idempotency_key<'c, E>(
     exe: E,
-    manifest_hash: ManifestHash<'_>,
-) -> Result<Vec<Job>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT DISTINCT
-            j.id,
-            js.node_id,
-            js.status,
-            j.descriptor,
-            j.created_at,
-            js.updated_at
-        FROM jobs j
-        INNER JOIN jobs_status js ON j.id = js.job_id
-        INNER JOIN physical_table_revisions ptr ON j.id = ptr.writer
-        INNER JOIN physical_tables pt ON pt.active_revision_id = ptr.id
-        WHERE pt.manifest_hash = $1
-        ORDER BY j.id ASC
-    "#};
-    let res = sqlx::query_as(query)
-        .bind(manifest_hash)
-        .fetch_all(exe)
-        .await?;
-    Ok(res)
-}
-
-/// List jobs by dataset reference (namespace, name, and manifest hash)
-///
-/// Queries the job descriptor JSONB field directly, avoiding joins to physical_tables.
-pub async fn list_by_dataset_reference<'c, E>(
-    exe: E,
-    dataset_namespace: DatasetNamespace<'_>,
-    dataset_name: DatasetName<'_>,
-    manifest_hash: ManifestHash<'_>,
-) -> Result<Vec<Job>, sqlx::Error>
+    idempotency_key: &IdempotencyKey<'_>,
+) -> Result<Option<Job>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -149,21 +115,16 @@ where
             j.id,
             js.node_id,
             js.status,
-            j.descriptor,
             j.created_at,
             js.updated_at
         FROM jobs j
-        INNER JOIN jobs_status js ON j.id = js.job_id
-        WHERE j.descriptor->>'dataset_namespace' = $1
-          AND j.descriptor->>'dataset_name' = $2
-          AND j.descriptor->>'manifest_hash' = $3
-        ORDER BY j.id ASC
+        INNER JOIN jobs_status js
+            ON j.id = js.job_id
+        WHERE j.idempotency_key = $1
     "#};
     let res = sqlx::query_as(query)
-        .bind(&dataset_namespace)
-        .bind(&dataset_name)
-        .bind(&manifest_hash)
-        .fetch_all(exe)
+        .bind(idempotency_key)
+        .fetch_optional(exe)
         .await?;
     Ok(res)
 }
@@ -241,7 +202,6 @@ where
                     j.id,
                     js.node_id,
                     js.status,
-                    j.descriptor,
                     j.created_at,
                     js.updated_at
                 FROM jobs j
@@ -258,7 +218,6 @@ where
                     j.id,
                     js.node_id,
                     js.status,
-                    j.descriptor,
                     j.created_at,
                     js.updated_at
                 FROM jobs j
@@ -299,7 +258,6 @@ where
                     j.id,
                     js.node_id,
                     js.status,
-                    j.descriptor,
                     j.created_at,
                     js.updated_at
                 FROM jobs j
@@ -321,7 +279,6 @@ where
                     j.id,
                     js.node_id,
                     js.status,
-                    j.descriptor,
                     j.created_at,
                     js.updated_at
                 FROM jobs j
@@ -360,7 +317,6 @@ where
             j.id,
             js.node_id,
             js.status,
-            j.descriptor,
             j.created_at,
             js.updated_at,
             COUNT(je.id)::int4 AS next_retry_index
@@ -368,7 +324,7 @@ where
         INNER JOIN jobs_status js ON j.id = js.job_id
         LEFT JOIN job_events je ON j.id = je.job_id AND je.event_type = $1
         WHERE js.status = $2
-        GROUP BY j.id, js.node_id, js.status, j.descriptor, j.created_at, js.updated_at
+        GROUP BY j.id, js.node_id, js.status, j.created_at, js.updated_at
         HAVING js.updated_at + INTERVAL '1 second' * POW(2, COUNT(je.id))::bigint
             <= timezone('UTC', now())
         ORDER BY j.id ASC

@@ -7,6 +7,8 @@ use std::borrow::Cow;
 
 use serde_json::value::RawValue;
 
+use crate::jobs::JobDescriptorRaw;
+
 /// An owned event detail type for database return values and owned storage scenarios.
 ///
 /// This is a type alias for `EventDetail<'static>`, specifically intended for use as a return
@@ -122,5 +124,12 @@ impl<'a> From<&'a EventDetail<'a>> for EventDetail<'a> {
         // This works for both Cow::Borrowed and Cow::Owned without cloning the underlying data.
         // SAFETY: The input EventDetail already upholds invariants, so the referenced data is valid.
         EventDetail::from_ref_unchecked(value.as_ref())
+    }
+}
+
+impl From<JobDescriptorRaw<'static>> for EventDetail<'static> {
+    fn from(value: JobDescriptorRaw<'static>) -> Self {
+        // SAFETY: JobDescriptor inner data is valid JSON from trusted sources
+        EventDetail::from_owned_unchecked(value.into_inner())
     }
 }

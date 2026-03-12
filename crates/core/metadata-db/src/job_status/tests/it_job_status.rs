@@ -2,7 +2,7 @@
 
 use crate::{
     job_status,
-    jobs::{self, JobStatus},
+    jobs::{self, IdempotencyKey, JobStatus},
     tests::helpers::{TEST_WORKER_ID, raw_descriptor, register_job, setup_test_db, test_detail},
     workers::{self, WorkerInfo, WorkerNodeId},
 };
@@ -15,7 +15,7 @@ async fn register_inserts_status_row() {
     let job_desc = raw_descriptor(&serde_json::json!({"test": "register"}));
 
     //* When
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* Then
     let job = jobs::get_by_id(&conn, job_id)
@@ -32,7 +32,7 @@ async fn mark_running_from_scheduled_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "mark_running"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     job_status::mark_running(&conn, job_id)
@@ -53,7 +53,7 @@ async fn mark_running_from_running_returns_state_conflict() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "conflict"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark job running");
@@ -99,7 +99,7 @@ async fn mark_completed_from_running_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "completed"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -123,7 +123,7 @@ async fn mark_completed_from_scheduled_returns_state_conflict() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "completed_conflict"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     let result = job_status::mark_completed(&conn, job_id).await;
@@ -147,7 +147,7 @@ async fn request_stop_from_scheduled_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stop_scheduled"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     let changed = job_status::request_stop(&conn, job_id)
@@ -169,7 +169,7 @@ async fn request_stop_from_running_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stop_running"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -194,7 +194,7 @@ async fn request_stop_is_idempotent_when_already_stop_requested() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stop_idempotent"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     let first = job_status::request_stop(&conn, job_id)
         .await
         .expect("Failed to request stop");
@@ -215,7 +215,7 @@ async fn request_stop_from_stopping_returns_false() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stop_from_stopping"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::request_stop(&conn, job_id)
         .await
         .expect("Failed to request stop");
@@ -238,7 +238,7 @@ async fn request_stop_from_completed_returns_error() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stop_completed"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -259,7 +259,7 @@ async fn full_stop_lifecycle() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "lifecycle"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When — walk through the full stop lifecycle
     job_status::mark_running(&conn, job_id)
@@ -292,7 +292,7 @@ async fn mark_stopping_from_running_returns_state_conflict() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stopping_conflict"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -310,7 +310,7 @@ async fn mark_stopped_from_scheduled_returns_state_conflict() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "stopped_conflict"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When — mark_stopped requires Stopping, not Scheduled
     let result = job_status::mark_stopped(&conn, job_id).await;
@@ -325,7 +325,7 @@ async fn mark_error_from_running_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "error_running"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -349,7 +349,7 @@ async fn mark_error_from_scheduled_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "error_scheduled"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     //* When
     job_status::mark_error(&conn, job_id, &test_detail())
@@ -370,7 +370,7 @@ async fn mark_fatal_from_running_succeeds() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "fatal_running"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -394,7 +394,7 @@ async fn mark_fatal_from_completed_returns_state_conflict() {
     let (_db, conn) = setup_test_db().await;
     let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
     let job_desc = raw_descriptor(&serde_json::json!({"test": "fatal_completed"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
     job_status::mark_running(&conn, job_id)
         .await
         .expect("Failed to mark running");
@@ -421,7 +421,7 @@ async fn reschedule_updates_status_and_worker() {
         .expect("Failed to register worker-2");
 
     let job_desc = raw_descriptor(&serde_json::json!({"test": "reschedule"}));
-    let job_id = register_job(&conn, &job_desc, &worker_id, None).await;
+    let job_id = register_job(&conn, &job_desc, &worker_id, None, None).await;
 
     // Move to Error state so reschedule makes sense
     job_status::mark_error(&conn, job_id, &test_detail())
@@ -429,7 +429,7 @@ async fn reschedule_updates_status_and_worker() {
         .expect("Failed to mark error");
 
     //* When
-    job_status::reschedule(&conn, job_id, &new_worker_id)
+    job_status::reschedule(&conn, job_id, &new_worker_id, job_desc)
         .await
         .expect("Failed to reschedule");
 
@@ -440,4 +440,51 @@ async fn reschedule_updates_status_and_worker() {
         .expect("Job should exist");
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id.as_str(), "worker-2");
+}
+
+#[tokio::test]
+async fn reschedule_updates_node_id_and_preserves_idempotency_key() {
+    //* Given
+    let (_db, conn) = setup_test_db().await;
+    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
+
+    let new_worker_id = WorkerNodeId::from_ref_unchecked("worker-2");
+    workers::register(&conn, new_worker_id.clone(), WorkerInfo::default())
+        .await
+        .expect("Failed to register worker-2");
+
+    let job_desc = raw_descriptor(&serde_json::json!({"test": "reschedule"}));
+    let idempotency_key = IdempotencyKey::from_ref_unchecked("test-idempotency-key");
+    let job_id = register_job(
+        &conn,
+        &job_desc,
+        &worker_id,
+        Some(idempotency_key.clone()),
+        None,
+    )
+    .await;
+    // Move to Error state so reschedule makes sense
+    job_status::mark_error(&conn, job_id, &test_detail())
+        .await
+        .expect("Failed to mark error");
+
+    //* When
+    job_status::reschedule(&conn, job_id, &new_worker_id, job_desc)
+        .await
+        .expect("Failed to reschedule");
+
+    //* Then
+    let job = jobs::get_by_id(&conn, job_id)
+        .await
+        .expect("Failed to get job")
+        .expect("Job should exist");
+    assert_eq!(job.status, JobStatus::Scheduled);
+    assert_eq!(job.node_id.as_str(), new_worker_id.as_str());
+
+    // Verify the idempotency key still resolves to the same job
+    let job_by_key = jobs::get_by_idempotency_key(&conn, idempotency_key)
+        .await
+        .expect("Failed to get job by idempotency key")
+        .expect("Job should be found by idempotency key");
+    assert_eq!(job_by_key.id, job_id);
 }
