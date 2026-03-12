@@ -207,10 +207,10 @@ impl CompactionAlgorithm {
     /// - When a group is started, if the candidate can be added to it.
     ///
     /// The current algorithm is:
-    /// - If the file is `Hot`, it cannot start a new group.
-    /// - If a group has been started, it will accept files up to the target size, regardless of file state.
+    /// - If the file is `Hot`, it is excluded from compaction entirely (cannot start or join a group).
+    /// - If a group has been started, it will accept non-hot files up to the target size.
     pub fn predicate(&self, group: &CompactionGroup, candidate: &CompactionFile) -> bool {
-        if group.is_empty() && self.file_state(&candidate.size) == FileState::Hot {
+        if self.file_state(&candidate.size) == FileState::Hot {
             return false;
         }
 
