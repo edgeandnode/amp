@@ -20,13 +20,14 @@ use datafusion::{
 };
 use itertools::izip;
 
-use super::sol_to_arrow_type;
+use super::evm_common::{
+    FieldBuilder, array_to_sol_value, num_rows, scalar_to_sol_value, sol_to_arrow_type,
+};
 use crate::{
     arrow::{
         array::{Array, BinaryArray, StructBuilder},
         datatypes::{DataType, Field, Fields},
     },
-    evm::udfs::{FieldBuilder, array_to_sol_value, num_rows, scalar_to_sol_value},
     plan,
 };
 

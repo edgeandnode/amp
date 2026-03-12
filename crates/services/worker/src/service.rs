@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 use amp_config::WorkerEventsConfig;
 use amp_data_store::DataStore;
 use backon::{ExponentialBuilder, Retryable};
-use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use common::{datasets_cache::DatasetsCache, udfs::eth_call::EthCallUdfsCache};
 use futures::TryStreamExt as _;
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{

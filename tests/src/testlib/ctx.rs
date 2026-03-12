@@ -34,7 +34,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc};
 use amp_data_store::DataStore;
 use amp_worker_core::node_id::NodeId;
 use anyhow::{Result, anyhow};
-use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use common::{datasets_cache::DatasetsCache, udfs::eth_call::EthCallUdfsCache};
 use datasets_common::reference::Reference;
 use js_runtime::isolate_pool::IsolatePool;
 use worker::events::EventEmitter;

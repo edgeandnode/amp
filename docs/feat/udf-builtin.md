@@ -54,8 +54,8 @@ This example uses:
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/` - UDF implementations for EVM data transformations
-- `crates/core/common/src/evm/udfs.rs` - UDF registration with DataFusion
+- `crates/core/common/src/udfs/evm/` - UDF implementations for EVM data transformations
+- `crates/core/common/src/evm/udfs/` - EVM RPC-specific UDFs (eth_call)
 
 ## References
 

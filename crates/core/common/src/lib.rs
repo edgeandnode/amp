@@ -10,8 +10,6 @@ pub mod cursor;
 pub mod dataset_schema_provider;
 pub mod datasets_cache;
 pub mod detached_logical_plan;
-pub mod ethcall_udfs_cache;
-pub mod evm;
 pub mod exec_env;
 pub mod func_catalog;
 pub mod incrementalizer;

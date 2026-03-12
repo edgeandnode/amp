@@ -13,13 +13,13 @@ use datafusion::{
 };
 use itertools::izip;
 
+pub use super::evm_common::{DEC256_PREC, Event};
 use crate::{
     BYTES32_TYPE, Bytes32ArrayType,
     arrow::{
         array::{Array, BinaryArray, StructBuilder},
         datatypes::{DataType, Field},
     },
-    evm::udfs::Event,
 };
 
 /// DataFusion UDF that decodes EVM event logs into structured data.
@@ -228,15 +228,12 @@ mod tests {
     use datafusion::arrow::array::{Decimal256Builder, StringArray};
 
     use super::*;
-    use crate::{
-        arrow::{
-            array::{
-                BinaryBuilder, Decimal256Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder,
-                Int32Array, StructArray,
-            },
-            datatypes::i256,
+    use crate::arrow::{
+        array::{
+            BinaryBuilder, Decimal256Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder,
+            Int32Array, StructArray,
         },
-        evm::udfs::DEC256_PREC,
+        datatypes::i256,
     };
 
     fn parse_dec256<const N: usize>(vals: [&str; N]) -> Decimal256Array {

@@ -18,7 +18,7 @@ use datasets_raw::dataset::Dataset as RawDataset;
 use evm_rpc_datasets::EvmRpcDatasetKind;
 use parking_lot::RwLock;
 
-use crate::evm::udfs::EthCall;
+use super::udf::EthCall;
 
 /// Manages creation and caching of `eth_call` scalar UDFs for EVM RPC datasets.
 ///

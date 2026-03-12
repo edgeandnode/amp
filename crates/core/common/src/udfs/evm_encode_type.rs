@@ -11,7 +11,7 @@ use datafusion::{
     scalar::ScalarValue,
 };
 
-use super::{array_to_sol_value, num_rows, scalar_to_sol_value};
+use super::evm_common::{array_to_sol_value, num_rows, scalar_to_sol_value};
 use crate::plan;
 
 /// DataFusion UDF that ABI-encodes a value according to a Solidity type.

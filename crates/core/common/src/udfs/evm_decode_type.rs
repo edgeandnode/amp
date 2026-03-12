@@ -16,7 +16,9 @@ use datafusion::{
     scalar::ScalarValue,
 };
 
-use super::{append_null_value_to_builder, append_sol_value_to_builder, sol_to_arrow_type};
+use super::evm_common::{
+    append_null_value_to_builder, append_sol_value_to_builder, sol_to_arrow_type,
+};
 use crate::{
     arrow::{
         array::{Array, BinaryArray},

@@ -92,7 +92,7 @@ JOIN token_prices p ON t.token = p.token
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/shift_units.rs` - Core UDF implementation with decimal shifting logic
+- `crates/core/common/src/udfs/shift_units.rs` - Core UDF implementation with decimal shifting logic
 
 ## Limitations
 

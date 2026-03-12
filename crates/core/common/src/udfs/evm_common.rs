@@ -20,15 +20,6 @@ use datafusion::{
     logical_expr::ColumnarValue,
     scalar::ScalarValue,
 };
-pub use eth_call::EthCall;
-pub use evm_decode_hex::EvmDecodeHex;
-pub use evm_decode_log::EvmDecodeLog;
-pub use evm_decode_type::EvmDecodeType;
-pub use evm_encode_hex::EvmEncodeHex;
-pub use evm_encode_type::EvmEncodeType;
-pub use evm_function_params::{EvmDecodeParams, EvmEncodeParams};
-pub use evm_topic::EvmTopic;
-pub use shift_units::ShiftUnits;
 use tracing::trace;
 
 use crate::arrow::{
@@ -43,20 +34,10 @@ use crate::arrow::{
     },
 };
 
-mod eth_call;
-mod evm_decode_hex;
-mod evm_decode_log;
-mod evm_decode_type;
-mod evm_encode_hex;
-mod evm_encode_type;
-mod evm_function_params;
-mod evm_topic;
-mod shift_units;
+pub type Unsigned = alloy::primitives::Uint<256, 4>;
 
-type Unsigned = alloy::primitives::Uint<256, 4>;
-
-const DEC128_PREC: u8 = DECIMAL128_MAX_PRECISION;
-const DEC256_PREC: u8 = DECIMAL256_MAX_PRECISION;
+pub const DEC128_PREC: u8 = DECIMAL128_MAX_PRECISION;
+pub const DEC256_PREC: u8 = DECIMAL256_MAX_PRECISION;
 
 // This is `log2(10)*76 - 1`.
 //
@@ -65,10 +46,10 @@ const DEC256_PREC: u8 = DECIMAL256_MAX_PRECISION;
 //
 // When the precision on a Solidity type is greater than this, such as uint256,
 // we decode the value as a string instead of a decimal.
-const DEC_256_MAX_BINARY_PREC: usize = 251;
+pub const DEC_256_MAX_BINARY_PREC: usize = 251;
 
 // See comment for DEC_256_MAX_BINARY_PREC
-const DEC_128_MAX_BINARY_PREC: usize = 125;
+pub const DEC_128_MAX_BINARY_PREC: usize = 125;
 
 // Convenience to report an internal error. Same as DataFusion's
 // `internal_err!`, but the error is not wrapped in an `Err`
@@ -94,7 +75,7 @@ macro_rules! plan {
     }}
 }
 
-struct AppendError(std::string::String);
+pub struct AppendError(std::string::String);
 
 impl From<DataFusionError> for AppendError {
     fn from(e: DataFusionError) -> Self {
@@ -126,18 +107,18 @@ impl std::fmt::Display for AppendError {
     }
 }
 
-struct FieldBuilder<'a> {
+pub struct FieldBuilder<'a> {
     builder: &'a mut StructBuilder,
     ty: &'a DynSolType,
     field: usize,
 }
 
 impl<'a> FieldBuilder<'a> {
-    fn new(builder: &'a mut StructBuilder, ty: &'a DynSolType, field: usize) -> Self {
+    pub fn new(builder: &'a mut StructBuilder, ty: &'a DynSolType, field: usize) -> Self {
         Self { builder, ty, field }
     }
 
-    fn append_null_value(&'a mut self) -> Result<(), DataFusionError> {
+    pub fn append_null_value(&'a mut self) -> Result<(), DataFusionError> {
         let ty = sol_to_arrow_type(self.ty)?;
         let builder = &mut self.builder.field_builders_mut()[self.field];
         append_null_value_to_builder(builder, &ty)?;
@@ -159,13 +140,13 @@ impl<'a> FieldBuilder<'a> {
     /// To avoid lossy conversion, we convert `uint256` and `int256` to `Utf8`,
     /// leaving it up to the user to cast to an appropriate numeric type if
     /// they need to perform arithmetic operations.
-    fn append_value(&'a mut self, value: DynSolValue) -> Result<(), DataFusionError> {
+    pub fn append_value(&'a mut self, value: DynSolValue) -> Result<(), DataFusionError> {
         let builder = &mut self.builder.field_builders_mut()[self.field];
         append_sol_value_to_builder(builder, value)
     }
 }
 
-struct Event {
+pub struct Event {
     name: String,
     topic0: Option<B256>,
     topic_names: Vec<String>,
@@ -220,7 +201,7 @@ impl Event {
     /// Return `Fields` for the event. The fields are arranged so that the
     /// fields for the indexed attributes come first, followed by the fields
     /// for the non-indexed attributes.
-    fn fields(&self) -> Result<Fields, DataFusionError> {
+    pub fn fields(&self) -> Result<Fields, DataFusionError> {
         let mut fields = Vec::new();
 
         // Handle indexed (topic) fields - reference types become bytes32
@@ -245,14 +226,14 @@ impl Event {
         Ok(Fields::from(fields))
     }
 
-    fn topic0(&self) -> Result<B256, DataFusionError> {
+    pub fn topic0(&self) -> Result<B256, DataFusionError> {
         match self.topic0 {
             Some(topic0) => Ok(topic0),
             None => plan_err!("anonymous event {} has no topic0", self.name),
         }
     }
 
-    fn decode_topic(
+    pub fn decode_topic(
         &self,
         builder: &mut StructBuilder,
         number: usize,
@@ -284,7 +265,7 @@ impl Event {
         Ok(())
     }
 
-    fn decode_body(
+    pub fn decode_body(
         &self,
         builder: &mut StructBuilder,
         data: Option<&[u8]>,
@@ -363,7 +344,7 @@ impl TryFrom<&ScalarValue> for Event {
     }
 }
 
-fn append_sol_value_to_builder(
+pub fn append_sol_value_to_builder(
     builder: &mut dyn ArrayBuilder,
     value: DynSolValue,
 ) -> Result<(), DataFusionError> {
@@ -561,7 +542,7 @@ fn append_sol_value_to_builder(
     Ok(())
 }
 
-fn append_null_value_to_builder(
+pub fn append_null_value_to_builder(
     builder: &mut dyn ArrayBuilder,
     ty: &DataType,
 ) -> Result<(), DataFusionError> {
@@ -669,7 +650,7 @@ fn append_null_value_to_builder(
     Ok(())
 }
 
-fn scalar_to_sol_value(
+pub fn scalar_to_sol_value(
     arrow_value: ScalarValue,
     sol_type: &DynSolType,
 ) -> Result<DynSolValue, DataFusionError> {
@@ -806,7 +787,7 @@ fn scalar_to_sol_value(
     }
 }
 
-fn array_to_sol_value(
+pub fn array_to_sol_value(
     ary: &Arc<dyn Array>,
     sol_type: &DynSolType,
     idx: usize,
@@ -1055,7 +1036,7 @@ fn array_to_sol_value(
     }
 }
 
-fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
+pub fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
     let df = match ty {
         DynSolType::Bool => DataType::Boolean,
         DynSolType::Int(bits) => match *bits {
@@ -1122,7 +1103,7 @@ fn sol_to_arrow_type_for_indexed(ty: &DynSolType) -> Result<DataType, DataFusion
     }
 }
 
-fn int_to_sol_value(s: I256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
+pub fn int_to_sol_value(s: I256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
     let sz = match sol_type {
         DynSolType::Int(sz) => *sz,
         _ => return plan_err!("expected int type, got {}", sol_type),
@@ -1156,7 +1137,7 @@ fn int_to_sol_value(s: I256, sol_type: &DynSolType) -> Result<DynSolValue, DataF
     Ok(DynSolValue::Int(s, sz))
 }
 
-fn uint_to_sol_value(s: U256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
+pub fn uint_to_sol_value(s: U256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
     let sz = match sol_type {
         DynSolType::Uint(sz) => *sz,
         _ => return plan_err!("expected uint type, got {}", sol_type),
@@ -1181,7 +1162,7 @@ fn uint_to_sol_value(s: U256, sol_type: &DynSolType) -> Result<DynSolValue, Data
     Ok(DynSolValue::Uint(s, sz))
 }
 
-fn num_rows(args: &[ColumnarValue]) -> usize {
+pub fn num_rows(args: &[ColumnarValue]) -> usize {
     for arg in args {
         match arg {
             ColumnarValue::Array(array) => return array.len(),
