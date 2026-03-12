@@ -206,6 +206,33 @@ export type DeployDatasetError =
   | Error.SchedulerError
   | Error.MetadataDbError
 
+export class ListDatasetJobsResponse extends Schema.Class<ListDatasetJobsResponse>("ListDatasetJobsResponse")({
+  jobs: Schema.Array(Model.JobInfo),
+}) {}
+
+/**
+ * The list dataset jobs endpoint (GET /datasets/{namespace}/{name}/versions/{revision}/jobs).
+ */
+const listDatasetJobs = HttpApiEndpoint.get(
+  "listDatasetJobs",
+)`/datasets/${datasetNamespace}/${datasetName}/versions/${datasetRevision}/jobs`
+  .addError(Error.InvalidRequest)
+  .addError(Error.DatasetNotFound)
+  .addError(Error.MetadataDbError)
+  .addSuccess(ListDatasetJobsResponse)
+
+/**
+ * Error type for the `listDatasetJobs` endpoint.
+ *
+ * - InvalidRequest: Invalid namespace, name, or revision in path parameters.
+ * - DatasetNotFound: The dataset or revision was not found.
+ * - MetadataDbError: Database error while listing jobs.
+ */
+export type ListDatasetJobsError =
+  | Error.InvalidRequest
+  | Error.DatasetNotFound
+  | Error.MetadataDbError
+
 /**
  * The get dataset manifest endpoint (GET /datasets/{namespace}/{name}/versions/{revision}/manifest).
  */
@@ -339,6 +366,7 @@ export class DatasetGroup extends HttpApiGroup.make("dataset")
   .add(getDatasetVersion)
   .add(deployDataset)
   .add(getDatasetManifest)
+  .add(listDatasetJobs)
 {}
 
 /**
@@ -461,6 +489,20 @@ export class Admin extends Context.Tag("Amp/Admin")<Admin, {
     name: Model.DatasetName,
     revision: Model.DatasetRevision,
   ) => Effect.Effect<any, HttpError | GetDatasetManifestError>
+
+  /**
+   * List all jobs for a specific dataset version.
+   *
+   * @param namespace The namespace of the dataset.
+   * @param name The name of the dataset.
+   * @param revision The version/revision of the dataset.
+   * @return The list of jobs for the dataset version.
+   */
+  readonly listDatasetJobs: (
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
+  ) => Effect.Effect<ListDatasetJobsResponse, HttpError | ListDatasetJobsError>
 
   /**
    * Get a job by ID.
@@ -628,6 +670,27 @@ export const make = Effect.fn(function*(url: string, options?: {
     return result
   })
 
+  const listDatasetJobs = Effect.fn("listDatasetJobs")(function*(
+    namespace: Model.DatasetNamespace,
+    name: Model.DatasetName,
+    revision: Model.DatasetRevision,
+  ) {
+    const result = yield* client.dataset.listDatasetJobs({
+      path: {
+        namespace,
+        name,
+        revision,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
   const getJobById = Effect.fn("getJobById")(function*(jobId: number) {
     const result = yield* client.job.getJobById({
       path: {
@@ -665,6 +728,7 @@ export const make = Effect.fn(function*(url: string, options?: {
     getDatasetVersion,
     deployDataset,
     getDatasetManifest,
+    listDatasetJobs,
     getJobById,
     getOutputSchema,
   }
