@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use amp_worker_core::jobs::job_id::JobId;
+use amp_worker_core::jobs::{job_id::JobId, status::JobStatus};
 use axum::{
     Json,
     extract::{Path, State, rejection::PathRejection},
@@ -10,6 +10,7 @@ use axum::{
 };
 use common::physical_table::PhysicalTable;
 use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use metadata_db::job_events::EventDetailOwned;
 use monitoring::logging;
 
 use crate::{
@@ -95,6 +96,22 @@ pub async fn handler(
             return Err(Error::GetJob(err).into());
         }
     };
+    let mut detail = None;
+    if matches!(job.status, JobStatus::Error | JobStatus::Fatal) {
+        detail = ctx
+            .scheduler
+            .get_job_detail(job.id, job.status)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    job_id = ?job_id,
+                    error = %err,
+                    error_source = logging::error_source(&err),
+                    "failed to get job detail"
+                );
+                Error::GetJobDetail(err)
+            })?;
+    }
 
     // Get all tables associated with this job's writer
     let job_tables = ctx
@@ -119,6 +136,7 @@ pub async fn handler(
             job_id: *job_id,
             job_status: job.status.to_string(),
             tables: HashMap::new(),
+            detail: detail_to_value(&detail),
         }));
     };
 
@@ -258,7 +276,16 @@ pub async fn handler(
         job_id: *job_id,
         job_status: job.status.to_string(),
         tables,
+        detail: detail_to_value(&detail),
     }))
+}
+
+/// Convert the job's optional detail field to a `serde_json::Value`.
+fn detail_to_value(detail: &Option<EventDetailOwned>) -> Option<serde_json::Value> {
+    // SAFETY: detail is valid JSON from trusted sources
+    detail
+        .as_ref()
+        .map(|d| serde_json::from_str(d.as_str()).unwrap())
 }
 
 /// API response containing progress information for a job
@@ -271,6 +298,10 @@ pub struct JobProgressResponse {
     pub job_status: String,
     /// Progress for each table written by this job, keyed by table name
     pub tables: HashMap<String, TableProgress>,
+    /// Structured error detail (present when job is in error/fatal state)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<serde_json::Value>))]
+    pub detail: Option<serde_json::Value>,
 }
 
 /// Progress information for a single table
@@ -307,6 +338,10 @@ pub enum Error {
     /// Failed to retrieve job from scheduler
     #[error("failed to get job")]
     GetJob(#[source] scheduler::GetJobError),
+
+    /// Failed to retrieve job detail from scheduler
+    #[error("failed to get job detail")]
+    GetJobDetail(#[source] scheduler::GetJobDetailError),
 
     /// Failed to get tables by writer
     #[error("failed to get tables by writer")]
@@ -348,6 +383,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidId { .. } => "INVALID_JOB_ID",
             Error::NotFound { .. } => "JOB_NOT_FOUND",
             Error::GetJob(_) => "GET_JOB_ERROR",
+            Error::GetJobDetail(_) => "GET_JOB_DETAIL_ERROR",
             Error::GetTables(_) => "GET_TABLES_ERROR",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
             Error::GetActiveRevision(_) => "GET_ACTIVE_REVISION_ERROR",
@@ -362,6 +398,7 @@ impl IntoErrorResponse for Error {
             Error::InvalidId { .. } => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::GetJob(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GetJobDetail(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetTables(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::GetActiveRevision(_) => StatusCode::INTERNAL_SERVER_ERROR,

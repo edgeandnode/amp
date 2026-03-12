@@ -27,8 +27,8 @@
 use std::{collections::HashMap, time::Duration};
 
 use admin_api::scheduler::{
-    DeleteJobError, DeleteJobsByStatusError, GetJobDescriptorError, GetJobError, GetWorkerError,
-    JobDescriptor, ListJobDescriptorsError, ListJobsByDatasetError, ListJobsError,
+    DeleteJobError, DeleteJobsByStatusError, GetJobDescriptorError, GetJobDetailError, GetJobError,
+    GetWorkerError, JobDescriptor, ListJobDescriptorsError, ListJobsByDatasetError, ListJobsError,
     ListWorkersError, NodeSelector, ScheduleJobError, SchedulerJobs, SchedulerWorkers,
     StopJobError,
 };
@@ -40,6 +40,7 @@ use async_trait::async_trait;
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{
     Error as MetadataDbError, MetadataDb,
+    job_events::EventDetailOwned,
     job_status::JobStatusUpdateError,
     jobs::{IdempotencyKey, JobDescriptorRawOwned},
     workers::Worker,
@@ -537,6 +538,17 @@ impl SchedulerJobs for Scheduler {
                 .map(|(job_id, descriptor)| (job_id.into(), descriptor))
                 .collect();
         Ok(descriptors)
+    }
+
+    async fn get_job_detail(
+        &self,
+        job_id: JobId,
+        status: JobStatus,
+    ) -> Result<Option<EventDetailOwned>, GetJobDetailError> {
+        let detail = metadata_db::job_events::get_job_detail(&self.metadata_db, &job_id, status)
+            .await
+            .map_err(GetJobDetailError)?;
+        Ok(detail)
     }
 }
 

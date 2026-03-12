@@ -688,6 +688,9 @@ pub struct JobProgress {
     pub job_status: String,
     /// Progress for each table written by this job
     pub tables: BTreeMap<String, TableProgress>,
+    /// Structured error detail (present when job is in error/fatal state)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
 }
 
 /// Progress information for a single table.
