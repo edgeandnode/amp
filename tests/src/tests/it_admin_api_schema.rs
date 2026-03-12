@@ -77,8 +77,8 @@ async fn resolve_schema_with_catalog_qualified_table_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "TABLE_REFERENCE_RESOLUTION",
-        "should return TABLE_REFERENCE_RESOLUTION for catalog-qualified table"
+        response.error_code, "CATALOG_QUALIFIED_TABLE",
+        "should return CATALOG_QUALIFIED_TABLE for catalog-qualified table"
     );
     assert!(
         response
@@ -652,8 +652,8 @@ async fn multiple_tables_catalog_qualified_fails() {
         .expect("failed to parse error response JSON");
 
     assert_eq!(
-        response.error_code, "TABLE_REFERENCE_RESOLUTION",
-        "should return TABLE_REFERENCE_RESOLUTION for catalog-qualified table"
+        response.error_code, "CATALOG_QUALIFIED_TABLE",
+        "should return CATALOG_QUALIFIED_TABLE for catalog-qualified table"
     );
 }
 
@@ -1758,6 +1758,224 @@ async fn resolve_schema_with_no_table_references_fails() {
         response.error_code, "NO_TABLE_REFERENCES",
         "should return NO_TABLE_REFERENCES for table with no source references"
     );
+}
+
+// ============================================================================
+// Inter-table dependency tests
+// ============================================================================
+
+#[tokio::test]
+async fn resolve_schema_with_self_qualified_inter_table_ref_succeeds() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "inter_table_self_ref",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When — table_b references table_a via self.
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [
+                ("table_a", "SELECT block_num, hash FROM eth.blocks"),
+                ("table_b", "SELECT block_num FROM self.table_a"),
+            ],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "schema resolution should succeed with self-qualified inter-table reference"
+    );
+
+    let _response: SchemaResponse = resp
+        .json()
+        .await
+        .expect("failed to parse schema response JSON");
+}
+
+#[tokio::test]
+async fn resolve_schema_with_chained_inter_table_deps_succeeds() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "inter_table_chain_three",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When — C depends on B, B depends on A
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [
+                ("table_a", "SELECT block_num, hash FROM eth.blocks"),
+                ("table_b", "SELECT block_num, hash FROM self.table_a"),
+                ("table_c", "SELECT block_num FROM self.table_b"),
+            ],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "schema resolution should succeed with chain of three inter-table deps"
+    );
+
+    let _response: SchemaResponse = resp
+        .json()
+        .await
+        .expect("failed to parse schema response JSON");
+}
+
+#[tokio::test]
+async fn resolve_schema_with_cyclic_inter_table_deps_fails() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "inter_table_cycle",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When — A references B and B references A (cycle)
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [
+                ("table_a", "SELECT block_num FROM self.table_b"),
+                ("table_b", "SELECT block_num FROM self.table_a"),
+            ],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should reject cyclic inter-table dependencies"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    assert_eq!(
+        response.error_code, "CYCLIC_DEPENDENCY",
+        "should return CYCLIC_DEPENDENCY for inter-table cycle"
+    );
+}
+
+#[tokio::test]
+async fn resolve_schema_with_self_referencing_table_fails() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "inter_table_self_ref_cycle",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When — table references itself
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [("table_a", "SELECT block_num FROM self.table_a")],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then — self-references are detected during dependency extraction and rejected
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail for self-referencing table"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    assert_eq!(
+        response.error_code, "SELF_REFERENCING_TABLE",
+        "should return SELF_REFERENCING_TABLE for table referencing itself"
+    );
+}
+
+#[tokio::test]
+async fn resolve_schema_with_self_ref_to_nonexistent_table_fails() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "inter_table_nonexistent_ref",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When — table_a references a sibling that doesn't exist
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [
+                ("table_a", "SELECT block_num, hash FROM eth.blocks"),
+                ("table_b", "SELECT block_num FROM self.nonexistent_table"),
+            ],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "schema resolution should fail for self-ref to nonexistent sibling"
+    );
+
+    let response: ErrorResponse = resp
+        .json()
+        .await
+        .expect("failed to parse error response JSON");
+
+    assert_eq!(
+        response.error_code, "SELF_REF_TABLE_NOT_FOUND",
+        "should return SELF_REF_TABLE_NOT_FOUND for reference to nonexistent sibling"
+    );
+}
+
+#[tokio::test]
+async fn resolve_schema_with_mixed_inter_table_and_external_deps_succeeds() {
+    //* Given
+    let ctx = TestCtx::setup(
+        "inter_table_mixed_deps",
+        [("eth_firehose", "_/eth_firehose@0.0.1")],
+    )
+    .await;
+
+    //* When — table_a uses external dep, table_b uses both external and self ref
+    let resp = ctx
+        .send_schema_request_with_tables_and_deps(
+            [
+                ("table_a", "SELECT block_num, hash FROM eth.blocks"),
+                (
+                    "table_b",
+                    "SELECT a.block_num, t.gas_used FROM self.table_a a JOIN eth.transactions t ON a.block_num = t.block_num",
+                ),
+            ],
+            [("eth", "_/eth_firehose@0.0.1")],
+        )
+        .await;
+
+    //* Then
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "schema resolution should succeed with mixed inter-table and external deps"
+    );
+
+    let _response: SchemaResponse = resp
+        .json()
+        .await
+        .expect("failed to parse schema response JSON");
 }
 
 struct TestCtx {

@@ -12,7 +12,10 @@ use amp_worker_core::{
 use common::{
     BlockNum,
     amp_catalog_provider::{AMP_CATALOG_NAME, AmpCatalogProvider},
-    catalog::physical::{EarliestBlockError, for_dump as physical_for_dump},
+    catalog::{
+        logical::LogicalTable,
+        physical::{EarliestBlockError, for_dump as physical_for_dump},
+    },
     context::{exec::ExecContextBuilder, plan::PlanContextBuilder},
     cursor::Cursor,
     datasets_cache::ResolveRevisionError,
@@ -20,12 +23,12 @@ use common::{
     physical_table::{CanonicalChainError, PhysicalTable},
     retryable::RetryableErrorExt as _,
     self_schema_provider::SelfSchemaProvider,
-    sql::{ParseSqlError, ResolveTableReferencesError, resolve_table_references},
+    sql::{ParseSqlError, ResolveTableReferencesError, TableReference, resolve_table_references},
 };
-use datasets_common::hash_reference::HashReference;
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     Manifest as DerivedManifest,
-    deps::{DepAlias, DepAliasError},
+    deps::{DepAlias, DepAliasOrSelfRef, DepAliasOrSelfRefError, SELF_REF_KEYWORD},
     manifest::TableInput,
 };
 use tracing::Instrument as _;
@@ -34,6 +37,7 @@ use super::query::{MaterializeSqlQueryError, materialize_sql_query};
 use crate::job_ctx::Context;
 
 /// Materializes a derived dataset table
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, fields(table = %table.table_name()), err)]
 pub async fn materialize_table(
     ctx: Context,
@@ -43,6 +47,7 @@ pub async fn materialize_table(
     compactor: Arc<AmpCompactor>,
     opts: Arc<WriterProperties>,
     end: EndBlock,
+    siblings: &BTreeMap<TableName, Arc<PhysicalTable>>,
 ) -> Result<(), MaterializeTableError> {
     let materialize_start_time = Instant::now();
 
@@ -93,19 +98,51 @@ pub async fn materialize_table(
 
     let self_schema_provider = SelfSchemaProvider::from_manifest_udfs(&manifest.functions);
 
-    let catalog = {
-        let table_refs = resolve_table_references::<DepAlias>(&query)
-            .map_err(MaterializeTableError::ResolveTableReferences)?;
-        physical_for_dump::create(
-            &ctx.datasets_cache,
-            &ctx.data_store,
-            &dependencies,
-            table_refs,
-            self_schema_provider.udfs().to_vec(),
-        )
-        .await
-        .map_err(MaterializeTableError::CreatePhysicalCatalog)?
-    };
+    // Resolve and partition table references into external deps and self-refs.
+    let all_table_refs = resolve_table_references::<DepAliasOrSelfRef>(&query)
+        .map_err(MaterializeTableError::ResolveTableReferences)?;
+    let (ext_refs, self_ref_tables) = partition_table_refs(all_table_refs);
+
+    // Resolve self-ref sibling tables for planning (schema) and execution (physical)
+    let mut pre_resolved = Vec::new();
+    for self_ref_name in &self_ref_tables {
+        let sibling = siblings
+            .get(self_ref_name)
+            .ok_or_else(|| MaterializeTableError::SelfRefTableNotFound(self_ref_name.clone()))?;
+
+        // Planning: register schema so DataFusion knows column types
+        self_schema_provider.add_table(self_ref_name.to_string(), sibling.table().schema().clone());
+
+        // Execution: build resolved entry so attach() can find real data
+        pre_resolved.push(physical_for_dump::ResolvedTableEntry {
+            logical: LogicalTable::new(
+                SELF_REF_KEYWORD.to_string(),
+                sibling.dataset_reference().clone(),
+                sibling.table().clone(),
+            ),
+            physical: Arc::clone(sibling),
+            schema_name: Arc::from(SELF_REF_KEYWORD),
+        });
+    }
+
+    // Resolve external deps, combine with self-ref entries, and build the catalog
+    let mut all_entries = physical_for_dump::resolve_external_deps(
+        &ctx.datasets_cache,
+        &ctx.data_store,
+        &dependencies,
+        ext_refs,
+    )
+    .await
+    .map_err(MaterializeTableError::CreatePhysicalCatalog)?;
+
+    all_entries.extend(pre_resolved);
+
+    let catalog = physical_for_dump::build_catalog(
+        all_entries,
+        self_schema_provider.udfs().to_vec(),
+        &dependencies,
+    );
+
     let dep_alias_map = catalog.dep_aliases().clone();
 
     // Planning context: tables resolved lazily by AmpCatalogProvider with dep aliases.
@@ -135,18 +172,40 @@ pub async fn materialize_table(
                 });
             }
 
-            let Some(dependency_earliest_block) = catalog
-                .earliest_block()
-                .await
-                .map_err(MaterializeTableSpawnError::EarliestBlock)?
-            else {
-                // If the dependencies have synced nothing, we have nothing to do.
-                tracing::warn!("no blocks to materialize for {table_name}, dependencies are empty");
-                return Ok::<(), MaterializeTableSpawnError>(());
-            };
+            // Wait until at least one dependency has synced data, then use its
+            // earliest block as the start. For tables with only external deps this
+            // returns immediately. For tables with self-refs, this blocks on the
+            // notification pipeline until the sibling table produces data.
+            // No explicit timeout: if a sibling fails, FailFastJoinSet aborts this task.
+            let start = {
+                let mut receivers: BTreeMap<_, _> = BTreeMap::new();
+                for pt in catalog.physical_tables() {
+                    let loc = pt.location_id();
+                    receivers
+                        .entry(loc)
+                        .or_insert(ctx.notification_multiplexer.subscribe(loc).await);
+                }
 
-            // Derived datasets inherit start_block from their dependencies
-            let start = dependency_earliest_block;
+                loop {
+                    match catalog
+                        .earliest_block()
+                        .await
+                        .map_err(MaterializeTableSpawnError::EarliestBlock)?
+                    {
+                        Some(block) => break block,
+                        None => {
+                            tracing::debug!(
+                                "dependencies not yet synced, blocking on notification"
+                            );
+                            let futs: Vec<_> = receivers
+                                .values_mut()
+                                .map(|rx| Box::pin(rx.changed()))
+                                .collect();
+                            let _ = futures::future::select_all(futs).await;
+                        }
+                    }
+                }
+            };
 
             let resolved = resolve_end_block(&end, start, async {
                 let query_ctx = ExecContextBuilder::new(env.clone())
@@ -296,7 +355,7 @@ pub enum MaterializeTableError {
     /// This occurs when extracting and resolving table references from the
     /// parsed SQL query fails.
     #[error("failed to resolve table references: {0}")]
-    ResolveTableReferences(#[source] ResolveTableReferencesError<DepAliasError>),
+    ResolveTableReferences(#[source] ResolveTableReferencesError<DepAliasOrSelfRefError>),
 
     /// Failed to create the physical catalog for query execution
     ///
@@ -304,6 +363,13 @@ pub enum MaterializeTableError {
     /// catalog fails.
     #[error("failed to create physical catalog: {0}")]
     CreatePhysicalCatalog(#[source] physical_for_dump::CreateCatalogError),
+
+    /// A self-ref table was not found among sibling tables
+    ///
+    /// This occurs when a SQL query references `self.table_name` but no sibling
+    /// table with that name exists in the dataset.
+    #[error("self-referenced table '{0}' not found in dataset")]
+    SelfRefTableNotFound(TableName),
 
     /// A parallel materialization task failed during execution
     ///
@@ -332,6 +398,7 @@ impl RetryableErrorExt for MaterializeTableError {
             Self::DependencyNotFound { .. } => false,
             Self::ResolveTableReferences(_) => false,
             Self::CreatePhysicalCatalog(_) => false,
+            Self::SelfRefTableNotFound(_) => false,
 
             // Transient DB failure — recoverable
             Self::ResolveRevision(err) => err.0.is_retryable(),
@@ -365,13 +432,6 @@ pub enum MaterializeTableSpawnError {
         source: common::incrementalizer::NonIncrementalQueryError,
     },
 
-    /// Failed to determine the earliest block from dependencies
-    ///
-    /// This occurs when querying the catalog for the earliest available
-    /// block across all dependency datasets fails.
-    #[error("failed to get earliest block: {0}")]
-    EarliestBlock(#[source] EarliestBlockError),
-
     /// Failed to resolve the end block for materialization
     ///
     /// This occurs when determining the target end block for the
@@ -385,6 +445,13 @@ pub enum MaterializeTableSpawnError {
     /// resume watermark calculation fails.
     #[error("failed to get canonical chain: {0}")]
     CanonicalChain(#[source] CanonicalChainError),
+
+    /// Failed to compute the earliest block from dependencies
+    ///
+    /// This occurs when snapshotting dependency tables to determine their
+    /// earliest synced block fails.
+    #[error("failed to compute earliest block: {0}")]
+    EarliestBlock(#[source] EarliestBlockError),
 
     /// Failed to execute the SQL query materialization operation
     ///
@@ -410,8 +477,8 @@ impl RetryableErrorExt for MaterializeTableSpawnError {
             Self::NonIncrementalQuery { .. } => false,
 
             // Delegate to inner error classification
-            Self::EarliestBlock(err) => err.is_retryable(),
             Self::CanonicalChain(err) => err.is_retryable(),
+            Self::EarliestBlock(err) => err.is_retryable(),
 
             // Block range resolution — inspect the source variant
             Self::ResolveEndBlock(err) => err.is_retryable(),
@@ -419,5 +486,123 @@ impl RetryableErrorExt for MaterializeTableSpawnError {
             // Delegate to MaterializeSqlQueryError classification
             Self::MaterializeSqlQuery(err) => err.is_retryable(),
         }
+    }
+}
+
+/// Partitions table references into external dependency refs and self-ref table names.
+///
+/// References with `self.` schema are collected as self-ref table names.
+/// All other qualified references are converted to external `DepAlias` refs.
+fn partition_table_refs(
+    refs: Vec<TableReference<DepAliasOrSelfRef>>,
+) -> (Vec<TableReference<DepAlias>>, Vec<TableName>) {
+    let mut ext_refs: Vec<TableReference<DepAlias>> = Vec::new();
+    let mut self_ref_tables: Vec<TableName> = Vec::new();
+
+    for table_ref in refs {
+        match table_ref {
+            TableReference::Bare { table } => {
+                ext_refs.push(TableReference::Bare { table });
+            }
+            TableReference::Partial { schema, table } => match schema.as_ref() {
+                DepAliasOrSelfRef::SelfRef => {
+                    self_ref_tables.push(table.as_ref().clone());
+                }
+                DepAliasOrSelfRef::DepAlias(alias) => {
+                    ext_refs.push(TableReference::Partial {
+                        schema: Arc::new(alias.clone()),
+                        table,
+                    });
+                }
+            },
+        }
+    }
+
+    (ext_refs, self_ref_tables)
+}
+
+#[cfg(test)]
+mod tests {
+    use common::sql::resolve_table_references;
+    use datasets_derived::{deps::DepAliasOrSelfRef, sql_str::SqlStr};
+
+    use super::*;
+
+    #[test]
+    fn partition_table_refs_with_only_external_deps_returns_ext_refs_only() {
+        //* When
+        let (ext, self_refs) = parse_and_partition("SELECT * FROM eth_firehose.blocks");
+
+        //* Then
+        assert_eq!(ext.len(), 1, "should have one external ref");
+        assert!(self_refs.is_empty(), "should have no self-refs");
+        assert_eq!(ext[0].to_string(), "eth_firehose.blocks");
+    }
+
+    #[test]
+    fn partition_table_refs_with_only_self_refs_returns_self_ref_tables_only() {
+        //* When
+        let (ext, self_refs) = parse_and_partition("SELECT * FROM self.blocks_base");
+
+        //* Then
+        assert!(ext.is_empty(), "should have no external refs");
+        assert_eq!(self_refs.len(), 1, "should have one self-ref");
+        assert_eq!(self_refs[0].to_string(), "blocks_base");
+    }
+
+    #[test]
+    fn partition_table_refs_with_mixed_refs_splits_correctly() {
+        //* When
+        let (ext, self_refs) = parse_and_partition(
+            "SELECT a.block_num, b.hash FROM eth_firehose.blocks a JOIN self.blocks_base b ON a.block_num = b.block_num",
+        );
+
+        //* Then
+        assert_eq!(ext.len(), 1, "should have one external ref");
+        assert_eq!(self_refs.len(), 1, "should have one self-ref");
+        assert_eq!(ext[0].to_string(), "eth_firehose.blocks");
+        assert_eq!(self_refs[0].to_string(), "blocks_base");
+    }
+
+    #[test]
+    fn partition_table_refs_with_multiple_self_refs_captures_all() {
+        //* When
+        let (ext, self_refs) = parse_and_partition(
+            "SELECT * FROM self.blocks_base JOIN self.transactions ON self.blocks_base.block_num = self.transactions.block_num",
+        );
+
+        //* Then
+        assert!(ext.is_empty(), "should have no external refs");
+        assert_eq!(self_refs.len(), 2, "should have two self-refs");
+        assert!(
+            self_refs.iter().any(|t| *t == "blocks_base"),
+            "should contain blocks_base"
+        );
+        assert!(
+            self_refs.iter().any(|t| *t == "transactions"),
+            "should contain transactions"
+        );
+    }
+
+    #[test]
+    fn is_retryable_with_self_ref_table_not_found_returns_false() {
+        //* Given
+        let err = MaterializeTableError::SelfRefTableNotFound(
+            "missing_table".parse().expect("should parse table name"),
+        );
+
+        //* When
+        let result = err.is_retryable();
+
+        //* Then
+        assert!(!result, "SelfRefTableNotFound should not be retryable");
+    }
+
+    fn parse_and_partition(sql: &str) -> (Vec<TableReference<DepAlias>>, Vec<TableName>) {
+        let sql_str: SqlStr = sql.parse().expect("sql should parse to SqlStr");
+        let stmt = common::sql::parse(&sql_str).expect("sql should parse to statement");
+        let refs = resolve_table_references::<DepAliasOrSelfRef>(&stmt)
+            .expect("table references should resolve");
+        partition_table_refs(refs)
     }
 }

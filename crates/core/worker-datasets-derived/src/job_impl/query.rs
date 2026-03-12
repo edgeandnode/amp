@@ -30,11 +30,10 @@ use common::{
 use datafusion::parquet::errors::ParquetError;
 use futures::StreamExt as _;
 use js_runtime::isolate_pool::IsolatePool;
-use tracing::instrument;
 
 use crate::job_ctx::Context;
 
-#[instrument(skip_all, err)]
+#[tracing::instrument(skip_all, err)]
 #[expect(clippy::too_many_arguments)]
 pub async fn materialize_sql_query(
     ctx: &Context,

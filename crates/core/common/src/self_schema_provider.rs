@@ -7,6 +7,7 @@ use std::{any::Any, collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use datafusion::{
+    arrow::datatypes::SchemaRef,
     catalog::{
         AsyncSchemaProvider as TableAsyncSchemaProvider, SchemaProvider as TableSchemaProvider,
         TableProvider,
@@ -55,6 +56,15 @@ impl SelfSchemaProvider {
     /// Returns the UDFs held by this provider.
     pub fn udfs(&self) -> &[ScalarUDF] {
         &self.udfs
+    }
+
+    /// Registers a table dynamically for progressive schema resolution.
+    ///
+    /// After a table's schema is inferred during inter-table dependency processing,
+    /// call this method so that subsequent tables can reference it via `self.<table_name>`.
+    pub fn add_table(&self, name: impl Into<String>, schema: SchemaRef) {
+        let table_provider: Arc<dyn TableProvider> = Arc::new(PlanTable::new(schema));
+        self.table_cache.write().insert(name.into(), table_provider);
     }
 
     /// Creates a provider from manifest functions (no tables).

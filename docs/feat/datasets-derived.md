@@ -126,3 +126,4 @@ Custom functions can be declared in the `functions` field and used in SQL views.
 
 - [datasets](datasets.md) - Base: Dataset system overview
 - [datasets-manifest](datasets-manifest.md) - Related: Manifest format
+- [datasets-derived-inter-table-dependencies](datasets-derived-inter-table-dependencies.md) - Child: Inter-table dependency resolution
