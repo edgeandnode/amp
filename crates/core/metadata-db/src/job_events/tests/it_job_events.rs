@@ -43,7 +43,7 @@ async fn get_attempts_returns_only_scheduled_events() {
         job_id,
         &worker_id,
         JobStatus::Error,
-        Some(sample_job_desc.clone().into()),
+        Some(sample_job_desc.clone()),
     )
     .await
     .expect("Failed to register ERROR");
@@ -52,7 +52,7 @@ async fn get_attempts_returns_only_scheduled_events() {
         job_id,
         &worker_id,
         JobStatus::Scheduled,
-        Some(sample_job_desc.into()),
+        Some(sample_job_desc),
     )
     .await
     .expect("Failed to register second SCHEDULED");
@@ -82,7 +82,7 @@ async fn get_attempts_scoped_to_job() {
         job_id_1,
         &worker_id,
         JobStatus::Scheduled,
-        Some(job_desc.clone().into()),
+        Some(job_desc.clone()),
     )
     .await
     .expect("Failed to register second event for job 1");

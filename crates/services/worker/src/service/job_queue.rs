@@ -8,8 +8,8 @@ use amp_worker_core::{jobs::job_id::JobId, node_id::NodeId};
 use backon::{ExponentialBuilder, Retryable};
 use metadata_db::{
     Error as MetadataDbError, MetadataDb,
-    job_events::EventDetail,
-    jobs::{JobDescriptorRawOwned, JobStatus},
+    job_events::{EventDetail, EventDetailOwned},
+    jobs::JobStatus,
     workers::WorkerNodeId,
 };
 use monitoring::logging;
@@ -99,7 +99,7 @@ impl JobQueue {
     pub async fn get_latest_job_descriptor(
         &self,
         job_id: JobId,
-    ) -> Result<Option<JobDescriptorRawOwned>, MetadataDbError> {
+    ) -> Result<Option<EventDetailOwned>, MetadataDbError> {
         let job_descriptor =
             (|| metadata_db::job_events::get_latest_descriptor(&self.metadata_db, job_id))
                 .retry(with_policy())

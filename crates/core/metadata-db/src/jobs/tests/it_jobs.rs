@@ -626,7 +626,7 @@ async fn reschedule_updates_status_and_worker() {
     let job_id = register_job(&conn, &job_desc, &worker_id1, None, Some(JobStatus::Error)).await;
 
     //* When
-    job_status::sql::reschedule(&conn, job_id, &worker_id2, &job_desc.into())
+    job_status::sql::reschedule(&conn, job_id, &worker_id2, &job_desc)
         .await
         .expect("Failed to reschedule job");
 

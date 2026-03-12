@@ -17,7 +17,7 @@ pub struct JobDescriptor {
     pub manifest_hash: Hash,
 }
 
-impl From<JobDescriptor> for metadata_db::jobs::JobDescriptorRawOwned {
+impl From<JobDescriptor> for metadata_db::job_events::EventDetailOwned {
     fn from(desc: JobDescriptor) -> Self {
         // Internal struct used to serialize the descriptor with the required `kind` tag
         #[derive(serde::Serialize)]
@@ -36,14 +36,14 @@ impl From<JobDescriptor> for metadata_db::jobs::JobDescriptorRawOwned {
         .expect("JobDescriptor serialization is infallible");
 
         // SAFETY: This is safe because the raw value is guaranteed to be valid JSON
-        metadata_db::jobs::JobDescriptorRaw::from_owned_unchecked(raw)
+        metadata_db::job_events::EventDetail::from_owned_unchecked(raw)
     }
 }
 
-impl TryFrom<&metadata_db::jobs::JobDescriptorRaw<'_>> for JobDescriptor {
+impl TryFrom<&metadata_db::job_events::EventDetail<'_>> for JobDescriptor {
     type Error = InvalidJobDescriptorError;
 
-    fn try_from(raw: &metadata_db::jobs::JobDescriptorRaw<'_>) -> Result<Self, Self::Error> {
+    fn try_from(raw: &metadata_db::job_events::EventDetail<'_>) -> Result<Self, Self::Error> {
         // Internal struct used to deserialize the descriptor with the expected `kind` tag
         #[derive(serde::Deserialize)]
         struct TaggedOwned {
@@ -59,7 +59,7 @@ impl TryFrom<&metadata_db::jobs::JobDescriptorRaw<'_>> for JobDescriptor {
     }
 }
 
-/// Error returned when a [`metadata_db::jobs::JobDescriptorRaw`] cannot be converted into a [`JobDescriptor`].
+/// Error returned when a [`metadata_db::job_events::EventDetail`] cannot be converted into a [`JobDescriptor`].
 ///
 /// This wraps the underlying deserialization error, which may indicate either a kind
 /// mismatch (wrong `kind` tag) or malformed descriptor fields.

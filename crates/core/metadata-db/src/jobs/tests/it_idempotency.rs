@@ -69,7 +69,7 @@ async fn get_by_idempotency_key_returns_job() {
         job_id,
         &worker_id,
         JobStatus::Scheduled,
-        Some(job_desc.clone().into()),
+        Some(job_desc.clone()),
     )
     .await
     .expect("register event failed");
@@ -78,7 +78,7 @@ async fn get_by_idempotency_key_returns_job() {
         job_id,
         &worker_id,
         JobStatus::Scheduled,
-        Some(job_desc.into()),
+        Some(job_desc),
     )
     .await
     .expect("register status failed");

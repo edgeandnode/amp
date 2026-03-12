@@ -34,14 +34,14 @@
 //! | `dataset_name`       | Dataset identity (name)                                |
 //! | `manifest_hash`      | Exact manifest version pinning SQL/schema definitions  |
 //!
-//! The descriptor validates at the DB boundary via `TryFrom<&JobDescriptorRaw>`, which
+//! The descriptor validates at the DB boundary via `TryFrom<&EventDetail>`, which
 //! checks the `"materialize-derived"` kind tag and deserializes fields. Once converted,
 //! domain code trusts the descriptor without re-validation.
 //!
 //! ## Execution Pipeline
 //!
 //! ```text
-//! metadata-db (JobDescriptorRaw)
+//! metadata-db (EventDetail)
 //!   → JobDescriptor (validated at boundary)
 //!     → execute(): fetch manifest, resolve tables, lock revisions, consistency check
 //!       → materialize_table() ×N concurrently (FailFastJoinSet)

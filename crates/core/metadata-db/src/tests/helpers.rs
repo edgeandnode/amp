@@ -9,7 +9,7 @@ use crate::{
     job_events,
     job_events::EventDetail,
     job_status,
-    jobs::{self, IdempotencyKey, JobDescriptorRaw, JobStatus},
+    jobs::{self, IdempotencyKey, JobStatus},
     manifests::ManifestHash,
     physical_table::{self, TableName},
     physical_table_revision::{self, LocationId, TablePath},
@@ -24,10 +24,9 @@ pub fn test_detail() -> EventDetail<'static> {
     EventDetail::from_value(&serde_json::json!({"error_code": "TEST"}))
 }
 
-/// Helper to create a [`JobDescriptorRaw`] from a [`serde_json::Value`].
-pub fn raw_descriptor(value: &serde_json::Value) -> JobDescriptorRaw<'static> {
-    let raw = serde_json::value::to_raw_value(value).expect("Failed to serialize to raw value");
-    JobDescriptorRaw::from_owned_unchecked(raw)
+/// Helper to create an [`EventDetail`] from a [`serde_json::Value`].
+pub fn raw_descriptor(value: &serde_json::Value) -> EventDetail<'static> {
+    EventDetail::from_value(value)
 }
 
 /// Set up a test database with a single registered worker ([`TEST_WORKER_ID`]).
@@ -54,7 +53,7 @@ pub async fn setup_test_db() -> (PgTempDB, crate::MetadataDb) {
 /// Performs the 3-step atomic registration: insert job → register event → register status.
 pub async fn register_job(
     conn: &crate::MetadataDb,
-    job_desc: &JobDescriptorRaw<'static>,
+    job_desc: &EventDetail<'static>,
     worker_id: &WorkerNodeId<'_>,
     idempotency_key: Option<IdempotencyKey<'_>>,
     status: Option<JobStatus>,
@@ -69,24 +68,12 @@ pub async fn register_job(
     let job_id = jobs::register(&mut tx, idempotency_key, worker_id)
         .await
         .expect("Failed to register job");
-    job_events::register(
-        &mut tx,
-        job_id,
-        worker_id,
-        status,
-        Some(job_desc.clone().into()),
-    )
-    .await
-    .expect("Failed to register job event");
-    job_status::register(
-        &mut tx,
-        job_id,
-        worker_id,
-        status,
-        Some(job_desc.clone().into()),
-    )
-    .await
-    .expect("Failed to register job status");
+    job_events::register(&mut tx, job_id, worker_id, status, Some(job_desc.clone()))
+        .await
+        .expect("Failed to register job event");
+    job_status::register(&mut tx, job_id, worker_id, status, Some(job_desc.clone()))
+        .await
+        .expect("Failed to register job status");
     tx.commit().await.expect("Failed to commit transaction");
     job_id
 }

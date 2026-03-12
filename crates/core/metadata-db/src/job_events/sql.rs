@@ -2,10 +2,9 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::{EventDetail, JobEvent};
+use super::{EventDetail, EventDetailOwned, JobEvent};
 use crate::{
-    job_events::EventDetailOwned,
-    jobs::{JobDescriptorRawOwned, JobId, JobStatus},
+    jobs::{JobId, JobStatus},
     workers::WorkerNodeId,
 };
 
@@ -83,7 +82,7 @@ where
 pub async fn get_latest_descriptor<'c, E>(
     exe: E,
     job_id: JobId,
-) -> Result<Option<JobDescriptorRawOwned>, sqlx::Error>
+) -> Result<Option<EventDetailOwned>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -108,7 +107,7 @@ where
 pub async fn list_latest_descriptors<'c, E>(
     exe: E,
     job_ids: &[JobId],
-) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, sqlx::Error>
+) -> Result<Vec<(JobId, EventDetailOwned)>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
