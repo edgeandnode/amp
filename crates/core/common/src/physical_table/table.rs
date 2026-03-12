@@ -1,4 +1,4 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeSet, ops::RangeInclusive, sync::Arc};
 
 use amp_data_store::{DataStore, PhyTableRevision, physical_table::PhyTableRevisionPath};
 use amp_parquet::{meta::ParquetMeta, writer::WriterTarget};
@@ -32,13 +32,16 @@ pub struct PhysicalTable {
     /// Table name.
     table_name: TableName,
 
-    /// Network identifier (if the table has one).
-    network: Option<NetworkId>,
+    /// Networks this table is associated with.
+    ///
+    /// For raw tables this is a singleton set from the table definition.
+    /// For derived tables this is resolved from the transitive dependency chain.
+    networks: BTreeSet<NetworkId>,
 
     /// Data store for accessing metadata database and object storage.
     store: DataStore,
 
-    /// Table definition (schema, sorted_by, optional network).
+    /// Table definition (schema, sorted_by).
     table: Arc<dyn Table>,
 }
 
@@ -53,6 +56,7 @@ impl PhysicalTable {
         dataset_reference: HashReference,
         dataset_start_block: Option<BlockNum>,
         table: Arc<dyn Table>,
+        networks: BTreeSet<NetworkId>,
         revision: PhyTableRevision,
     ) -> Self {
         Self {
@@ -60,7 +64,7 @@ impl PhysicalTable {
             dataset_reference,
             dataset_start_block,
             table_name: table.name().clone(),
-            network: table.network().cloned(),
+            networks,
             store,
             table,
         }
@@ -77,8 +81,8 @@ impl PhysicalTable {
         &self.table_name
     }
 
-    pub fn network(&self) -> Option<&NetworkId> {
-        self.network.as_ref()
+    pub fn networks(&self) -> &BTreeSet<NetworkId> {
+        &self.networks
     }
 
     pub fn url(&self) -> &Url {

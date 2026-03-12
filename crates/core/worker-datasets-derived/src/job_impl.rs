@@ -98,7 +98,10 @@
 pub mod query;
 pub mod table;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use amp_data_store::retryable::RetryableErrorExt as _;
 use amp_worker_core::{
@@ -165,11 +168,24 @@ pub async fn execute(
                 .map_err(Error::RegisterNewPhysicalTable)?,
         };
 
+        // Resolve networks: raw tables have an intrinsic network; derived tables
+        // need resolution from the transitive dependency chain.
+        let networks = match table_def.network() {
+            Some(id) => BTreeSet::from([id.clone()]),
+            None => common::datasets_cache::resolve_dataset_networks(
+                &ctx.datasets_cache,
+                Arc::clone(&dataset),
+            )
+            .await
+            .map_err(Error::ResolveNetworks)?,
+        };
+
         let physical_table = Arc::new(PhysicalTable::from_revision(
             ctx.data_store.clone(),
             dataset.reference().clone(),
             dataset.start_block(),
             table_def.clone(),
+            networks,
             revision,
         ));
 
@@ -339,6 +355,16 @@ pub enum Error {
         source: amp_worker_core::check::ConsistencyError,
     },
 
+    /// Failed to resolve networks from dependency chain
+    ///
+    /// This occurs when traversing the derived dataset's dependencies fails
+    /// to resolve all raw dataset networks. Common causes:
+    /// - Dependency dataset not found
+    /// - Failed to resolve dependency revision
+    /// - Dataset store connectivity issues
+    #[error("Failed to resolve networks from dependencies")]
+    ResolveNetworks(#[source] common::datasets_cache::DependencyTraversalError),
+
     /// Failed to retrieve derived dataset manifest
     ///
     /// This occurs when the manifest for a derived dataset cannot be fetched from
@@ -388,6 +414,9 @@ impl RetryableErrorExt for Error {
             // Delegate to inner error classification
             Self::GetDataset(err) => err.is_retryable(),
 
+            // Network resolution depends on dataset store — transient
+            Self::ResolveNetworks(_) => true,
+
             // Transient DB/store lookup failures
             Self::GetActivePhysicalTable(err) => err.is_retryable(),
             Self::RegisterNewPhysicalTable(_) => true,
@@ -425,6 +454,7 @@ impl amp_worker_core::retryable::JobErrorExt for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Self::GetDataset(_) => "GET_DATASET",
+            Self::ResolveNetworks(_) => "RESOLVE_NETWORKS",
             Self::GetActivePhysicalTable(_) => "GET_ACTIVE_PHYSICAL_TABLE",
             Self::RegisterNewPhysicalTable(_) => "REGISTER_NEW_PHYSICAL_TABLE",
             Self::LockRevisionsForWriter(_) => "LOCK_REVISIONS_FOR_WRITER",

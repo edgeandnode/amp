@@ -4,7 +4,7 @@
 //! through the datasets registry with in-memory caching.
 // TODO: Move to providers-registry once the derived dataset constructor is decoupled from common
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 pub use amp_datasets_registry::error::ResolveRevisionError;
 use amp_datasets_registry::{
@@ -13,10 +13,13 @@ use amp_datasets_registry::{
 };
 use datafusion::common::HashMap;
 use datasets_common::{
-    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
-    manifest::Manifest as CommonManifest, reference::Reference,
+    dataset::Dataset, dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference,
+    manifest::Manifest as CommonManifest, network_id::NetworkId, reference::Reference,
 };
-use datasets_derived::{DerivedDatasetKind, Manifest as DerivedManifest};
+use datasets_derived::{
+    DerivedDatasetKind, Manifest as DerivedManifest, dataset::Dataset as DerivedDataset,
+};
+use datasets_raw::dataset::Dataset as RawDataset;
 use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
 use firehose_datasets::{FirehoseDatasetKind, Manifest as FirehoseManifest};
 use parking_lot::RwLock;
@@ -227,6 +230,88 @@ impl crate::retryable::RetryableErrorExt for GetDerivedManifestError {
             Self::ManifestNotFound(_) => false,
         }
     }
+}
+
+/// Collects all raw datasets reachable through a dataset's transitive dependency chain.
+///
+/// For a raw dataset, returns a singleton vec containing it. For a derived dataset,
+/// traverses the dependency chain and returns all raw dataset leaves. For other
+/// dataset types (e.g., static), returns an empty vec.
+pub async fn collect_raw_datasets(
+    datasets_cache: &DatasetsCache,
+    dataset: Arc<dyn Dataset>,
+) -> Result<Vec<Arc<RawDataset>>, DependencyTraversalError> {
+    if let Ok(raw) = dataset.clone().downcast_arc::<RawDataset>() {
+        return Ok(vec![raw]);
+    }
+
+    let mut raw_datasets = Vec::new();
+    let mut stack: Vec<Arc<dyn Dataset>> = vec![dataset];
+    let mut visited = BTreeSet::new();
+
+    while let Some(current) = stack.pop() {
+        let current_ref = current.reference().clone();
+        if !visited.insert(current_ref) {
+            continue;
+        }
+
+        if let Ok(raw) = current.clone().downcast_arc::<RawDataset>() {
+            raw_datasets.push(raw);
+            continue;
+        }
+
+        if let Some(derived) = current.downcast_ref::<DerivedDataset>() {
+            for dep in derived.dependencies().values() {
+                let hash_ref = datasets_cache
+                    .resolve_revision(dep.to_reference())
+                    .await
+                    .map_err(DependencyTraversalError::ResolveRevision)?
+                    .ok_or_else(|| {
+                        DependencyTraversalError::NotFound(dep.to_reference().to_string())
+                    })?;
+                let dep_dataset = datasets_cache
+                    .get_dataset(&hash_ref)
+                    .await
+                    .map_err(DependencyTraversalError::GetDataset)?;
+                stack.push(dep_dataset);
+            }
+        }
+    }
+
+    Ok(raw_datasets)
+}
+
+/// Resolves the set of networks for a dataset by collecting all raw datasets
+/// in its transitive dependency chain and extracting their networks.
+///
+/// For raw datasets, returns a singleton set. For derived datasets, returns
+/// the union of all networks from reachable raw datasets.
+///
+/// This is used at catalog construction time to inject accurate network information
+/// into `PhysicalTable` for derived datasets, whose `Table::network()` returns
+/// `None` by default.
+pub async fn resolve_dataset_networks(
+    datasets_cache: &DatasetsCache,
+    dataset: Arc<dyn Dataset>,
+) -> Result<BTreeSet<NetworkId>, DependencyTraversalError> {
+    let raw_datasets = collect_raw_datasets(datasets_cache, dataset).await?;
+    Ok(raw_datasets.iter().map(|r| r.network().clone()).collect())
+}
+
+/// Errors that occur when traversing dataset dependencies.
+#[derive(Debug, thiserror::Error)]
+pub enum DependencyTraversalError {
+    /// Failed to get dataset from dataset store.
+    #[error("failed to get dataset")]
+    GetDataset(#[source] GetDatasetError),
+
+    /// Failed to resolve revision.
+    #[error("failed to resolve revision")]
+    ResolveRevision(#[source] ResolveRevisionError),
+
+    /// Dependency not found.
+    #[error("dependency '{0}' not found")]
+    NotFound(String),
 }
 
 /// Parses manifest content according to the dataset kind and creates the appropriate dataset implementation.
