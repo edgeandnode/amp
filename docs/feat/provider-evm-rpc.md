@@ -60,7 +60,7 @@ Dataset Job → Provider Resolution → JSON-RPC Client → RPC Endpoint
 
 ## Configuration
 
-For the complete field reference, see the [config schema](../providers/evm-rpc.spec.json).
+For the complete field reference, see the [config schema](../schemas/providers/evm-rpc.spec.json).
 
 ### Minimal Configuration
 
@@ -150,10 +150,6 @@ rpc_batch_size = 100
 - `crates/extractors/evm-rpc/src/lib.rs` - ProviderConfig and client factory
 - `crates/extractors/evm-rpc/src/client.rs` - Client with streaming
 - `crates/core/common/src/evm/provider.rs` - Low-level provider construction
-
-### Sample Configuration File
-
-`docs/schemas/providers/evm-rpc.sample.toml`
 
 ## Limitations
 

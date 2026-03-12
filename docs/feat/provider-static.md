@@ -30,7 +30,7 @@ The static provider enables serving pre-computed CSV datasets from object stores
 
 ## Configuration
 
-For the complete field reference, see the [config schema](../providers/static.spec.json).
+For the complete field reference, see the [config schema](../schemas/providers/static.spec.json).
 
 ### Example Configuration
 

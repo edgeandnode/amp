@@ -31,7 +31,7 @@ Derived datasets transform and combine data from existing datasets using SQL vie
 
 ## Configuration
 
-For the complete field reference, see the [manifest schema](../manifest-schemas/derived.spec.json).
+For the complete field reference, see the [manifest schema](../schemas/manifest/derived.spec.json).
 
 ### Example Manifest
 

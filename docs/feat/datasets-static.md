@@ -29,7 +29,7 @@ Static datasets define tables backed by static data files (currently CSV) served
 
 ## Manifest
 
-See the [static dataset manifest schema](../manifest-schemas/static.spec.json) for the complete field reference, types, defaults, and examples.
+See the [static dataset manifest schema](../schemas/manifest/static.spec.json) for the complete field reference, types, defaults, and examples.
 
 ## Schema
 

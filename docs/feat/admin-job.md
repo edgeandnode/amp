@@ -119,7 +119,7 @@ ampctl job inspect 12345 --json | jq '.status'
 
 ## API Reference
 
-For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
+For request/response schemas, see [Admin API OpenAPI spec](../schemas/openapi/admin.spec.json):
 
 ```bash
 jq '.paths | to_entries[] | select(.key | startswith("/jobs"))' docs/schemas/openapi/admin.spec.json
@@ -137,4 +137,4 @@ jq '.paths | to_entries[] | select(.key | startswith("/jobs"))' docs/schemas/ope
 
 - [app-ampctl](app-ampctl.md) - Base: ampctl overview
 - [admin](admin.md) - Related: Administration overview
-- [admin-jobs-progress](admin-jobs-progress.md) - Related: Job progress API details
+- [admin-job-progress](admin-job-progress.md) - Related: Job progress API details

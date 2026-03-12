@@ -28,13 +28,13 @@ The Firehose dataset defines table schemas for EVM-compatible blockchain data as
 
 ## Manifest
 
-See the [raw dataset manifest schema](../manifest-schemas/raw.spec.json) for the complete field reference, types, defaults, and examples.
+See the [raw dataset manifest schema](../schemas/manifest/raw.spec.json) for the complete field reference, types, defaults, and examples.
 
 ## Schema
 
 This dataset declares four tables: `blocks`, `transactions`, `calls`, and `logs`.
 
-For detailed column definitions, see the [table schema](../schemas/firehose-evm.md).
+For detailed column definitions, see the [table schema](../schemas/tables/firehose-evm.md).
 
 ## Implementation
 

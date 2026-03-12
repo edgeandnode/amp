@@ -22,7 +22,9 @@ pub struct EvmRpcProviderConfig {
     /// The network this provider serves.
     pub network: NetworkId,
 
-    /// The URL of the EVM RPC endpoint (HTTP, HTTPS, or IPC).
+    /// The URL of the EVM RPC endpoint (HTTP, HTTPS, WebSocket, or IPC).
+    ///
+    /// Supported schemes: `http://`, `https://`, `ws://`, `wss://`, and IPC socket paths.
     #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub url: Redacted<Url>,
 
@@ -32,24 +34,33 @@ pub struct EvmRpcProviderConfig {
     /// instead of the default `Authorization: Bearer <auth_token>`.
     /// Ignored if `auth_token` is not set.
     #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>", example = &"Drpc-Key"))]
     pub auth_header: Option<AuthHeaderName>,
 
     /// Authentication token for RPC requests.
     ///
     /// Default: sent as `Authorization: Bearer <token>`.
     /// With `auth_header`: sent as `<auth_header>: <token>`.
+    ///
+    /// The token value is redacted in logs and debug output to prevent credential leakage.
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     pub auth_token: Option<AuthToken>,
 
     /// Optional rate limit for requests per minute.
+    #[cfg_attr(feature = "schemars", schemars(default))]
     pub rate_limit_per_minute: Option<NonZeroU32>,
 
     /// Optional limit on the number of concurrent requests.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(default = "default_concurrent_request_limit")
+    )]
     pub concurrent_request_limit: Option<u16>,
 
     /// Maximum number of JSON-RPC requests to batch together.
+    ///
+    /// Set to 0 to disable batching.
     #[serde(default)]
     pub rpc_batch_size: usize,
 
@@ -63,8 +74,6 @@ pub struct EvmRpcProviderConfig {
     /// Maximum time to wait for an RPC request to complete (including connection
     /// establishment and response). Requests exceeding this duration will be cancelled
     /// and treated as errors.
-    ///
-    /// Default: 30 seconds
     #[serde_as(as = "DurationSeconds<u64>")]
     #[serde(default = "default_timeout", rename = "timeout_secs")]
     #[cfg_attr(feature = "schemars", schemars(with = "u64"))]
@@ -123,4 +132,10 @@ impl<'de> serde::Deserialize<'de> for AuthToken {
 /// Default timeout for RPC requests (30 seconds)
 fn default_timeout() -> Duration {
     Duration::from_secs(30)
+}
+
+/// Default concurrent request limit (1024)
+#[cfg(feature = "schemars")]
+fn default_concurrent_request_limit() -> Option<u16> {
+    Some(1024)
 }

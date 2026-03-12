@@ -30,13 +30,13 @@ The Solana dataset defines table schemas for Solana blockchain data. It declares
 
 ## Manifest
 
-See the [raw dataset manifest schema](../manifest-schemas/raw.spec.json) for the complete field reference, types, defaults, and examples.
+See the [raw dataset manifest schema](../schemas/manifest/raw.spec.json) for the complete field reference, types, defaults, and examples.
 
 ## Schema
 
 This dataset declares five tables: `block_headers`, `transactions`, `messages`, `instructions`, and `block_rewards`. 
 
-For detailed column definitions, see the [table schema](../schemas/solana.md).
+For detailed column definitions, see the [table schema](../schemas/tables/solana.md).
 
 ### Slot-to-Block Mapping
 

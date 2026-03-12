@@ -59,7 +59,7 @@ Every `TableRows` value is validated against these invariants:
 
 ## Manifest
 
-For the complete field reference, types, defaults, and examples, see the [raw dataset manifest schema](../manifest-schemas/raw.spec.json).
+For the complete field reference, types, defaults, and examples, see the [raw dataset manifest schema](../schemas/manifest/raw.spec.json).
 
 ### Network Identifier
 

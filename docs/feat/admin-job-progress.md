@@ -81,7 +81,7 @@ This design follows the Single Responsibility Principle: `/datasets` manages dat
 | ---------------------- | ------ | ------------------------------------------ |
 | `/jobs/{id}/progress`  | GET    | Progress for all tables written by the job |
 
-For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
+For request/response schemas, see [Admin API OpenAPI spec](../schemas/openapi/admin.spec.json):
 
 ```bash
 # Job progress endpoint

@@ -176,7 +176,7 @@ ampctl dataset restore my_namespace/my_dataset@1.0.0 --json
 
 ## API Reference
 
-For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
+For request/response schemas, see [Admin API OpenAPI spec](../schemas/openapi/admin.spec.json):
 
 ```bash
 jq '.paths | to_entries[] | select(.key | startswith("/datasets"))' docs/schemas/openapi/admin.spec.json
