@@ -6,13 +6,11 @@
 use sqlx::types::chrono::{DateTime, Utc};
 
 mod idempotency_key;
-mod job_descriptor;
 mod job_id;
 pub(crate) mod sql;
 
 pub use self::{
     idempotency_key::{IdempotencyKey, IdempotencyKeyOwned},
-    job_descriptor::{JobDescriptorRaw, JobDescriptorRawOwned},
     job_id::JobId,
     sql::JobWithRetryInfo,
 };

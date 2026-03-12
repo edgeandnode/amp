@@ -39,11 +39,8 @@ use amp_worker_core::{
 use async_trait::async_trait;
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{
-    Error as MetadataDbError, MetadataDb,
-    job_events::EventDetailOwned,
-    job_status::JobStatusUpdateError,
-    jobs::{IdempotencyKey, JobDescriptorRawOwned},
-    workers::Worker,
+    Error as MetadataDbError, MetadataDb, job_events::EventDetailOwned,
+    job_status::JobStatusUpdateError, jobs::IdempotencyKey, workers::Worker,
 };
 use monitoring::logging;
 use rand::seq::IndexedRandom as _;
@@ -157,8 +154,7 @@ impl Scheduler {
         }
 
         let scheduled_job_status = JobStatus::Scheduled;
-        let detail_raw: metadata_db::jobs::JobDescriptorRaw<'static> = job_descriptor.into();
-        let detail: metadata_db::job_events::EventDetail<'static> = detail_raw.into();
+        let detail: metadata_db::job_events::EventDetail<'static> = job_descriptor.into();
 
         let job_id: JobId = metadata_db::jobs::register(&mut tx, idempotency_key, &node_id)
             .await
@@ -517,7 +513,7 @@ impl SchedulerJobs for Scheduler {
     async fn get_job_descriptor(
         &self,
         job_id: JobId,
-    ) -> Result<Option<JobDescriptorRawOwned>, GetJobDescriptorError> {
+    ) -> Result<Option<EventDetailOwned>, GetJobDescriptorError> {
         let descriptor = metadata_db::job_events::get_latest_descriptor(&self.metadata_db, &job_id)
             .await
             .map_err(GetJobDescriptorError)?;
@@ -527,10 +523,10 @@ impl SchedulerJobs for Scheduler {
     async fn list_job_descriptors(
         &self,
         job_ids: Vec<JobId>,
-    ) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, ListJobDescriptorsError> {
+    ) -> Result<Vec<(JobId, EventDetailOwned)>, ListJobDescriptorsError> {
         let job_ids: Vec<metadata_db::jobs::JobId> =
             job_ids.into_iter().map(|id| id.into()).collect();
-        let descriptors: Vec<(JobId, JobDescriptorRawOwned)> =
+        let descriptors: Vec<(JobId, EventDetailOwned)> =
             metadata_db::job_events::list_latest_descriptors(&self.metadata_db, &job_ids)
                 .await
                 .map_err(ListJobDescriptorsError)?

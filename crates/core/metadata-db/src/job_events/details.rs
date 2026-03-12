@@ -1,13 +1,11 @@
 //! Event detail new-type wrapper for database values
 //!
 //! This module provides an [`EventDetail`] new-type wrapper around [`Cow<RawValue>`] that
-//! represents structured error details for job events and status as validated JSON.
+//! represents structured event details for job events and status as validated JSON.
 
 use std::borrow::Cow;
 
 use serde_json::value::RawValue;
-
-use crate::jobs::JobDescriptorRaw;
 
 /// An owned event detail type for database return values and owned storage scenarios.
 ///
@@ -18,7 +16,7 @@ pub type EventDetailOwned = EventDetail<'static>;
 
 /// Event detail wrapper for database values.
 ///
-/// This new-type wrapper around `Cow<RawValue>` represents structured error details
+/// This new-type wrapper around `Cow<RawValue>` represents structured event details
 /// as validated JSON for database storage. It supports both borrowed and owned RawValue
 /// through copy-on-write semantics, enabling efficient handling without unnecessary
 /// allocations.
@@ -87,6 +85,14 @@ impl EventDetail<'static> {
     }
 }
 
+impl<'a> PartialEq for EventDetail<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
+impl<'a> Eq for EventDetail<'a> {}
+
 impl<'a> AsRef<RawValue> for EventDetail<'a> {
     fn as_ref(&self) -> &RawValue {
         &self.0
@@ -127,9 +133,12 @@ impl<'a> From<&'a EventDetail<'a>> for EventDetail<'a> {
     }
 }
 
-impl From<JobDescriptorRaw<'static>> for EventDetail<'static> {
-    fn from(value: JobDescriptorRaw<'static>) -> Self {
-        // SAFETY: JobDescriptor inner data is valid JSON from trusted sources
-        EventDetail::from_owned_unchecked(value.into_inner())
+#[cfg(test)]
+impl Default for EventDetail<'static> {
+    fn default() -> Self {
+        // Create a minimal valid JSON object for testing
+        let raw: Box<RawValue> =
+            serde_json::from_str("{}").expect("Empty JSON object should be valid");
+        EventDetail::from_owned_unchecked(raw)
     }
 }

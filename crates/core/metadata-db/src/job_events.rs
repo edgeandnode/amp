@@ -13,7 +13,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 use crate::{
     Error,
     db::Executor,
-    jobs::{JobDescriptorRawOwned, JobId, JobStatus},
+    jobs::{JobId, JobStatus},
     workers::WorkerNodeId,
 };
 
@@ -87,7 +87,7 @@ where
 pub async fn get_latest_descriptor<'c, E>(
     exe: E,
     job_id: impl Into<JobId> + std::fmt::Debug,
-) -> Result<Option<JobDescriptorRawOwned>, Error>
+) -> Result<Option<EventDetailOwned>, Error>
 where
     E: Executor<'c>,
 {
@@ -104,7 +104,7 @@ where
 pub async fn list_latest_descriptors<'c, E>(
     exe: E,
     job_ids: &[JobId],
-) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, Error>
+) -> Result<Vec<(JobId, EventDetailOwned)>, Error>
 where
     E: Executor<'c>,
 {

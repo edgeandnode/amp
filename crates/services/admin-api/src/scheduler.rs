@@ -30,8 +30,8 @@ use amp_worker_core::{
 use async_trait::async_trait;
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{
-    job_events::EventDetailOwned,
-    jobs::{IdempotencyKey, JobDescriptorRawOwned},
+    job_events::{EventDetail, EventDetailOwned},
+    jobs::IdempotencyKey,
     workers::Worker,
 };
 use serde_json::value::RawValue;
@@ -112,7 +112,7 @@ pub trait SchedulerJobs: Send + Sync {
     async fn get_job_descriptor(
         &self,
         job_id: JobId,
-    ) -> Result<Option<JobDescriptorRawOwned>, GetJobDescriptorError>;
+    ) -> Result<Option<EventDetailOwned>, GetJobDescriptorError>;
 
     /// Get the most recent descriptors for a batch of jobs.
     ///
@@ -121,8 +121,12 @@ pub trait SchedulerJobs: Send + Sync {
     async fn list_job_descriptors(
         &self,
         job_ids: Vec<JobId>,
-    ) -> Result<Vec<(JobId, JobDescriptorRawOwned)>, ListJobDescriptorsError>;
+    ) -> Result<Vec<(JobId, EventDetailOwned)>, ListJobDescriptorsError>;
 
+    /// Get the most recent event detail for a job filtered by status.
+    ///
+    /// Returns the detail from the latest event matching the given status,
+    /// or `None` if no matching event with a detail exists.
     async fn get_job_detail(
         &self,
         job_id: JobId,
@@ -134,11 +138,11 @@ pub trait SchedulerJobs: Send + Sync {
 ///
 /// Acts as the admin-api's canonical job descriptor type, decoupling the scheduler trait
 /// interface from both the typed worker descriptor crates (`amp-worker-datasets-raw`,
-/// `amp-worker-datasets-derived`) and the metadata-db storage type (`JobDescriptorRawOwned`).
+/// `amp-worker-datasets-derived`) and the metadata-db storage type (`EventDetailOwned`).
 ///
 /// Invariants are established at the point of construction (via the `From` impls from typed
 /// worker descriptors) and preserved throughout. All subsequent conversions to/from
-/// `JobDescriptorRawOwned` or `JobDescriptorRaw` are infallible.
+/// `EventDetailOwned` or `EventDetail` are infallible.
 #[derive(Clone, Debug)]
 pub struct JobDescriptor(Box<RawValue>);
 
@@ -150,48 +154,48 @@ impl PartialEq for JobDescriptor {
 
 impl Eq for JobDescriptor {}
 
-impl PartialEq<metadata_db::jobs::JobDescriptorRaw<'_>> for JobDescriptor {
-    fn eq(&self, other: &metadata_db::jobs::JobDescriptorRaw<'_>) -> bool {
+impl PartialEq<EventDetail<'_>> for JobDescriptor {
+    fn eq(&self, other: &EventDetail<'_>) -> bool {
         self.0.get() == other.as_raw().get()
     }
 }
 
-impl From<JobDescriptor> for metadata_db::jobs::JobDescriptorRawOwned {
+impl From<JobDescriptor> for EventDetailOwned {
     fn from(value: JobDescriptor) -> Self {
         // SAFETY: JobDescriptor inner data is valid JSON from trusted sources
-        metadata_db::jobs::JobDescriptorRaw::from_owned_unchecked(value.0)
+        EventDetail::from_owned_unchecked(value.0)
     }
 }
 
-impl<'a> From<&'a JobDescriptor> for metadata_db::jobs::JobDescriptorRaw<'a> {
+impl<'a> From<&'a JobDescriptor> for EventDetail<'a> {
     fn from(value: &'a JobDescriptor) -> Self {
         // SAFETY: JobDescriptor inner data is valid JSON from trusted sources
-        metadata_db::jobs::JobDescriptorRaw::from_ref_unchecked(&value.0)
+        EventDetail::from_ref_unchecked(&value.0)
     }
 }
 
-impl From<metadata_db::jobs::JobDescriptorRawOwned> for JobDescriptor {
-    fn from(value: metadata_db::jobs::JobDescriptorRawOwned) -> Self {
+impl From<EventDetailOwned> for JobDescriptor {
+    fn from(value: EventDetailOwned) -> Self {
         Self(value.into_inner())
     }
 }
 
-impl From<&metadata_db::jobs::JobDescriptorRaw<'_>> for JobDescriptor {
-    fn from(value: &metadata_db::jobs::JobDescriptorRaw<'_>) -> Self {
+impl From<&EventDetail<'_>> for JobDescriptor {
+    fn from(value: &EventDetail<'_>) -> Self {
         Self(value.as_raw().to_owned())
     }
 }
 
 impl From<amp_worker_datasets_raw::job_descriptor::JobDescriptor> for JobDescriptor {
     fn from(desc: amp_worker_datasets_raw::job_descriptor::JobDescriptor) -> Self {
-        let raw: metadata_db::jobs::JobDescriptorRawOwned = desc.into();
+        let raw: EventDetailOwned = desc.into();
         Self(raw.into_inner())
     }
 }
 
 impl From<amp_worker_datasets_derived::job_descriptor::JobDescriptor> for JobDescriptor {
     fn from(desc: amp_worker_datasets_derived::job_descriptor::JobDescriptor) -> Self {
-        let raw: metadata_db::jobs::JobDescriptorRawOwned = desc.into();
+        let raw: EventDetailOwned = desc.into();
         Self(raw.into_inner())
     }
 }

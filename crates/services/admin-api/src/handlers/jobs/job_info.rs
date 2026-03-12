@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use amp_worker_core::jobs::job_id::JobId;
-use metadata_db::jobs::JobDescriptorRawOwned;
+use metadata_db::job_events::EventDetailOwned;
 use worker::job::Job;
 
 /// Represents job information for the API response
@@ -36,10 +36,7 @@ pub struct JobInfo {
 
 impl JobInfo {
     /// Attach descriptors to a list of jobs by matching job IDs.
-    pub fn attach_descriptors(
-        jobs: &mut [JobInfo],
-        descriptors: Vec<(JobId, JobDescriptorRawOwned)>,
-    ) {
+    pub fn attach_descriptors(jobs: &mut [JobInfo], descriptors: Vec<(JobId, EventDetailOwned)>) {
         let descriptor_map: HashMap<_, _> =
             descriptors.iter().map(|(id, desc)| (*id, desc)).collect();
         for job in jobs {
