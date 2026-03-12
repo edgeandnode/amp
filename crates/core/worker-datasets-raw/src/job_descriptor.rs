@@ -18,6 +18,15 @@ pub struct JobDescriptor {
     pub dataset_name: Name,
     /// The hash of the dataset manifest that defines the extraction.
     pub manifest_hash: Hash,
+    /// Enable cryptographic verification of EVM block data during extraction.
+    ///
+    /// When enabled, verifies block hashes, transaction roots, and receipt roots
+    /// before writing data. Requires the dataset to have `blocks`, `transactions`,
+    /// and `logs` tables with EVM schema. Verification failures are retryable errors.
+    ///
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub verify: bool,
 }
 
 fn default_max_writers() -> u16 {

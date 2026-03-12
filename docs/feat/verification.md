@@ -51,15 +51,27 @@ When all verifications pass, the dataset provides these guarantees:
 
 ## What is Not Verified
 
-| Item             | Reason                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| EVM execution    | Transactions are not re-executed to verify state transitions or gas calculations                             |
-| Consensus rules  | Proof-of-work/proof-of-stake, block timestamps, gas limits, and other consensus parameters are not validated |
-| Canonical chain  | Block headers are verified internally but not proven to belong to the chain agreed upon by network consensus |
+| Item            | Reason                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------ |
+| EVM execution   | Transactions are not re-executed to verify state transitions or gas calculations                             |
+| Consensus rules | Proof-of-work/proof-of-stake, block timestamps, gas limits, and other consensus parameters are not validated |
+| Canonical chain | Block headers are verified internally but not proven to belong to the chain agreed upon by network consensus |
 
 ## Usage
 
-Run verification against a block range:
+### Extraction-Time Verification
+
+Enable verification during extraction to catch data corruption immediately:
+
+```bash
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --verify
+```
+
+When `--verify` is enabled, each block is cryptographically verified before being written to storage. This is EVM-only and requires the dataset to have `blocks`, `transactions`, and `logs` tables. Verification failures are retryable errors, allowing the extraction to recover from transient issues.
+
+### Post-Extraction Verification
+
+Run verification against an already-extracted block range:
 
 ```bash
 ampctl verify --dataset=edgeandnode/ethereum_mainnet --start-block=0 --end-block=100000

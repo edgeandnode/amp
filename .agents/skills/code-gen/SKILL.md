@@ -17,78 +17,20 @@ Use this skill when:
 
 ## Available Commands
 
-### Generate All Schemas
+All codegen tasks are in the `[codegen]` group in the justfile. To discover available commands:
+
 ```bash
-just gen
+just --list | grep -A100 '\[codegen\]'
 ```
-Runs all codegen tasks in sequence:
-- Common dataset manifest schema
-- Derived dataset manifest schema
-- EVM RPC dataset manifest schema
-- Firehose dataset manifest schema
-- Admin API OpenAPI specification
 
-**Alias**: `just codegen` (same as `gen`)
+### Key commands
 
-**Use this when**: Multiple schemas need regeneration or you're unsure which specific schema to regenerate.
+| Command | When to use |
+|---------|-------------|
+| `just gen` | Run all codegen tasks (alias: `just codegen`) |
+| `just gen-<name>` | Run a specific codegen task (see `just --list`) |
 
-### Generate Common Dataset Manifest Schema
-```bash
-just gen-common-dataset-manifest-schema [DEST_DIR]
-```
-Generates the JSON schema for common dataset manifests. Uses `RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-common-gen`.
-
-**Output**: `docs/manifest-schemas/common.spec.json` (default)
-
-**Use this when**: Core dataset manifest structures in `datasets-common` change.
-
-### Generate Derived Dataset Manifest Schema
-```bash
-just gen-derived-dataset-manifest-schema [DEST_DIR]
-```
-Generates the JSON schema for derived dataset manifests. Uses `RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-derived-gen`.
-
-**Output**: `docs/manifest-schemas/derived.spec.json` (default)
-
-**Use this when**: Derived dataset manifest structures change.
-
-### Generate EVM RPC Dataset Manifest Schema
-```bash
-just gen-evm-rpc-dataset-manifest-schema [DEST_DIR]
-```
-Generates the JSON schema for EVM RPC dataset definitions. Uses `RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-evm-rpc-gen`.
-
-**Output**: `docs/manifest-schemas/evm-rpc.spec.json` (default)
-
-**Use this when**: EVM RPC dataset manifest structures change.
-
-### Generate Firehose Dataset Manifest Schema
-```bash
-just gen-firehose-dataset-manifest-schema [DEST_DIR]
-```
-Generates the JSON schema for Firehose dataset definitions. Uses `RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-firehose-gen`.
-
-**Output**: `docs/manifest-schemas/firehose.spec.json` (default)
-
-**Use this when**: Firehose dataset manifest structures change.
-
-### Generate Admin API OpenAPI Specification
-```bash
-just gen-admin-api-openapi-spec [DEST_DIR]
-```
-Generates the OpenAPI specification for the Admin API. Uses `RUSTFLAGS="--cfg gen_openapi_spec" cargo build -p admin-api-gen`.
-
-**Output**: `docs/openapi-specs/admin.spec.json` (default)
-
-**Use this when**: Admin API endpoint definitions or schemas change.
-
-### Generate Firehose Protobuf Bindings (Currently Disabled)
-```bash
-just gen-firehose-datasets-proto
-```
-Generates Firehose protobuf bindings. Uses `RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets`.
-
-**Note**: This is currently commented out in the main `gen` task. Use only when specifically needed.
+Most `gen-*` commands accept an optional `DEST_DIR` parameter to override the output location.
 
 ## How Code Generation Works
 
@@ -104,12 +46,6 @@ Generates Firehose protobuf bindings. Uses `RUSTFLAGS="--cfg gen_proto" cargo bu
 3. Specs are written to `target/debug/build/<crate>/out/openapi.spec.json`
 4. The just command copies the spec to the docs directory
 
-### Custom Destination
-All generation commands accept an optional `DEST_DIR` parameter:
-```bash
-just gen-common-dataset-manifest-schema /custom/path
-```
-
 ## Important Guidelines
 
 ### When to Regenerate Schemas
@@ -119,16 +55,8 @@ just gen-common-dataset-manifest-schema /custom/path
 - Before committing changes to manifest-related code
 
 ### Output Locations
-- **Manifest Schemas**: `docs/manifest-schemas/` (default)
-- **OpenAPI Specs**: `docs/openapi-specs/` (default)
-
-### Generation Crates
-These special `-gen` crates are used for code generation:
-- `datasets-common-gen`
-- `datasets-derived-gen`
-- `datasets-evm-rpc-gen`
-- `datasets-firehose-gen`
-- `admin-api-gen`
+- **Manifest Schemas**: `docs/schemas/manifest/` (default)
+- **OpenAPI Specs**: `docs/schemas/openapi/` (default)
 
 ## Concrete Examples
 
@@ -136,9 +64,9 @@ These special `-gen` crates are used for code generation:
 **Situation**: Added `indexer_url` field to EVM RPC dataset manifest
 **Action**:
 ```bash
-just gen-evm-rpc-dataset-manifest-schema
+just gen-raw-dataset-manifest-schema
 ```
-**Result**: Updated `docs/manifest-schemas/evm-rpc.spec.json` with new field
+**Result**: Updated `docs/schemas/manifest/raw.spec.json` with new field
 
 ### Example 2: After Modifying Admin API Endpoint
 **Situation**: Added new `/workers` endpoint to admin API
@@ -146,7 +74,7 @@ just gen-evm-rpc-dataset-manifest-schema
 ```bash
 just gen-admin-api-openapi-spec
 ```
-**Result**: Updated `docs/openapi-specs/admin.spec.json` with new endpoint
+**Result**: Updated `docs/schemas/openapi/admin.spec.json` with new endpoint
 
 ### Example 3: Multiple Changes Across Datasets
 **Situation**: Refactored field types across multiple dataset types

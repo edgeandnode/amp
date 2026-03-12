@@ -5,6 +5,7 @@ use alloy::primitives::{
 };
 use amp_client::AmpClient;
 use anyhow::Context as _;
+use arrow::array::RecordBatch;
 use futures::StreamExt as _;
 use typed_arrow::{AsViewsIterator as _, Decimal128, List};
 
@@ -297,6 +298,135 @@ impl Transaction {
     }
 }
 
+// Arrow record view types for parsing EVM data from RecordBatches
+#[derive(typed_arrow::Record)]
+struct BlockRecordView {
+    _block_num: u64,
+    block_num: u64,
+    timestamp: typed_arrow::Timestamp<typed_arrow::Nanosecond>,
+    hash: [u8; 32],
+    parent_hash: [u8; 32],
+    ommers_hash: [u8; 32],
+    miner: [u8; 20],
+    state_root: [u8; 32],
+    transactions_root: [u8; 32],
+    receipt_root: [u8; 32],
+    logs_bloom: Vec<u8>,
+    difficulty: Decimal128<38, 0>,
+    total_difficulty: Option<Decimal128<38, 0>>,
+    gas_limit: u64,
+    gas_used: u64,
+    extra_data: Vec<u8>,
+    mix_hash: [u8; 32],
+    nonce: u64,
+    base_fee_per_gas: Option<Decimal128<38, 0>>,
+    withdrawals_root: Option<[u8; 32]>,
+    blob_gas_used: Option<u64>,
+    excess_blob_gas: Option<u64>,
+    parent_beacon_root: Option<[u8; 32]>,
+    requests_hash: Option<[u8; 32]>,
+}
+
+#[derive(typed_arrow::Record)]
+struct TransactionRecordView {
+    _block_num: u64,
+    block_hash: [u8; 32],
+    block_num: u64,
+    timestamp: typed_arrow::Timestamp<typed_arrow::Nanosecond>,
+    tx_index: u32,
+    tx_hash: [u8; 32],
+    to: Option<[u8; 20]>,
+    nonce: u64,
+    gas_price: Option<Decimal128<38, 0>>,
+    gas_limit: u64,
+    value: String,
+    input: Vec<u8>,
+    r: [u8; 32],
+    s: [u8; 32],
+    v_parity: bool,
+    chain_id: Option<u64>,
+    gas_used: u64,
+    r#type: i32,
+    max_fee_per_gas: Option<Decimal128<38, 0>>,
+    max_priority_fee_per_gas: Option<Decimal128<38, 0>>,
+    max_fee_per_blob_gas: Option<Decimal128<38, 0>>,
+    from: [u8; 20],
+    status: bool,
+    state_root: Option<[u8; 32]>,
+    access_list: Option<List<AccessListItemView>>,
+    blob_versioned_hashes: Option<List<[u8; 32]>>,
+    authorization_list: Option<List<AuthorizationTupleView>>,
+}
+
+#[derive(typed_arrow::Record)]
+struct AccessListItemView {
+    address: [u8; 20],
+    storage_keys: List<[u8; 32]>,
+}
+
+#[derive(typed_arrow::Record)]
+struct AuthorizationTupleView {
+    chain_id: u64,
+    address: [u8; 20],
+    nonce: u64,
+    y_parity: bool,
+    r: [u8; 32],
+    s: [u8; 32],
+}
+
+#[derive(typed_arrow::Record)]
+struct LogRecordView {
+    _block_num: u64,
+    block_hash: [u8; 32],
+    block_num: u64,
+    timestamp: typed_arrow::Timestamp<typed_arrow::Nanosecond>,
+    tx_hash: [u8; 32],
+    tx_index: u32,
+    log_index: u32,
+    address: [u8; 20],
+    topic0: Option<[u8; 32]>,
+    topic1: Option<[u8; 32]>,
+    topic2: Option<[u8; 32]>,
+    topic3: Option<[u8; 32]>,
+    data: Vec<u8>,
+}
+
+/// Error converting Arrow RecordBatches to verification types.
+#[derive(Debug, thiserror::Error)]
+pub enum ConversionError {
+    /// RecordBatch schema doesn't match expected EVM table schema
+    #[error("schema mismatch")]
+    SchemaMismatch(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// Failed to read a record view from the batch
+    #[error("failed to read record view")]
+    ReadView(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// Integer overflow when converting to u128
+    #[error("{0} does not fit in u128")]
+    InvalidU128(&'static str),
+
+    /// Integer overflow when converting to u64
+    #[error("{0} does not fit in u64")]
+    InvalidU64(&'static str),
+
+    /// Value field is not a valid decimal string
+    #[error("value is not a valid decimal string")]
+    InvalidDecimalString,
+
+    /// Negative value where unsigned integer was expected
+    #[error("{0} is negative")]
+    NegativeValue(&'static str),
+
+    /// Block batch doesn't contain exactly one row
+    #[error("block batch must contain exactly one row, got {0}")]
+    InvalidBlockBatchSize(usize),
+
+    /// Block batch is empty
+    #[error("block batch is empty")]
+    EmptyBlockBatch,
+}
+
 /// Escape and quote dataset name for SQL identifier safety.
 /// Replaces " with "" and wraps the result in double quotes.
 fn escape_dataset_name(dataset: &str) -> String {
@@ -308,98 +438,6 @@ pub async fn fetch_blocks(
     dataset: &str,
     range: RangeInclusive<BlockNumber>,
 ) -> anyhow::Result<Vec<Block>> {
-    #[derive(typed_arrow::Record)]
-    struct BlockRecordView {
-        _block_num: u64,
-        block_num: u64,
-        timestamp: typed_arrow::Timestamp<typed_arrow::Nanosecond>,
-        hash: [u8; 32],
-        parent_hash: [u8; 32],
-        ommers_hash: [u8; 32],
-        miner: [u8; 20],
-        state_root: [u8; 32],
-        transactions_root: [u8; 32],
-        receipt_root: [u8; 32],
-        logs_bloom: Vec<u8>,
-        difficulty: Decimal128<38, 0>,
-        total_difficulty: Option<Decimal128<38, 0>>,
-        gas_limit: u64,
-        gas_used: u64,
-        extra_data: Vec<u8>,
-        mix_hash: [u8; 32],
-        nonce: u64,
-        base_fee_per_gas: Option<Decimal128<38, 0>>,
-        withdrawals_root: Option<[u8; 32]>,
-        blob_gas_used: Option<u64>,
-        excess_blob_gas: Option<u64>,
-        parent_beacon_root: Option<[u8; 32]>,
-        requests_hash: Option<[u8; 32]>,
-    }
-
-    #[derive(typed_arrow::Record)]
-    struct TransactionRecordView {
-        _block_num: u64,
-        block_hash: [u8; 32],
-        block_num: u64,
-        timestamp: typed_arrow::Timestamp<typed_arrow::Nanosecond>,
-        tx_index: u32,
-        tx_hash: [u8; 32],
-        to: Option<[u8; 20]>,
-        nonce: u64,
-        gas_price: Option<Decimal128<38, 0>>,
-        gas_limit: u64,
-        value: String,
-        input: Vec<u8>,
-        r: [u8; 32],
-        s: [u8; 32],
-        v_parity: bool,
-        chain_id: Option<u64>,
-        gas_used: u64,
-        r#type: i32,
-        max_fee_per_gas: Option<Decimal128<38, 0>>,
-        max_priority_fee_per_gas: Option<Decimal128<38, 0>>,
-        max_fee_per_blob_gas: Option<Decimal128<38, 0>>,
-        from: [u8; 20],
-        status: bool,
-        state_root: Option<[u8; 32]>,
-        access_list: Option<List<AccessListItem>>,
-        blob_versioned_hashes: Option<List<[u8; 32]>>,
-        authorization_list: Option<List<AuthorizationTuple>>,
-    }
-
-    #[derive(typed_arrow::Record)]
-    struct AccessListItem {
-        address: [u8; 20],
-        storage_keys: List<[u8; 32]>,
-    }
-
-    #[derive(typed_arrow::Record)]
-    struct AuthorizationTuple {
-        chain_id: u64,
-        address: [u8; 20],
-        nonce: u64,
-        y_parity: bool,
-        r: [u8; 32],
-        s: [u8; 32],
-    }
-
-    #[derive(typed_arrow::Record)]
-    struct LogRecordView {
-        _block_num: u64,
-        block_hash: [u8; 32],
-        block_num: u64,
-        timestamp: typed_arrow::Timestamp<typed_arrow::Nanosecond>,
-        tx_hash: [u8; 32],
-        tx_index: u32,
-        log_index: u32,
-        address: [u8; 20],
-        topic0: Option<[u8; 32]>,
-        topic1: Option<[u8; 32]>,
-        topic2: Option<[u8; 32]>,
-        topic3: Option<[u8; 32]>,
-        data: Vec<u8>,
-    }
-
     let start_block = *range.start();
     let end_block = *range.end();
 
@@ -608,4 +646,205 @@ pub async fn fetch_blocks(
     );
 
     Ok(block_data)
+}
+
+/// Convert Arrow RecordBatches (block, transactions, logs) to a verification Block.
+///
+/// This is used for inline verification during extraction, where data is already
+/// in RecordBatch format. The function expects:
+/// - `block_batch`: A single-row RecordBatch containing one block's header data
+/// - `transactions_batch`: RecordBatch containing all transactions for this block
+/// - `logs_batch`: RecordBatch containing all logs for this block
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The RecordBatch schema doesn't match expected EVM table schema
+/// - Type conversions fail (e.g., overflow, missing required fields)
+/// - The block batch doesn't contain exactly one row
+pub fn block_from_record_batches(
+    block_batch: &RecordBatch,
+    transactions_batch: &RecordBatch,
+    logs_batch: &RecordBatch,
+) -> Result<Block, ConversionError> {
+    // Parse logs
+    let mut logs = Vec::new();
+    for view in logs_batch
+        .iter_views::<LogRecordView>()
+        .map_err(|e| ConversionError::SchemaMismatch(Box::new(e)))?
+    {
+        let view = view.map_err(|e| ConversionError::ReadView(Box::new(e)))?;
+        let view: LogRecordView = view
+            .try_into()
+            .map_err(|e| ConversionError::ReadView(Box::new(e)))?;
+
+        // Collapse topic0-topic3 into single Vec
+        let topics: Vec<B256> = [view.topic0, view.topic1, view.topic2, view.topic3]
+            .into_iter()
+            .flatten()
+            .map(B256::from)
+            .collect();
+
+        let log = Log {
+            block_number: view.block_num,
+            tx_index: view.tx_index,
+            log_index: view.log_index,
+            address: Address::from(view.address),
+            topics,
+            data: Bytes::from(view.data),
+        };
+
+        logs.push(log);
+    }
+
+    // Sort logs by (tx_index, log_index)
+    logs.sort_unstable_by_key(|log| (log.tx_index, log.log_index));
+
+    // Parse transactions
+    let mut transactions = Vec::new();
+    for view in transactions_batch
+        .iter_views::<TransactionRecordView>()
+        .map_err(|e| ConversionError::SchemaMismatch(Box::new(e)))?
+    {
+        let view = view.map_err(|e| ConversionError::ReadView(Box::new(e)))?;
+        let view: TransactionRecordView = view
+            .try_into()
+            .map_err(|e| ConversionError::ReadView(Box::new(e)))?;
+
+        let transaction = Transaction {
+            block_number: view.block_num,
+            tx_index: view.tx_index,
+            tx_hash: B256::from(view.tx_hash),
+            tx_type: view.r#type,
+            nonce: view.nonce,
+            gas_price: view
+                .gas_price
+                .map(|d| u128::try_from(d.into_value()))
+                .transpose()
+                .map_err(|_| ConversionError::InvalidU128("gas_price"))?,
+            max_fee_per_gas: view
+                .max_fee_per_gas
+                .map(|d| u128::try_from(d.into_value()))
+                .transpose()
+                .map_err(|_| ConversionError::InvalidU128("max_fee_per_gas"))?,
+            max_priority_fee_per_gas: view
+                .max_priority_fee_per_gas
+                .map(|d| u128::try_from(d.into_value()))
+                .transpose()
+                .map_err(|_| ConversionError::InvalidU128("max_priority_fee_per_gas"))?,
+            max_fee_per_blob_gas: view
+                .max_fee_per_blob_gas
+                .map(|d| u128::try_from(d.into_value()))
+                .transpose()
+                .map_err(|_| ConversionError::InvalidU128("max_fee_per_blob_gas"))?,
+            gas_limit: view.gas_limit,
+            to: view.to.map(Address::from),
+            value: U256::from_str_radix(&view.value, 10)
+                .map_err(|_| ConversionError::InvalidDecimalString)?,
+            input: Bytes::from(view.input),
+            r: view.r.into(),
+            s: view.s.into(),
+            v_parity: view.v_parity,
+            chain_id: view.chain_id,
+            from: Address::from(view.from),
+            access_list: view.access_list.map(|list| {
+                list.into_inner()
+                    .into_iter()
+                    .map(|item| {
+                        let address = Address::from(item.address);
+                        let storage_keys = item
+                            .storage_keys
+                            .into_inner()
+                            .into_iter()
+                            .map(B256::from)
+                            .collect();
+                        (address, storage_keys)
+                    })
+                    .collect()
+            }),
+            blob_versioned_hashes: view
+                .blob_versioned_hashes
+                .map(|hashes| hashes.into_inner().into_iter().map(B256::from).collect()),
+            gas_used: view.gas_used,
+            status: view.status,
+            state_root: view.state_root.map(B256::from),
+            authorization_list: view.authorization_list.map(|list| {
+                list.into_inner()
+                    .into_iter()
+                    .map(|item| {
+                        (
+                            item.chain_id,
+                            Address::from(item.address),
+                            item.nonce,
+                            item.y_parity,
+                            B256::from(item.r),
+                            B256::from(item.s),
+                        )
+                    })
+                    .collect()
+            }),
+        };
+
+        transactions.push(transaction);
+    }
+
+    transactions.sort_unstable_by_key(|tx| tx.tx_index);
+
+    // Parse block header - should be exactly one row
+    if block_batch.num_rows() != 1 {
+        return Err(ConversionError::InvalidBlockBatchSize(
+            block_batch.num_rows(),
+        ));
+    }
+
+    let mut block_iter = block_batch
+        .iter_views::<BlockRecordView>()
+        .map_err(|e| ConversionError::SchemaMismatch(Box::new(e)))?;
+    let view = block_iter
+        .next()
+        .ok_or(ConversionError::EmptyBlockBatch)?
+        .map_err(|e| ConversionError::ReadView(Box::new(e)))?;
+    let view: BlockRecordView = view
+        .try_into()
+        .map_err(|e| ConversionError::ReadView(Box::new(e)))?;
+
+    let block_num = view.block_num;
+    let block = Block {
+        number: block_num,
+        timestamp: (view.timestamp.value() / 1_000_000_000) as u64,
+        hash: BlockHash::from(view.hash),
+        parent_hash: BlockHash::from(view.parent_hash),
+        ommers_hash: BlockHash::from(view.ommers_hash),
+        miner: Address::from(view.miner),
+        state_root: BlockHash::from(view.state_root),
+        transactions_root: BlockHash::from(view.transactions_root),
+        receipts_root: BlockHash::from(view.receipt_root),
+        logs_bloom: view.logs_bloom.into(),
+        difficulty: U256::try_from(view.difficulty.into_value())
+            .map_err(|_| ConversionError::NegativeValue("difficulty"))?,
+        total_difficulty: view
+            .total_difficulty
+            .map(|d| U256::try_from(d.into_value()))
+            .transpose()
+            .map_err(|_| ConversionError::NegativeValue("total_difficulty"))?,
+        gas_limit: view.gas_limit,
+        gas_used: view.gas_used,
+        extra_data: view.extra_data.into(),
+        mix_hash: BlockHash::from(view.mix_hash),
+        nonce: view.nonce,
+        base_fee_per_gas: view
+            .base_fee_per_gas
+            .map(|d| u64::try_from(d.into_value()))
+            .transpose()
+            .map_err(|_| ConversionError::InvalidU64("base_fee_per_gas"))?,
+        withdrawals_root: view.withdrawals_root.map(BlockHash::from),
+        blob_gas_used: view.blob_gas_used,
+        excess_blob_gas: view.excess_blob_gas,
+        parent_beacon_root: view.parent_beacon_root.map(BlockHash::from),
+        requests_hash: view.requests_hash.map(BlockHash::from),
+        transactions,
+        logs,
+    };
+
+    Ok(block)
 }

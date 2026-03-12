@@ -19,7 +19,6 @@ use common::{
         session::{SessionStateBuilder, is_user_input_error},
     },
     datasets_cache::DatasetsCache,
-    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::{ExecEnv, default_session_config},
     func_catalog::{
         catalog_provider::{
@@ -34,6 +33,7 @@ use common::{
     physical_table::PhysicalTable,
     sql,
     sql_str::SqlStr,
+    udfs::eth_call::EthCallUdfsCache,
 };
 use datafusion::{
     arrow::datatypes::{DataType, Field, Schema},

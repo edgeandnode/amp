@@ -42,12 +42,12 @@ use common::{
     cursor::Cursor,
     datasets_cache::{DatasetsCache, GetDatasetError},
     detached_logical_plan::{AttachPlanError, DetachedLogicalPlan},
-    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::ExecEnv,
     plan_visitors::plan_has_block_num_udf,
     sql::{ResolveFunctionReferencesError, ResolveTableReferencesError, resolve_table_references},
     sql_str::SqlStr,
     streaming_query::{QueryMessage, StreamingQuery},
+    udfs::eth_call::EthCallUdfsCache,
 };
 use datafusion::{
     common::DFSchema, error::DataFusionError, physical_plan::stream::RecordBatchStreamAdapter,

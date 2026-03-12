@@ -8,9 +8,7 @@ use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
 use async_stream::stream;
 use datasets_common::block_num::BlockNum;
 use datasets_raw::{
-    client::{
-        BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
-    },
+    client::{BlockStreamError, BlockStreamResultExt, BlockStreamer, LatestBlockError},
     rows::Rows,
 };
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
@@ -273,10 +271,6 @@ impl BlockStreamer for Client {
 
     fn bucket_size(&self) -> Option<NonZeroU64> {
         None
-    }
-
-    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
-        Ok(())
     }
 
     #[instrument(skip(self), err)]

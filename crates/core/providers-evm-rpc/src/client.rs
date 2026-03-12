@@ -29,9 +29,7 @@ use datasets_common::{
 };
 use datasets_raw::{
     Timestamp,
-    client::{
-        BlockStreamError, BlockStreamResultExt, BlockStreamer, CleanupError, LatestBlockError,
-    },
+    client::{BlockStreamError, BlockStreamResultExt, BlockStreamer, LatestBlockError},
     evm::{
         EvmCurrency,
         tables::{
@@ -497,10 +495,6 @@ impl BlockStreamer for Client {
 
     fn bucket_size(&self) -> Option<NonZeroU64> {
         None
-    }
-
-    async fn wait_for_cleanup(self) -> Result<(), CleanupError> {
-        Ok(())
     }
 
     fn provider_name(&self) -> &str {

@@ -25,7 +25,7 @@ A dataset manifest is a JSON document that fully describes a dataset — its kin
 - **Content-Addressable Storage**: Each manifest is identified by a SHA-256 hash of its canonical JSON, ensuring immutability and deduplication
 - **Kind Discriminator**: The `kind` field determines which dataset implementation parses the manifest (e.g., `"evm-rpc"`, `"manifest"`, `"static"`)
 - **Table Schema**: An ordered list of named Arrow fields per table, defining column names, data types, and nullability
-- **JSON Schema**: Each kind has a generated JSON schema at `docs/manifest-schemas/{kind}.spec.json` for validation
+- **JSON Schema**: Each kind has a generated JSON schema at `docs/schemas/manifest/{kind}.spec.json` for validation
 
 ## Configuration
 

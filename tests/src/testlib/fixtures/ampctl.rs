@@ -194,6 +194,7 @@ impl Ampctl {
         end_block: Option<u64>,
         parallelism: Option<u16>,
         worker_id: Option<NodeSelector>,
+        verify: bool,
     ) -> Result<JobId> {
         let reference: Reference = dataset_ref.parse().map_err(|err| {
             anyhow!(
@@ -212,6 +213,7 @@ impl Ampctl {
                 end_block_param,
                 parallelism.unwrap_or(1),
                 worker_id,
+                verify,
             )
             .await
             .map_err(Into::into)

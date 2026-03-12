@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/arrow-to-postgres",
-    "crates/auth/http",
     "crates/clients/admin",
     "crates/bin/ampctl",
     "crates/bin/ampcc",
@@ -10,7 +9,7 @@ members = [
     "crates/clients/flight",
     "crates/config",
     "crates/config/gen",
-    "crates/core/amp-parquet",
+    "crates/core/parquet",
     "crates/core/common",
     "crates/core/data-store",
     "crates/core/datasets-registry",
@@ -19,6 +18,9 @@ members = [
     "crates/core/datasets-derived",
     "crates/core/datasets-derived/gen",
     "crates/core/datasets-raw",
+    "crates/core/datasets-raw/gen",
+    "crates/core/datasets-static",
+    "crates/core/datasets-static/gen",
     "crates/core/js-runtime",
     "crates/core/metadata-db",
     "crates/core/monitoring",

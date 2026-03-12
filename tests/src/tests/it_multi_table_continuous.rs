@@ -41,6 +41,7 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
         &anvil_dataset_ref,
         Some(5),
         Duration::from_secs(30),
+        false,
     )
     .await
     .expect("Failed to dump dataset anvil_rpc");
@@ -63,6 +64,7 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
                 .expect("failed to parse dataset reference"),
             None,
             Duration::from_secs(30),
+            false,
         )
         .await
         .expect("Failed to dump dataset");
@@ -84,6 +86,7 @@ async fn dump_multi_table_derived_dataset_in_continuous_mode_populates_all_table
         &anvil_dataset_ref,
         Some(8),
         Duration::from_secs(30),
+        false,
     )
     .await
     .expect("Failed to dump anvil_rpc with new blocks");

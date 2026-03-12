@@ -71,8 +71,8 @@ LIMIT 10
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/evm_encode_hex.rs` - Converts hex strings to binary
-- `crates/core/common/src/evm/udfs/evm_decode_hex.rs` - Converts binary to hex strings
+- `crates/core/common/src/udfs/evm/encode_hex.rs` - Converts hex strings to binary
+- `crates/core/common/src/udfs/evm/decode_hex.rs` - Converts binary to hex strings
 
 ## Limitations
 

@@ -69,6 +69,9 @@ ampctl dataset deploy my_namespace/my_dataset@1.0.0 --parallelism 4
 
 # Assign to a specific worker
 ampctl dataset deploy my_namespace/my_dataset@1.0.0 --worker-id my-worker
+
+# Enable cryptographic verification for EVM datasets
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --verify
 ```
 
 **List registered datasets:**
@@ -176,7 +179,7 @@ ampctl dataset restore my_namespace/my_dataset@1.0.0 --json
 For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
 
 ```bash
-jq '.paths | to_entries[] | select(.key | startswith("/datasets"))' docs/openapi-specs/admin.spec.json
+jq '.paths | to_entries[] | select(.key | startswith("/datasets"))' docs/schemas/openapi/admin.spec.json
 ```
 
 ## Implementation

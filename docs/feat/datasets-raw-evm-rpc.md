@@ -15,8 +15,8 @@ The EVM RPC dataset defines the table schemas for block, transaction, and event 
 ## Table of Contents
 
 1. [Key Concepts](#key-concepts)
-2. [Configuration](#configuration)
-3. [Usage](#usage)
+2. [Manifest](#manifest)
+3. [Schema](#schema)
 4. [Implementation](#implementation)
 5. [References](#references)
 
@@ -26,41 +26,15 @@ The EVM RPC dataset defines the table schemas for block, transaction, and event 
 - **Receipt Fields**: Transaction table schema includes receipt fields (gas used, status, logs) that come from transaction receipts
 - **Shared EVM Schemas**: The `blocks` and `logs` table schemas are shared with the Firehose dataset, ensuring consistent column definitions across EVM-compatible dataset kinds
 
-## Configuration
+## Manifest
 
-For the complete field reference, see the [manifest schema](../manifest-schemas/evm-rpc.spec.json).
+See the [raw dataset manifest schema](../manifest-schemas/raw.spec.json) for the complete field reference, types, defaults, and examples.
 
-### Example Manifest
+## Schema
 
-```json
-{
-  "kind": "evm-rpc",
-  "network": "mainnet",
-  "start_block": 0,
-  "finalized_blocks_only": false,
-  "tables": {
-    "blocks": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" },
-    "transactions": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" },
-    "logs": { "schema": { "arrow": { "fields": [] } }, "network": "mainnet" }
-  }
-}
-```
+This dataset declares three tables: `blocks`, `transactions`, and `logs`. 
 
-### Manifest Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `kind` | `"evm-rpc"` | Dataset kind identifier |
-| `network` | string | Target EVM network (e.g., `mainnet`, `base`, `polygon`) |
-| `start_block` | u64 | First block number for data |
-| `finalized_blocks_only` | bool | Restrict to finalized blocks |
-| `tables` | object | Table definitions with schemas |
-
-## Usage
-
-This dataset declares three tables: `blocks`, `transactions`, and `logs`. For detailed column definitions, see the [table schema](../schemas/evm-rpc.md).
-
-The `blocks` and `logs` tables use shared EVM schema definitions from `datasets-raw::evm`, while `transactions` uses a schema specific to the JSON-RPC response format (including receipt fields like gas used and status).
+For detailed column definitions, see the [table schema](../schemas/evm-rpc.md).
 
 ## Implementation
 

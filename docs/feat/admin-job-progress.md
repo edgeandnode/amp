@@ -85,7 +85,7 @@ For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admi
 
 ```bash
 # Job progress endpoint
-jq '.paths["/jobs/{id}/progress"]' docs/openapi-specs/admin.spec.json
+jq '.paths["/jobs/{id}/progress"]' docs/schemas/openapi/admin.spec.json
 ```
 
 ### Response Schema

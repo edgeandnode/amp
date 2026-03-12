@@ -18,7 +18,7 @@ Or using the full `cargo build` command:
 RUSTFLAGS="--cfg gen_schema" cargo build -p solana-gen
 
 mkdir -p docs/manifest-schemas
-cp target/debug/build/solana-gen-*/out/schema.json docs/manifest-schemas/Solana.json
+cp target/debug/build/solana-gen-*/out/schema.json docs/schemas/manifest/Solana.json
 ```
 
 This will generate JSON schemas from the Solana dataset definitions and copy them to `docs/dataset-def-schemas/Solana.json`.

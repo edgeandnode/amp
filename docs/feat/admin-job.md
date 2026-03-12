@@ -122,7 +122,7 @@ ampctl job inspect 12345 --json | jq '.status'
 For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
 
 ```bash
-jq '.paths | to_entries[] | select(.key | startswith("/jobs"))' docs/openapi-specs/admin.spec.json
+jq '.paths | to_entries[] | select(.key | startswith("/jobs"))' docs/schemas/openapi/admin.spec.json
 ```
 
 ## Implementation

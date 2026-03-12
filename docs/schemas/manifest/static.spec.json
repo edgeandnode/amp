@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "description": "Complete manifest definition for a static dataset.\n\nA manifest defines one or more tables backed by static data files.\nTable names are explicit map keys.",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "Dataset kind, must be `static`.",
+      "const": "static"
+    },
+    "tables": {
+      "description": "Table definitions mapped by table name.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_$]*$": {
+          "$ref": "#/$defs/Table"
+        }
+      }
+    }
+  },
+  "required": [
+    "kind",
+    "tables"
+  ],
+  "$defs": {
+    "ArrowSchema": {
+      "description": "Arrow schema representation for serialization.\n\nContains an ordered list of fields that define the structure of a table.",
+      "type": "object",
+      "properties": {
+        "fields": {
+          "description": "Ordered list of fields in the schema",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Field"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "fields"
+      ]
+    },
+    "DataType": {
+      "description": "Arrow data type, e.g. `Int32`, `Utf8`, etc.",
+      "type": "string"
+    },
+    "Field": {
+      "description": "Arrow field definition with name, type, and nullability.\n\nRepresents a single column in a table schema.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Field name",
+          "type": "string"
+        },
+        "nullable": {
+          "description": "Whether the field can contain null values",
+          "type": "boolean"
+        },
+        "type": {
+          "description": "Arrow data type of the field",
+          "$ref": "#/$defs/DataType"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "nullable"
+      ]
+    },
+    "FilePath": {
+      "description": "Relative file path with forward slashes, no traversal (..), and a file extension",
+      "type": "string",
+      "examples": [
+        "data/prices.csv",
+        "tables/users.csv"
+      ],
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\./)[^\\s]+\\.[a-zA-Z0-9]+$"
+    },
+    "Table": {
+      "description": "Table definition within a static dataset.\n\nDefines a table backed by a static data file with its format\nand Arrow schema.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Path to the data file relative to the provider's object store root.",
+          "$ref": "#/$defs/FilePath"
+        },
+        "schema": {
+          "description": "Table schema definition.",
+          "$ref": "#/$defs/TableSchema"
+        },
+        "sorted_by": {
+          "description": "Column names the data file is pre-sorted by.\n\nDeclaring sort order enables the query engine to skip redundant sorts.\nDefaults to empty (no ordering guarantees).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "oneOf": [
+        {
+          "description": "Comma-separated values format.",
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "const": "csv"
+            },
+            "has_header": {
+              "description": "Whether the CSV file includes a header row.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "format",
+            "has_header"
+          ]
+        }
+      ],
+      "required": [
+        "path",
+        "schema"
+      ]
+    },
+    "TableSchema": {
+      "description": "Schema definition for a table.\n\nWraps an Arrow schema with field definitions including names, types, and nullability.",
+      "type": "object",
+      "properties": {
+        "arrow": {
+          "description": "Arrow schema definition",
+          "$ref": "#/$defs/ArrowSchema"
+        }
+      },
+      "required": [
+        "arrow"
+      ]
+    }
+  }
+}

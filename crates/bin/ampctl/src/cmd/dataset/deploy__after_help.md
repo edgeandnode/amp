@@ -20,6 +20,11 @@ Deploy dataset, staying 100 blocks behind chain tip:
 ampctl dataset deploy my_namespace/my_dataset@1.0.0 --end-block -100
 ```
 
+Deploy EVM dataset with cryptographic verification:
+```
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --verify
+```
+
 Use custom admin URL:
 ```
 ampctl dataset deploy my_namespace/my_dataset@1.0.0 --admin-url http://production:1610

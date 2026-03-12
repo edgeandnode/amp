@@ -48,8 +48,6 @@ pub trait BlockStreamer: Clone + 'static {
 
     fn bucket_size(&self) -> Option<NonZeroU64>;
 
-    fn wait_for_cleanup(self) -> impl Future<Output = Result<(), CleanupError>> + Send;
-
     fn provider_name(&self) -> &str;
 }
 ```
@@ -61,7 +59,6 @@ pub trait BlockStreamer: Clone + 'static {
 - `bucket_size()` — returns the bucket size if the streamer fetches blocks in fixed-size buckets, or `None` if
   blocks are produced individually. This matters for determining how to split block ranges
   for parallel streaming.
-- `wait_for_cleanup()` — releases background tasks, connections, and resources
 - `provider_name()` — returns the provider instance name
 
 **Error types** are all `Box<dyn std::error::Error + Sync + Send + 'static>`.

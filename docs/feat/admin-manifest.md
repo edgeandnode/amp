@@ -118,7 +118,7 @@ ampctl manifest list --json | jq '.manifests[] | select(.dataset_count == 0) | .
 For request/response schemas, see [Admin API OpenAPI spec](../openapi-specs/admin.spec.json):
 
 ```bash
-jq '.paths | to_entries[] | select(.key | startswith("/manifests"))' docs/openapi-specs/admin.spec.json
+jq '.paths | to_entries[] | select(.key | startswith("/manifests"))' docs/schemas/openapi/admin.spec.json
 ```
 
 ## Implementation

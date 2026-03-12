@@ -321,7 +321,7 @@ impl TestCtx {
         let reference = format!("{}/{}@{}", namespace, name, revision);
 
         let job_id = ampctl
-            .dataset_deploy(&reference, end_block, None, None)
+            .dataset_deploy(&reference, end_block, None, None, false)
             .await
             .expect("failed to deploy dataset");
 

@@ -195,7 +195,7 @@ Additional fields vary by provider kind. The provider name is derived from the f
 
 ## Sample Provider Configurations
 
-Complete sample configuration files for each provider kind are available in the [docs/providers/](providers/) directory:
+Complete sample configuration files for each provider kind are available in the [docs/schemas/providers/](providers/) directory:
 
 - **[evm-rpc.sample.toml](providers/evm-rpc.sample.toml)** - Configuration for Ethereum-compatible JSON-RPC endpoints. Includes fields for URL (HTTP/WebSocket/IPC), concurrent request limits, RPC batching, rate limiting, and receipt fetching options.
 

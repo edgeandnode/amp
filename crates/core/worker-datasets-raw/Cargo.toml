@@ -6,13 +6,13 @@ license-file.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../data-store" }
-amp-parquet = { path = "../amp-parquet" }
+amp-parquet = { path = "../parquet" }
 amp-providers-registry = { path = "../providers-registry" }
+amp-worker-core = { path = "../worker-core" }
 common = { path = "../common" }
+datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
 datasets-raw = { path = "../datasets-raw" }
-amp-worker-core = { path = "../worker-core" }
-datafusion.workspace = true
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 monitoring = { path = "../monitoring" }
@@ -21,6 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+verification = { path = "../verification" }
 
 [dev-dependencies]
 rstest.workspace = true

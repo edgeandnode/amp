@@ -4,14 +4,7 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
-[features]
-schemars = ["dep:schemars", "datasets-common/schemars", "datasets-raw/schemars", "dep:serde_json"]
-
 [dependencies]
 amp-providers-evm-rpc = { path = "../../core/providers-evm-rpc" }
 datasets-common = { path = "../../core/datasets-common" }
 datasets-raw = { path = "../../core/datasets-raw" }
-schemars = { workspace = true, optional = true }
-serde.workspace = true
-serde_json = { workspace = true, optional = true }
-thiserror.workspace = true

@@ -10,7 +10,7 @@ use amp_data_store::DataStore;
 use amp_datasets_registry::DatasetsRegistry;
 use amp_providers_registry::ProvidersRegistry;
 use anyhow::Result;
-use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+use common::{datasets_cache::DatasetsCache, udfs::eth_call::EthCallUdfsCache};
 use metadata_db::MetadataDb;
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;

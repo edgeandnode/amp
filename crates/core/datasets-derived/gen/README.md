@@ -18,10 +18,8 @@ Or using the full `cargo build` command:
 RUSTFLAGS="--cfg gen_schema" cargo build -p common-gen
 
 mkdir -p docs/manifest-schemas
-cp target/debug/build/common-gen-*/out/schema.json docs/manifest-schemas/derived.spec.json
-cp target/debug/build/common-gen-*/out/sql_schema.json docs/manifest-schemas/sql.spec.json
+cp target/debug/build/common-gen-*/out/schema.json docs/schemas/manifest/derived.spec.json
 ```
 
 This will generate JSON schemas from the common dataset manifest definitions and copy them to:
 - `docs/dataset-def-schemas/derived.spec.json` for derived datasets
-- `docs/dataset-def-schemas/sql.spec.json` for SQL datasets

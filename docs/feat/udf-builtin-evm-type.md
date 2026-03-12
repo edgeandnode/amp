@@ -103,8 +103,8 @@ FROM (
 
 ### Source Files
 
-- `crates/core/common/src/evm/udfs/evm_encode_type.rs` - ABI-encodes values to binary
-- `crates/core/common/src/evm/udfs/evm_decode_type.rs` - Decodes ABI binary to typed values
+- `crates/core/common/src/udfs/evm/encode_type.rs` - ABI-encodes values to binary
+- `crates/core/common/src/udfs/evm/decode_type.rs` - Decodes ABI binary to typed values
 
 ## Limitations
 

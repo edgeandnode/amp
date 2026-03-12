@@ -7,8 +7,7 @@ license-file.workspace = true
 
 [dependencies]
 amp-datasets-derived = { path = "../../core/datasets-derived", package = "datasets-derived", features = ["schemars"] }
-amp-datasets-evmrpc = { path = "../../extractors/evm-rpc", package = "evm-rpc-datasets", features = ["schemars"] }
-amp-datasets-firehose = { path = "../../extractors/firehose", package = "firehose-datasets", features = ["schemars"] }
+amp-datasets-raw = { path = "../../core/datasets-raw", package = "datasets-raw", features = ["schemars"] }
 alloy.workspace = true
 anyhow.workspace = true
 arboard = "3.6.1"

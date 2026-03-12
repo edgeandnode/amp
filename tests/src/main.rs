@@ -175,7 +175,7 @@ async fn main() {
             .expect("Failed to create data store");
 
             let (datasets_cache, ethcall_udfs_cache, datasets_registry, providers_registry) = {
-                use common::{datasets_cache::DatasetsCache, ethcall_udfs_cache::EthCallUdfsCache};
+                use common::{datasets_cache::DatasetsCache, udfs::eth_call::EthCallUdfsCache};
 
                 let provider_configs_store = ProviderConfigsStore::new(
                     amp_object_store::new_with_prefix(
@@ -385,7 +385,7 @@ async fn bless(
 
     // Dump the dataset
     tracing::debug!(%dataset, end_block=end, "Dumping dataset");
-    test_helpers::deploy_and_wait(ampctl, &dataset, Some(end), Duration::from_secs(30))
+    test_helpers::deploy_and_wait(ampctl, &dataset, Some(end), Duration::from_secs(30), false)
         .await
         .map_err(|err| {
             anyhow!(

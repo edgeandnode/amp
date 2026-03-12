@@ -46,6 +46,7 @@ impl Step {
                 &self.dataset,
                 Some(self.end),
                 Duration::from_secs(30),
+                false,
             )
             .await
             .expect("Failed to dump dataset via worker");

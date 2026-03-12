@@ -4,17 +4,15 @@ edition.workspace = true
 version.workspace = true
 license-file.workspace = true
 
-[features]
-schemars = ["dep:schemars", "datasets-common/schemars", "datasets-raw/schemars"]
-
 [dependencies]
 amp-providers-common = { path = "../../core/providers-common" }
 amp-providers-solana = { path = "../../core/providers-solana" }
 anyhow.workspace = true
 async-stream.workspace = true
 backon.workspace = true
-bs58 = "0.5.1"
 base64 = "0.22.1"
+bs58 = "0.5.1"
+bytes.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-raw = { path = "../../core/datasets-raw" }
 futures.workspace = true
@@ -22,9 +20,7 @@ fs-err.workspace = true
 governor.workspace = true
 headers = { workspace = true }
 monitoring = { path = "../../core/monitoring" }
-memmap2 = "0.9.9"
 reqwest.workspace = true
-schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 solana-clock = "3.0.0"

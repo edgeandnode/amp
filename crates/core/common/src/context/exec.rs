@@ -49,7 +49,6 @@ use crate::{
         session::{SessionContext, SessionState, SessionStateBuilder},
     },
     datasets_cache::DatasetsCache,
-    ethcall_udfs_cache::EthCallUdfsCache,
     exec_env::ExecEnv,
     func_catalog::catalog_provider::AsyncCatalogProvider as FuncAsyncCatalogProvider,
     memory_pool::{MemoryPoolKind, TieredMemoryPool, make_memory_pool},
@@ -59,7 +58,7 @@ use crate::{
         forbid_underscore_prefixed_aliases,
     },
     sql::{TableReference, TableReferenceConversionError},
-    udfs::plan::PlanJsUdf,
+    udfs::{builtin_udfs, eth_call::EthCallUdfsCache, plan::PlanJsUdf},
 };
 
 /// A context for executing queries against a catalog.
@@ -470,6 +469,7 @@ impl ExecContextBuilder {
         // the per-query tiered pool). All session creation in ExecContext goes
         // through `self.session_ctx.state()`.
         let mut session_builder = SessionStateBuilder::new(self.session_config)
+            .with_scalar_udfs(builtin_udfs())
             .with_memory_pool(tiered_memory_pool.clone())
             .with_disk_manager(env.disk_manager.clone())
             .with_cache_manager(env.cache_manager.clone())

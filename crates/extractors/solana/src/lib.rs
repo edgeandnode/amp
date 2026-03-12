@@ -13,14 +13,11 @@
 //! integrity is maintained through hash-based validation where each block's parent_hash must
 //! match the previous block's hash.
 
-use std::collections::BTreeMap;
-
 use amp_providers_common::provider_name::ProviderName;
 use amp_providers_solana::config::AuthHeaderName;
-use datasets_common::{block_num::BlockNum, hash_reference::HashReference, network_id::NetworkId};
+use datasets_common::hash_reference::HashReference;
 
 mod client;
-mod dataset_kind;
 pub mod error;
 pub mod metrics;
 pub mod of1_client;
@@ -29,33 +26,16 @@ pub mod tables;
 
 pub use amp_providers_solana::config::{self, SolanaProviderConfig, UseArchive};
 use datasets_raw::dataset::Dataset as RawDataset;
-pub use datasets_raw::manifest::Table;
+pub use datasets_raw::{
+    dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
+    manifest::{SolanaManifest as Manifest, Table},
+};
 use solana_client::rpc_config::CommitmentConfig;
 
-pub use self::{
-    client::{Client, TRUNCATED_LOG_MESSAGES_MARKER, non_empty_of1_slot, non_empty_rpc_slot},
-    dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
+pub use self::client::{
+    Client, TRUNCATED_LOG_MESSAGES_MARKER, non_empty_of1_slot, non_empty_rpc_slot,
 };
 use crate::error::ClientError;
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct Manifest {
-    /// Dataset kind, must be `solana`
-    pub kind: SolanaDatasetKind,
-
-    /// Network name, e.g., `mainnet`
-    pub network: NetworkId,
-    /// Dataset start block
-    #[serde(default)]
-    pub start_block: BlockNum,
-    /// Only include finalized block data
-    #[serde(default)]
-    pub finalized_blocks_only: bool,
-
-    /// Dataset tables. Maps table names to their definitions.
-    pub tables: BTreeMap<String, Table>,
-}
 
 /// Convert a Solana manifest into a logical dataset representation.
 ///
@@ -140,11 +120,9 @@ pub fn client(
         config.max_rpc_calls_per_second,
         config.network,
         name,
-        config.of1_car_directory,
-        config.keep_of1_car_files,
         config.use_archive,
-        meter,
         commitment,
+        meter,
     );
 
     Ok(client)
