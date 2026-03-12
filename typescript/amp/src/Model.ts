@@ -376,7 +376,8 @@ export const JobStatus = Schema.Literal(
   "STOPPED",
   "STOP_REQUESTED",
   "STOPPING",
-  "FAILED",
+  "ERROR",
+  "FATAL",
   "UNKNOWN",
 ).pipe(
   Schema.annotations({
