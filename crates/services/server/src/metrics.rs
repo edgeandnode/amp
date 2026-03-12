@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use common::memory_pool::TieredMemoryPool;
+use datafusion::execution::memory_pool::human_readable_size;
 use datasets_common::hash_reference::HashReference;
 use monitoring::telemetry;
 
@@ -135,6 +139,7 @@ impl MetricsRegistry {
         rows_returned: u64,
         bytes_egress: u64,
         dataset: &HashReference,
+        memory_pool: Option<&Arc<TieredMemoryPool>>,
     ) {
         let labels = dataset_kvs(dataset);
         self.query_count.inc_with_kvs(&labels);
@@ -144,6 +149,14 @@ impl MetricsRegistry {
             .inc_by_with_kvs(rows_returned, &labels);
         self.query_bytes_egress
             .inc_by_with_kvs(bytes_egress, &labels);
+        if let Some(pool) = memory_pool {
+            let peak = pool.peak_reserved() as u64;
+            self.query_memory_peak_bytes.record(peak);
+            tracing::debug!(
+                peak_memory = human_readable_size(peak as usize),
+                "Query memory usage"
+            );
+        }
     }
 
     /// Record query error
@@ -154,11 +167,6 @@ impl MetricsRegistry {
             error_code.to_string(),
         ));
         self.query_errors.inc_with_kvs(&labels);
-    }
-
-    /// Record query memory usage
-    pub fn record_query_memory(&self, peak_bytes: u64) {
-        self.query_memory_peak_bytes.record(peak_bytes);
     }
 
     /// Record streaming microbatch size and throughput
