@@ -8,7 +8,7 @@ license-file.workspace = true
 alloy.workspace = true
 amp-data-store = { path = "../data-store" }
 amp-datasets-registry = { path = "../datasets-registry" }
-amp-parquet = { path = "../amp-parquet" }
+amp-parquet = { path = "../parquet" }
 amp-providers-registry = { path = "../providers-registry" }
 arrow.workspace = true
 async-stream.workspace = true
