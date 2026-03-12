@@ -1,41 +1,14 @@
 //! Solana dataset extractor.
-//!
-//! ### Important note - Slot vs. Block Number
-//!
-//! In Solana, each produced block gets placed in a "slot", which is a specific time interval
-//! during which a validator can propose a block. However, not every slot results in a produced
-//! block; some slots may be skipped due to various reasons such as network issues or validator
-//! performance. Therefore, the slot number does not always correspond directly to a block number.
-//!
-//! Since [`datasets_raw::client::BlockStreamer`] and related infrastructure generally operate
-//! on the concept of block numbers, the implementation treats Solana slots as block numbers.
-//! Skipped slots do not produce any rows, resulting in gaps in the block number sequence. Chain
-//! integrity is maintained through hash-based validation where each block's parent_hash must
-//! match the previous block's hash.
 
-use amp_providers_common::provider_name::ProviderName;
-use amp_providers_solana::config::AuthHeaderName;
 use datasets_common::hash_reference::HashReference;
+use datasets_raw::dataset::Dataset as RawDataset;
 
-mod client;
-pub mod error;
-pub mod metrics;
-pub mod of1_client;
-pub mod rpc_client;
 pub mod tables;
 
-pub use amp_providers_solana::config::{self, SolanaProviderConfig, UseArchive};
-use datasets_raw::dataset::Dataset as RawDataset;
 pub use datasets_raw::{
     dataset_kind::{SolanaDatasetKind, SolanaDatasetKindError},
     manifest::{SolanaManifest as Manifest, Table},
 };
-use solana_client::rpc_config::CommitmentConfig;
-
-pub use self::client::{
-    Client, TRUNCATED_LOG_MESSAGES_MARKER, non_empty_of1_slot, non_empty_rpc_slot,
-};
-use crate::error::ClientError;
 
 /// Convert a Solana manifest into a logical dataset representation.
 ///
@@ -51,88 +24,4 @@ pub fn dataset(reference: HashReference, manifest: Manifest) -> RawDataset {
         Some(manifest.start_block),
         manifest.finalized_blocks_only,
     )
-}
-
-/// Create a Solana client based on the provided configuration.
-pub fn client(
-    name: ProviderName,
-    config: SolanaProviderConfig,
-    meter: Option<&monitoring::telemetry::metrics::Meter>,
-) -> Result<Client, ClientError> {
-    if config.network != "mainnet" {
-        return Err(ClientError::UnsupportedNetwork {
-            network: config.network,
-        });
-    }
-
-    match config.rpc_provider_info.url.scheme() {
-        "http" | "https" => {}
-        scheme => {
-            return Err(ClientError::UnsupportedUrlScheme {
-                scheme: scheme.to_string(),
-            });
-        }
-    }
-    match config
-        .fallback_rpc_provider_info
-        .as_ref()
-        .map(|info| info.url.scheme())
-    {
-        Some("http") | Some("https") | None => {}
-        Some(scheme) => {
-            return Err(ClientError::UnsupportedUrlScheme {
-                scheme: scheme.to_string(),
-            });
-        }
-    }
-
-    let commitment = commitment_config(config.commitment);
-
-    // Resolve authentication configuration
-    let main_rpc_provider_auth = config.rpc_provider_info.auth_token.map(|token| {
-        let token = token.into_inner();
-        let header = config
-            .rpc_provider_info
-            .auth_header
-            .map(AuthHeaderName::into_inner);
-        rpc_client::Auth::new(token, header)
-    });
-
-    let main_rpc_connection_info = rpc_client::RpcProviderConnectionInfo {
-        url: config.rpc_provider_info.url,
-        auth: main_rpc_provider_auth,
-    };
-    let fallback_rpc_connection_info = config.fallback_rpc_provider_info.map(|info| {
-        let auth = info.auth_token.map(|token| {
-            let token = token.into_inner();
-            let header = info.auth_header.map(AuthHeaderName::into_inner);
-            rpc_client::Auth::new(token, header)
-        });
-        rpc_client::RpcProviderConnectionInfo {
-            url: info.url,
-            auth,
-        }
-    });
-
-    let client = Client::new(
-        main_rpc_connection_info,
-        fallback_rpc_connection_info,
-        config.max_rpc_calls_per_second,
-        config.network,
-        name,
-        config.use_archive,
-        commitment,
-        meter,
-    );
-
-    Ok(client)
-}
-
-/// Convert a [`config::CommitmentLevel`] config value into a Solana [`CommitmentConfig`].
-pub fn commitment_config(level: config::CommitmentLevel) -> CommitmentConfig {
-    match level {
-        config::CommitmentLevel::Processed => CommitmentConfig::processed(),
-        config::CommitmentLevel::Confirmed => CommitmentConfig::confirmed(),
-        config::CommitmentLevel::Finalized => CommitmentConfig::finalized(),
-    }
 }

@@ -1,8 +1,10 @@
-use futures::TryStreamExt;
-use solana_datasets::{
-    Client, UseArchive, of1_client,
+use amp_providers_solana::{
+    Client,
+    config::UseArchive,
+    of1_client,
     rpc_client::{self, rpc_config::CommitmentConfig},
 };
+use futures::TryStreamExt;
 use url::Url;
 
 /// Test the transition from historical blocks to JSON-RPC blocks in the Solana client.

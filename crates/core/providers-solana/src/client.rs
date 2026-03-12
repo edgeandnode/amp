@@ -15,7 +15,6 @@ use std::{
 };
 
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
-use amp_providers_solana::config::UseArchive;
 use anyhow::Context;
 use datasets_common::block_num::BlockNum;
 use datasets_raw::{
@@ -26,7 +25,7 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use solana_client::rpc_config::CommitmentConfig;
 use solana_clock::Slot;
 
-use crate::{metrics, of1_client, rpc_client, tables};
+use crate::{config::UseArchive, metrics, of1_client, rpc_client, tables};
 
 /// Marker string that appears in Solana transaction log message lists when logs
 /// have been truncated.
@@ -571,13 +570,12 @@ fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use amp_providers_common::redacted::Redacted;
-    use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
     use solana_client::rpc_config::CommitmentConfig;
     use url::Url;
 
     use super::Client;
-    use crate::{of1_client, rpc_client};
+    use crate::{config::UseArchive, of1_client, rpc_client};
 
     #[tokio::test]
     async fn historical_blocks_only() {

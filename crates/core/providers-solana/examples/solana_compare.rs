@@ -1,19 +1,19 @@
 //! The program streams blocks from OF1 for a given epoch, fetches the same blocks via JSON-RPC,
-//! and compares the results at the [solana_datasets::tables::NonEmptySlot] level.
+//! and compares the results at the [amp_providers_solana::tables::NonEmptySlot] level.
 
 #[cfg(debug_assertions)]
 use std::{collections::HashSet, sync::Mutex};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
+use amp_providers_solana::{
+    commitment_config, config::SolanaProviderConfig, non_empty_of1_slot, non_empty_rpc_slot,
+    of1_client, rpc_client, tables,
+};
 use anyhow::Context;
 use backon::{ExponentialBuilder, Retryable};
 use clap::Parser;
 use futures::StreamExt;
 use solana_clock::Slot;
-use solana_datasets::{
-    SolanaProviderConfig, commitment_config, non_empty_of1_slot, non_empty_rpc_slot, of1_client,
-    rpc_client, tables,
-};
 
 const SLOT_MISMATCH_LIMIT: u8 = 10;
 
@@ -217,8 +217,8 @@ async fn get_block_with_retry(
 /// focused error logging.
 fn slots_match(
     slot_num: Slot,
-    mut of1_slot: solana_datasets::tables::NonEmptySlot,
-    mut rpc_slot: solana_datasets::tables::NonEmptySlot,
+    mut of1_slot: amp_providers_solana::tables::NonEmptySlot,
+    mut rpc_slot: amp_providers_solana::tables::NonEmptySlot,
 ) -> bool {
     if of1_slot.slot != rpc_slot.slot {
         tracing::warn!(
@@ -453,7 +453,7 @@ fn known_log_message_mismatch(
     };
 
     let is_known_mismatch1 = of1_log_messages.is_empty() && !rpc_log_messages.is_empty();
-    let truncated_log_marker = String::from(solana_datasets::TRUNCATED_LOG_MESSAGES_MARKER);
+    let truncated_log_marker = String::from(amp_providers_solana::TRUNCATED_LOG_MESSAGES_MARKER);
     let is_known_mismatch2 = of1_log_messages.contains(&truncated_log_marker)
         || rpc_log_messages.contains(&truncated_log_marker);
 

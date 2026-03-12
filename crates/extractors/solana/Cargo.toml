@@ -5,49 +5,6 @@ version.workspace = true
 license-file.workspace = true
 
 [dependencies]
-amp-providers-common = { path = "../../core/providers-common" }
 amp-providers-solana = { path = "../../core/providers-solana" }
-anyhow.workspace = true
-async-stream.workspace = true
-backon.workspace = true
-base64 = "0.22.1"
-bs58 = "0.5.1"
-bytes.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-raw = { path = "../../core/datasets-raw" }
-futures.workspace = true
-fs-err.workspace = true
-governor.workspace = true
-headers = { workspace = true }
-monitoring = { path = "../../core/monitoring" }
-reqwest.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-solana-clock = "3.0.0"
-solana-client = "3.0.0"
-solana-rpc-client = "3.0.0"
-solana-rpc-client-api = "3.0.0"
-solana-sdk = "3.0.0"
-solana-storage-proto = { path = "../solana-storage-proto" }
-solana-transaction = "3.0.0"
-solana-transaction-error = "3.0.0"
-solana-transaction-status-client-types = "3.0.0"
-solana-reward-info = "3.0.0"
-thiserror.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-url.workspace = true
-yellowstone-faithful-car-parser = "1.0.0"
-zstd.workspace = true
-prost.workspace = true
-
-# Not using the workspace version for compatibility with Solana crates 
-# we depend on. They are all on 1.3.3 for legacy reasons.
-bincode = "1.3.3"
-
-[dev-dependencies]
-clap.workspace = true
-fs-err.workspace = true
-pretty_assertions.workspace = true
-toml.workspace = true
-tracing-subscriber.workspace = true
