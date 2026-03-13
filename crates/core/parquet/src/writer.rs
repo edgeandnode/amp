@@ -13,6 +13,7 @@ use metadata_db::{
 };
 use object_store::{ObjectMeta, buffered::BufWriter};
 use parquet_ext::arrow::async_writer::AsyncArrowWriter;
+use tracing::Instrument;
 use url::Url;
 
 use crate::{
@@ -77,6 +78,7 @@ impl ParquetFileWriter {
     }
 
     /// Appends a record batch, flushing the row group when it approaches the configured size limit.
+    #[tracing::instrument(skip_all, fields(rows = batch.num_rows(), table = %self.table_ref_compact))]
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
         self.rows_written += batch.num_rows();
         self.writer.write(batch).await?;
@@ -104,10 +106,14 @@ impl ParquetFileWriter {
         parent_ids: Vec<FileId>,
         generation: Generation,
     ) -> Result<ParquetFileWriterOutput, ParquetFileWriterCloseError> {
-        self.writer
-            .flush()
-            .await
-            .map_err(ParquetFileWriterCloseError::Flush)?;
+        async {
+            self.writer
+                .flush()
+                .await
+                .map_err(ParquetFileWriterCloseError::Flush)
+        }
+        .instrument(tracing::info_span!("flush_remaining"))
+        .await?;
 
         let parquet_meta = ParquetMeta {
             table: self.table_name.to_string(),
@@ -136,11 +142,14 @@ impl ParquetFileWriter {
             KeyValue::new(GENERATION_METADATA_KEY.to_string(), generation.to_string());
         self.writer.append_key_value_metadata(generation_metadata);
 
-        let meta = self
-            .writer
-            .close()
-            .await
-            .map_err(ParquetFileWriterCloseError::Close)?;
+        let meta = async {
+            self.writer
+                .close()
+                .await
+                .map_err(ParquetFileWriterCloseError::Close)
+        }
+        .instrument(tracing::info_span!("finalize_parquet"))
+        .await?;
 
         let object_meta = self
             .store

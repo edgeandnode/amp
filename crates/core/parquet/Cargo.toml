@@ -13,7 +13,7 @@ datasets-common = { path = "../datasets-common" }
 futures.workspace = true
 metadata-db = { path = "../metadata-db" }
 object_store.workspace = true
-parquet-ext = { path = "../../parquet-ext", features = ["async", "zstd"] }
+parquet-ext = { path = "../../parquet-ext", features = ["async", "zstd", "tracing"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

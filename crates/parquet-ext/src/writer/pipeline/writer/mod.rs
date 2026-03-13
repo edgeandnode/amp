@@ -71,6 +71,7 @@ where
     }
 
     /// Blocking close: receive all remaining WriteJobs until Finalize, then finalize.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn close_async(mut self) -> Result<ParquetMetaData> {
         loop {
             match self
@@ -105,6 +106,7 @@ where
         self.key_value_metadata.push(kv);
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn write_row_group(&mut self, pending: PendingRowGroup) -> Result<()> {
         let PendingRowGroup {
             chunks,
@@ -176,6 +178,7 @@ where
         Ok(())
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn finalize(&mut self) -> Result<ParquetMetaData> {
         self.flush_pending_encoders().await?;
         self.flush_key_value_metadata();

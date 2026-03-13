@@ -62,6 +62,7 @@ where
         self.writer_executor.append_key_value_metadata(kv);
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn close_async(mut self) -> Result<ParquetMetaData> {
         self.encoder_executor.flush_async(true).await?;
         let metadata = self.writer_executor.close_async().await?;
