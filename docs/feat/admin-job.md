@@ -119,6 +119,15 @@ ampctl job events 123
 ampctl job events 123 --json
 ```
 
+**View a single job event:**
+
+Get full details of a specific event, including the optional detail payload (e.g., job descriptor for SCHEDULED events).
+
+```bash
+ampctl job events 123 --event-id 42
+ampctl job events 123 --event-id 42 --json
+```
+
 **JSON output for scripting:**
 
 ```bash

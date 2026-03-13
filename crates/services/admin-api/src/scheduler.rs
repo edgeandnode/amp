@@ -133,10 +133,19 @@ pub trait SchedulerJobs: Send + Sync {
         status: JobStatus,
     ) -> Result<Option<EventDetailOwned>, GetJobDetailError>;
 
+    /// Get a single lifecycle event by job ID and event ID, including the detail payload.
+    ///
+    /// Returns `None` if no event with the given ID exists for the job.
+    async fn get_event_for_job(
+        &self,
+        job_id: JobId,
+        event_id: i64,
+    ) -> Result<Option<JobEvent>, GetEventForJobError>;
+
     /// Get all lifecycle events for a job.
     ///
     /// Returns the complete audit trail ordered by event id ascending.
-    async fn get_events_for_job(
+    async fn list_events_for_job(
         &self,
         job_id: JobId,
     ) -> Result<Vec<JobEvent>, GetEventsForJobError>;
@@ -520,6 +529,16 @@ pub struct GetJobDetailError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct GetEventsForJobError(#[source] pub metadata_db::Error);
+
+/// Error when getting a single event for a job from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct GetEventForJobError(#[source] pub metadata_db::Error);
 
 /// Trait for querying worker information
 ///

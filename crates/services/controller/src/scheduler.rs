@@ -27,10 +27,10 @@
 use std::{collections::HashMap, time::Duration};
 
 use admin_api::scheduler::{
-    DeleteJobError, DeleteJobsByStatusError, GetEventsForJobError, GetJobDescriptorError,
-    GetJobDetailError, GetJobError, GetWorkerError, JobDescriptor, ListJobDescriptorsError,
-    ListJobsByDatasetError, ListJobsError, ListWorkersError, NodeSelector, ScheduleJobError,
-    SchedulerJobs, SchedulerWorkers, StopJobError,
+    DeleteJobError, DeleteJobsByStatusError, GetEventForJobError, GetEventsForJobError,
+    GetJobDescriptorError, GetJobDetailError, GetJobError, GetWorkerError, JobDescriptor,
+    ListJobDescriptorsError, ListJobsByDatasetError, ListJobsError, ListWorkersError, NodeSelector,
+    ScheduleJobError, SchedulerJobs, SchedulerWorkers, StopJobError,
 };
 use amp_worker_core::{
     jobs::{job_id::JobId, status::JobStatus},
@@ -550,14 +550,25 @@ impl SchedulerJobs for Scheduler {
         Ok(detail)
     }
 
-    async fn get_events_for_job(
+    async fn list_events_for_job(
         &self,
         job_id: JobId,
     ) -> Result<Vec<JobEvent>, GetEventsForJobError> {
-        let events = metadata_db::job_events::get_events_for_job(&self.metadata_db, &job_id)
+        let events = metadata_db::job_events::list_events_for_job(&self.metadata_db, &job_id)
             .await
             .map_err(GetEventsForJobError)?;
         Ok(events)
+    }
+
+    async fn get_event_for_job(
+        &self,
+        job_id: JobId,
+        event_id: i64,
+    ) -> Result<Option<JobEvent>, GetEventForJobError> {
+        let event = metadata_db::job_events::get_event_by_id(&self.metadata_db, &job_id, event_id)
+            .await
+            .map_err(GetEventForJobError)?;
+        Ok(event)
     }
 }
 

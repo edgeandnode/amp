@@ -1137,6 +1137,78 @@
         }
       }
     },
+    "/jobs/{id}/events/{event_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs/{id}/events/{event_id}` endpoint",
+        "description": "Retrieves the full details of a single lifecycle event for a job, including\nthe optional detail payload (e.g., job descriptor for SCHEDULED events).\n\n## Path Parameters\n- `id`: The unique identifier of the job\n- `event_id`: The unique identifier of the event\n\n## Response\n- **200 OK**: Returns the full event details\n- **400 Bad Request**: Invalid job ID or event ID format\n- **404 Not Found**: Job or event not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided job ID or event ID is not valid\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `EVENT_NOT_FOUND`: No event exists with the given ID for the specified job\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler\n- `GET_JOB_EVENT_ERROR`: Failed to retrieve job event from the database\n\nThis handler:\n- Validates and extracts the job ID and event ID from the URL path\n- Verifies the job exists in the scheduler\n- Queries the event by ID for the specified job\n- Returns the full event details including the optional detail payload",
+        "operationId": "get_job_event_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "description": "Event ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved job event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobEventDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID or event ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job or event not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{id}/progress": {
       "get": {
         "tags": [
@@ -2798,6 +2870,44 @@
           "url": {
             "type": "string",
             "description": "Base location URL (e.g., \"s3://bucket/path/\") - combine with file_name for full file URL"
+          }
+        }
+      },
+      "JobEventDetailResponse": {
+        "type": "object",
+        "description": "Response body for GET /jobs/{id}/events/{event_id} endpoint.",
+        "required": [
+          "id",
+          "job_id",
+          "created_at",
+          "node_id",
+          "event_type"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Event timestamp in ISO 8601 / RFC 3339 format"
+          },
+          "detail": {
+            "description": "Optional structured detail payload"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Event type (e.g., SCHEDULED, RUNNING, COMPLETED, ERROR, FATAL, STOPPED)"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Event ID"
+          },
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Job ID"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the worker node that recorded this event"
           }
         }
       },

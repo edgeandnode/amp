@@ -83,7 +83,7 @@ pub async fn handler(
 
     let events = ctx
         .scheduler
-        .get_events_for_job(job_id)
+        .list_events_for_job(job_id)
         .await
         .map_err(|err| {
             tracing::error!(
