@@ -2,7 +2,7 @@
 
 use sqlx::{Executor, Postgres};
 
-use super::{EventDetail, EventDetailOwned, JobEvent};
+use super::{EventDetail, EventDetailOwned, JobAttempt, JobEvent};
 use crate::{
     jobs::{JobId, JobStatus},
     workers::WorkerNodeId,
@@ -51,6 +51,21 @@ where
         .await
 }
 
+/// Get all lifecycle events for a job, ordered by id ascending
+pub async fn get_events_for_job<'c, E>(exe: E, job_id: JobId) -> Result<Vec<JobEvent>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT id, created_at, job_id, node_id, event_type
+        FROM job_events
+        WHERE job_id = $1
+        ORDER BY id ASC
+    "#};
+
+    sqlx::query_as(query).bind(job_id).fetch_all(exe).await
+}
+
 /// Get all scheduling attempts for a job
 ///
 /// Each SCHEDULED event in the log represents one attempt.
@@ -58,7 +73,7 @@ where
 pub async fn get_attempts_for_job<'c, E>(
     exe: E,
     job_id: JobId,
-) -> Result<Vec<JobEvent>, sqlx::Error>
+) -> Result<Vec<JobAttempt>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {

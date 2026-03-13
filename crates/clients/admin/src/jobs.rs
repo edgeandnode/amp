@@ -54,6 +54,13 @@ fn job_progress(id: &JobId) -> String {
     format!("jobs/{id}/progress")
 }
 
+/// Build URL path for getting job events.
+///
+/// GET `/jobs/{id}/events`
+fn job_events(id: &JobId) -> String {
+    format!("jobs/{id}/events")
+}
+
 /// Client for jobs-related API operations.
 ///
 /// Created via [`Client::jobs`](crate::client::Client::jobs).
@@ -611,6 +618,111 @@ impl<'a> JobsClient<'a> {
             }
         }
     }
+    /// Get all lifecycle events for a job.
+    ///
+    /// GETs from `/jobs/{id}/events` endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GetEventsError`] for network errors, API errors (400/500),
+    /// or unexpected responses.
+    #[tracing::instrument(skip(self), fields(job_id = %id))]
+    pub async fn get_events(
+        &self,
+        id: &JobId,
+    ) -> Result<Option<JobEventsResponse>, GetEventsError> {
+        let url = self
+            .client
+            .base_url()
+            .join(&job_events(id))
+            .expect("valid URL");
+
+        tracing::debug!("sending GET request for job events");
+
+        let response = self
+            .client
+            .http()
+            .get(url.as_str())
+            .send()
+            .await
+            .map_err(|err| GetEventsError::Network {
+                url: url.to_string(),
+                source: err,
+            })?;
+
+        let status = response.status();
+        tracing::debug!(status = %status, "received API response");
+
+        match status.as_u16() {
+            200 => {
+                let events: JobEventsResponse = response.json().await.map_err(|err| {
+                    tracing::error!(
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse events response"
+                    );
+                    GetEventsError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("failed to parse response: {}", err),
+                    }
+                })?;
+                Ok(Some(events))
+            }
+            404 => {
+                tracing::debug!("job not found");
+                Ok(None)
+            }
+            400 | 500 => {
+                let text = response.text().await.map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to read error response"
+                    );
+                    GetEventsError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: format!("failed to read error response: {}", err),
+                    }
+                })?;
+
+                let error_response: ErrorResponse = serde_json::from_str(&text).map_err(|err| {
+                    tracing::error!(
+                        status = %status,
+                        error = %err,
+                        error_source = logging::error_source(&err),
+                        "failed to parse error response"
+                    );
+                    GetEventsError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text.clone(),
+                    }
+                })?;
+
+                match error_response.error_code.as_str() {
+                    "INVALID_JOB_ID" => Err(GetEventsError::InvalidJobId(error_response.into())),
+                    "GET_JOB_ERROR" => Err(GetEventsError::GetJobError(error_response.into())),
+                    "GET_JOB_EVENTS_ERROR" => {
+                        Err(GetEventsError::GetJobEventsError(error_response.into()))
+                    }
+                    _ => Err(GetEventsError::UnexpectedResponse {
+                        status: status.as_u16(),
+                        message: text,
+                    }),
+                }
+            }
+            _ => {
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|err| format!("failed to read response body: {}", err));
+                Err(GetEventsError::UnexpectedResponse {
+                    status: status.as_u16(),
+                    message: text,
+                })
+            }
+        }
+    }
 }
 
 /// Response body for GET /jobs endpoint.
@@ -704,6 +816,28 @@ pub struct TableProgress {
     pub files_count: i64,
     /// Total size of all Parquet files in bytes
     pub total_size_bytes: i64,
+}
+
+/// Response for GET /jobs/{id}/events endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct JobEventsResponse {
+    /// Job ID
+    pub job_id: i64,
+    /// List of lifecycle events
+    pub events: Vec<JobEventInfo>,
+}
+
+/// A single job lifecycle event.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct JobEventInfo {
+    /// Event ID
+    pub id: i64,
+    /// Event timestamp in ISO 8601 / RFC 3339 format
+    pub created_at: String,
+    /// ID of the worker node that recorded this event
+    pub node_id: String,
+    /// Event type (e.g., SCHEDULED, RUNNING, COMPLETED, ERROR, FATAL, STOPPED)
+    pub event_type: String,
 }
 
 /// Errors that can occur when listing jobs.
@@ -885,6 +1019,47 @@ pub enum DeleteByStatusError {
     Network { url: String, source: reqwest::Error },
 
     /// Unexpected response from API
+    #[error("unexpected response (status {status}): {message}")]
+    UnexpectedResponse { status: u16, message: String },
+}
+
+/// Errors that can occur when getting job events.
+#[derive(Debug, thiserror::Error)]
+pub enum GetEventsError {
+    /// The job ID in the URL path is invalid (400, INVALID_JOB_ID)
+    ///
+    /// This occurs when the ID cannot be parsed as a valid JobId.
+    #[error("invalid job ID")]
+    InvalidJobId(#[source] ApiError),
+
+    /// Failed to retrieve job from scheduler (500, GET_JOB_ERROR)
+    ///
+    /// This occurs when the scheduler query fails due to a database
+    /// connection error or internal scheduler failure.
+    #[error("failed to get job")]
+    GetJobError(#[source] ApiError),
+
+    /// Failed to retrieve job events (500, GET_JOB_EVENTS_ERROR)
+    ///
+    /// This occurs when:
+    /// - Database connection fails or is lost during the query
+    /// - Query execution encounters an internal database error
+    /// - Connection pool is exhausted or unavailable
+    #[error("failed to get job events")]
+    GetJobEventsError(#[source] ApiError),
+
+    /// Network or connection error
+    ///
+    /// This occurs when the HTTP request to the admin API cannot be
+    /// completed due to connection timeout, DNS resolution failure,
+    /// or other transport-level errors.
+    #[error("network error connecting to {url}")]
+    Network { url: String, source: reqwest::Error },
+
+    /// Unexpected response from API
+    ///
+    /// This occurs when the API returns a status code or error code
+    /// that is not part of the expected contract.
     #[error("unexpected response (status {status}): {message}")]
     UnexpectedResponse { status: u16, message: String },
 }
