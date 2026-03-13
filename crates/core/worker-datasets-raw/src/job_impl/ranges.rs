@@ -510,10 +510,14 @@ impl<S: BlockStreamer> MaterializePartition<S> {
 
         let mut stream = std::pin::pin!(stream);
         let mut prev_block_num = None;
-        while let Some(dataset_rows) = stream
-            .try_next()
-            .await
-            .map_err(RunRangeError::read_stream)?
+        while let Some(dataset_rows) = async {
+            stream
+                .try_next()
+                .await
+                .map_err(RunRangeError::read_stream)
+        }
+        .instrument(tracing::info_span!("fetch_block"))
+        .await?
         {
             let cur_block_num = dataset_rows.block_num();
             if let Some(prev) = prev_block_num
