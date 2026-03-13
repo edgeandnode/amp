@@ -313,7 +313,16 @@ pub enum DependencyTraversalError {
     #[error("dependency '{0}' not found")]
     NotFound(String),
 }
-
+impl crate::retryable::RetryableErrorExt for DependencyTraversalError {
+    fn is_retryable(&self) -> bool {
+        use amp_datasets_registry::retryable::RetryableErrorExt as _;
+        match self {
+            Self::GetDataset(err) => err.is_retryable(),
+            Self::ResolveRevision(err) => err.is_retryable(),
+            Self::NotFound(_) => false,
+        }
+    }
+}
 /// Parses manifest content according to the dataset kind and creates the appropriate dataset implementation.
 fn create_dataset_from_manifest(
     kind: &DatasetKindStr,
