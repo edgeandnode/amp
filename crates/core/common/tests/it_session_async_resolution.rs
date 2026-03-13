@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
 };
 
@@ -540,11 +540,14 @@ async fn exec_statement_to_plan_with_overlapping_async_and_physical_tables_succe
         url: revision_url,
     };
 
+    let dataset_table = Arc::new(dataset_table);
+    let networks = BTreeSet::from([dataset_table.network_ref().clone()]);
     let physical_table = Arc::new(PhysicalTable::from_revision(
         data_store.clone(),
         hash_ref,
         None,
-        Arc::new(dataset_table),
+        dataset_table,
+        networks,
         revision,
     ));
 

@@ -203,6 +203,7 @@ pub async fn load_physical_tables(
             dataset_ref.clone(),
             dataset.start_block(),
             table_def.clone(),
+            table_def.network().into_iter().cloned().collect(),
             revision,
         );
         dumped_tables.push(physical_table.into());
@@ -295,6 +296,7 @@ pub async fn restore_dataset_snapshot(
             dataset_ref.clone(),
             dataset.start_block(),
             table_def.clone(),
+            table_def.network().into_iter().cloned().collect(),
             revision,
         );
         tables.push(physical_table.into());
@@ -360,6 +362,7 @@ pub async fn catalog_for_dataset(
             dataset_ref.clone(),
             dataset.start_block(),
             table_def.clone(),
+            table_def.network().into_iter().cloned().collect(),
             revision,
         );
         tables.push((
