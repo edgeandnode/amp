@@ -159,7 +159,7 @@ impl Scheduler {
         let scheduled_job_status = JobStatus::Scheduled;
         let detail: metadata_db::job_events::EventDetail<'static> = job_descriptor.into();
 
-        let job_id: JobId = metadata_db::jobs::register(&mut tx, idempotency_key, &node_id)
+        let job_id: JobId = metadata_db::jobs::register(&mut tx, idempotency_key)
             .await
             .map(Into::into)
             .map_err(ScheduleJobError::RegisterJob)?;

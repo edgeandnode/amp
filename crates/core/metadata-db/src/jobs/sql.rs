@@ -30,21 +30,19 @@ pub struct JobWithRetryInfo {
 pub async fn insert<'c, E>(
     exe: E,
     idempotency_key: &IdempotencyKey<'_>,
-    node_id: &WorkerNodeId<'_>,
 ) -> Result<JobId, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        INSERT INTO jobs (idempotency_key, node_id, created_at)
-        VALUES ($1, $2, timezone('UTC', now()))
+        INSERT INTO jobs (idempotency_key, created_at)
+        VALUES ($1, timezone('UTC', now()))
         ON CONFLICT ON CONSTRAINT jobs_idempotency_key_unique
         DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
         RETURNING id
     "#};
     let res = sqlx::query_scalar(query)
         .bind(idempotency_key)
-        .bind(node_id)
         .fetch_one(exe)
         .await?;
     Ok(res)

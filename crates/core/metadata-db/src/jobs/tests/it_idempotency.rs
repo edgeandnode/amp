@@ -27,23 +27,14 @@ async fn register_with_same_key_returns_same_job_id() {
 async fn different_keys_produce_different_jobs() {
     //* Given
     let (_db, conn) = setup_test_db().await;
-    let worker_id = WorkerNodeId::from_ref_unchecked(TEST_WORKER_ID);
-    let job_id_a = jobs::register(
-        &conn,
-        IdempotencyKey::from_ref_unchecked("key-a"),
-        &worker_id,
-    )
-    .await
-    .expect("register key-a failed");
+    let job_id_a = jobs::register(&conn, IdempotencyKey::from_ref_unchecked("key-a"))
+        .await
+        .expect("register key-a failed");
 
     //* When
-    let job_id_b = jobs::register(
-        &conn,
-        IdempotencyKey::from_ref_unchecked("key-b"),
-        &worker_id,
-    )
-    .await
-    .expect("register key-b failed");
+    let job_id_b = jobs::register(&conn, IdempotencyKey::from_ref_unchecked("key-b"))
+        .await
+        .expect("register key-b failed");
 
     //* Then
     assert_ne!(
@@ -61,7 +52,7 @@ async fn get_by_idempotency_key_returns_job() {
     let key = IdempotencyKey::from_ref_unchecked("lookup-key");
 
     let mut tx = conn.begin_txn().await.expect("begin txn failed");
-    let job_id = jobs::register(&mut tx, key.clone(), &worker_id)
+    let job_id = jobs::register(&mut tx, key.clone())
         .await
         .expect("register failed");
     job_events::register(

@@ -65,7 +65,7 @@ pub async fn register_job(
         let key_str = format!("test:{}", COUNTER.fetch_add(1, Ordering::Relaxed));
         IdempotencyKey::from_owned_unchecked(key_str)
     });
-    let job_id = jobs::register(&mut tx, idempotency_key, worker_id)
+    let job_id = jobs::register(&mut tx, idempotency_key)
         .await
         .expect("Failed to register job");
     job_events::register(&mut tx, job_id, worker_id, status, Some(job_desc.clone()))
