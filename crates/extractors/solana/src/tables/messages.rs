@@ -1,6 +1,5 @@
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Context;
 use datasets_common::{
     block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
 };
@@ -14,7 +13,11 @@ use datasets_raw::{
 };
 use solana_clock::Slot;
 
-use crate::{rpc_client, tables::BASE58_ENCODED_HASH_LEN};
+use crate::{
+    error::{RowConversionError, RowConversionResult},
+    rpc_client,
+    tables::BASE58_ENCODED_HASH_LEN,
+};
 
 pub const TABLE_NAME: &str = "messages";
 
@@ -142,15 +145,16 @@ impl Message {
         slot: Slot,
         tx_index: u32,
         message: rpc_client::UiRawMessage,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
         let instructions = message
             .instructions
             .iter()
             .map(|inst| {
                 bs58::decode(&inst.data)
                     .into_vec()
-                    .with_context(|| {
-                        format!("decoding instruction data for slot {slot}, tx_index {tx_index}")
+                    .map_err(|_| RowConversionError::DecodeInstructionData {
+                        slot,
+                        tx_idx: tx_index as usize,
                     })
                     .map(|data| super::instructions::Instruction {
                         slot,
@@ -162,7 +166,7 @@ impl Message {
                         inner_stack_height: None,
                     })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<RowConversionResult<Vec<_>>>()?;
         let address_table_lookups = message.address_table_lookups.as_ref().map(|atls| {
             atls.iter()
                 .cloned()
