@@ -16,7 +16,6 @@ use std::{
 
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
 use amp_providers_solana::config::UseArchive;
-use anyhow::Context;
 use datasets_common::block_num::BlockNum;
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamResultExt, BlockStreamer, LatestBlockError},
@@ -26,7 +25,10 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use solana_client::rpc_config::CommitmentConfig;
 use solana_clock::Slot;
 
-use crate::{metrics, of1_client, rpc_client, tables};
+use crate::{
+    error::{SlotConversionError, SlotConversionResult},
+    metrics, of1_client, rpc_client, tables,
+};
 
 /// Marker string that appears in Solana transaction log message lists when logs
 /// have been truncated.
@@ -159,7 +161,6 @@ impl Client {
                         self.metrics.clone(),
                     )
                     .await
-                    .with_context(|| format!("filling truncated OF1 logs for slot {current_slot}"))
                     .recoverable()?;
                 }
 
@@ -197,7 +198,6 @@ impl Client {
                                 self.metrics.clone(),
                             )
                             .await
-                            .with_context(|| format!("filling truncated JSON-RPC logs for slot {slot}"))
                             .recoverable()?;
                         }
                         yield non_empty_slot.into_db_rows(&self.network).fatal();
@@ -339,7 +339,9 @@ impl BlockStreamer for Client {
 
 /// Converts [of1_client::DecodedSlot] to [tables::NonEmptySlot]. This conversion can fail if any
 /// of the decoded fields do not match the expected format/values.
-pub fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<tables::NonEmptySlot> {
+pub fn non_empty_of1_slot(
+    slot: of1_client::DecodedSlot,
+) -> SlotConversionResult<tables::NonEmptySlot> {
     let of1_client::DecodedSlot {
         slot,
         parent_slot,
@@ -374,7 +376,7 @@ pub fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<table
         let tx = tables::transactions::Transaction::from_of1_transaction(
             slot, tx_index, tx_version, signatures, tx_meta,
         )
-        .context("converting of1 transaction")?;
+        .map_err(|row_conv_err| SlotConversionError::row_conversion_error(slot, row_conv_err))?;
         let message = tables::messages::Message::from_of1_message(slot, tx_index, message);
 
         txs.push(tx);
@@ -382,7 +384,7 @@ pub fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<table
     }
 
     let block_rewards = tables::block_rewards::BlockRewards::from_of1_rewards(slot, block_rewards)
-        .context("converting of1 block rewards")?;
+        .map_err(|row_conv_err| SlotConversionError::row_conversion_error(slot, row_conv_err))?;
 
     Ok(tables::NonEmptySlot {
         slot,
@@ -402,20 +404,20 @@ pub fn non_empty_of1_slot(slot: of1_client::DecodedSlot) -> anyhow::Result<table
 pub fn non_empty_rpc_slot(
     slot: Slot,
     confirmed_block: rpc_client::UiConfirmedBlock,
-) -> anyhow::Result<tables::NonEmptySlot> {
+) -> SlotConversionResult<tables::NonEmptySlot> {
     // Transactions and block rewards should be present since we requested them when fetching the block.
     let transactions = confirmed_block
         .transactions
-        .with_context(|| format!("missing transactions in confirmed block {slot}"))?;
+        .ok_or(SlotConversionError::MissingTransactions { slot })?;
     let block_rewards = confirmed_block
         .rewards
-        .with_context(|| format!("missing block rewards in confirmed block {slot}"))?;
+        .ok_or(SlotConversionError::MissingBlockRewards { slot })?;
 
     let mut txs = Vec::with_capacity(transactions.len());
     let mut msgs = Vec::with_capacity(transactions.len());
 
     for (index, tx_with_meta) in transactions.into_iter().enumerate() {
-        let tx_index = index.try_into().expect("conversion error");
+        let tx_index: u32 = index.try_into().expect("conversion error");
 
         let rpc_client::EncodedTransactionWithStatusMeta {
             transaction,
@@ -429,15 +431,38 @@ pub fn non_empty_rpc_slot(
             message,
         }) = transaction
         else {
-            anyhow::bail!("expected JSON encoded transaction for slot {slot}, tx index {tx_index}");
+            let enc = match transaction {
+                rpc_client::EncodedTransaction::LegacyBinary(_) => "legacy binary",
+                rpc_client::EncodedTransaction::Binary(_, _) => "binary",
+                rpc_client::EncodedTransaction::Accounts(_) => "accounts",
+                rpc_client::EncodedTransaction::Json(_) => unreachable!("already matched above"),
+            };
+            return Err(SlotConversionError::UnexpectedTransactionEncoding {
+                slot,
+                tx_index: tx_index as usize,
+                expected: "json",
+                found: enc,
+            });
         };
         let rpc_client::UiMessage::Raw(msg) = message else {
-            anyhow::bail!("expected raw message for slot {slot}, tx index {tx_index}");
+            let enc = match message {
+                rpc_client::UiMessage::Parsed(_) => "parsed",
+                rpc_client::UiMessage::Raw(_) => unreachable!("already matched above"),
+            };
+            return Err(SlotConversionError::UnexpectedMessageEncoding {
+                slot,
+                tx_index: tx_index as usize,
+                expected: "raw",
+                found: enc,
+            });
         };
 
         // Version should be present since we requested it when fetching the block.
-        let Some(version) = version.as_ref() else {
-            anyhow::bail!("missing transaction version for slot {slot}, tx index {tx_index}");
+        let Some(version) = version else {
+            return Err(SlotConversionError::MissingTransactionVersion {
+                slot,
+                tx_index: tx_index as usize,
+            });
         };
 
         let tx_version = match version {
@@ -448,28 +473,38 @@ pub fn non_empty_rpc_slot(
                 tables::transactions::TransactionVersion::V0
             }
             solana_transaction::versioned::TransactionVersion::Number(n) => {
-                anyhow::bail!(
-                    "unsupported transaction version number {n} at slot {slot}, transaction index {tx_index}"
-                )
+                return Err(SlotConversionError::UnsupportedTransactionVersion {
+                    slot,
+                    tx_index: tx_index as usize,
+                    version: n,
+                });
             }
         };
 
         let tx = tables::transactions::Transaction::from_rpc_transaction(
             slot, tx_index, tx_version, signatures, meta,
+        )
+        .map_err(|row_conv_err| SlotConversionError::row_conversion_error(slot, row_conv_err))?;
+        let msg = tables::messages::Message::from_rpc_message(slot, tx_index, msg).map_err(
+            |row_conv_err| SlotConversionError::row_conversion_error(slot, row_conv_err),
         )?;
-        let msg = tables::messages::Message::from_rpc_message(slot, tx_index, msg);
 
         txs.push(tx);
         msgs.push(msg);
     }
 
     let block_rewards = tables::block_rewards::BlockRewards::from_rpc_rewards(slot, block_rewards);
+    let blockhash = bs58_decode_blockhash(slot, &confirmed_block.blockhash)?;
+    let prev_blockhash = bs58_decode_blockhash(
+        confirmed_block.parent_slot,
+        &confirmed_block.previous_blockhash,
+    )?;
 
     Ok(tables::NonEmptySlot {
         slot,
+        blockhash,
+        prev_blockhash,
         parent_slot: confirmed_block.parent_slot,
-        blockhash: bs58_decode_blockhash(&confirmed_block.blockhash)?,
-        prev_blockhash: bs58_decode_blockhash(&confirmed_block.previous_blockhash)?,
         block_height: confirmed_block.block_height,
         blocktime: confirmed_block.block_time,
         transactions: txs,
@@ -485,7 +520,7 @@ async fn fill_truncated_logs(
     fallback_rpc_client: &rpc_client::SolanaRpcClient,
     get_transaction_config: rpc_client::rpc_config::RpcTransactionConfig,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-) -> anyhow::Result<()> {
+) -> SlotConversionResult<()> {
     let truncated_logs: Vec<_> = slot
         .transactions
         .iter_mut()
@@ -503,20 +538,25 @@ async fn fill_truncated_logs(
         })
         .collect();
 
-    for (tx_id, truncated_log) in truncated_logs {
+    for (tx_id_str, truncated_log) in truncated_logs {
         let fallback_log_messages = {
-            let tx_id = solana_transaction::Signature::from_str(tx_id)
-                .with_context(|| format!("parsing transaction signature {tx_id}"))?;
+            let tx_id = solana_transaction::Signature::from_str(tx_id_str).map_err(|_| {
+                SlotConversionError::ParsingTransactionSignature {
+                    slot: slot.slot,
+                    tx_id: tx_id_str.to_owned(),
+                }
+            })?;
 
             fallback_rpc_client
                 .get_transaction(tx_id, get_transaction_config, metrics.clone())
                 .await
-                .with_context(|| {
-                    format!(
-                        "fetching transaction details for tx {tx_id} in slot {}",
-                        slot.slot
-                    )
-                })?
+                .map_err(
+                    |client_err| SlotConversionError::FetchingTransactionDetails {
+                        slot: slot.slot,
+                        tx_id: tx_id_str.to_owned(),
+                        source: client_err,
+                    },
+                )?
                 .transaction
                 .meta
                 .and_then(|meta| -> Option<Vec<String>> { meta.log_messages.into() })
@@ -529,7 +569,7 @@ async fn fill_truncated_logs(
         {
             tracing::warn!(
                 slot_number = slot.slot,
-                transaction_id = %tx_id,
+                transaction_id = %tx_id_str,
                 "fallback logs also truncated, skipped log fill"
             );
             continue;
@@ -543,7 +583,7 @@ async fn fill_truncated_logs(
         if fallback_log_messages.len() <= truncated_log_len_without_markers {
             tracing::warn!(
                 slot_number = %slot.slot,
-                transaction_id = %tx_id,
+                transaction_id = %tx_id_str,
                 fallback_len = %fallback_log_messages.len(),
                 truncated_len = %truncated_log_len_without_markers,
                 "fallback logs too short, skipped log fill"
@@ -557,14 +597,23 @@ async fn fill_truncated_logs(
     Ok(())
 }
 
-fn bs58_decode_blockhash(blockhash_str: &str) -> anyhow::Result<[u8; 32]> {
+fn bs58_decode_blockhash(
+    slot: solana_clock::Slot,
+    blockhash_str: &str,
+) -> SlotConversionResult<[u8; 32]> {
     bs58::decode(blockhash_str)
         .into_vec()
-        .context("base58 decoding blockhash string")
+        .map_err(|_| SlotConversionError::DecodeBlockhash {
+            slot,
+            encoded: blockhash_str.to_string(),
+        })
         .and_then(|bytes| {
-            bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("block hash should be 32 bytes long"))
+            bytes.try_into().map_err(
+                |bytes: Vec<_>| SlotConversionError::InvalidBlockhashLength {
+                    slot,
+                    actual_len: bytes.len(),
+                },
+            )
         })
 }
 

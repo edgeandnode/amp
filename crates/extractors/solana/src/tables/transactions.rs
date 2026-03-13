@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use anyhow::Context;
 use base64::Engine;
 use datasets_common::{
     block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
@@ -18,7 +17,10 @@ use datasets_raw::{
 };
 use solana_clock::Slot;
 
-use crate::{of1_client, rpc_client, tables};
+use crate::{
+    error::{RowConversionError, RowConversionResult},
+    of1_client, rpc_client, tables,
+};
 
 pub const TABLE_NAME: &str = "transactions";
 
@@ -138,7 +140,7 @@ impl Transaction {
         tx_version: TransactionVersion,
         of1_tx_signatures: Vec<solana_sdk::signature::Signature>,
         of1_tx_meta: Option<of1_client::DecodedTransactionStatusMeta>,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
         let signatures = of1_tx_signatures.iter().map(|s| s.to_string()).collect();
         let transaction_status_meta = of1_tx_meta
             .map(|meta| match meta {
@@ -167,7 +169,7 @@ impl Transaction {
         tx_version: TransactionVersion,
         rpc_tx_signatures: Vec<String>,
         rpc_tx_meta: Option<rpc_client::UiTransactionStatusMeta>,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
         let transaction_status_meta = rpc_tx_meta
             .map(|rpc_meta| TransactionStatusMeta::from_rpc_meta(slot, tx_index, rpc_meta))
             .transpose()?;
@@ -223,7 +225,7 @@ impl TransactionStatusMeta {
         slot: u64,
         tx_index: u32,
         stored_tx_meta: solana_storage_proto::StoredTransactionStatusMeta,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
         // Convert to RPC format to reuse existing conversion logic for that type.
         let rpc_tx_meta = crate::rpc_client::TransactionStatusMeta::from(stored_tx_meta);
 
@@ -233,7 +235,11 @@ impl TransactionStatusMeta {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
-            .context("serializing stored transaction error")?;
+            .map_err(|serde_err| RowConversionError::SerializeTransactionError {
+                slot,
+                tx_idx: tx_index as usize,
+                source: serde_err,
+            })?;
 
         let inner_instructions = rpc_tx_meta
             .inner_instructions
@@ -303,17 +309,30 @@ impl TransactionStatusMeta {
         slot: Slot,
         tx_index: u32,
         proto_tx_meta: solana_storage_proto::confirmed_block::TransactionStatusMeta,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
+        // Ser/de roundtrip to get a UTF-8 string representation of the transaction error.
         let err = proto_tx_meta
             .err
             .map(|proto_err| {
-                let err: solana_transaction_error::TransactionError =
-                    bincode::deserialize(&proto_err.err)
-                        .context("bincode deserializing proto transaction error")?;
-                serde_json::to_string(&err).context("json serializing proto transaction error")
+                bincode::deserialize::<solana_transaction_error::TransactionError>(&proto_err.err)
+                    .map_err(
+                        |bincode_err| RowConversionError::DeserializeTransactionError {
+                            slot,
+                            tx_idx: tx_index as usize,
+                            source: bincode_err,
+                        },
+                    )
+                    .and_then(|tx_err| {
+                        serde_json::to_string(&tx_err).map_err(|serde_err| {
+                            RowConversionError::SerializeTransactionError {
+                                slot,
+                                tx_idx: tx_index as usize,
+                                source: serde_err,
+                            }
+                        })
+                    })
             })
-            .transpose()
-            .context("converting proto tx error")?;
+            .transpose()?;
 
         let inner_instructions: Vec<Vec<tables::instructions::Instruction>> = proto_tx_meta
             .inner_instructions
@@ -350,8 +369,7 @@ impl TransactionStatusMeta {
             .rewards
             .into_iter()
             .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .context("converting proto tx rewards")?;
+            .collect::<RowConversionResult<_>>()?;
 
         let loaded_addresses = LoadedAddresses {
             writable: proto_tx_meta
@@ -395,13 +413,17 @@ impl TransactionStatusMeta {
         slot: Slot,
         tx_index: u32,
         rpc_meta: rpc_client::UiTransactionStatusMeta,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
         let err = rpc_meta
             .err
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
-            .context("serializing RPC transaction error")?;
+            .map_err(|serde_err| RowConversionError::SerializeTransactionError {
+                slot,
+                tx_idx: tx_index as usize,
+                source: serde_err,
+            })?;
 
         let inner_instructions = rpc_meta
             .inner_instructions
@@ -415,11 +437,17 @@ impl TransactionStatusMeta {
                     for rpc_inner_instruction in rpc_inner_instruction_array.instructions {
                         let rpc_client::UiInstruction::Compiled(compiled) = rpc_inner_instruction
                         else {
-                            anyhow::bail!("unexpected inner instruction format; slot {slot}, transaction index {tx_index}");
+                            return Err(RowConversionError::ParsedInnerInstructionNotSupported {
+                                slot,
+                                tx_idx: tx_index as usize,
+                            });
                         };
-                        let data = bs58::decode(&compiled.data)
-                            .into_vec()
-                            .context("decoding base58 inner instruction data")?;
+                        let data = bs58::decode(&compiled.data).into_vec().map_err(|_| {
+                            RowConversionError::DecodeInstructionData {
+                                slot,
+                                tx_idx: tx_index as usize,
+                            }
+                        })?;
                         let instruction = tables::instructions::Instruction {
                             slot,
                             tx_index,
@@ -471,9 +499,13 @@ impl TransactionStatusMeta {
                 let data = match encoding {
                     rpc_client::UiReturnDataEncoding::Base64 => base64::prelude::BASE64_STANDARD
                         .decode(data)
-                        .context("decoding base64 return data")?,
+                        .map_err(|_| RowConversionError::DecodeReturnData {
+                            slot,
+                            tx_idx: tx_index as usize,
+                        })?,
                 };
-                anyhow::Ok(TransactionReturnData {
+
+                Ok(TransactionReturnData {
                     program_id: return_data.program_id,
                     data,
                 })

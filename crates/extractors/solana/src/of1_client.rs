@@ -81,8 +81,10 @@ pub fn stream(
             bs58::decode("4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL4VZHirAn")
                 .into_vec()
                 .map(TryInto::try_into)
-                .expect("invalid base-58 string")
-                .expect("blockhash is 32 bytes")
+                .map_err(Of1StreamError::DecodeBase58)?
+                .map_err(|vec: Vec<_>| Of1StreamError::TryIntoArray {
+                    expected_len: 32, actual_len: vec.len()
+                })?
         } else {
             let mut slot = start;
             loop {
@@ -96,8 +98,10 @@ pub fn stream(
                         break bs58::decode(block.previous_blockhash)
                             .into_vec()
                             .map(TryInto::try_into)
-                            .expect("invalid base-58 string")
-                            .expect("blockhash is 32 bytes");
+                            .map_err(Of1StreamError::DecodeBase58)?
+                            .map_err(|vec: Vec<_>| Of1StreamError::TryIntoArray {
+                                expected_len: 32, actual_len: vec.len()
+                            })?;
                     }
                     Err(e) if rpc_client::is_block_missing_err(&e) => slot += 1,
                     Err(e) => {
@@ -376,29 +380,35 @@ async fn read_next_slot<R: tokio::io::AsyncRead + Unpin>(
         })
         .transpose()?;
 
-    let blockhash = {
-        // Hash of the last entry has the same value as that block's `blockhash` in
-        // CAR files.
-        let last_entry_cid = block.entries.last().expect("at least one entry");
-        let last_entry_node = nodes.nodes.get(last_entry_cid).expect("last entry node");
-        let car_parser::node::Node::Entry(last_entry) = last_entry_node else {
-            return Err(Of1StreamError::MissingNode {
-                expected: "entry",
-                cid: last_entry_cid.to_string(),
-            });
+    let blockhash =
+        {
+            // Hash of the last entry has the same value as that block's `blockhash` in
+            // CAR files.
+            let last_entry_cid = block.entries.last().expect("at least one entry");
+            let last_entry_node = nodes.nodes.get(last_entry_cid);
+            let Some(car_parser::node::Node::Entry(last_entry)) = last_entry_node else {
+                return Err(Of1StreamError::MissingNode {
+                    expected: "entry",
+                    cid: last_entry_cid.to_string(),
+                });
+            };
+            last_entry.hash.clone().try_into().map_err(|vec: Vec<u8>| {
+                Of1StreamError::TryIntoArray {
+                    expected_len: 32,
+                    actual_len: vec.len(),
+                }
+            })?
         };
-        last_entry
-            .hash
-            .clone()
-            .try_into()
-            .expect("blockhash is 32 bytes")
-    };
 
-    let blocktime = block
-        .meta
-        .blocktime
-        .try_into()
-        .expect("blocktime fits in i64");
+    let blocktime =
+        block
+            .meta
+            .blocktime
+            .try_into()
+            .map_err(|_| Of1StreamError::BlocktimeOverflow {
+                slot: block.slot,
+                blocktime: block.meta.blocktime,
+            })?;
 
     let block = DecodedSlot {
         slot: block.slot,
