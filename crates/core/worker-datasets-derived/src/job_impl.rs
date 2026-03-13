@@ -415,7 +415,7 @@ impl RetryableErrorExt for Error {
             Self::GetDataset(err) => err.is_retryable(),
 
             // Network resolution depends on dataset store — transient
-            Self::ResolveNetworks(_) => true,
+            Self::ResolveNetworks(err) => err.is_retryable(),
 
             // Transient DB/store lookup failures
             Self::GetActivePhysicalTable(err) => err.is_retryable(),
