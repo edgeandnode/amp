@@ -36,7 +36,9 @@ macro_rules! define_dataset_kind {
 
             impl From<$Name> for DatasetKindStr {
                 fn from(value: $Name) -> Self {
-                    DatasetKindStr::new(value.to_string())
+                    // SAFETY: $Name is a strongly-typed ZST whose Display impl produces
+                    // a valid dataset kind string.
+                    DatasetKindStr::new_unchecked(value.to_string())
                 }
             }
 

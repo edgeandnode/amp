@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 amp-data-store = { path = "../../core/data-store" }
+amp-datasets-raw = { path = "../../core/datasets-raw", package = "datasets-raw" }
 amp-datasets-registry = { path = "../../core/datasets-registry" }
 amp-parquet = { path = "../../core/parquet" }
 amp-providers-common = { path = "../../core/providers-common" }
@@ -19,14 +20,11 @@ common = { path = "../../core/common" }
 datafusion.workspace = true
 datasets-common = { path = "../../core/datasets-common" }
 datasets-derived = { path = "../../core/datasets-derived" }
-evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
-firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
-solana-datasets = { path = "../../extractors/solana" }
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true

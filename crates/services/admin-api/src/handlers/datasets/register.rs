@@ -1,3 +1,4 @@
+use amp_datasets_raw::manifest::{EvmRpcManifest, FirehoseManifest, SolanaManifest};
 use amp_datasets_registry::error::{LinkManifestError, RegisterManifestError, SetVersionTagError};
 use axum::{
     Json,
@@ -9,25 +10,20 @@ use datasets_common::{
     dataset_kind_str::DatasetKindStr,
     hash::{Hash, hash},
     hash_reference::HashReference,
-    manifest::Manifest as CommonManifest,
     name::Name,
     namespace::Namespace,
     table_name::TableName,
     version::Version,
 };
-use datasets_derived::DerivedDatasetKind;
-use evm_rpc_datasets::{EvmRpcDatasetKind, Manifest as EvmRpcManifest};
-use firehose_datasets::{FirehoseDatasetKind, Manifest as FirehoseManifest};
 use monitoring::logging;
 use serde_json::value::RawValue;
-use solana_datasets::{Manifest as SolanaManifest, SolanaDatasetKind};
 
 use crate::{
     ctx::Ctx,
     handlers::{
         common::{
-            ManifestValidationError, ParseDerivedManifestError, ParseRawManifestError,
-            parse_and_canonicalize_derived_dataset_manifest,
+            DatasetKind, ManifestHeader, ManifestValidationError, ParseDerivedManifestError,
+            ParseRawManifestError, parse_and_canonicalize_derived_dataset_manifest,
             parse_and_canonicalize_raw_dataset_manifest,
         },
         error::{ErrorResponse, IntoErrorResponse},
@@ -63,7 +59,6 @@ use crate::{
 /// - `MANIFEST_LINKING_ERROR`: Failed to link manifest to dataset
 /// - `MANIFEST_NOT_FOUND`: Manifest hash provided but manifest doesn't exist
 /// - `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version
-/// - `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported
 ///
 /// ## Behavior
 /// This handler supports multiple dataset kinds for registration:
@@ -164,59 +159,57 @@ pub async fn handler(
                 "Received manifest content, validating and storing"
             );
 
-            let manifest =
-                serde_json::from_str::<CommonManifest>(manifest_content.get()).map_err(|err| {
+            let header =
+                serde_json::from_str::<ManifestHeader>(manifest_content.get()).map_err(|err| {
                     tracing::error!(
                         namespace = %namespace,
                         name = %name,
                         version = ?version,
                         error = %err, error_source = logging::error_source(&err),
-                        "Failed to parse common manifest JSON"
+                        "Failed to parse manifest JSON"
                     );
                     Error::InvalidManifest(err)
                 })?;
 
+            let kind_str = DatasetKindStr::from(header.kind);
+
             // Validate and serialize manifest based on dataset kind
-            let manifest_canonical = if manifest.kind == DerivedDatasetKind {
-                parse_and_canonicalize_derived_dataset_manifest(
-                    manifest_content.get(),
-                    &ctx.datasets_cache,
-                    &ctx.ethcall_udfs_cache,
-                )
-                .await
-                .map_err(Error::from)?
-            } else if manifest.kind == EvmRpcDatasetKind {
-                parse_and_canonicalize_raw_dataset_manifest::<EvmRpcManifest>(
-                    manifest_content.get(),
-                )
-                .map_err(Error::from)?
-            } else if manifest.kind == FirehoseDatasetKind {
-                parse_and_canonicalize_raw_dataset_manifest::<FirehoseManifest>(
-                    manifest_content.get(),
-                )
-                .map_err(Error::from)?
-            } else if manifest.kind == SolanaDatasetKind {
-                parse_and_canonicalize_raw_dataset_manifest::<SolanaManifest>(
-                    manifest_content.get(),
-                )
-                .map_err(Error::from)?
-            } else {
-                return Err(Error::UnsupportedDatasetKind(manifest.kind.to_string()).into());
-            };
+            let manifest_canonical =
+                match header.kind {
+                    DatasetKind::Derived => parse_and_canonicalize_derived_dataset_manifest(
+                        &ctx.datasets_cache,
+                        &ctx.ethcall_udfs_cache,
+                        manifest_content.get(),
+                    )
+                    .await
+                    .map_err(Error::from)?,
+                    DatasetKind::EvmRpc => parse_and_canonicalize_raw_dataset_manifest::<
+                        EvmRpcManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                    DatasetKind::Firehose => parse_and_canonicalize_raw_dataset_manifest::<
+                        FirehoseManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                    DatasetKind::Solana => parse_and_canonicalize_raw_dataset_manifest::<
+                        SolanaManifest,
+                    >(manifest_content.get())
+                    .map_err(Error::from)?,
+                };
 
             // Compute manifest hash from canonical serialization
             let manifest_hash = hash(&manifest_canonical);
 
             // Register manifest (store in object store + metadata DB)
             ctx.datasets_registry
-                .register_manifest(&manifest_hash, manifest_canonical)
+                .register_manifest(&manifest_hash, &kind_str, manifest_canonical)
                 .await
                 .map_err(|err| {
                     tracing::error!(
                         namespace = %namespace,
                         name = %name,
                         manifest_hash = %manifest_hash,
-                        kind = %manifest.kind,
+                        kind = %kind_str,
                         error = %err, error_source = logging::error_source(&err),
                         "Failed to register manifest"
                     );
@@ -227,7 +220,7 @@ pub async fn handler(
                 namespace = %namespace,
                 name = %name,
                 manifest_hash = %manifest_hash,
-                kind = %manifest.kind,
+                kind = %kind_str,
                 "Manifest registered, will link to dataset"
             );
 
@@ -506,15 +499,6 @@ pub enum Error {
     #[error("Failed to set version tag")]
     VersionTaggingError(#[source] SetVersionTagError),
 
-    /// Unsupported dataset kind
-    ///
-    /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
-    #[error(
-        "unsupported kind '{0}' - supported kinds: 'manifest' (derived), 'evm-rpc', 'firehose'"
-    )]
-    UnsupportedDatasetKind(String),
-
     /// Manifest not found
     ///
     /// This occurs when:
@@ -537,7 +521,6 @@ impl IntoErrorResponse for Error {
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
             Error::ManifestLinkingError(_) => "MANIFEST_LINKING_ERROR",
             Error::VersionTaggingError(_) => "VERSION_TAGGING_ERROR",
-            Error::UnsupportedDatasetKind(_) => "UNSUPPORTED_DATASET_KIND",
             Error::ManifestNotFound(_) => "MANIFEST_NOT_FOUND",
             Error::GetDataset(_) => "GET_DATASET_ERROR",
         }
@@ -551,7 +534,6 @@ impl IntoErrorResponse for Error {
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ManifestLinkingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::VersionTaggingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::UnsupportedDatasetKind(_) => StatusCode::BAD_REQUEST,
             Error::ManifestNotFound(_) => StatusCode::NOT_FOUND,
             Error::GetDataset(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

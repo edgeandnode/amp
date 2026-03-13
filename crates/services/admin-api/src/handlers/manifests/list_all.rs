@@ -21,7 +21,8 @@ use crate::{
 /// This handler returns a comprehensive list of all manifests registered in the system.
 /// For each manifest, it includes:
 /// - The content-addressable hash (SHA-256)
-/// - The object store path where the manifest is stored
+/// - The dataset kind (e.g., "evm-rpc", "solana", "firehose", "manifest")
+/// - The number of datasets using this manifest
 ///
 /// Results are ordered by hash (lexicographical).
 #[tracing::instrument(skip_all, err)]
@@ -51,6 +52,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<ManifestsResponse>, 
         .into_iter()
         .map(|summary| ManifestInfo {
             hash: Hash::from(summary.hash),
+            kind: summary.kind.into_inner(),
             dataset_count: summary.dataset_count as u64,
         })
         .collect();
@@ -73,6 +75,8 @@ pub struct ManifestInfo {
     /// Content-addressable hash (SHA-256)
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub hash: Hash,
+    /// Dataset kind (e.g. "evm-rpc", "solana", "firehose", "manifest")
+    pub kind: String,
     /// Number of datasets using this manifest
     pub dataset_count: u64,
 }

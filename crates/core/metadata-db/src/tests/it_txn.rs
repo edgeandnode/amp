@@ -2,7 +2,7 @@
 
 use crate::{
     datasets::{self, DatasetName, DatasetNamespace},
-    manifests::{self, ManifestHash, ManifestPath},
+    manifests::{self, ManifestHash, ManifestKind, ManifestPath},
     tests::helpers::setup_test_db,
 };
 
@@ -16,13 +16,14 @@ async fn commit_persists_changes() {
     let manifest_hash = ManifestHash::from_ref_unchecked(
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
+    let manifest_kind = ManifestKind::from_ref_unchecked("evm-rpc");
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-commit.json");
 
     // Begin transaction
     let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, &manifest_hash, &manifest_path)
+    manifests::register(&mut tx, &manifest_hash, &manifest_kind, &manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
     datasets::link_manifest(&mut tx, &namespace, &name, &manifest_hash)
@@ -56,12 +57,13 @@ async fn explicit_rollback_discards_changes() {
     let manifest_hash = ManifestHash::from_ref_unchecked(
         "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     );
+    let manifest_kind = ManifestKind::from_ref_unchecked("evm-rpc");
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-rollback.json");
 
     let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, &manifest_hash, manifest_path)
+    manifests::register(&mut tx, &manifest_hash, &manifest_kind, &manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
     datasets::link_manifest(&mut tx, &namespace, &name, &manifest_hash)
@@ -97,12 +99,13 @@ async fn rollback_on_drop_discards_changes() {
     let manifest_hash = ManifestHash::from_ref_unchecked(
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     );
+    let manifest_kind = ManifestKind::from_ref_unchecked("evm-rpc");
     let manifest_path = ManifestPath::from_ref_unchecked("path/to/manifest-drop.json");
 
     let mut tx = conn.begin_txn().await.expect("Failed to begin transaction");
 
     // Make changes within transaction
-    manifests::register(&mut tx, &manifest_hash, manifest_path)
+    manifests::register(&mut tx, &manifest_hash, &manifest_kind, &manifest_path)
         .await
         .expect("Failed to register manifest in transaction");
     datasets::link_manifest(&mut tx, &namespace, &name, &manifest_hash)

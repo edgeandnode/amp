@@ -35,7 +35,9 @@ impl DerivedDatasetKind {
 
 impl From<DerivedDatasetKind> for DatasetKindStr {
     fn from(value: DerivedDatasetKind) -> Self {
-        DatasetKindStr::new(value.to_string())
+        // SAFETY: DerivedDatasetKind is a strongly-typed ZST whose Display impl produces
+        // a valid dataset kind string.
+        DatasetKindStr::new_unchecked(value.to_string())
     }
 }
 

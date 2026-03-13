@@ -138,9 +138,6 @@ impl<'a> ManifestsClient<'a> {
                     "MANIFEST_VALIDATION_ERROR" => Err(RegisterError::ManifestValidationError(
                         error_response.into(),
                     )),
-                    "UNSUPPORTED_DATASET_KIND" => {
-                        Err(RegisterError::UnsupportedDatasetKind(error_response.into()))
-                    }
                     "MANIFEST_STORAGE_ERROR" => {
                         Err(RegisterError::ManifestStorageError(error_response.into()))
                     }
@@ -574,14 +571,6 @@ pub enum RegisterError {
     /// - Dependency resolution fails during validation
     #[error("dependency validation error")]
     ManifestValidationError(#[source] ApiError),
-
-    /// Unsupported dataset kind (400, UNSUPPORTED_DATASET_KIND)
-    ///
-    /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
-    /// - The 'kind' field in the manifest contains an unrecognized value
-    #[error("unsupported dataset kind")]
-    UnsupportedDatasetKind(#[source] ApiError),
 
     /// Failed to write manifest to object store (500, MANIFEST_STORAGE_ERROR)
     ///

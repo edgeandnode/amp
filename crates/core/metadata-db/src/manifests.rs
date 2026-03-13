@@ -2,18 +2,20 @@
 //!
 //! This module provides operations for managing manifest files:
 //! - **manifest_files**: Content-addressable manifest storage indexed by SHA256 hash
-//! - **Type definitions**: ManifestHash, ManifestPath
+//! - **Type definitions**: ManifestHash, ManifestPath, ManifestKind
 //!
 //! ## Database Tables
 //!
-//! - **manifest_files**: Content-addressable manifest storage with hash → path mapping
+//! - **manifest_files**: Content-addressable manifest storage with hash → path → kind mapping
 
 mod hash;
+mod kind;
 mod path;
 pub(crate) mod sql;
 
 pub use self::{
     hash::{Hash as ManifestHash, HashOwned as ManifestHashOwned},
+    kind::{Kind as ManifestKind, KindOwned as ManifestKindOwned},
     path::{Path as ManifestPath, PathOwned as ManifestPathOwned},
     sql::ManifestSummary,
 };
@@ -21,19 +23,20 @@ use crate::{db::Executor, error::Error};
 
 /// Register manifest file in content-addressable storage
 ///
-/// Inserts manifest hash and path into `manifest_files` table with ON
+/// Inserts manifest hash, path, and kind into `manifest_files` table with ON
 /// CONFLICT DO NOTHING. This operation is idempotent - duplicate
 /// registrations are silently ignored.
 #[tracing::instrument(skip(exe), err)]
 pub async fn register<'c, E>(
     exe: E,
     hash: impl Into<ManifestHash<'_>> + std::fmt::Debug,
+    kind: impl Into<ManifestKind<'_>> + std::fmt::Debug,
     path: impl Into<ManifestPath<'_>> + std::fmt::Debug,
 ) -> Result<(), Error>
 where
     E: Executor<'c>,
 {
-    sql::insert(exe, hash.into(), path.into())
+    sql::insert(exe, hash.into(), kind.into(), path.into())
         .await
         .map_err(Error::Database)
 }
@@ -74,6 +77,7 @@ where
 ///
 /// Queries for all manifests in the `manifest_files` table, returning:
 /// - Hash (content-addressable identifier)
+/// - Kind (dataset kind, e.g., "evm-rpc", "solana", "firehose", "manifest")
 /// - Dataset count (number of datasets using this manifest)
 ///
 /// Results are ordered by hash.
