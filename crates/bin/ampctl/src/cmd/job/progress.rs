@@ -15,7 +15,7 @@ use amp_client_admin as client;
 use amp_worker_core::jobs::job_id::JobId;
 use monitoring::logging;
 
-use crate::args::GlobalArgs;
+use crate::{args::GlobalArgs, ui::format_error_detail};
 
 /// Command-line arguments for the `jobs progress` command.
 #[derive(Debug, clap::Args)]
@@ -121,89 +121,6 @@ fn format_bytes(bytes: i64) -> String {
     } else {
         format!("{} B", bytes)
     }
-}
-
-/// Format structured error detail in a human-readable way.
-///
-/// Recognizes the structured format with `error_message`, `error_code`, and
-/// `error_context` fields. Prints "Unknown error" when the expected fields are absent.
-fn format_error_detail(
-    f: &mut std::fmt::Formatter,
-    detail: &serde_json::Value,
-) -> std::fmt::Result {
-    let error_message = detail
-        .get("error_message")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Unknown error");
-
-    writeln!(f)?;
-    writeln!(f, "✖ {error_message}")?;
-
-    let error_code = detail.get("error_code").and_then(|v| v.as_str());
-    let ctx = detail.get("error_context").and_then(|v| v.as_object());
-
-    // Collect key-value fields for aligned display
-    let mut fields: Vec<(String, String)> = Vec::new();
-
-    if let Some(code) = error_code {
-        fields.push(("Error Code".to_string(), code.to_string()));
-    }
-
-    if let Some(ctx) = ctx {
-        // Print context fields, skip stack_trace (handled separately)
-        for (key, value) in ctx {
-            if key == "stack_trace" {
-                continue;
-            }
-            let label = key
-                .split('_')
-                .map(|w| {
-                    let mut c = w.chars();
-                    match c.next() {
-                        None => String::new(),
-                        Some(first) => first.to_uppercase().to_string() + c.as_str(),
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            let display_value = match value {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            fields.push((label, display_value));
-        }
-    }
-
-    if !fields.is_empty() {
-        // Calculate max label width for alignment
-        let max_label_width = fields
-            .iter()
-            .map(|(label, _)| label.len())
-            .max()
-            .unwrap_or(0);
-
-        writeln!(f)?;
-        for (label, value) in &fields {
-            writeln!(f, "  {label:<max_label_width$} : {value}")?;
-        }
-    }
-
-    // Print stack trace if present
-    if let Some(traces) = ctx
-        .and_then(|c| c.get("stack_trace"))
-        .and_then(|v| v.as_array())
-    {
-        writeln!(f)?;
-        writeln!(f, "  Stack Trace:")?;
-        for trace in traces {
-            if let Some(msg) = trace.as_str() {
-                writeln!(f, "    • {msg}")?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Errors for job progress operations.

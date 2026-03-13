@@ -61,14 +61,31 @@ where
 /// Returns all events ordered by id ascending, forming the complete
 /// audit trail for the job's lifecycle.
 #[tracing::instrument(skip(exe), err)]
-pub async fn get_events_for_job<'c, E>(
+pub async fn list_events_for_job<'c, E>(
     exe: E,
     job_id: impl Into<JobId> + std::fmt::Debug,
 ) -> Result<Vec<JobEvent>, Error>
 where
     E: Executor<'c>,
 {
-    sql::get_events_for_job(exe, job_id.into())
+    sql::list_events_for_job(exe, job_id.into())
+        .await
+        .map_err(Error::Database)
+}
+
+/// Get a single event by job ID and event ID, including the detail payload
+///
+/// Returns `None` if no event with the given ID exists for the job.
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_event_by_id<'c, E>(
+    exe: E,
+    job_id: impl Into<JobId> + std::fmt::Debug,
+    event_id: i64,
+) -> Result<Option<JobEvent>, Error>
+where
+    E: Executor<'c>,
+{
+    sql::get_event_by_id(exe, job_id.into(), event_id)
         .await
         .map_err(Error::Database)
 }
@@ -164,6 +181,8 @@ pub struct JobEvent {
     pub node_id: String,
     /// The lifecycle transition (e.g. scheduled, running, completed, error, fatal, stopped).
     pub event_type: String,
+    /// Optional structured detail payload (e.g. job descriptor for SCHEDULED events).
+    pub detail: Option<EventDetailOwned>,
 }
 
 #[cfg(test)]
