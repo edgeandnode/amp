@@ -3326,17 +3326,15 @@
       },
       "SchemaResponse": {
         "type": "object",
-        "description": "Response returned by the schema endpoint\n\nContains schemas and networks for one or more tables.",
+        "description": "Response returned by the schema endpoint\n\nContains inferred schemas for one or more tables.",
         "required": [
           "schemas"
         ],
         "properties": {
           "schemas": {
             "type": "object",
-            "description": "Schemas for each table\n\nMaps table names to their schemas and networks.\nContains one entry per table definition.",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/TableSchemaWithNetworks"
-            },
+            "description": "Schemas for each table\n\nMaps table names to their inferred schemas.\nContains one entry per table definition.",
+            "additionalProperties": {},
             "propertyNames": {
               "type": "string"
             }
@@ -3406,26 +3404,6 @@
             "type": "integer",
             "format": "int64",
             "description": "Total size of all Parquet files in bytes"
-          }
-        }
-      },
-      "TableSchemaWithNetworks": {
-        "type": "object",
-        "description": "Table schema with associated networks\n\nContains the output schema for a table and the list of networks referenced by its query.",
-        "required": [
-          "schema",
-          "networks"
-        ],
-        "properties": {
-          "networks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of networks referenced by this table's query\n\nContains the network names of all datasets/tables referenced\nin this specific table's SQL query (e.g., \"mainnet\", \"polygon\", etc.)."
-          },
-          "schema": {
-            "description": "The output schema for the table\n\nDescribes the structure and types of columns that will be returned\nwhen executing the SQL query for this table."
           }
         }
       },

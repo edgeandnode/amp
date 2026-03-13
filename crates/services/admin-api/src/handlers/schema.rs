@@ -19,9 +19,7 @@ use common::{
     sql_str::SqlStr,
 };
 use datafusion::{arrow, sql::parser::Statement};
-use datasets_common::{
-    hash_reference::HashReference, network_id::NetworkId, table_name::TableName,
-};
+use datasets_common::{hash_reference::HashReference, table_name::TableName};
 use datasets_derived::{
     deps::{DepAlias, DepAliasOrSelfRef, DepAliasOrSelfRefError, DepReference, HashOrVersion},
     func_name::FuncName,
@@ -309,15 +307,7 @@ pub async fn handler(
         let arrow_schema: Arc<arrow::datatypes::Schema> = Arc::new(schema.as_arrow().clone());
         self_schema_provider.add_table(table_name.as_str(), arrow_schema);
 
-        schemas.insert(
-            table_name,
-            TableSchemaWithNetworks {
-                schema: schema.into(),
-                // TODO: Remove this dummy network once the TS manifest builder no longer requires
-                //  exactly one network from the schema endpoint.
-                networks: vec!["derived".parse().expect("valid network id")],
-            },
-        );
+        schemas.insert(table_name, schema.into());
     }
 
     Ok(Json(SchemaResponse { schemas }))
@@ -369,16 +359,16 @@ pub struct SchemaRequest {
 
 /// Response returned by the schema endpoint
 ///
-/// Contains schemas and networks for one or more tables.
+/// Contains inferred schemas for one or more tables.
 #[derive(Debug, serde::Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SchemaResponse {
     /// Schemas for each table
     ///
-    /// Maps table names to their schemas and networks.
+    /// Maps table names to their inferred schemas.
     /// Contains one entry per table definition.
-    #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, TableSchemaWithNetworks>))]
-    schemas: BTreeMap<TableName, TableSchemaWithNetworks>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = std::collections::BTreeMap<String, serde_json::Value>))]
+    schemas: BTreeMap<TableName, TableSchema>,
 }
 
 /// Errors that can occur during schema operations
@@ -542,26 +532,6 @@ enum Error {
         #[source]
         source: datafusion::error::DataFusionError,
     },
-}
-
-/// Table schema with associated networks
-///
-/// Contains the output schema for a table and the list of networks referenced by its query.
-#[derive(Debug, serde::Serialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct TableSchemaWithNetworks {
-    /// The output schema for the table
-    ///
-    /// Describes the structure and types of columns that will be returned
-    /// when executing the SQL query for this table.
-    #[cfg_attr(feature = "utoipa", schema(value_type = serde_json::Value))]
-    schema: TableSchema,
-    /// List of networks referenced by this table's query
-    ///
-    /// Contains the network names of all datasets/tables referenced
-    /// in this specific table's SQL query (e.g., "mainnet", "polygon", etc.).
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
-    networks: Vec<NetworkId>,
 }
 
 impl IntoErrorResponse for Error {

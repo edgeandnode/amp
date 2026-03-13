@@ -98,10 +98,8 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Amp/Mani
               })
             }
 
-            // TODO: Remove this once network is fully dropped from derived tables
-            const network = Model.Network.make("derived")
             const input = new Model.TableInput({ sql: table.sql })
-            const output = new Model.Table({ input, schema: tableSchema.schema, network })
+            const output = new Model.Table({ input, schema: tableSchema })
 
             return [name, output] as const
           })
