@@ -284,7 +284,7 @@ export class GetOutputSchemaPayload extends Schema.Class<GetOutputSchemaPayload>
 }) {}
 
 export class GetOutputSchemaResponse extends Schema.Class<GetOutputSchemaResponse>("SchemaResponse")({
-  schemas: Schema.Record({ key: Schema.String, value: Model.TableSchemaWithNetworks }),
+  schemas: Schema.Record({ key: Schema.String, value: Model.TableSchema }),
 }) {}
 
 /**
