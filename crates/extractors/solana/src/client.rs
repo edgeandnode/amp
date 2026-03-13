@@ -457,7 +457,7 @@ pub fn non_empty_rpc_slot(
         let tx = tables::transactions::Transaction::from_rpc_transaction(
             slot, tx_index, tx_version, signatures, meta,
         )?;
-        let msg = tables::messages::Message::from_rpc_message(slot, tx_index, msg);
+        let msg = tables::messages::Message::from_rpc_message(slot, tx_index, msg)?;
 
         txs.push(tx);
         msgs.push(msg);

@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use datasets_common::{
     block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
 };
@@ -141,25 +142,27 @@ impl Message {
         slot: Slot,
         tx_index: u32,
         message: rpc_client::UiRawMessage,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let instructions = message
             .instructions
             .iter()
             .map(|inst| {
-                let data = bs58::decode(&inst.data)
+                bs58::decode(&inst.data)
                     .into_vec()
-                    .expect("invalid base-58 string");
-                super::instructions::Instruction {
-                    slot,
-                    tx_index,
-                    program_id_index: inst.program_id_index,
-                    accounts: inst.accounts.clone(),
-                    data,
-                    inner_index: None,
-                    inner_stack_height: None,
-                }
+                    .with_context(|| {
+                        format!("decoding instruction data for slot {slot}, tx_index {tx_index}")
+                    })
+                    .map(|data| super::instructions::Instruction {
+                        slot,
+                        tx_index,
+                        program_id_index: inst.program_id_index,
+                        accounts: inst.accounts.clone(),
+                        data,
+                        inner_index: None,
+                        inner_stack_height: None,
+                    })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         let address_table_lookups = message.address_table_lookups.as_ref().map(|atls| {
             atls.iter()
                 .cloned()
@@ -171,7 +174,7 @@ impl Message {
                 .collect()
         });
 
-        Self {
+        Ok(Self {
             slot,
             tx_index,
             num_required_signatures: message.header.num_required_signatures,
@@ -181,7 +184,7 @@ impl Message {
             address_table_lookups,
             account_keys: message.account_keys.clone(),
             recent_block_hash: message.recent_blockhash.clone(),
-        }
+        })
     }
 }
 

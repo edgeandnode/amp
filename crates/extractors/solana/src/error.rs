@@ -142,6 +142,36 @@ pub enum Of1StreamError {
     /// typically due to missing or corrupted fragment nodes.
     #[error("CAR dataframe reassembly error")]
     DataframeReassembly(#[source] car_parser::node::ReassableError),
+
+    /// Failed to decode a Base58 string.
+    ///
+    /// Base58 encoding is commonly used in Solana for addresses and other identifiers.
+    /// This error occurs when a string that is expected to be Base58-encoded cannot be
+    /// decoded, indicating invalid input data.
+    #[error("failed to decode Base58 string {0}")]
+    DecodeBase58(#[source] bs58::decode::Error),
+
+    /// Failed to convert a byte buffer to an array of fixed size.
+    ///
+    /// This error occurs when attempting to convert a byte buffer (for example a
+    /// `Vec<u8>` or slice) into an array of a specific size (e.g., for fixed-size
+    /// fields in Solana data structures) and the input does not have the expected
+    /// length.
+    #[error(
+        "failed to convert slice to array: expected length {expected_len}, actual length {actual_len}"
+    )]
+    TryIntoArray {
+        expected_len: usize,
+        actual_len: usize,
+    },
+
+    /// Blocktime value overflowed when converting from u64 to i64.
+    ///
+    /// Solana blocktimes are represented as i64 but when decoding from CAR files or
+    /// other sources, they may initially be in u64 format. This error occurs when the
+    /// blocktime value exceeds the maximum value of i64, which prevents safe conversion.
+    #[error("blocktime overflow: slot {slot} has blocktime {blocktime} which exceeds i64::MAX")]
+    BlocktimeOverflow { slot: u64, blocktime: u64 },
 }
 
 impl From<Of1StreamError> for BlockStreamError {
@@ -161,7 +191,10 @@ impl From<Of1StreamError> for BlockStreamError {
             | Of1StreamError::Bincode(_)
             | Of1StreamError::DecodeField { .. }
             | Of1StreamError::NodeParse(_)
-            | Of1StreamError::DataframeReassembly(_) => BlockStreamError::Fatal(value.into()),
+            | Of1StreamError::DataframeReassembly(_)
+            | Of1StreamError::DecodeBase58(_)
+            | Of1StreamError::TryIntoArray { .. }
+            | Of1StreamError::BlocktimeOverflow { .. } => BlockStreamError::Fatal(value.into()),
 
             Of1StreamError::RpcClient(_)
             | Of1StreamError::FileStream(of1_client::CarReaderError::Http(_))
