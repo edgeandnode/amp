@@ -30,7 +30,7 @@ pub enum Commands {
     #[command(after_help = include_str!("table/get__after_help.md"))]
     Get(get::Args),
 
-    /// List all table revisions
+    /// List table revisions
     #[command(alias = "ls")]
     #[command(after_help = include_str!("table/list__after_help.md"))]
     List(list::Args),

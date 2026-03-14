@@ -1797,7 +1797,7 @@
           "revisions"
         ],
         "summary": "Handler for the `GET /revisions` endpoint",
-        "description": "Returns all physical table revisions, with an optional active status filter.\n\n## Query Parameters\n- `active` (optional): Filter by active status (`true` or `false`)\n- `limit` (optional): Maximum number of revisions to return (default: 100)\n\n## Response\n- **200 OK**: Successfully retrieved revisions\n- **400 Bad Request**: Invalid query parameters\n- **500 Internal Server Error**: Database error during listing\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters\n- `LIST_ALL_TABLE_REVISIONS_ERROR`: Failed to list table revisions\n\nThis handler:\n- Validates and extracts optional `active` and `limit` query parameters\n- Calls the data store to list table revisions with the given filters\n- Returns revision information as a JSON array",
+        "description": "Returns physical table revisions with cursor-based pagination and optional active\nstatus filtering.\n\n## Query Parameters\n- `active` (optional): Filter by active status (`true` or `false`)\n- `limit` (optional): Maximum number of revisions to return (default: 100)\n- `last_id` (optional): Cursor for pagination — ID of the last revision from the\n  previous page. Omit for the first page.\n\n## Response\n- **200 OK**: Successfully retrieved revisions\n- **400 Bad Request**: Invalid query parameters\n- **500 Internal Server Error**: Database error during listing\n\n## Error Codes\n- `INVALID_QUERY_PARAMETERS`: Invalid query parameters\n- `LIST_ALL_TABLE_REVISIONS_ERROR`: Failed to list table revisions\n\nThis handler:\n- Validates and extracts optional `active`, `limit`, and `last_id` query parameters\n- Calls the data store to list table revisions with the given filters and cursor\n- Returns revision information as a JSON array",
         "operationId": "list_revisions",
         "parameters": [
           {
@@ -1813,6 +1813,16 @@
             "name": "limit",
             "in": "query",
             "description": "Maximum number of revisions to return (default: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "last_id",
+            "in": "query",
+            "description": "Cursor for pagination: ID of the last revision from the previous page",
             "required": false,
             "schema": {
               "type": "integer",

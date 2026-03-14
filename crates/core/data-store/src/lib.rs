@@ -329,16 +329,19 @@ impl DataStore {
             .map_err(GetRevisionByLocationIdError)
     }
 
-    /// Lists physical table revisions from the metadata database.
+    /// Lists physical table revisions from the metadata database with cursor-based pagination.
     ///
+    /// Uses cursor-based pagination where `last_id` is the ID of the last revision
+    /// from the previous page. For the first page, pass `None` for `last_id`.
     /// When `active` is `None`, returns all revisions. When `Some(true)` or
     /// `Some(false)`, returns only revisions matching that active status.
     pub async fn list_all_table_revisions(
         &self,
         active: Option<bool>,
         limit: i64,
+        last_id: Option<LocationId>,
     ) -> Result<Vec<PhysicalTableRevision>, ListAllTableRevisionsError> {
-        metadata_db::physical_table_revision::list_all(&self.metadata_db, active, limit)
+        metadata_db::physical_table_revision::list(&self.metadata_db, limit, last_id, active)
             .await
             .map_err(ListAllTableRevisionsError)
     }

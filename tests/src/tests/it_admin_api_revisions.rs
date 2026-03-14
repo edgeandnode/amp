@@ -1224,7 +1224,7 @@ async fn prune_revision_with_reorg_schedules_non_canonical_files() {
     // Get the revision for the blocks table
     let revisions_after_first_deploy = ampctl_client
         .revisions()
-        .list(None, None)
+        .list(None, None, None)
         .await
         .expect("failed to list revisions");
     let blocks_revision = revisions_after_first_deploy
@@ -1410,7 +1410,10 @@ impl TestCtx {
         active: Option<bool>,
         limit: Option<i64>,
     ) -> Result<Vec<RevisionInfo>, ListError> {
-        self.ampctl_client.revisions().list(active, limit).await
+        self.ampctl_client
+            .revisions()
+            .list(active, limit, None)
+            .await
     }
 
     /// Fetches a revision by its location ID, returning `None` if not found.

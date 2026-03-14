@@ -148,42 +148,27 @@ where
         .map_err(Error::Database)
 }
 
-/// List physical table locations with cursor-based pagination
+/// List physical table revisions with cursor-based pagination, optionally filtered by
+/// active status
 ///
-/// This function provides an ergonomic interface for paginated listing that automatically
-/// handles first page vs subsequent page logic based on the cursor parameter.
+/// Uses cursor-based pagination where `last_id` is the ID of the last revision
+/// from the previous page. For the first page, pass `None` for `last_id`.
+/// If `active` is provided, only revisions matching that active status are returned.
 #[tracing::instrument(skip(exe), err)]
 pub async fn list<'c, E>(
     exe: E,
     limit: i64,
     last_id: Option<impl Into<LocationId> + std::fmt::Debug>,
+    active: Option<bool>,
 ) -> Result<Vec<PhysicalTableRevision>, Error>
 where
     E: Executor<'c>,
 {
     match last_id {
-        None => sql::list_first_page(exe, limit).await,
-        Some(id) => sql::list_next_page(exe, limit, id.into()).await,
+        None => sql::list_first_page(exe, limit, active).await,
+        Some(id) => sql::list_next_page(exe, limit, id.into(), active).await,
     }
     .map_err(Error::Database)
-}
-
-/// List all physical table revisions with an optional active status filter
-///
-/// When `active` is `None`, returns all revisions. When `Some(true)` or `Some(false)`,
-/// returns only revisions matching that active status.
-#[tracing::instrument(skip(exe), err)]
-pub async fn list_all<'c, E>(
-    exe: E,
-    active: Option<bool>,
-    limit: i64,
-) -> Result<Vec<PhysicalTableRevision>, Error>
-where
-    E: Executor<'c>,
-{
-    sql::list_all(exe, active, limit)
-        .await
-        .map_err(Error::Database)
 }
 
 /// A specific storage revision (location) of a physical table

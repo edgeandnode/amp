@@ -47,7 +47,7 @@ Table revision management controls which physical version of a table's data is s
 | **`DataStore`**   | Single-operation get revision by location ID                                   |
 | **`DataStore`**   | Single-operation delete revision by location ID (CASCADE deletes file metadata) |
 | **`DataStore`**   | Multi-step truncate revision (stream files, delete from object store + metadata, verify, delete revision) |
-| **`metadata_db`** | SQL operations on `physical_table_revisions` (register, list_all, get_by_location_id, delete_by_id) and `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
+| **`metadata_db`** | SQL operations on `physical_table_revisions` (register, list, get_by_location_id, delete_by_id) and `physical_tables` (mark_inactive_by_table_name, mark_active_by_id) |
 
 **Key Principle**: Admin API handlers do not interact with `metadata_db` directly. All database access is encapsulated in `DataStore` methods, keeping handlers as pure orchestration and presentation logic.
 
@@ -67,7 +67,7 @@ Each handler follows the same pattern: parse request, resolve dataset reference,
 
 | Endpoint                      | Method | Description                                       |
 | ----------------------------- | ------ | ------------------------------------------------- |
-| `/revisions`                  | GET    | List revisions (optional `?active=true\|false` filter, `?limit=N` default 100) |
+| `/revisions`                  | GET    | List revisions (optional `?active=true\|false` filter, `?limit=N` default 100, `?last_id=N` cursor) |
 | `/revisions`                  | POST   | Register a new inactive table revision             |
 | `/revisions/{id}`             | GET    | Retrieve a specific revision by location ID       |
 | `/revisions/{id}`             | DELETE | Delete an inactive table revision by location ID  |
@@ -102,7 +102,7 @@ curl -X POST http://localhost:1610/revisions \
 
 ### List table revisions
 
-View revisions with optional active status filter and result limit.
+View revisions with optional active status filter, result limit, and cursor-based pagination.
 
 ```bash
 # Via ampctl
@@ -118,6 +118,9 @@ ampctl table list --limit 10
 # Combine filters
 ampctl table list --active true --limit 5
 
+# Cursor-based pagination (use last_id from previous page)
+ampctl table list --limit 10 --last-id 42
+
 # JSON output for scripting
 ampctl table list --json
 
@@ -125,6 +128,7 @@ ampctl table list --json
 curl http://localhost:1610/revisions
 curl http://localhost:1610/revisions?active=true
 curl http://localhost:1610/revisions?limit=10
+curl http://localhost:1610/revisions?limit=10&last_id=42
 ```
 
 ### Get a specific revision
@@ -232,7 +236,7 @@ curl -X POST http://localhost:1610/revisions/42/restore
 - `crates/services/admin-api/src/handlers/revisions/restore.rs` - Restore endpoint handler and error types
 - `crates/core/data-store/src/lib.rs` - `register_table_revision`, `activate_table_revision` (transactional), `deactivate_table_revision`, `delete_table_revision`, and `truncate_revision` methods
 - `crates/core/metadata-db/src/physical_table.rs` - `mark_inactive_by_table_name` and `mark_active_by_id` SQL operations on `physical_tables`
-- `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list_all`, `get_by_location_id`, and `delete_by_id` SQL operations on `physical_table_revisions`
+- `crates/core/metadata-db/src/physical_table_revision.rs` - `register`, `list`, `get_by_location_id`, and `delete_by_id` SQL operations on `physical_table_revisions`
 
 ## References
 
