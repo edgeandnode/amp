@@ -54,7 +54,7 @@ pub async fn create(
                     name: name.clone(),
                     source: err,
                 })?;
-        solana_datasets::client(name.clone(), typed_config, meter)
+        amp_providers_solana::client(name.clone(), typed_config, meter)
             .map(BlockStreamClient::Solana)
             .map_err(|err| CreateClientError::ProviderClient {
                 name,
@@ -86,7 +86,7 @@ pub async fn create(
 #[derive(Clone)]
 pub enum BlockStreamClient {
     EvmRpc(amp_providers_evm_rpc::Client),
-    Solana(solana_datasets::Client),
+    Solana(amp_providers_solana::Client),
     Firehose(Box<amp_providers_firehose::Client>),
 }
 
@@ -215,12 +215,12 @@ pub enum ProviderClientError {
     #[error("failed to create EVM RPC client")]
     EvmRpc(#[source] amp_providers_evm_rpc::error::ClientError),
 
-    /// Failed to create Solana extractor.
+    /// Failed to create Solana client.
     ///
-    /// This occurs during initialization of the Solana extractor, which may fail due to
+    /// This occurs during initialization of the Solana client, which may fail due to
     /// invalid or unsupported URL schemes.
-    #[error("failed to create Solana extractor")]
-    Solana(#[source] solana_datasets::error::ClientError),
+    #[error("failed to create Solana client")]
+    Solana(#[source] amp_providers_solana::error::ClientError),
 
     /// Failed to create Firehose client.
     ///

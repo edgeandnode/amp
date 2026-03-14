@@ -20,6 +20,7 @@ amp-datasets-registry = { path = "../crates/core/datasets-registry" }
 amp-object-store = { path = "../crates/core/object-store" }
 amp-parquet = { path = "../crates/core/parquet" }
 amp-providers-registry = { path = "../crates/core/providers-registry" }
+amp-providers-solana = { path = "../crates/core/providers-solana" }
 amp-worker-core = { path = "../crates/core/worker-core" }
 amp-client-admin = { package = "admin-client", path = "../crates/clients/admin" }
 ampctl = { path = "../crates/bin/ampctl" }

@@ -1,20 +1,10 @@
-use amp_providers_common::network_id::NetworkId;
-use datasets_common::{block_range::BlockRange, network_id::NetworkId as DatasetNetworkId};
-use datasets_raw::{dataset::Table, rows::Rows};
-use solana_clock::Slot;
+use amp_providers_solana::tables::{
+    block_headers, block_rewards, instructions, messages, transactions,
+};
+use datasets_common::network_id::NetworkId;
+use datasets_raw::dataset::Table;
 
-use crate::error::RowConversionError;
-
-pub mod block_headers;
-pub mod block_rewards;
-pub mod instructions;
-pub mod messages;
-pub mod transactions;
-
-/// Maximum number of ASCII characters in a base58-encoded 32-byte hash.
-pub(crate) const BASE58_ENCODED_HASH_LEN: usize = 44;
-
-pub fn all(network: &DatasetNetworkId) -> Vec<Table> {
+pub fn all(network: &NetworkId) -> Vec<Table> {
     vec![
         block_headers::table(network.clone()),
         block_rewards::table(network.clone()),
@@ -22,132 +12,4 @@ pub fn all(network: &DatasetNetworkId) -> Vec<Table> {
         messages::table(network.clone()),
         instructions::table(network.clone()),
     ]
-}
-
-/// A Solana slot that contains a confirmed block.
-#[derive(Clone, Debug)]
-pub struct NonEmptySlot {
-    pub slot: Slot,
-    pub parent_slot: Slot,
-    pub blockhash: [u8; 32],
-    pub prev_blockhash: [u8; 32],
-    pub block_height: Option<u64>,
-    pub blocktime: Option<i64>,
-    pub transactions: Vec<transactions::Transaction>,
-    pub messages: Vec<messages::Message>,
-    pub block_rewards: block_rewards::BlockRewards,
-}
-
-impl NonEmptySlot {
-    pub fn into_db_rows(self, network: &NetworkId) -> Result<Rows, RowConversionError> {
-        let NonEmptySlot {
-            slot,
-            parent_slot,
-            blockhash,
-            prev_blockhash,
-            block_height,
-            blocktime,
-            transactions,
-            messages,
-            block_rewards,
-        } = self;
-
-        // SAFETY: The NetworkId comes from validated provider configuration that was checked during
-        // provider lookup. The amp_providers_common::NetworkId type enforces the same non-empty
-        // invariant as DatasetNetworkId, so converting the validated string representation is guaranteed
-        // to produce a valid DatasetNetworkId without re-validation.
-        let dataset_network_id = DatasetNetworkId::new_unchecked(network.to_string());
-
-        let range = BlockRange {
-            // Using the slot as a block number since some blocks do not have a block_height.
-            numbers: slot..=slot,
-            network: dataset_network_id,
-            hash: blockhash.into(),
-            prev_hash: prev_blockhash.into(),
-            timestamp: blocktime.and_then(|t| u64::try_from(t).ok()),
-        };
-
-        let block_headers_row = {
-            let mut builder = block_headers::BlockHeaderRowsBuilder::new();
-
-            let header = block_headers::BlockHeader {
-                block_height,
-                slot,
-                parent_slot,
-                block_hash: bs58::encode(blockhash).into_string(),
-                previous_block_hash: bs58::encode(prev_blockhash).into_string(),
-                block_time: blocktime,
-            };
-
-            builder.append(&header);
-            builder
-                .build(range.clone())
-                .map_err(RowConversionError::TableBuild)?
-        };
-
-        let block_rewards_row = {
-            let mut builder =
-                block_rewards::BlockRewardsRowsBuilder::with_capacity(block_rewards.rewards.len());
-            builder.append(&block_rewards);
-            builder
-                .build(range.clone())
-                .map_err(RowConversionError::TableBuild)?
-        };
-
-        let transactions_row = {
-            let mut builder =
-                transactions::TransactionRowsBuilder::with_capacity(transactions.len());
-            for tx in &transactions {
-                builder.append(tx);
-            }
-            builder
-                .build(range.clone())
-                .map_err(RowConversionError::TableBuild)?
-        };
-
-        let messages_row = {
-            let mut builder = messages::MessageRowsBuilder::with_capacity(messages.len());
-            for message in &messages {
-                builder.append(message);
-            }
-            builder
-                .build(range.clone())
-                .map_err(RowConversionError::TableBuild)?
-        };
-
-        let instructions_row = {
-            let all_instructions: Vec<_> = transactions
-                .iter()
-                .filter_map(|tx| {
-                    tx.transaction_status_meta
-                        .as_ref()
-                        .and_then(|meta| meta.inner_instructions.as_ref())
-                        .map(|inner_instructions| {
-                            inner_instructions
-                                .iter()
-                                .flat_map(|instructions| instructions.iter())
-                        })
-                })
-                .flatten()
-                .chain(messages.iter().flat_map(|msg| msg.instructions.iter()))
-                .collect();
-
-            let mut builder =
-                instructions::InstructionRowsBuilder::with_capacity(all_instructions.len());
-            for instruction in all_instructions {
-                builder.append(instruction);
-            }
-            builder
-                .build(range.clone())
-                .map_err(RowConversionError::TableBuild)?
-        };
-
-        Ok(Rows::new(vec![
-            block_headers_row,
-            block_rewards_row,
-            transactions_row,
-            messages_row,
-            instructions_row,
-        ]))
-    }
 }

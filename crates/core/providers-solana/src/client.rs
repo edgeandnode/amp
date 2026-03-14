@@ -15,7 +15,6 @@ use std::{
 };
 
 use amp_providers_common::{network_id::NetworkId, provider_name::ProviderName};
-use amp_providers_solana::config::UseArchive;
 use datasets_common::block_num::BlockNum;
 use datasets_raw::{
     client::{BlockStreamError, BlockStreamResultExt, BlockStreamer, LatestBlockError},
@@ -26,6 +25,7 @@ use solana_client::rpc_config::CommitmentConfig;
 use solana_clock::Slot;
 
 use crate::{
+    config::UseArchive,
     error::{SlotConversionError, SlotConversionResult},
     metrics, of1_client, rpc_client, tables,
 };
@@ -620,13 +620,12 @@ fn bs58_decode_blockhash(
 #[cfg(test)]
 mod tests {
     use amp_providers_common::redacted::Redacted;
-    use amp_providers_solana::config::UseArchive;
     use futures::StreamExt;
     use solana_client::rpc_config::CommitmentConfig;
     use url::Url;
 
     use super::Client;
-    use crate::{of1_client, rpc_client};
+    use crate::{config::UseArchive, of1_client, rpc_client};
 
     #[tokio::test]
     async fn historical_blocks_only() {
