@@ -57,6 +57,7 @@ reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx = { version = "0.8.3", features = ["postgres", "runtime-tokio"] }
 serde_yaml.workspace = true
 server = { path = "../crates/services/server" }
 solana-datasets = { path = "../crates/extractors/solana" }

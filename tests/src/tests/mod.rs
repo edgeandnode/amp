@@ -4,6 +4,7 @@ mod it_admin_api_datasets_manifest;
 mod it_admin_api_datasets_register;
 mod it_admin_api_datasets_restore;
 mod it_admin_api_datasets_stop_job;
+mod it_admin_api_job_delete;
 mod it_admin_api_job_events;
 mod it_admin_api_jobs_progress;
 mod it_admin_api_revisions;

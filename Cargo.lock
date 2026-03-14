@@ -12340,6 +12340,7 @@ dependencies = [
  "serde_yaml",
  "server",
  "solana-datasets",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

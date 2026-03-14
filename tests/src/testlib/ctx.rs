@@ -731,6 +731,14 @@ impl TestCtx {
     pub fn new_ampctl(&self) -> Ampctl {
         Ampctl::new(self.daemon_controller_fixture.admin_api_url())
     }
+
+    /// Get a reference to the metadata database connection pool.
+    ///
+    /// Use this to run direct database queries against the metadata database
+    /// in integration tests (e.g., to verify cascade deletes across tables).
+    pub fn metadata_db(&self) -> &metadata_db::MetadataDb {
+        self._metadata_db_fixture.conn_pool()
+    }
 }
 
 /// Helper type for specifying dataset manifest registrations.
