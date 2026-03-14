@@ -4,6 +4,7 @@ use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
+use metadata_db::physical_table_revision::LocationId;
 use monitoring::logging;
 
 use crate::{
@@ -16,11 +17,14 @@ use crate::{
 
 /// Handler for the `GET /revisions` endpoint
 ///
-/// Returns all physical table revisions, with an optional active status filter.
+/// Returns physical table revisions with cursor-based pagination and optional active
+/// status filtering.
 ///
 /// ## Query Parameters
 /// - `active` (optional): Filter by active status (`true` or `false`)
 /// - `limit` (optional): Maximum number of revisions to return (default: 100)
+/// - `last_id` (optional): Cursor for pagination — ID of the last revision from the
+///   previous page. Omit for the first page.
 ///
 /// ## Response
 /// - **200 OK**: Successfully retrieved revisions
@@ -32,8 +36,8 @@ use crate::{
 /// - `LIST_ALL_TABLE_REVISIONS_ERROR`: Failed to list table revisions
 ///
 /// This handler:
-/// - Validates and extracts optional `active` and `limit` query parameters
-/// - Calls the data store to list table revisions with the given filters
+/// - Validates and extracts optional `active`, `limit`, and `last_id` query parameters
+/// - Calls the data store to list table revisions with the given filters and cursor
 /// - Returns revision information as a JSON array
 #[tracing::instrument(skip_all, err)]
 #[cfg_attr(
@@ -45,7 +49,8 @@ use crate::{
         operation_id = "list_revisions",
         params(
             ("active" = Option<bool>, Query, description = "Filter by active status"),
-            ("limit" = Option<i64>, Query, description = "Maximum number of revisions to return (default: 100)")
+            ("limit" = Option<i64>, Query, description = "Maximum number of revisions to return (default: 100)"),
+            ("last_id" = Option<i64>, Query, description = "Cursor for pagination: ID of the last revision from the previous page")
         ),
         responses(
             (status = 200, description = "Successfully retrieved revisions", body = Vec<RevisionInfo>),
@@ -72,7 +77,7 @@ pub async fn handler(
     }
 
     let revisions =
-        ctx.data_store.list_all_table_revisions(query.active, query.limit)
+        ctx.data_store.list_all_table_revisions(query.active, query.limit, query.last_id)
             .await
             .map_err(|err| {
                 tracing::debug!(error = %err, error_source = logging::error_source(&err), "failed to list revisions");
@@ -93,6 +98,8 @@ pub struct QueryParams {
     /// Maximum number of revisions to return (default: 100)
     #[serde(default = "default_limit")]
     pub limit: i64,
+    /// Cursor for pagination: ID of the last revision from the previous page
+    pub last_id: Option<LocationId>,
 }
 
 fn default_limit() -> i64 {

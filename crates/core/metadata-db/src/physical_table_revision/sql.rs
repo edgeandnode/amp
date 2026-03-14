@@ -246,98 +246,116 @@ where
     Ok(result.rows_affected() > 0)
 }
 
-/// List the first page of physical table revisions
+/// List the first page of physical table revisions, optionally filtered by active status
 ///
 /// Returns a paginated list of revisions ordered by ID in descending order (newest first).
 /// This function is used to fetch the initial page when no cursor is available.
+/// If `active` is provided, only revisions matching that active status are returned.
 pub async fn list_first_page<'c, E>(
     exe: E,
     limit: i64,
+    active: Option<bool>,
 ) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = indoc::indoc! {r#"
-        SELECT
-            ptr.id,
-            ptr.path,
-            EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
-            ptr.writer,
-            ptr.metadata
-        FROM physical_table_revisions ptr
-        ORDER BY ptr.id DESC
-        LIMIT $1
-    "#};
+    match active {
+        None => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    ptr.id,
+                    ptr.path,
+                    EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
+                    ptr.writer,
+                    ptr.metadata
+                FROM physical_table_revisions ptr
+                ORDER BY ptr.id DESC
+                LIMIT $1
+            "#};
 
-    sqlx::query_as(query).bind(limit).fetch_all(exe).await
+            sqlx::query_as(query).bind(limit).fetch_all(exe).await
+        }
+        Some(active) => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    ptr.id,
+                    ptr.path,
+                    $2 AS active,
+                    ptr.writer,
+                    ptr.metadata
+                FROM physical_table_revisions ptr
+                WHERE EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) = $2
+                ORDER BY ptr.id DESC
+                LIMIT $1
+            "#};
+
+            sqlx::query_as(query)
+                .bind(limit)
+                .bind(active)
+                .fetch_all(exe)
+                .await
+        }
+    }
 }
 
-/// List subsequent pages of physical table revisions using cursor-based pagination
+/// List subsequent pages of physical table revisions using cursor-based pagination,
+/// optionally filtered by active status
 ///
 /// Returns a paginated list of revisions with IDs less than the provided cursor,
 /// ordered by ID in descending order (newest first). This implements cursor-based
 /// pagination for efficient traversal of large revision lists.
+/// If `active` is provided, only revisions matching that active status are returned.
 pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
     last_id: LocationId,
-) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT
-            ptr.id,
-            ptr.path,
-            EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
-            ptr.writer,
-            ptr.metadata
-        FROM physical_table_revisions ptr
-        WHERE ptr.id < $2
-        ORDER BY ptr.id DESC
-        LIMIT $1
-    "#};
-
-    sqlx::query_as(query)
-        .bind(limit)
-        .bind(last_id)
-        .fetch_all(exe)
-        .await
-}
-
-/// List all physical table revisions with an optional active status filter
-///
-/// Returns all revisions ordered by ID in descending order (newest first).
-/// When `active` is `None`, all revisions are returned. When `Some(true)` or
-/// `Some(false)`, only revisions matching that active status are returned.
-pub async fn list_all<'c, E>(
-    exe: E,
     active: Option<bool>,
-    limit: i64,
 ) -> Result<Vec<PhysicalTableRevision>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = indoc::indoc! {r#"
-        SELECT
-            ptr.id,
-            ptr.path,
-            pt.active_revision_id IS NOT NULL AS active,
-            ptr.writer,
-            ptr.metadata
-        FROM physical_table_revisions AS ptr
-        LEFT JOIN physical_tables pt ON pt.active_revision_id = ptr.id
-        WHERE (
-            $1::boolean IS NULL
-            OR (pt.active_revision_id IS NOT NULL) = $1
-        )
-        ORDER BY ptr.id DESC
-        LIMIT $2
-    "#};
+    match active {
+        None => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    ptr.id,
+                    ptr.path,
+                    EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) AS active,
+                    ptr.writer,
+                    ptr.metadata
+                FROM physical_table_revisions ptr
+                WHERE ptr.id < $2
+                ORDER BY ptr.id DESC
+                LIMIT $1
+            "#};
 
-    sqlx::query_as(query)
-        .bind(active)
-        .bind(limit)
-        .fetch_all(exe)
-        .await
+            sqlx::query_as(query)
+                .bind(limit)
+                .bind(last_id)
+                .fetch_all(exe)
+                .await
+        }
+        Some(active) => {
+            let query = indoc::indoc! {r#"
+                SELECT
+                    ptr.id,
+                    ptr.path,
+                    $3 AS active,
+                    ptr.writer,
+                    ptr.metadata
+                FROM physical_table_revisions ptr
+                WHERE ptr.id < $2
+                    AND EXISTS(SELECT 1 FROM physical_tables WHERE active_revision_id = ptr.id) = $3
+                ORDER BY ptr.id DESC
+                LIMIT $1
+            "#};
+
+            sqlx::query_as(query)
+                .bind(limit)
+                .bind(last_id)
+                .bind(active)
+                .fetch_all(exe)
+                .await
+        }
+    }
 }

@@ -1,6 +1,6 @@
 ## Examples
 
-List all table revisions:
+List table revisions:
   $ ampctl table list
 
 Filter by active status:
@@ -11,6 +11,9 @@ Limit the number of results:
 
 Combine filters:
   $ ampctl table list --active true --limit 5
+
+Paginate through results:
+  $ ampctl table list --limit 10 --last-id 42
 
 With JSON output:
   $ ampctl table list --json

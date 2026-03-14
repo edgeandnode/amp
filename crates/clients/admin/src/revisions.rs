@@ -25,14 +25,18 @@ fn revision_get_by_id(id: i64) -> String {
 
 /// Build URL path for listing all revisions.
 ///
-/// GET `/revisions` with optional `?active=true|false` and `?limit=x` query parameters
-fn revisions_list(active: Option<bool>, limit: Option<i64>) -> String {
+/// GET `/revisions` with optional `?active=true|false`, `?limit=x`, and `?last_id=x`
+/// query parameters
+fn revisions_list(active: Option<bool>, limit: Option<i64>, last_id: Option<i64>) -> String {
     let mut params = Vec::new();
     if let Some(v) = active {
         params.push(format!("active={v}"));
     }
     if let Some(v) = limit {
         params.push(format!("limit={v}"));
+    }
+    if let Some(v) = last_id {
+        params.push(format!("last_id={v}"));
     }
     if params.is_empty() {
         "revisions".to_owned()
@@ -220,8 +224,8 @@ impl<'a> RevisionsClient<'a> {
 
     /// List all revisions, optionally filtered by active status.
     ///
-    /// Sends GET to `/revisions` endpoint with optional `?active=true|false`
-    /// and `?limit=x` query parameters.
+    /// Sends GET to `/revisions` endpoint with optional `?active=true|false`,
+    /// `?limit=x`, and `?last_id=x` query parameters.
     ///
     /// # Errors
     ///
@@ -232,11 +236,12 @@ impl<'a> RevisionsClient<'a> {
         &self,
         active: Option<bool>,
         limit: Option<i64>,
+        last_id: Option<i64>,
     ) -> Result<Vec<RevisionInfo>, ListError> {
         let url = self
             .client
             .base_url()
-            .join(&revisions_list(active, limit))
+            .join(&revisions_list(active, limit, last_id))
             .expect("valid URL");
 
         tracing::debug!(url = %url, "Sending GET request to list revisions");

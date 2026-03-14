@@ -1,4 +1,4 @@
-//! Pagination tests for location listing
+//! Pagination and filtering tests for location listing
 
 use crate::{
     datasets::{DatasetName, DatasetNamespace},
@@ -14,7 +14,7 @@ async fn list_locations_first_page_when_empty() {
     let (_db, conn) = setup_test_db().await;
 
     //* When
-    let locations = physical_table_revision::list(&conn, 10, None as Option<LocationId>)
+    let locations = physical_table_revision::list(&conn, 10, None as Option<LocationId>, None)
         .await
         .expect("Failed to list locations");
 
@@ -63,7 +63,7 @@ async fn list_locations_first_page_respects_limit() {
     }
 
     //* When
-    let locations = physical_table_revision::list(&conn, 3, None as Option<LocationId>)
+    let locations = physical_table_revision::list(&conn, 3, None as Option<LocationId>, None)
         .await
         .expect("Failed to list locations");
 
@@ -138,7 +138,7 @@ async fn list_locations_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = physical_table_revision::list(&conn, 3, None as Option<LocationId>)
+    let first_page = physical_table_revision::list(&conn, 3, None as Option<LocationId>, None)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -147,7 +147,7 @@ async fn list_locations_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = physical_table_revision::list(&conn, 3, Some(cursor))
+    let second_page = physical_table_revision::list(&conn, 3, Some(cursor), None)
         .await
         .expect("Failed to list second page");
 
@@ -178,5 +178,173 @@ async fn list_locations_next_page_uses_cursor() {
     assert!(
         cursor > second_page[0].id,
         "list should use cursor to exclude locations with ID >= cursor"
+    );
+}
+
+#[tokio::test]
+async fn list_locations_filters_by_active_status() {
+    //* Given
+    let (_db, conn) = setup_test_db().await;
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
+    // Create 4 revisions: 2 active, 2 inactive
+    for i in 0..4 {
+        let table_name = TableName::from_owned_unchecked(format!("test_table_filter_{}", i));
+        let path = TablePath::from_owned_unchecked(format!(
+            "test-dataset/test_table_filter_{}/revision-{}",
+            i, i
+        ));
+        let location_id =
+            register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
+                .await
+                .expect("Failed to insert location");
+
+        // Only mark even-indexed revisions as active
+        if i % 2 == 0 {
+            physical_table::mark_active_by_id(
+                &conn,
+                location_id,
+                &namespace,
+                &name,
+                &hash,
+                &table_name,
+            )
+            .await
+            .expect("Failed to mark location active");
+        }
+    }
+
+    //* When
+    let active_only =
+        physical_table_revision::list(&conn, 10, None as Option<LocationId>, Some(true))
+            .await
+            .expect("Failed to list active locations");
+    let inactive_only =
+        physical_table_revision::list(&conn, 10, None as Option<LocationId>, Some(false))
+            .await
+            .expect("Failed to list inactive locations");
+    let all = physical_table_revision::list(&conn, 10, None as Option<LocationId>, None)
+        .await
+        .expect("Failed to list all locations");
+
+    //* Then
+    assert_eq!(
+        active_only.len(),
+        2,
+        "list with active=true should return only active revisions"
+    );
+    for rev in &active_only {
+        assert!(
+            rev.active,
+            "all revisions should be active when filtered by active=true"
+        );
+    }
+
+    assert_eq!(
+        inactive_only.len(),
+        2,
+        "list with active=false should return only inactive revisions"
+    );
+    for rev in &inactive_only {
+        assert!(
+            !rev.active,
+            "all revisions should be inactive when filtered by active=false"
+        );
+    }
+
+    assert_eq!(
+        all.len(),
+        4,
+        "list with active=None should return all revisions"
+    );
+}
+
+#[tokio::test]
+async fn list_locations_combines_cursor_and_active_filter() {
+    //* Given
+    let (_db, conn) = setup_test_db().await;
+
+    let namespace = DatasetNamespace::from_ref_unchecked("test-namespace");
+    let name = DatasetName::from_ref_unchecked("test-dataset");
+    let hash = ManifestHash::from_ref_unchecked(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+
+    // Create 6 revisions: 3 active (even indices), 3 inactive (odd indices)
+    for i in 0..6 {
+        let table_name = TableName::from_owned_unchecked(format!("test_table_combo_{}", i));
+        let path = TablePath::from_owned_unchecked(format!(
+            "test-dataset/test_table_combo_{}/revision-{}",
+            i, i
+        ));
+        let location_id =
+            register_table_and_revision(&conn, &namespace, &name, &hash, &table_name, &path)
+                .await
+                .expect("Failed to insert location");
+
+        if i % 2 == 0 {
+            physical_table::mark_active_by_id(
+                &conn,
+                location_id,
+                &namespace,
+                &name,
+                &hash,
+                &table_name,
+            )
+            .await
+            .expect("Failed to mark location active");
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    // Get first page of active revisions (limit 2)
+    let first_page =
+        physical_table_revision::list(&conn, 2, None as Option<LocationId>, Some(true))
+            .await
+            .expect("Failed to list first page");
+
+    assert_eq!(
+        first_page.len(),
+        2,
+        "first page should return 2 active revisions"
+    );
+    for rev in &first_page {
+        assert!(
+            rev.active,
+            "first page should only contain active revisions"
+        );
+    }
+
+    let cursor = first_page
+        .last()
+        .expect("First page should not be empty")
+        .id;
+
+    //* When — get second page of active revisions using cursor
+    let second_page = physical_table_revision::list(&conn, 2, Some(cursor), Some(true))
+        .await
+        .expect("Failed to list second page");
+
+    //* Then
+    assert_eq!(
+        second_page.len(),
+        1,
+        "second page should return remaining 1 active revision"
+    );
+    for rev in &second_page {
+        assert!(
+            rev.active,
+            "second page should only contain active revisions"
+        );
+    }
+    assert!(
+        cursor > second_page[0].id,
+        "cursor-based pagination should return revisions with IDs less than cursor"
     );
 }

@@ -30,9 +30,13 @@ pub struct Args {
     /// Maximum number of revisions to return (default: 100)
     #[arg(long, short = 'l')]
     pub limit: Option<i64>,
+
+    /// Cursor for pagination: ID of the last revision from the previous page
+    #[arg(long)]
+    pub last_id: Option<i64>,
 }
 
-/// List all table revisions by retrieving them from the admin API.
+/// List table revisions by retrieving them from the admin API.
 ///
 /// Retrieves table revisions with optional filtering and displays them based on
 /// the output format.
@@ -40,17 +44,18 @@ pub struct Args {
 /// # Errors
 ///
 /// Returns [`Error`] for API errors (400/500) or network failures.
-#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, active = ?active, limit = ?limit))]
+#[tracing::instrument(skip_all, fields(admin_url = %global.admin_url, active = ?active, limit = ?limit, last_id = ?last_id))]
 pub async fn run(
     Args {
         global,
         active,
         limit,
+        last_id,
     }: Args,
 ) -> Result<(), Error> {
     tracing::debug!("listing table revisions");
 
-    let revisions = get_revisions(&global, active, limit).await?;
+    let revisions = get_revisions(&global, active, limit, last_id).await?;
     let result = ListResult { revisions };
     global.print(&result).map_err(Error::JsonFormattingError)?;
 
@@ -65,12 +70,13 @@ async fn get_revisions(
     global: &GlobalArgs,
     active: Option<bool>,
     limit: Option<i64>,
+    last_id: Option<i64>,
 ) -> Result<Vec<client::revisions::RevisionInfo>, Error> {
     let client = global.build_client().map_err(Error::ClientBuildError)?;
 
     let revisions = client
         .revisions()
-        .list(active, limit)
+        .list(active, limit, last_id)
         .await
         .map_err(|err| {
             tracing::error!(
