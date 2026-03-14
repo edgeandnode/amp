@@ -99,7 +99,7 @@ Testing.layer((it) => {
       })
       const result = yield* api.getOutputSchema(request)
       assertInstanceOf(result, Admin.GetOutputSchemaResponse)
-      assertInstanceOf(result.schemas.query, Model.TableSchemaWithNetworks)
+      assertInstanceOf(result.schemas.query, Model.TableSchema)
     }),
   )
 

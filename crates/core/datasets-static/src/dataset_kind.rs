@@ -31,7 +31,9 @@ impl StaticDatasetKind {
 
 impl From<StaticDatasetKind> for DatasetKindStr {
     fn from(value: StaticDatasetKind) -> Self {
-        DatasetKindStr::new(value.to_string())
+        // SAFETY: StaticDatasetKind is a strongly-typed ZST whose Display impl produces
+        // a valid dataset kind string.
+        DatasetKindStr::new_unchecked(value.to_string())
     }
 }
 

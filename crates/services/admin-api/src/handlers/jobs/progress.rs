@@ -203,6 +203,7 @@ pub async fn handler(
                     hash_ref.clone(),
                     dataset.start_block(),
                     table_config.clone(),
+                    table_config.network().into_iter().cloned().collect(),
                     revision,
                 )
             });

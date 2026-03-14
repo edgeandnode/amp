@@ -250,7 +250,6 @@ export class DatasetMetadata extends Schema.Class<DatasetMetadata>("DatasetMetad
 export class DatasetConfig extends Schema.Class<DatasetConfig>("DatasetConfig")({
   namespace: DatasetNamespace.pipe(Schema.optional),
   name: DatasetName,
-  network: Network,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
   description: DatasetDescription.pipe(Schema.optional),
@@ -312,11 +311,6 @@ export const RawDatasetTable = Schema.Struct({
   schema: TableSchema,
   network: Network,
 })
-
-export class OutputSchema extends Schema.Class<OutputSchema>("OutputSchema")({
-  schema: TableSchema,
-  networks: Schema.Array(Schema.String),
-}) {}
 
 export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionManifest")({
   name: Schema.String,
@@ -490,11 +484,6 @@ export const GenrateTokenDuration = Schema.String.pipe(
   }),
 )
 export type GenrateTokenDuration = typeof GenrateTokenDuration.Type
-
-export class TableSchemaWithNetworks extends Schema.Class<TableSchemaWithNetworks>("TableSchemaWithNetworks")({
-  schema: TableSchema,
-  networks: Schema.Array(Schema.String),
-}) {}
 
 export const RecordBatchFromSelf = Schema.declare<RecordBatch>((value) => value instanceof RecordBatch, {
   title: "RecordBatchFromSelf",

@@ -84,9 +84,11 @@ pub trait Table: DowncastSync + std::fmt::Debug {
     /// Returns the Arrow schema defining this table's columns and types.
     fn schema(&self) -> &SchemaRef;
 
-    /// Returns the network this table is associated with, if any.
+    /// Returns the intrinsic network this table belongs to, if any.
     ///
-    /// Raw tables always have a network; derived tables return `None`.
+    /// Raw tables return `Some` (they always belong to exactly one network).
+    /// Derived and static tables return `None` (their networks are resolved
+    /// from the dependency chain at catalog construction time).
     fn network(&self) -> Option<&NetworkId> {
         None
     }

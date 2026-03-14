@@ -13,7 +13,11 @@ use datasets_raw::{
 };
 use solana_clock::Slot;
 
-use crate::{rpc_client, tables::BASE58_ENCODED_HASH_LEN};
+use crate::{
+    error::{RowConversionError, RowConversionResult},
+    rpc_client,
+    tables::BASE58_ENCODED_HASH_LEN,
+};
 
 pub const TABLE_NAME: &str = "messages";
 
@@ -141,25 +145,28 @@ impl Message {
         slot: Slot,
         tx_index: u32,
         message: rpc_client::UiRawMessage,
-    ) -> Self {
+    ) -> RowConversionResult<Self> {
         let instructions = message
             .instructions
             .iter()
             .map(|inst| {
-                let data = bs58::decode(&inst.data)
+                bs58::decode(&inst.data)
                     .into_vec()
-                    .expect("invalid base-58 string");
-                super::instructions::Instruction {
-                    slot,
-                    tx_index,
-                    program_id_index: inst.program_id_index,
-                    accounts: inst.accounts.clone(),
-                    data,
-                    inner_index: None,
-                    inner_stack_height: None,
-                }
+                    .map_err(|_| RowConversionError::DecodeInstructionData {
+                        slot,
+                        tx_idx: tx_index as usize,
+                    })
+                    .map(|data| super::instructions::Instruction {
+                        slot,
+                        tx_index,
+                        program_id_index: inst.program_id_index,
+                        accounts: inst.accounts.clone(),
+                        data,
+                        inner_index: None,
+                        inner_stack_height: None,
+                    })
             })
-            .collect();
+            .collect::<RowConversionResult<Vec<_>>>()?;
         let address_table_lookups = message.address_table_lookups.as_ref().map(|atls| {
             atls.iter()
                 .cloned()
@@ -171,7 +178,7 @@ impl Message {
                 .collect()
         });
 
-        Self {
+        Ok(Self {
             slot,
             tx_index,
             num_required_signatures: message.header.num_required_signatures,
@@ -181,7 +188,7 @@ impl Message {
             address_table_lookups,
             account_keys: message.account_keys.clone(),
             recent_block_hash: message.recent_blockhash.clone(),
-        }
+        })
     }
 }
 

@@ -354,7 +354,9 @@ export class AmpRegistryService extends Effect.Service<AmpRegistryService>()("Am
         : []
 
       // derived from the tables in the dataset manifest (unique chains only)
-      const indexingChains = [...new Set(Object.values(manifest.tables).map((table) => table.network))]
+      const indexingChains = Array.dedupe(
+        Array.filterMap(Object.values(manifest.tables), (table) => Option.fromNullable(table.network)),
+      )
 
       // Check if dataset exists (try public first, then owned/private)
       const maybeDataset = yield* getDatasetWithFallback(auth, namespace, name)

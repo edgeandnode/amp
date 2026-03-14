@@ -1,7 +1,7 @@
 pub mod message_stream_with_block_complete;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::Duration,
 };
@@ -16,7 +16,7 @@ use datasets_common::{
     network_id::NetworkId,
     table_name::TableName,
 };
-use datasets_derived::{dataset::Dataset as DerivedDataset, deps::SELF_REF_KEYWORD};
+use datasets_derived::deps::SELF_REF_KEYWORD;
 use datasets_raw::dataset::Dataset as RawDataset;
 use futures::stream::{self, BoxStream, StreamExt};
 use js_runtime::isolate_pool::IsolatePool;
@@ -45,7 +45,7 @@ use crate::{
         plan::PlanContextBuilder,
     },
     cursor::{Cursor, CursorNetworkNotFoundError, NetworkCursor, Watermark},
-    datasets_cache::{DatasetsCache, ResolveRevisionError},
+    datasets_cache::DatasetsCache,
     detached_logical_plan::DetachedLogicalPlan,
     exec_env::ExecEnv,
     incrementalizer::incrementalize_plan,
@@ -119,7 +119,7 @@ pub enum SpawnError {
 
     /// Failed to resolve raw dataset from dependencies
     ///
-    /// This occurs when BFS through dataset dependencies fails to find a raw
+    /// This occurs when traversing dataset dependencies fails to find a raw
     /// (non-derived) dataset whose network can be used for the streaming query.
     #[error("failed to resolve raw dataset from dependencies")]
     ResolveRawDataset(#[source] ResolveRawDatasetError),
@@ -1247,11 +1247,13 @@ async fn resolve_blocks_table(
         })?;
 
     let sql_schema_name = dataset.reference().to_reference().to_string();
+    let networks = table.network().into_iter().cloned().collect();
     let physical_table = PhysicalTable::from_revision(
         data_store,
         dataset.reference().clone(),
         dataset.start_block(),
         Arc::clone(table) as Arc<dyn Table>,
+        networks,
         revision,
     );
     Ok((
@@ -1284,63 +1286,37 @@ pub enum ResolveBlocksTableError {
     TableNotSynced(String, String),
 }
 
-/// Resolve the raw dataset and its network by BFS through dataset dependencies.
+/// Resolve the raw dataset from a set of root dataset references.
 ///
-/// Returns the first raw (non-derived) dataset found and its network, validating that all raw
-/// datasets in the dependency tree belong to the same network.
+/// Traverses transitive dependencies from each root, collecting raw datasets.
+/// Returns the first raw dataset found, validating that all raw datasets in
+/// the dependency tree belong to the same network.
 async fn resolve_raw_dataset_from_dependencies(
     datasets_cache: &DatasetsCache,
     root_dataset_refs: impl Iterator<Item = &HashReference>,
 ) -> Result<Arc<RawDataset>, ResolveRawDatasetError> {
     let mut found: Option<Arc<RawDataset>> = None;
-    let mut queue: VecDeque<Arc<dyn Dataset>> = VecDeque::new();
 
     for hash_ref in root_dataset_refs {
         let dataset = datasets_cache
             .get_dataset(hash_ref)
             .await
             .map_err(ResolveRawDatasetError::GetDataset)?;
-        queue.push_back(dataset);
-    }
 
-    let mut visited = BTreeSet::new();
-    while let Some(dataset) = queue.pop_front() {
-        let dataset_ref = dataset.reference().clone();
-        if !visited.insert(dataset_ref) {
-            continue;
-        }
+        let raw_datasets = crate::datasets_cache::collect_raw_datasets(datasets_cache, dataset)
+            .await
+            .map_err(ResolveRawDatasetError::Traversal)?;
 
-        // Raw dataset: record its network, fail if a second network appears
-        if let Ok(raw) = dataset.clone().downcast_arc::<RawDataset>() {
+        for raw in raw_datasets {
             match &found {
-                None => {
-                    found = Some(raw);
-                }
+                None => found = Some(raw),
                 Some(first) if *first.network() != *raw.network() => {
                     return Err(ResolveRawDatasetError::MultipleNetworks {
                         first: first.network().clone(),
                         second: raw.network().clone(),
                     });
                 }
-                Some(_) => {} // same network, continue BFS
-            }
-        }
-
-        // Derived dataset: enqueue dependencies
-        if let Some(derived) = dataset.downcast_ref::<DerivedDataset>() {
-            for dep in derived.dependencies().values() {
-                let hash_ref = datasets_cache
-                    .resolve_revision(dep.to_reference())
-                    .await
-                    .map_err(ResolveRawDatasetError::ResolveRevision)?
-                    .ok_or_else(|| {
-                        ResolveRawDatasetError::NotFound(dep.to_reference().to_string())
-                    })?;
-                let dataset = datasets_cache
-                    .get_dataset(&hash_ref)
-                    .await
-                    .map_err(ResolveRawDatasetError::GetDataset)?;
-                queue.push_back(dataset);
+                Some(_) => {} // same network
             }
         }
     }
@@ -1351,17 +1327,13 @@ async fn resolve_raw_dataset_from_dependencies(
 /// Errors that occur when resolving the raw dataset from dependencies.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveRawDatasetError {
-    /// Failed to get dataset from dataset store.
+    /// Failed to get root dataset from dataset store.
     #[error("failed to get dataset")]
     GetDataset(#[source] crate::datasets_cache::GetDatasetError),
 
-    /// Failed to resolve revision.
-    #[error("failed to resolve revision")]
-    ResolveRevision(#[source] ResolveRevisionError),
-
-    /// Dependency not found.
-    #[error("dependency '{0}' not found")]
-    NotFound(String),
+    /// Failed to traverse dataset dependencies.
+    #[error("failed to traverse dependencies")]
+    Traversal(#[source] crate::datasets_cache::DependencyTraversalError),
 
     /// Multiple networks found in the dependency tree.
     #[error("multiple networks in dependency tree: {first} and {second}")]

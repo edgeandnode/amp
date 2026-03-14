@@ -169,6 +169,7 @@ pub async fn execute(
             dataset.reference().clone(),
             dataset.start_block(),
             table_def.clone(),
+            table_def.network().into_iter().cloned().collect(),
             revision,
         ));
 

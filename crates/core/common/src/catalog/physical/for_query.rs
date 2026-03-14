@@ -97,11 +97,27 @@ pub async fn create(
                 table: (**table).clone(),
             })?;
 
+        // Resolve networks: raw tables have an intrinsic network; derived tables
+        // need resolution from the transitive dependency chain.
+        let networks = match dataset_table.network() {
+            Some(id) => BTreeSet::from([id.clone()]),
+            None => crate::datasets_cache::resolve_dataset_networks(
+                datasets_cache,
+                Arc::clone(&dataset),
+            )
+            .await
+            .map_err(|err| CreateCatalogError::ResolveNetworks {
+                dataset: hash_ref.clone(),
+                source: err,
+            })?,
+        };
+
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             hash_ref,
             dataset.start_block(),
             dataset_table.clone(),
+            networks,
             revision,
         );
         entries.push((
@@ -180,5 +196,17 @@ pub enum CreateCatalogError {
         dataset: HashReference,
         #[source]
         source: GetDatasetError,
+    },
+
+    /// Failed to resolve networks from dependency chain.
+    ///
+    /// This occurs when traversing a derived dataset's dependencies fails
+    /// to resolve the set of networks.
+    #[error("Failed to resolve networks for dataset {dataset}")]
+    ResolveNetworks {
+        /// The hash reference of the dataset
+        dataset: HashReference,
+        #[source]
+        source: crate::datasets_cache::DependencyTraversalError,
     },
 }

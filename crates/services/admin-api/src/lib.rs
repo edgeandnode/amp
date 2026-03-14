@@ -87,6 +87,11 @@ pub fn router(ctx: Ctx) -> Router<()> {
         )
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
         .route("/jobs/{id}/progress", get(jobs::progress::handler))
+        .route("/jobs/{id}/events", get(jobs::events::handler))
+        .route(
+            "/jobs/{id}/events/{event_id}",
+            get(jobs::event_by_id::handler),
+        )
         .route(
             "/manifests",
             get(manifests::list_all::handler)
@@ -148,6 +153,8 @@ pub fn router(ctx: Ctx) -> Router<()> {
         handlers::jobs::get_by_id::handler,
         handlers::jobs::stop::handler,
         handlers::jobs::progress::handler,
+        handlers::jobs::events::handler,
+        handlers::jobs::event_by_id::handler,
         handlers::jobs::delete::handler,
         handlers::jobs::delete_by_id::handler,
         // Provider endpoints
@@ -199,6 +206,9 @@ pub fn router(ctx: Ctx) -> Router<()> {
         // Job schemas
         handlers::jobs::progress::JobProgressResponse,
         handlers::jobs::progress::TableProgress,
+        handlers::jobs::events::JobEventsResponse,
+        handlers::jobs::events::JobEventInfo,
+        handlers::jobs::event_by_id::JobEventDetailResponse,
         handlers::jobs::job_info::JobInfo,
         handlers::jobs::get_all::JobsResponse,
         handlers::jobs::delete::JobStatusFilter,

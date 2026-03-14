@@ -173,6 +173,7 @@ pub async fn handler(
                 dataset_ref.clone(),
                 start_block,
                 table_def.clone(),
+                table_def.network().into_iter().cloned().collect(),
                 info,
             );
 

@@ -6,6 +6,7 @@ use std::{
 };
 
 use amp_data_store::{DataStore, PhyTableRevision};
+use amp_datasets_raw::dataset_kind::{EvmRpcDatasetKind, FirehoseDatasetKind, SolanaDatasetKind};
 use amp_datasets_registry::error::ResolveRevisionError;
 use amp_parquet::footer::{AmpMetadataFromParquetError, amp_metadata_from_parquet_file};
 use common::{
@@ -21,9 +22,11 @@ use common::{
     udfs::eth_call::EthCallUdfsCache,
 };
 use datafusion::sql::parser::Statement;
-use datasets_common::{hash_reference::HashReference, table_name::TableName};
+use datasets_common::{
+    dataset_kind_str::DatasetKindStr, hash_reference::HashReference, table_name::TableName,
+};
 use datasets_derived::{
-    Manifest as DerivedDatasetManifest,
+    DerivedDatasetKind, Manifest as DerivedDatasetManifest,
     deps::{DepAlias, DepAliasOrSelfRef, DepAliasOrSelfRefError},
     manifest::{TableInput, View},
     sorting::{self, CyclicDepError},
@@ -124,105 +127,95 @@ impl InterTableDepError {
     }
 }
 
-/// A string wrapper that ensures the value is not empty or whitespace-only
+/// Manifest header extracted from a manifest JSON string.
 ///
-/// This invariant-holding _new-type_ validates that strings contain at least one non-whitespace character.
-/// Validation occurs during:
-/// - JSON/serde deserialization
-/// - Parsing from `&str` via `FromStr`
+/// Deserializes only the `kind` field, ignoring all other fields.
+/// Validates the kind against supported dataset kinds during deserialization.
+#[derive(serde::Deserialize)]
+pub struct ManifestHeader {
+    /// The dataset kind, validated during deserialization against supported kinds.
+    pub kind: DatasetKind,
+}
+
+/// Enum of supported dataset kinds for handler dispatch.
 ///
-/// ## Behavior
-/// - Input strings are validated by checking if they contain non-whitespace characters after trimming
-/// - Empty strings or whitespace-only strings are rejected with [`EmptyStringError`]
-/// - The **original string is preserved** including any leading/trailing whitespace
-/// - Once created, the string is guaranteed to contain at least one non-whitespace character
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "utoipa", schema(value_type = String))]
-pub struct NonEmptyString(String);
-
-impl NonEmptyString {
-    /// Creates a new NonEmptyString without validation
-    ///
-    /// ## Safety
-    /// The caller must ensure that the string contains at least one non-whitespace character.
-    /// Passing an empty string or whitespace-only string violates the type's invariant and
-    /// may lead to undefined behavior in code that relies on this guarantee.
-    pub unsafe fn new_unchecked(value: String) -> Self {
-        Self(value)
-    }
-
-    /// Returns a reference to the inner string value
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Consumes the NonEmptyString and returns the inner String
-    pub fn into_inner(self) -> String {
-        self.0
-    }
+/// Centralizes the supported kinds so both registration handlers can use the same
+/// dispatch logic without duplicating if-else chains against the ZST kind constants.
+#[derive(Debug, Clone, Copy)]
+pub enum DatasetKind {
+    /// Derived datasets that transform data from other datasets using SQL queries.
+    Derived,
+    /// Raw datasets that extract blockchain data from Ethereum-compatible JSON-RPC endpoints.
+    EvmRpc,
+    /// Raw datasets that extract blockchain data from Solana RPC endpoints.
+    Solana,
+    /// Raw datasets that stream blockchain data from StreamingFast Firehose protocol.
+    Firehose,
 }
 
-impl AsRef<str> for NonEmptyString {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl AsRef<[u8]> for NonEmptyString {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_bytes()
-    }
-}
-
-impl std::ops::Deref for NonEmptyString {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for NonEmptyString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl std::str::FromStr for NonEmptyString {
-    type Err = EmptyStringError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.trim().is_empty() {
-            return Err(EmptyStringError);
+impl DatasetKind {
+    /// Returns the canonical string representation of this kind.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Derived => DerivedDatasetKind.as_str(),
+            Self::EvmRpc => EvmRpcDatasetKind.as_str(),
+            Self::Solana => SolanaDatasetKind.as_str(),
+            Self::Firehose => FirehoseDatasetKind.as_str(),
         }
-        Ok(NonEmptyString(s.to_string()))
     }
 }
 
-impl<'de> serde::Deserialize<'de> for NonEmptyString {
+impl From<DatasetKind> for DatasetKindStr {
+    fn from(kind: DatasetKind) -> Self {
+        // SAFETY: DatasetKind variants map to validated ZST kind types; as_str() returns
+        // a valid dataset kind string.
+        Self::new_unchecked(kind.to_string())
+    }
+}
+
+impl TryFrom<&DatasetKindStr> for DatasetKind {
+    type Error = UnsupportedDatasetKindError;
+
+    fn try_from(kind: &DatasetKindStr) -> Result<Self, Self::Error> {
+        if *kind == DerivedDatasetKind {
+            Ok(Self::Derived)
+        } else if *kind == EvmRpcDatasetKind {
+            Ok(Self::EvmRpc)
+        } else if *kind == SolanaDatasetKind {
+            Ok(Self::Solana)
+        } else if *kind == FirehoseDatasetKind {
+            Ok(Self::Firehose)
+        } else {
+            Err(UnsupportedDatasetKindError(kind.to_string()))
+        }
+    }
+}
+
+impl std::fmt::Display for DatasetKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for DatasetKind {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = String::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
+        let s = String::deserialize(deserializer)?;
+        let kind_str = DatasetKindStr::new_unchecked(s);
+        DatasetKind::try_from(&kind_str).map_err(serde::de::Error::custom)
     }
 }
 
-impl serde::Serialize for NonEmptyString {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-/// Error type for NonEmptyString parsing failures
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("string cannot be empty or whitespace-only")]
-pub struct EmptyStringError;
+/// Error returned when a dataset kind string does not match any supported kind.
+///
+/// This error occurs when `TryFrom<&DatasetKindStr>` encounters a kind string
+/// that is not one of the recognized dataset kinds (derived, evm-rpc, solana, firehose).
+/// During deserialization, this surfaces as a serde error via `Deserialize` for `DatasetKind`.
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported dataset kind: '{0}'")]
+pub struct UnsupportedDatasetKindError(String);
 
 /// Parse, validate, and re-serialize a derived dataset manifest to canonical JSON format
 ///
@@ -231,9 +224,9 @@ pub struct EmptyStringError;
 /// 2. Validate manifest using dataset store (SQL, dependencies, tables, functions)
 /// 3. Re-serialize to canonical JSON
 pub async fn parse_and_canonicalize_derived_dataset_manifest(
-    manifest_str: impl AsRef<str>,
     datasets_cache: &DatasetsCache,
     ethcall_udfs_cache: &EthCallUdfsCache,
+    manifest_str: impl AsRef<str>,
 ) -> Result<String, ParseDerivedManifestError> {
     let manifest: DerivedDatasetManifest = serde_json::from_str(manifest_str.as_ref())
         .map_err(ParseDerivedManifestError::Deserialization)?;

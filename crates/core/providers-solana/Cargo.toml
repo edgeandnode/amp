@@ -10,7 +10,6 @@ schemars = ["dep:schemars", "amp-providers-common/schemars"]
 
 [dependencies]
 amp-providers-common = { path = "../providers-common" }
-anyhow.workspace = true
 async-stream.workspace = true
 backon.workspace = true
 base64 = "0.22.1"
@@ -49,6 +48,7 @@ yellowstone-faithful-car-parser = "1.0.0"
 zstd.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 clap.workspace = true
 pretty_assertions.workspace = true
 toml.workspace = true

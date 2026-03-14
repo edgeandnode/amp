@@ -162,7 +162,10 @@ impl Collector {
         }
 
         tracing::debug!("Expired files deleted: {}", files_deleted);
-        tracing::debug!("Expired files not found: {}", files_not_found);
+
+        if files_not_found > 0 {
+            tracing::debug!("Expired files not found: {}", files_not_found);
+        }
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.inc_successful_collections(table_name.to_string());

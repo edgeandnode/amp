@@ -609,16 +609,15 @@ pub fn find_cross_network_join(
     plan: &LogicalPlan,
     catalog: &crate::catalog::physical::Catalog,
 ) -> Result<Option<CrossNetworkJoinInfo>, DataFusionError> {
-    let table_to_network: BTreeMap<TableReference, NetworkId> = catalog
+    let table_to_networks: BTreeMap<TableReference, BTreeSet<NetworkId>> = catalog
         .entries()
         .iter()
-        .filter_map(|(physical_table, sql_schema_name)| {
-            let network = physical_table.network()?.clone();
+        .map(|(physical_table, sql_schema_name)| {
             let table_ref = TableReference::Partial {
                 schema: Arc::from(&**sql_schema_name),
                 table: Arc::from(physical_table.table_name().as_str()),
             };
-            Some((table_ref, network))
+            (table_ref, physical_table.networks().clone())
         })
         .collect();
 
@@ -627,7 +626,9 @@ pub fn find_cross_network_join(
             let table_refs = extract_table_references_from_plan(subtree)?;
             Ok(table_refs
                 .into_iter()
-                .filter_map(|table_ref| table_to_network.get(&table_ref).cloned())
+                .filter_map(|table_ref| table_to_networks.get(&table_ref))
+                .flatten()
+                .cloned()
                 .collect())
         };
 

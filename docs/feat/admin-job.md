@@ -1,6 +1,6 @@
 ---
 name: "app-ampctl-job"
-description: "Job management commands: list, inspect, stop, remove, prune, progress. Load when asking about managing extraction jobs via ampctl CLI"
+description: "Job management commands: list, inspect, stop, remove, prune, progress, events. Load when asking about managing extraction jobs via ampctl CLI"
 type: feature
 status: stable
 components: "app:ampctl,crate:admin-client,service:admin-api"
@@ -10,7 +10,7 @@ components: "app:ampctl,crate:admin-client,service:admin-api"
 
 ## Summary
 
-Job commands provide operational control over extraction jobs. Operators can list jobs with pagination, inspect job details, stop running jobs gracefully, remove individual terminal jobs, bulk-prune terminal jobs by status, and monitor sync progress with block-level detail for each table.
+Job commands provide operational control over extraction jobs. Operators can list jobs with pagination, inspect job details, stop running jobs gracefully, remove individual terminal jobs, bulk-prune terminal jobs by status, monitor sync progress with block-level detail for each table, and view the complete lifecycle event history for a job.
 
 ## Table of Contents
 
@@ -25,6 +25,7 @@ Job commands provide operational control over extraction jobs. Operators can lis
 - **Job**: An extraction task that syncs blockchain data for a dataset, executed by a worker node
 - **Terminal State**: A job that has finished executing (`COMPLETED`, `STOPPED`, or `ERROR`)
 - **Progress**: Sync state of a job's tables, including `current_block`, `start_block`, and file statistics
+- **Events**: Append-only lifecycle event log recording every state transition (SCHEDULED, RUNNING, COMPLETED, ERROR, FATAL, STOPPED)
 - **Pagination**: Jobs are listed in pages using `--limit` (default: 50) and `--after` (cursor ID)
 
 ## Usage
@@ -107,6 +108,24 @@ View sync progress for all tables written by a job, including current block and 
 ```bash
 ampctl job progress 123
 ampctl job progress 123 --json
+```
+
+**View job events:**
+
+View the complete lifecycle event history for a job. Each event records a state transition with timestamp, worker node, and event type.
+
+```bash
+ampctl job events 123
+ampctl job events 123 --json
+```
+
+**View a single job event:**
+
+Get full details of a specific event, including the optional detail payload (e.g., job descriptor for SCHEDULED events).
+
+```bash
+ampctl job events 123 --event-id 42
+ampctl job events 123 --event-id 42 --json
 ```
 
 **JSON output for scripting:**

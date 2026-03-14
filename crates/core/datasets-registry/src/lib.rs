@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use datasets_common::{
-    hash::Hash, hash_reference::HashReference, name::Name, namespace::Namespace,
-    reference::Reference, revision::Revision, version::Version,
+    dataset_kind_str::DatasetKindStr, hash::Hash, hash_reference::HashReference, name::Name,
+    namespace::Namespace, reference::Reference, revision::Revision, version::Version,
 };
 use metadata_db::MetadataDb;
 
@@ -63,6 +63,7 @@ impl DatasetsRegistry {
     pub async fn register_manifest(
         &self,
         hash: &Hash,
+        kind: &DatasetKindStr,
         content: String,
     ) -> Result<(), RegisterManifestError> {
         let path = self
@@ -70,7 +71,7 @@ impl DatasetsRegistry {
             .store(hash, content)
             .await
             .map_err(RegisterManifestError::ManifestStorage)?;
-        metadata_db::manifests::register(&self.metadata_db, hash, path)
+        metadata_db::manifests::register(&self.metadata_db, hash, kind, path)
             .await
             .map_err(RegisterManifestError::MetadataRegistration)?;
         Ok(())

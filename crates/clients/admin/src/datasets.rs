@@ -234,9 +234,6 @@ impl<'a> DatasetsClient<'a> {
                     "MANIFEST_VALIDATION_ERROR" => Err(RegisterError::ManifestValidationError(
                         error_response.into(),
                     )),
-                    "UNSUPPORTED_DATASET_KIND" => {
-                        Err(RegisterError::UnsupportedDatasetKind(error_response.into()))
-                    }
                     "MANIFEST_REGISTRATION_ERROR" => Err(RegisterError::ManifestRegistrationError(
                         error_response.into(),
                     )),
@@ -1525,13 +1522,6 @@ pub enum RegisterError {
     /// - SQL queries reference datasets not declared in dependencies
     #[error("dependency validation error: {0}")]
     ManifestValidationError(#[source] ApiError),
-
-    /// Unsupported dataset kind (400, UNSUPPORTED_DATASET_KIND)
-    ///
-    /// This occurs when:
-    /// - Dataset kind is not one of the supported types (manifest, evm-rpc, firehose)
-    #[error("unsupported dataset kind")]
-    UnsupportedDatasetKind(#[source] ApiError),
 
     /// Failed to register manifest in the system (500, MANIFEST_REGISTRATION_ERROR)
     ///

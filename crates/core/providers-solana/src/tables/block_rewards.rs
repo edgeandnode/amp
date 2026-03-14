@@ -1,6 +1,5 @@
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Context;
 use datasets_common::{
     block_num::RESERVED_BLOCK_NUM_COLUMN_NAME, block_range::BlockRange, network_id::NetworkId,
 };
@@ -13,7 +12,10 @@ use datasets_raw::{
 };
 use solana_clock::Slot;
 
-use crate::{of1_client, rpc_client, tables};
+use crate::{
+    error::{RowConversionError, RowConversionResult},
+    of1_client, rpc_client, tables,
+};
 
 pub const TABLE_NAME: &str = "block_rewards";
 
@@ -72,29 +74,32 @@ impl From<solana_storage_proto::StoredExtendedReward> for Reward {
 }
 
 impl TryFrom<solana_storage_proto::confirmed_block::Reward> for Reward {
-    type Error = anyhow::Error;
+    type Error = RowConversionError;
 
     fn try_from(value: solana_storage_proto::confirmed_block::Reward) -> Result<Self, Self::Error> {
+        let solana_storage_proto::confirmed_block::Reward {
+            pubkey,
+            lamports,
+            post_balance,
+            reward_type,
+            commission,
+        } = value;
+
         let reward = Self {
-            pubkey: value.pubkey,
-            lamports: value.lamports,
-            post_balance: value.post_balance,
-            reward_type: value
-                .reward_type
-                .try_into()
-                .context("parsing proto reward type")
-                .map(|reward| match reward {
-                    RewardType::Unspecified => None,
-                    reward => Some(reward),
-                })?,
-            commission: if value.commission.is_empty() {
+            pubkey,
+            lamports,
+            post_balance,
+            reward_type: reward_type.try_into().map(|reward| match reward {
+                RewardType::Unspecified => None,
+                reward => Some(reward),
+            })?,
+            commission: if commission.is_empty() {
                 None
             } else {
-                value
-                    .commission
+                commission
                     .parse()
                     .map(Some)
-                    .context("parsing proto commission")?
+                    .map_err(|_| RowConversionError::InvalidRewardComission(commission))?
             },
         };
 
@@ -127,7 +132,7 @@ impl std::fmt::Display for RewardType {
 }
 
 impl TryFrom<i32> for RewardType {
-    type Error = anyhow::Error;
+    type Error = RowConversionError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         let typ = match value {
@@ -136,7 +141,9 @@ impl TryFrom<i32> for RewardType {
             2 => Self::Rent,
             3 => Self::Staking,
             4 => Self::Voting,
-            _ => anyhow::bail!("invalid reward type: {value}"),
+            v => {
+                return Err(RowConversionError::InvalidRewardType(v));
+            }
         };
 
         Ok(typ)
@@ -164,7 +171,7 @@ impl BlockRewards {
     pub(crate) fn from_of1_rewards(
         slot: Slot,
         rewards: Option<of1_client::DecodedBlockRewards>,
-    ) -> anyhow::Result<Self> {
+    ) -> RowConversionResult<Self> {
         let rewards: Vec<Reward> = rewards
             .map(|rewards| {
                 let rewards = match rewards {
@@ -172,14 +179,13 @@ impl BlockRewards {
                         .rewards
                         .into_iter()
                         .map(TryInto::try_into)
-                        .collect::<Result<_, _>>()
-                        .context("converting of1 block rewards")?,
+                        .collect::<RowConversionResult<_>>()?,
                     of1_client::DecodedField::Bincode(bincode_rewards) => {
                         bincode_rewards.into_iter().map(Into::into).collect()
                     }
                 };
 
-                anyhow::Ok(rewards)
+                Ok(rewards)
             })
             .transpose()?
             .unwrap_or_default();

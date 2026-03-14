@@ -5,7 +5,7 @@
 //! then builds the catalog from resolved entries.
 
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     sync::Arc,
 };
 
@@ -135,11 +135,27 @@ pub async fn resolve_external_deps(
             .get_table(table_name)
             .expect("table validated in Phase 1");
 
+        // Resolve networks: raw tables have an intrinsic network; derived tables
+        // need resolution from the transitive dependency chain.
+        let networks = match table_def.network() {
+            Some(id) => BTreeSet::from([id.clone()]),
+            None => crate::datasets_cache::resolve_dataset_networks(
+                datasets_cache,
+                Arc::clone(&dataset),
+            )
+            .await
+            .map_err(|err| CreateCatalogError::ResolveNetworks {
+                dataset: dataset_ref.clone(),
+                source: err,
+            })?,
+        };
+
         let physical_table = PhysicalTable::from_revision(
             data_store.clone(),
             table.dataset_reference().clone(),
             dataset.start_block(),
             Arc::clone(table_def),
+            networks,
             revision,
         );
         entries.push(ResolvedTableEntry {
@@ -256,5 +272,17 @@ pub enum CreateCatalogError {
         dataset: HashReference,
         #[source]
         source: GetDatasetError,
+    },
+
+    /// Failed to resolve networks from dependency chain.
+    ///
+    /// This occurs when traversing a derived dataset's dependencies fails
+    /// to resolve the set of networks.
+    #[error("Failed to resolve networks for dataset {dataset}")]
+    ResolveNetworks {
+        /// The hash reference of the dataset
+        dataset: HashReference,
+        #[source]
+        source: crate::datasets_cache::DependencyTraversalError,
     },
 }

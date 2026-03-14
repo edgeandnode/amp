@@ -30,7 +30,7 @@ use amp_worker_core::{
 use async_trait::async_trait;
 use datasets_common::{hash::Hash, name::Name, namespace::Namespace};
 use metadata_db::{
-    job_events::{EventDetail, EventDetailOwned},
+    job_events::{EventDetail, EventDetailOwned, JobEvent},
     jobs::IdempotencyKey,
     workers::Worker,
 };
@@ -132,6 +132,23 @@ pub trait SchedulerJobs: Send + Sync {
         job_id: JobId,
         status: JobStatus,
     ) -> Result<Option<EventDetailOwned>, GetJobDetailError>;
+
+    /// Get a single lifecycle event by job ID and event ID, including the detail payload.
+    ///
+    /// Returns `None` if no event with the given ID exists for the job.
+    async fn get_event_for_job(
+        &self,
+        job_id: JobId,
+        event_id: i64,
+    ) -> Result<Option<JobEvent>, GetEventForJobError>;
+
+    /// Get all lifecycle events for a job.
+    ///
+    /// Returns the complete audit trail ordered by event id ascending.
+    async fn list_events_for_job(
+        &self,
+        job_id: JobId,
+    ) -> Result<Vec<JobEvent>, GetEventsForJobError>;
 }
 
 /// Invariant-preserving bridge between typed worker job descriptors and the scheduler.
@@ -502,6 +519,26 @@ pub struct ListJobDescriptorsError(#[source] pub metadata_db::Error);
 #[derive(Debug, thiserror::Error)]
 #[error("metadata database error")]
 pub struct GetJobDetailError(#[source] pub metadata_db::Error);
+
+/// Error when getting events for a job from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct GetEventsForJobError(#[source] pub metadata_db::Error);
+
+/// Error when getting a single event for a job from the metadata database
+///
+/// This occurs when:
+/// - Database connection fails or is lost
+/// - Query execution encounters an error
+/// - Connection pool is exhausted
+#[derive(Debug, thiserror::Error)]
+#[error("metadata database error")]
+pub struct GetEventForJobError(#[source] pub metadata_db::Error);
 
 /// Trait for querying worker information
 ///

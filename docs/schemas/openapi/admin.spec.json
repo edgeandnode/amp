@@ -45,7 +45,7 @@
           "datasets"
         ],
         "summary": "Handler for the `POST /datasets` endpoint",
-        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{namespace}/{name}/versions/dev/deploy` - for dev tag\n- `POST /datasets/{namespace}/{name}/versions/latest/deploy` - for latest tag\n- `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Optional version of the dataset to register. If omitted, only the \"dev\" tag is updated.\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered (or updated if version tag already exists)\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `MANIFEST_VALIDATION_ERROR`: Manifest validation failed (SQL queries invalid, undeclared dependencies, etc.)\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `MANIFEST_LINKING_ERROR`: Failed to link manifest to dataset\n- `MANIFEST_NOT_FOUND`: Manifest hash provided but manifest doesn't exist\n- `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n\n## Behavior\nThis handler supports multiple dataset kinds for registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Firehose dataset** (kind=\"firehose\"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol\n- **Legacy SQL datasets** are **not supported** and will return an error\n\n## Registration Process\nThe registration process involves two or three steps depending on whether a version is provided:\n1. **Register or validate manifest**: Either stores a new manifest in hash-based storage and creates\n   a metadata database entry, or validates that a provided manifest hash exists in the system\n2. **Link manifest to dataset**: Links the manifest to the dataset namespace/name and automatically\n   updates the \"dev\" tag to point to this manifest (performed in a transaction for atomicity)\n3. **Tag version** (optional): If a version is provided, associates the version identifier with the\n   manifest hash, and updates the \"latest\" tag if this version is higher than the current latest\n\nThis approach enables:\n- Content-addressable storage by manifest hash\n- Deduplication of identical manifests\n- Separation of manifest storage, dataset linking, and version management\n- Development workflow: register without version to only update \"dev\" tag via linking\n- Release workflow: register with version to create semantic version tags and update \"latest\"\n- Reuse workflow: provide manifest hash to link existing manifest without re-registering it\n\nAll operations are idempotent:\n- **Manifest registration**: If the manifest already exists (same hash), the operation succeeds without changes\n- **Manifest linking**: If the manifest is already linked to the dataset, the operation succeeds without changes\n- **Dev tag update**: The dev tag is always updated to point to the linked manifest (last-write-wins)\n- **Version tag**: If the version tag doesn't exist, it is created; if it exists with the same hash, no changes;\n  if it exists with a different hash, it is updated to point to the new hash\n- **Latest tag**: Automatically updated only if the new version is higher than the current latest version\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is supported\n- Registers/validates the manifest, links it to the dataset, and optionally tags it with a version\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - Schedule data extraction",
+        "description": "Registers a new dataset configuration in the server's local registry. Accepts a JSON payload\ncontaining the dataset registration configuration.\n\n**Note**: This endpoint only registers datasets and does NOT schedule data extraction.\nTo extract data after registration, make a separate call to:\n- `POST /datasets/{namespace}/{name}/versions/dev/deploy` - for dev tag\n- `POST /datasets/{namespace}/{name}/versions/latest/deploy` - for latest tag\n- `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - for specific version\n\n## Request Body\n- `dataset_name`: Name of the dataset to be registered (must be valid dataset name)\n- `version`: Optional version of the dataset to register. If omitted, only the \"dev\" tag is updated.\n- `manifest`: JSON string representation of the dataset manifest\n\n## Response\n- **201 Created**: Dataset successfully registered (or updated if version tag already exists)\n- **400 Bad Request**: Invalid dataset name, version, or manifest format\n- **500 Internal Server Error**: Database or object store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `MANIFEST_VALIDATION_ERROR`: Manifest validation failed (SQL queries invalid, undeclared dependencies, etc.)\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system\n- `MANIFEST_LINKING_ERROR`: Failed to link manifest to dataset\n- `MANIFEST_NOT_FOUND`: Manifest hash provided but manifest doesn't exist\n- `VERSION_TAGGING_ERROR`: Failed to tag the manifest with the version\n\n## Behavior\nThis handler supports multiple dataset kinds for registration:\n- **Derived dataset** (kind=\"manifest\"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries\n- **EVM-RPC dataset** (kind=\"evm-rpc\"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints\n- **Firehose dataset** (kind=\"firehose\"): Registers a raw dataset that streams blockchain data from StreamingFast Firehose protocol\n- **Legacy SQL datasets** are **not supported** and will return an error\n\n## Registration Process\nThe registration process involves two or three steps depending on whether a version is provided:\n1. **Register or validate manifest**: Either stores a new manifest in hash-based storage and creates\n   a metadata database entry, or validates that a provided manifest hash exists in the system\n2. **Link manifest to dataset**: Links the manifest to the dataset namespace/name and automatically\n   updates the \"dev\" tag to point to this manifest (performed in a transaction for atomicity)\n3. **Tag version** (optional): If a version is provided, associates the version identifier with the\n   manifest hash, and updates the \"latest\" tag if this version is higher than the current latest\n\nThis approach enables:\n- Content-addressable storage by manifest hash\n- Deduplication of identical manifests\n- Separation of manifest storage, dataset linking, and version management\n- Development workflow: register without version to only update \"dev\" tag via linking\n- Release workflow: register with version to create semantic version tags and update \"latest\"\n- Reuse workflow: provide manifest hash to link existing manifest without re-registering it\n\nAll operations are idempotent:\n- **Manifest registration**: If the manifest already exists (same hash), the operation succeeds without changes\n- **Manifest linking**: If the manifest is already linked to the dataset, the operation succeeds without changes\n- **Dev tag update**: The dev tag is always updated to point to the linked manifest (last-write-wins)\n- **Version tag**: If the version tag doesn't exist, it is created; if it exists with the same hash, no changes;\n  if it exists with a different hash, it is updated to point to the new hash\n- **Latest tag**: Automatically updated only if the new version is higher than the current latest version\n\nThe handler:\n- Validates dataset name and version format\n- Checks that dataset kind is supported\n- Registers/validates the manifest, links it to the dataset, and optionally tags it with a version\n- Returns appropriate status codes and error messages\n\n## Typical Workflow\nFor users wanting both registration and data extraction:\n1. `POST /datasets` - Register the dataset (this endpoint)\n2. `POST /datasets/{namespace}/{name}/versions/{version}/deploy` - Schedule data extraction",
         "operationId": "datasets_register",
         "requestBody": {
           "content": {
@@ -1074,6 +1074,141 @@
         }
       }
     },
+    "/jobs/{id}/events": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs/{id}/events` endpoint",
+        "description": "Retrieves all lifecycle events for a specific job from the event log.\n\n## Path Parameters\n- `id`: The unique identifier of the job\n\n## Response\n- **200 OK**: Returns all events for the job\n- **400 Bad Request**: Invalid job ID format\n- **404 Not Found**: Job with the given ID does not exist\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided ID is not a valid job identifier\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler\n- `GET_JOB_EVENTS_ERROR`: Failed to retrieve job events from the database",
+        "operationId": "get_job_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved job events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{id}/events/{event_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Handler for the `GET /jobs/{id}/events/{event_id}` endpoint",
+        "description": "Retrieves the full details of a single lifecycle event for a job, including\nthe optional detail payload (e.g., job descriptor for SCHEDULED events).\n\n## Path Parameters\n- `id`: The unique identifier of the job\n- `event_id`: The unique identifier of the event\n\n## Response\n- **200 OK**: Returns the full event details\n- **400 Bad Request**: Invalid job ID or event ID format\n- **404 Not Found**: Job or event not found\n- **500 Internal Server Error**: Database connection or query error\n\n## Error Codes\n- `INVALID_JOB_ID`: The provided job ID or event ID is not valid\n- `JOB_NOT_FOUND`: No job exists with the given ID\n- `EVENT_NOT_FOUND`: No event exists with the given ID for the specified job\n- `GET_JOB_ERROR`: Failed to retrieve job from scheduler\n- `GET_JOB_EVENT_ERROR`: Failed to retrieve job event from the database\n\nThis handler:\n- Validates and extracts the job ID and event ID from the URL path\n- Verifies the job exists in the scheduler\n- Queries the event by ID for the specified job\n- Returns the full event details including the optional detail payload",
+        "operationId": "get_job_event_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "description": "Event ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved job event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobEventDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID or event ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job or event not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{id}/progress": {
       "get": {
         "tags": [
@@ -1200,7 +1335,7 @@
           "manifests"
         ],
         "summary": "Handler for the `GET /manifests` endpoint",
-        "description": "Returns all registered manifests in the system.\n\n## Response\n- **200 OK**: Successfully retrieved all manifests\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `LIST_ALL_MANIFESTS_ERROR`: Failed to list all manifests from metadata database\n\n## Behavior\nThis handler returns a comprehensive list of all manifests registered in the system.\nFor each manifest, it includes:\n- The content-addressable hash (SHA-256)\n- The object store path where the manifest is stored\n\nResults are ordered by hash (lexicographical).",
+        "description": "Returns all registered manifests in the system.\n\n## Response\n- **200 OK**: Successfully retrieved all manifests\n- **500 Internal Server Error**: Database query error\n\n## Error Codes\n- `LIST_ALL_MANIFESTS_ERROR`: Failed to list all manifests from metadata database\n\n## Behavior\nThis handler returns a comprehensive list of all manifests registered in the system.\nFor each manifest, it includes:\n- The content-addressable hash (SHA-256)\n- The dataset kind (e.g., \"evm-rpc\", \"solana\", \"firehose\", \"manifest\")\n- The number of datasets using this manifest\n\nResults are ordered by hash (lexicographical).",
         "operationId": "list_all_manifests",
         "responses": {
           "200": {
@@ -1230,7 +1365,7 @@
           "manifests"
         ],
         "summary": "Handler for the `POST /manifests` endpoint",
-        "description": "Registers a new manifest in content-addressable storage without linking to any dataset or creating version tags.\nThis endpoint is useful for pre-registering manifests before associating them with specific datasets.\n\n## Request Body\nThe request body should contain a complete manifest JSON object. The manifest kind determines\nthe validation rules:\n- `kind=\"manifest\"` (Derived): Validates SQL dependencies\n- `kind=\"evm-rpc\"`, `kind=\"firehose\"`, `kind=\"solana\"` (Raw): Validates structure only\n\n## Response\n- **201 Created**: Manifest successfully registered, returns the computed hash\n- **400 Bad Request**: Invalid JSON format, unsupported kind, or validation failure\n- **500 Internal Server Error**: Manifest store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `MANIFEST_VALIDATION_ERROR`: Manifest validation failed (derived datasets only)\n- `UNSUPPORTED_DATASET_KIND`: Dataset kind is not supported\n- `MANIFEST_STORAGE_ERROR`: Failed to store manifest in object store\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in metadata database\n\n## Registration Process\nUnlike `POST /datasets`, this endpoint performs minimal registration:\n1. **Parse and validate**: Validates manifest structure and dependencies (for derived datasets)\n2. **Canonicalize**: Re-serializes manifest to canonical JSON format\n3. **Compute hash**: Generates content hash from canonical JSON\n4. **Store manifest**: Writes to object store and registers in metadata database\n\nThis handler:\n- Validates and extracts the manifest JSON from the request body\n- Parses and validates based on dataset kind\n- Stores the manifest in content-addressable storage\n- Returns the computed manifest hash",
+        "description": "Registers a new manifest in content-addressable storage without linking to any dataset or creating version tags.\nThis endpoint is useful for pre-registering manifests before associating them with specific datasets.\n\n## Request Body\nThe request body should contain a complete manifest JSON object. The manifest kind determines\nthe validation rules:\n- `kind=\"manifest\"` (Derived): Validates SQL dependencies\n- `kind=\"evm-rpc\"`, `kind=\"firehose\"`, `kind=\"solana\"` (Raw): Validates structure only\n\n## Response\n- **201 Created**: Manifest successfully registered, returns the computed hash\n- **400 Bad Request**: Invalid JSON format, unsupported kind, or validation failure\n- **500 Internal Server Error**: Manifest store error\n\n## Error Codes\n- `INVALID_PAYLOAD_FORMAT`: Request JSON is malformed or invalid\n- `INVALID_MANIFEST`: Manifest JSON parsing or structure error\n- `MANIFEST_VALIDATION_ERROR`: Manifest validation failed (derived datasets only)\n- `MANIFEST_STORAGE_ERROR`: Failed to store manifest in object store\n- `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in metadata database\n\n## Registration Process\nUnlike `POST /datasets`, this endpoint performs minimal registration:\n1. **Parse and validate**: Validates manifest structure and dependencies (for derived datasets)\n2. **Canonicalize**: Re-serializes manifest to canonical JSON format\n3. **Compute hash**: Generates content hash from canonical JSON\n4. **Store manifest**: Writes to object store and registers in metadata database\n\nThis handler:\n- Validates and extracts the manifest JSON from the request body\n- Parses and validates based on dataset kind\n- Stores the manifest in content-addressable storage\n- Returns the computed manifest hash",
         "operationId": "manifests_register",
         "requestBody": {
           "content": {
@@ -2738,6 +2873,95 @@
           }
         }
       },
+      "JobEventDetailResponse": {
+        "type": "object",
+        "description": "Response body for GET /jobs/{id}/events/{event_id} endpoint.",
+        "required": [
+          "id",
+          "job_id",
+          "created_at",
+          "node_id",
+          "event_type"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Event timestamp in ISO 8601 / RFC 3339 format"
+          },
+          "detail": {
+            "description": "Optional structured detail payload"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Event type (e.g., SCHEDULED, RUNNING, COMPLETED, ERROR, FATAL, STOPPED)"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Event ID"
+          },
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Job ID"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the worker node that recorded this event"
+          }
+        }
+      },
+      "JobEventInfo": {
+        "type": "object",
+        "description": "A single job lifecycle event.",
+        "required": [
+          "id",
+          "created_at",
+          "node_id",
+          "event_type"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Event timestamp in ISO 8601 / RFC 3339 format"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Event type (e.g., SCHEDULED, RUNNING, COMPLETED, ERROR, FATAL, STOPPED)"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Event ID"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the worker node that recorded this event"
+          }
+        }
+      },
+      "JobEventsResponse": {
+        "type": "object",
+        "description": "Response body for GET /jobs/{id}/events endpoint.",
+        "required": [
+          "job_id",
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobEventInfo"
+            },
+            "description": "List of lifecycle events"
+          },
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Job ID"
+          }
+        }
+      },
       "JobInfo": {
         "type": "object",
         "description": "Represents job information for the API response",
@@ -2859,6 +3083,7 @@
         "description": "Summary information for a single manifest",
         "required": [
           "hash",
+          "kind",
           "dataset_count"
         ],
         "properties": {
@@ -2871,6 +3096,10 @@
           "hash": {
             "type": "string",
             "description": "Content-addressable hash (SHA-256)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Dataset kind (e.g. \"evm-rpc\", \"solana\", \"firehose\", \"manifest\")"
           }
         }
       },
@@ -3207,17 +3436,15 @@
       },
       "SchemaResponse": {
         "type": "object",
-        "description": "Response returned by the schema endpoint\n\nContains schemas and networks for one or more tables.",
+        "description": "Response returned by the schema endpoint\n\nContains inferred schemas for one or more tables.",
         "required": [
           "schemas"
         ],
         "properties": {
           "schemas": {
             "type": "object",
-            "description": "Schemas for each table\n\nMaps table names to their schemas and networks.\nContains one entry per table definition.",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/TableSchemaWithNetworks"
-            },
+            "description": "Schemas for each table\n\nMaps table names to their inferred schemas.\nContains one entry per table definition.",
+            "additionalProperties": {},
             "propertyNames": {
               "type": "string"
             }
@@ -3287,26 +3514,6 @@
             "type": "integer",
             "format": "int64",
             "description": "Total size of all Parquet files in bytes"
-          }
-        }
-      },
-      "TableSchemaWithNetworks": {
-        "type": "object",
-        "description": "Table schema with associated networks\n\nContains the output schema for a table and the list of networks referenced by its query.",
-        "required": [
-          "schema",
-          "networks"
-        ],
-        "properties": {
-          "networks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of networks referenced by this table's query\n\nContains the network names of all datasets/tables referenced\nin this specific table's SQL query (e.g., \"mainnet\", \"polygon\", etc.)."
-          },
-          "schema": {
-            "description": "The output schema for the table\n\nDescribes the structure and types of columns that will be returned\nwhen executing the SQL query for this table."
           }
         }
       },

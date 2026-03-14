@@ -1,5 +1,6 @@
 //! Job management commands
 
+pub mod events;
 pub mod inspect;
 pub mod list;
 pub mod progress;
@@ -10,6 +11,10 @@ pub mod stop;
 /// Job management subcommands.
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    /// Get lifecycle events for a job
+    #[command(after_help = include_str!("job/events__after_help.md"))]
+    Events(events::Args),
+
     /// List jobs with pagination
     #[command(alias = "ls")]
     #[command(after_help = include_str!("job/list__after_help.md"))]
@@ -41,6 +46,7 @@ pub enum Commands {
 /// Execute the job command with the given subcommand.
 pub async fn run(command: Commands) -> anyhow::Result<()> {
     match command {
+        Commands::Events(args) => events::run(args).await?,
         Commands::List(args) => list::run(args).await?,
         Commands::Inspect(args) => inspect::run(args).await?,
         Commands::Stop(args) => stop::run(args).await?,
