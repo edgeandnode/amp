@@ -258,17 +258,8 @@ pub async fn execute(
             async move {
                 let table_name = table.table_name().to_string();
 
-                materialize_table(
-                    ctx,
-                    &manifest,
-                    env.clone(),
-                    table.clone(),
-                    compactor,
-                    opts.clone(),
-                    end,
-                    &siblings,
-                )
-                .await?;
+                materialize_table(ctx, &manifest, env, table, compactor, opts, end, &siblings)
+                    .await?;
 
                 tracing::info!("materialization of `{}` completed successfully", table_name);
                 Ok(())

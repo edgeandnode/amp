@@ -664,15 +664,12 @@ impl DataStore {
             .await
             .map_err(TruncateError::StreamMetadata)?;
 
-        let metadata_db = self.metadata_db.clone();
-        let object_store = self.object_store.clone();
-
         let file_count = files.len() as u64;
 
         futures::stream::iter(files)
             .map(|file| {
-                let metadata_db = metadata_db.clone();
-                let object_store = object_store.clone();
+                let metadata_db = self.metadata_db.clone();
+                let object_store = self.object_store.clone();
                 async move {
                     // Delete from object store (treat "not found" as success)
                     match object_store.delete(&file.object_meta.location).await {

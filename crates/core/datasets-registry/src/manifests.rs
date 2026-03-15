@@ -84,7 +84,7 @@ where
             .map_err(GetError::ObjectStoreReadBytes)?;
 
         // Convert bytes to UTF-8 string
-        let content = String::from_utf8(bytes.to_vec())
+        let content = String::from_utf8(bytes.into())
             .map(ManifestContent)
             .map_err(GetError::Utf8Error)?;
 
