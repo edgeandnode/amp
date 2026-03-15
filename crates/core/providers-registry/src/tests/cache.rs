@@ -68,8 +68,7 @@ async fn register_with_valid_provider_makes_immediately_available() {
         .bytes()
         .await
         .expect("should read evm bytes");
-    let evm_file_contents =
-        String::from_utf8(evm_bytes.to_vec()).expect("should convert to string");
+    let evm_file_contents = String::from_utf8(evm_bytes.into()).expect("should convert to string");
     let parsed_evm_provider: ProviderConfigRaw =
         toml::from_str(&evm_file_contents).expect("should parse evm_mainnet file");
     let parsed_evm_header = parsed_evm_provider
@@ -86,8 +85,7 @@ async fn register_with_valid_provider_makes_immediately_available() {
         .bytes()
         .await
         .expect("should read fhs bytes");
-    let fhs_file_contents =
-        String::from_utf8(fhs_bytes.to_vec()).expect("should convert to string");
+    let fhs_file_contents = String::from_utf8(fhs_bytes.into()).expect("should convert to string");
     let parsed_fhs_provider: ProviderConfigRaw =
         toml::from_str(&fhs_file_contents).expect("should parse fhs_polygon file");
     let parsed_fhs_header = parsed_fhs_provider

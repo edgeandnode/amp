@@ -290,11 +290,10 @@ async fn load_and_parse_file(
         })?;
 
     // Parse as UTF-8
-    let content =
-        String::from_utf8(bytes.to_vec()).map_err(|source| LoadFileError::InvalidUtf8 {
-            path: path.clone(),
-            source,
-        })?;
+    let content = String::from_utf8(bytes.into()).map_err(|source| LoadFileError::InvalidUtf8 {
+        path: path.clone(),
+        source,
+    })?;
 
     // Parse TOML and deserialize directly to ProviderConfigRaw
     let config = toml::from_str::<ProviderConfigRaw>(&content).map_err(|source| {

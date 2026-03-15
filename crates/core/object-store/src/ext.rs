@@ -45,7 +45,7 @@ where
     async fn get_string(&self, location: impl Into<Path>) -> Result<String, ObjectStoreExtError> {
         let path = location.into();
         let bytes = self.get_bytes(path.clone()).await?;
-        String::from_utf8(bytes.to_vec()).map_err(|err| ObjectStoreExtError::NotUtf8 {
+        String::from_utf8(bytes.into()).map_err(|err| ObjectStoreExtError::NotUtf8 {
             path: path.to_string(),
             source: err,
         })
